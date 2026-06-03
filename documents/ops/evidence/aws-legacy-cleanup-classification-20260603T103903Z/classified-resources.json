@@ -1,0 +1,3541 @@
+{
+  "generatedAt": "2026-06-03T11:05:22.906Z",
+  "sourceInventoryPath": "/Users/abhiramteja/Downloads/genuine-scan-main/artifacts/aws-cleanup-inventory/20260603T103903Z.tar.gz",
+  "sourceType": "archive",
+  "inventoryRoot": "/var/folders/tc/k7yqlkj13mv8ftdf0gs_yjc80000gn/T/mscqr-aws-inventory-eXRzQQ/20260603T103903Z",
+  "validation": {
+    "complete": true,
+    "reasons": []
+  },
+  "resources": [
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "hosted-zone",
+      "resourceId": "Z0569586VLFIGGVI7HAZ",
+      "resourceName": "mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Current MSCQR hosted zone."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for hosted-zone Z0569586VLFIGGVI7HAZ.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Active production DNS zone."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "mscqr.com. A africa-capetown",
+      "resourceName": "mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Current Route 53 apex geolocation A record."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record mscqr.com. A africa-capetown.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production DNS policy."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "mscqr.com. A default-mumbai",
+      "resourceName": "mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Current Route 53 apex geolocation A record."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record mscqr.com. A default-mumbai.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production DNS policy."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "mscqr.com. A europe-london",
+      "resourceName": "mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Current Route 53 apex geolocation A record."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record mscqr.com. A europe-london.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production DNS policy."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "mscqr.com. MX",
+      "resourceName": "mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Email, ownership, or zone authority record is protected."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record mscqr.com. MX.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "DMARC/DKIM/SPF/MX/NS/SOA/TXT records are not cleanup candidates."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "mscqr.com. NS",
+      "resourceName": "mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Email, ownership, or zone authority record is protected."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record mscqr.com. NS.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "DMARC/DKIM/SPF/MX/NS/SOA/TXT records are not cleanup candidates."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "mscqr.com. SOA",
+      "resourceName": "mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Email, ownership, or zone authority record is protected."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record mscqr.com. SOA.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "DMARC/DKIM/SPF/MX/NS/SOA/TXT records are not cleanup candidates."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "mscqr.com. TXT",
+      "resourceName": "mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Email, ownership, or zone authority record is protected."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record mscqr.com. TXT.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "DMARC/DKIM/SPF/MX/NS/SOA/TXT records are not cleanup candidates."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "_2e0f2fe7ab15a9da737609c8ae0cb738.mscqr.com. CNAME",
+      "resourceName": "_2e0f2fe7ab15a9da737609c8ae0cb738.mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "ACM DNS validation CNAME for MSCQR certificate."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record _2e0f2fe7ab15a9da737609c8ae0cb738.mscqr.com. CNAME.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Preserve certificate validation while certs are active."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "_dmarc.mscqr.com. TXT",
+      "resourceName": "_dmarc.mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Email, ownership, or zone authority record is protected."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record _dmarc.mscqr.com. TXT.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "DMARC/DKIM/SPF/MX/NS/SOA/TXT records are not cleanup candidates."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "default._domainkey.mscqr.com. TXT",
+      "resourceName": "default._domainkey.mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Email, ownership, or zone authority record is protected."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record default._domainkey.mscqr.com. TXT.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "DMARC/DKIM/SPF/MX/NS/SOA/TXT records are not cleanup candidates."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "dr-capetown.mscqr.com. A",
+      "resourceName": "dr-capetown.mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "DR test hostname requires documentation review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record dr-capetown.mscqr.com. A.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Hard rule: DR test records are REVIEW_REQUIRED unless docs prove active use."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "dr-mumbai.mscqr.com. A",
+      "resourceName": "dr-mumbai.mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "DR test hostname requires documentation review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record dr-mumbai.mscqr.com. A.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Hard rule: DR test records are REVIEW_REQUIRED unless docs prove active use."
+    },
+    {
+      "classification": "KEEP",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "www.mscqr.com. CNAME",
+      "resourceName": "www.mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "Current www CNAME is explicitly protected."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record www.mscqr.com. CNAME.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Preserve public web hostname record."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "route53",
+      "region": "global",
+      "resourceType": "record",
+      "resourceId": "_b038cd46106cbc0a3d8683da0d9481d8.www.mscqr.com. CNAME",
+      "resourceName": "_b038cd46106cbc0a3d8683da0d9481d8.www.mscqr.com.",
+      "arn": "",
+      "evidence": [
+        "No hard KEEP rule matched."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Route 53.",
+        "Verify region global.",
+        "Search for record _b038cd46106cbc0a3d8683da0d9481d8.www.mscqr.com. CNAME.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "DNS record is ambiguous; review before any future action."
+    },
+    {
+      "classification": "KEEP",
+      "service": "s3",
+      "region": "global",
+      "resourceType": "bucket",
+      "resourceId": "mscqr-alb-logs-afs1-368992683803",
+      "resourceName": "mscqr-alb-logs-afs1-368992683803",
+      "arn": "arn:aws:s3:::mscqr-alb-logs-afs1-368992683803",
+      "evidence": [
+        "Known ALB access log bucket that may be active."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > S3.",
+        "Verify region global.",
+        "Search for bucket mscqr-alb-logs-afs1-368992683803.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Keep or review retention separately; do not delete in this pass."
+    },
+    {
+      "classification": "KEEP",
+      "service": "s3",
+      "region": "global",
+      "resourceType": "bucket",
+      "resourceId": "mscqr-alb-logs-aps1-368992683803",
+      "resourceName": "mscqr-alb-logs-aps1-368992683803",
+      "arn": "arn:aws:s3:::mscqr-alb-logs-aps1-368992683803",
+      "evidence": [
+        "Known ALB access log bucket that may be active."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > S3.",
+        "Verify region global.",
+        "Search for bucket mscqr-alb-logs-aps1-368992683803.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Keep or review retention separately; do not delete in this pass."
+    },
+    {
+      "classification": "KEEP",
+      "service": "s3",
+      "region": "global",
+      "resourceType": "bucket",
+      "resourceId": "mscqr-prod-afs1-artifacts-368992683803-af-south-1",
+      "resourceName": "mscqr-prod-afs1-artifacts-368992683803-af-south-1",
+      "arn": "arn:aws:s3:::mscqr-prod-afs1-artifacts-368992683803-af-south-1",
+      "evidence": [
+        "Known production S3 artifact bucket."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > S3.",
+        "Verify region global.",
+        "Search for bucket mscqr-prod-afs1-artifacts-368992683803-af-south-1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Production object storage uses S3 default credentials."
+    },
+    {
+      "classification": "KEEP",
+      "service": "s3",
+      "region": "global",
+      "resourceType": "bucket",
+      "resourceId": "mscqr-prod-aps1-artifacts-368992683803-ap-south-1",
+      "resourceName": "mscqr-prod-aps1-artifacts-368992683803-ap-south-1",
+      "arn": "arn:aws:s3:::mscqr-prod-aps1-artifacts-368992683803-ap-south-1",
+      "evidence": [
+        "Known production S3 artifact bucket."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > S3.",
+        "Verify region global.",
+        "Search for bucket mscqr-prod-aps1-artifacts-368992683803-ap-south-1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Production object storage uses S3 default credentials."
+    },
+    {
+      "classification": "KEEP",
+      "service": "s3",
+      "region": "global",
+      "resourceType": "bucket",
+      "resourceId": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+      "resourceName": "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+      "arn": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+      "evidence": [
+        "Known production S3 artifact bucket."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > S3.",
+        "Verify region global.",
+        "Search for bucket mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Production object storage uses S3 default credentials."
+    },
+    {
+      "classification": "KEEP",
+      "service": "iam",
+      "region": "global",
+      "resourceType": "role",
+      "resourceId": "github-actions-mscqr-deploy",
+      "resourceName": "github-actions-mscqr-deploy",
+      "arn": "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy",
+      "evidence": [
+        "Recognized current MSCQR production or GitHub role."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > IAM.",
+        "Verify region global.",
+        "Search for role github-actions-mscqr-deploy.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production/GitHub operational role."
+    },
+    {
+      "classification": "KEEP",
+      "service": "iam",
+      "region": "global",
+      "resourceType": "role",
+      "resourceId": "mscqr-asg-web-role-aps1",
+      "resourceName": "mscqr-asg-web-role-aps1",
+      "arn": "arn:aws:iam::368992683803:role/mscqr-asg-web-role-aps1",
+      "evidence": [
+        "Recognized current MSCQR production or GitHub role."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > IAM.",
+        "Verify region global.",
+        "Search for role mscqr-asg-web-role-aps1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production/GitHub operational role."
+    },
+    {
+      "classification": "KEEP",
+      "service": "iam",
+      "region": "global",
+      "resourceType": "role",
+      "resourceId": "mscqr-ec2-s3-artifacts-role",
+      "resourceName": "mscqr-ec2-s3-artifacts-role",
+      "arn": "arn:aws:iam::368992683803:role/mscqr-ec2-s3-artifacts-role",
+      "evidence": [
+        "Recognized current MSCQR production or GitHub role."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > IAM.",
+        "Verify region global.",
+        "Search for role mscqr-ec2-s3-artifacts-role.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production/GitHub operational role."
+    },
+    {
+      "classification": "KEEP",
+      "service": "iam",
+      "region": "global",
+      "resourceType": "role",
+      "resourceId": "mscqr-ec2-s3-artifacts-role-afs1",
+      "resourceName": "mscqr-ec2-s3-artifacts-role-afs1",
+      "arn": "arn:aws:iam::368992683803:role/mscqr-ec2-s3-artifacts-role-afs1",
+      "evidence": [
+        "Recognized current MSCQR production or GitHub role."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > IAM.",
+        "Verify region global.",
+        "Search for role mscqr-ec2-s3-artifacts-role-afs1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production/GitHub operational role."
+    },
+    {
+      "classification": "KEEP",
+      "service": "iam",
+      "region": "global",
+      "resourceType": "role",
+      "resourceId": "mscqr-ec2-s3-artifacts-role-aps1",
+      "resourceName": "mscqr-ec2-s3-artifacts-role-aps1",
+      "arn": "arn:aws:iam::368992683803:role/mscqr-ec2-s3-artifacts-role-aps1",
+      "evidence": [
+        "Recognized current MSCQR production or GitHub role."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > IAM.",
+        "Verify region global.",
+        "Search for role mscqr-ec2-s3-artifacts-role-aps1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production/GitHub operational role."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "iam",
+      "region": "global",
+      "resourceType": "role",
+      "resourceId": "mscqr-ecs-execution-role",
+      "resourceName": "mscqr-ecs-execution-role",
+      "arn": "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role",
+      "evidence": [
+        "IAM role is identity-critical and ambiguous."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > IAM.",
+        "Verify region global.",
+        "Search for role mscqr-ecs-execution-role.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Review trust policy, attachments, and last-used data before any future action."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "iam",
+      "region": "global",
+      "resourceType": "role",
+      "resourceId": "mscqr-ecs-task-role",
+      "resourceName": "mscqr-ecs-task-role",
+      "arn": "arn:aws:iam::368992683803:role/mscqr-ecs-task-role",
+      "evidence": [
+        "IAM role is identity-critical and ambiguous."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > IAM.",
+        "Verify region global.",
+        "Search for role mscqr-ecs-task-role.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Review trust policy, attachments, and last-used data before any future action."
+    },
+    {
+      "classification": "KEEP",
+      "service": "iam",
+      "region": "global",
+      "resourceType": "role",
+      "resourceId": "mscqr-github-auto-failover-readonly",
+      "resourceName": "mscqr-github-auto-failover-readonly",
+      "arn": "arn:aws:iam::368992683803:role/mscqr-github-auto-failover-readonly",
+      "evidence": [
+        "Recognized current MSCQR production or GitHub role."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > IAM.",
+        "Verify region global.",
+        "Search for role mscqr-github-auto-failover-readonly.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production/GitHub operational role."
+    },
+    {
+      "classification": "KEEP",
+      "service": "iam",
+      "region": "global",
+      "resourceType": "policy",
+      "resourceId": "mscqr-ec2-s3-artifacts-policy-aps1",
+      "resourceName": "mscqr-ec2-s3-artifacts-policy-aps1",
+      "arn": "arn:aws:iam::368992683803:policy/mscqr-ec2-s3-artifacts-policy-aps1",
+      "evidence": [
+        "Attached regional production S3 artifact access policy."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > IAM.",
+        "Verify region global.",
+        "Search for policy mscqr-ec2-s3-artifacts-policy-aps1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current regional production object-storage access policy."
+    },
+    {
+      "classification": "KEEP",
+      "service": "iam",
+      "region": "global",
+      "resourceType": "policy",
+      "resourceId": "mscqr-ec2-s3-artifacts-policy-afs1",
+      "resourceName": "mscqr-ec2-s3-artifacts-policy-afs1",
+      "arn": "arn:aws:iam::368992683803:policy/mscqr-ec2-s3-artifacts-policy-afs1",
+      "evidence": [
+        "Attached regional production S3 artifact access policy."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > IAM.",
+        "Verify region global.",
+        "Search for policy mscqr-ec2-s3-artifacts-policy-afs1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current regional production object-storage access policy."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "ap-south-1",
+      "resourceType": "instance",
+      "resourceId": "i-01a75d3af870584c7",
+      "resourceName": "",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:instance/i-01a75d3af870584c7",
+      "evidence": [
+        "Current production EC2/ASG/GitHub runner instance."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region ap-south-1.",
+        "Search for instance i-01a75d3af870584c7.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Running production or operational instance."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "ap-south-1",
+      "resourceType": "instance",
+      "resourceId": "i-04ae3b689ab72a68a",
+      "resourceName": "mscqr-prod-mumbai",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:instance/i-04ae3b689ab72a68a",
+      "evidence": [
+        "Current production EC2/ASG/GitHub runner instance."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region ap-south-1.",
+        "Search for instance i-04ae3b689ab72a68a.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Running production or operational instance."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "ap-south-1",
+      "resourceType": "instance",
+      "resourceId": "i-0278c3cd414aa7d29",
+      "resourceName": "",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:instance/i-0278c3cd414aa7d29",
+      "evidence": [
+        "Current production EC2/ASG/GitHub runner instance."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region ap-south-1.",
+        "Search for instance i-0278c3cd414aa7d29.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Running production or operational instance."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ebs",
+      "region": "ap-south-1",
+      "resourceType": "volume",
+      "resourceId": "vol-0565b1380fd5b95af",
+      "resourceName": "vol-0565b1380fd5b95af",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:volume/vol-0565b1380fd5b95af",
+      "evidence": [
+        "EBS volume is attached/in-use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Elastic Block Store.",
+        "Verify region ap-south-1.",
+        "Search for volume vol-0565b1380fd5b95af.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached volumes are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ebs",
+      "region": "ap-south-1",
+      "resourceType": "volume",
+      "resourceId": "vol-0470fcba474e66369",
+      "resourceName": "vol-0470fcba474e66369",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:volume/vol-0470fcba474e66369",
+      "evidence": [
+        "EBS volume is attached/in-use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Elastic Block Store.",
+        "Verify region ap-south-1.",
+        "Search for volume vol-0470fcba474e66369.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached volumes are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ebs",
+      "region": "ap-south-1",
+      "resourceType": "volume",
+      "resourceId": "vol-0df4e7d2594aa7ef3",
+      "resourceName": "vol-0df4e7d2594aa7ef3",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:volume/vol-0df4e7d2594aa7ef3",
+      "evidence": [
+        "EBS volume is attached/in-use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Elastic Block Store.",
+        "Verify region ap-south-1.",
+        "Search for volume vol-0df4e7d2594aa7ef3.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached volumes are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "ap-south-1",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-0cda0cfe1df1a8322",
+      "resourceName": "13.207.106.241",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region ap-south-1.",
+        "Search for elastic-ip eipalloc-0cda0cfe1df1a8322.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "ap-south-1",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-09b30cdf6c251f1ad",
+      "resourceName": "13.207.98.190",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region ap-south-1.",
+        "Search for elastic-ip eipalloc-09b30cdf6c251f1ad.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "ap-south-1",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-0edf6fdd3b389d52e",
+      "resourceName": "15.206.45.108",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region ap-south-1.",
+        "Search for elastic-ip eipalloc-0edf6fdd3b389d52e.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "elbv2",
+      "region": "ap-south-1",
+      "resourceType": "load-balancer",
+      "resourceId": "arn:aws:elasticloadbalancing:ap-south-1:368992683803:loadbalancer/app/mscqr-mumbai-alb/025ad0cb77546ee0",
+      "resourceName": "mscqr-mumbai-alb",
+      "arn": "arn:aws:elasticloadbalancing:ap-south-1:368992683803:loadbalancer/app/mscqr-mumbai-alb/025ad0cb77546ee0",
+      "evidence": [
+        "Current regional production ALB DNS name."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Load Balancing.",
+        "Verify region ap-south-1.",
+        "Search for load-balancer arn:aws:elasticloadbalancing:ap-south-1:368992683803:loadbalancer/app/mscqr-mumbai-alb/025ad0cb77546ee0.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current DNS policy target."
+    },
+    {
+      "classification": "KEEP",
+      "service": "elbv2",
+      "region": "ap-south-1",
+      "resourceType": "target-group",
+      "resourceId": "arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1",
+      "resourceName": "mscqr-mumbai-frontend-tg",
+      "arn": "arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1",
+      "evidence": [
+        "Target group is attached to current ALB or referenced by ASG."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Load Balancing.",
+        "Verify region ap-south-1.",
+        "Search for target-group arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production routing dependency."
+    },
+    {
+      "classification": "KEEP",
+      "service": "autoscaling",
+      "region": "ap-south-1",
+      "resourceType": "auto-scaling-group",
+      "resourceId": "mscqr-mumbai-dr-asg",
+      "resourceName": "mscqr-mumbai-dr-asg",
+      "arn": "arn:aws:autoscaling:ap-south-1:368992683803:autoScalingGroup:ba76e370-d733-4483-8703-d58c0cf20c77:autoScalingGroupName/mscqr-mumbai-dr-asg",
+      "evidence": [
+        "Current production regional ASG."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Auto Scaling Groups.",
+        "Verify region ap-south-1.",
+        "Search for auto-scaling-group mscqr-mumbai-dr-asg.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current regional DR/prod capacity."
+    },
+    {
+      "classification": "KEEP",
+      "service": "launch-template",
+      "region": "ap-south-1",
+      "resourceType": "launch-template",
+      "resourceId": "lt-02570cc00f696ee4c",
+      "resourceName": "mscqr-mumbai-dr-lt",
+      "arn": "",
+      "evidence": [
+        "Launch template belongs to current regional ASG standard."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Launch Templates.",
+        "Verify region ap-south-1.",
+        "Search for launch-template lt-02570cc00f696ee4c.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current ASG launch template."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "ap-south-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-0771ea7e59f7a49d4",
+      "resourceName": "mscqr-ec2-web-sg-aps1",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:security-group/sg-0771ea7e59f7a49d4",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region ap-south-1.",
+        "Search for security-group sg-0771ea7e59f7a49d4.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "ap-south-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-0ce45eda9cd11aa80",
+      "resourceName": "mscqr-rds-sg-aps1",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:security-group/sg-0ce45eda9cd11aa80",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region ap-south-1.",
+        "Search for security-group sg-0ce45eda9cd11aa80.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "security-group",
+      "region": "ap-south-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-080278ac70122fce1",
+      "resourceName": "default",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:security-group/sg-080278ac70122fce1",
+      "evidence": [
+        "No attachment found in inventory; hard rule requires review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region ap-south-1.",
+        "Search for security-group sg-080278ac70122fce1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Security group requires ENI/reference console review."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "ap-south-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-0924027a22e96be48",
+      "resourceName": "mscqr-mumbai-alb-sg",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:security-group/sg-0924027a22e96be48",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region ap-south-1.",
+        "Search for security-group sg-0924027a22e96be48.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "ap-south-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-05a60dd45bc09e637",
+      "resourceName": "mscqr-redis-sg-aps1",
+      "arn": "arn:aws:ec2:ap-south-1:368992683803:security-group/sg-05a60dd45bc09e637",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region ap-south-1.",
+        "Search for security-group sg-05a60dd45bc09e637.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "ap-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-06fff34694b568940",
+      "resourceName": "eni-06fff34694b568940",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region ap-south-1.",
+        "Search for network-interface eni-06fff34694b568940.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "ap-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-094f3f5cf0ab1fa8e",
+      "resourceName": "ELB app/mscqr-mumbai-alb/025ad0cb77546ee0",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region ap-south-1.",
+        "Search for network-interface eni-094f3f5cf0ab1fa8e.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "ap-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0e7ca9fd62b446766",
+      "resourceName": "ElastiCache mscqr-redis-aps1-primary-002",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region ap-south-1.",
+        "Search for network-interface eni-0e7ca9fd62b446766.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "ap-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0b0c78c72654108b0",
+      "resourceName": "ELB app/mscqr-mumbai-alb/025ad0cb77546ee0",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region ap-south-1.",
+        "Search for network-interface eni-0b0c78c72654108b0.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "ap-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-01bcb43b1608b173e",
+      "resourceName": "eni-01bcb43b1608b173e",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region ap-south-1.",
+        "Search for network-interface eni-01bcb43b1608b173e.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "ap-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0b6e91ad3c22886d2",
+      "resourceName": "RDSNetworkInterface",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region ap-south-1.",
+        "Search for network-interface eni-0b6e91ad3c22886d2.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "ap-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0e8ea92f98fe0cd2f",
+      "resourceName": "ElastiCache mscqr-redis-aps1-primary-001",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region ap-south-1.",
+        "Search for network-interface eni-0e8ea92f98fe0cd2f.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "ap-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-02c00fca9c1e649e0",
+      "resourceName": "eni-02c00fca9c1e649e0",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region ap-south-1.",
+        "Search for network-interface eni-02c00fca9c1e649e0.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "NEVER_DELETE_WITHOUT_BACKUP",
+      "service": "rds",
+      "region": "ap-south-1",
+      "resourceType": "db-instance",
+      "resourceId": "mscqr-prod-db-aps1",
+      "resourceName": "mscqr-prod-db-aps1",
+      "arn": "arn:aws:rds:ap-south-1:368992683803:db:mscqr-prod-db-aps1",
+      "evidence": [
+        "RDS DB instance is data-bearing."
+      ],
+      "risk": "NEVER_DELETE_WITHOUT_BACKUP",
+      "consoleReviewRequired": true,
+      "recommendedAction": "backup-before-any-action",
+      "consoleReviewChecklist": [
+        "Open AWS Console > RDS.",
+        "Verify region ap-south-1.",
+        "Search for db-instance mscqr-prod-db-aps1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Never delete without backup/export/snapshot and explicit approval."
+    },
+    {
+      "classification": "NEVER_DELETE_WITHOUT_BACKUP",
+      "service": "rds",
+      "region": "ap-south-1",
+      "resourceType": "manual-snapshot",
+      "resourceId": "mscqr-prod-db-aps1-manual-2026-04-27",
+      "resourceName": "mscqr-prod-db-aps1-manual-2026-04-27",
+      "arn": "arn:aws:rds:ap-south-1:368992683803:snapshot:mscqr-prod-db-aps1-manual-2026-04-27",
+      "evidence": [
+        "RDS manual snapshot is backup/recovery evidence."
+      ],
+      "risk": "NEVER_DELETE_WITHOUT_BACKUP",
+      "consoleReviewRequired": true,
+      "recommendedAction": "backup-before-any-action",
+      "consoleReviewChecklist": [
+        "Open AWS Console > RDS.",
+        "Verify region ap-south-1.",
+        "Search for manual-snapshot mscqr-prod-db-aps1-manual-2026-04-27.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Never delete without retention review and explicit approval."
+    },
+    {
+      "classification": "KEEP",
+      "service": "acm",
+      "region": "ap-south-1",
+      "resourceType": "certificate",
+      "resourceId": "arn:aws:acm:ap-south-1:368992683803:certificate/ac1be953-fdad-473e-8500-efbd02cb3715",
+      "resourceName": "mscqr.com",
+      "arn": "arn:aws:acm:ap-south-1:368992683803:certificate/ac1be953-fdad-473e-8500-efbd02cb3715",
+      "evidence": [
+        "ACM certificate is marked in use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Certificate Manager.",
+        "Verify region ap-south-1.",
+        "Search for certificate arn:aws:acm:ap-south-1:368992683803:certificate/ac1be953-fdad-473e-8500-efbd02cb3715.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Certificate attached to active infrastructure."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "ap-south-1",
+      "resourceType": "alarm",
+      "resourceId": "MSCQR-mumbai-ALB-5XX",
+      "resourceName": "MSCQR-mumbai-ALB-5XX",
+      "arn": "arn:aws:cloudwatch:ap-south-1:368992683803:alarm:MSCQR-mumbai-ALB-5XX",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region ap-south-1.",
+        "Search for alarm MSCQR-mumbai-ALB-5XX.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "ap-south-1",
+      "resourceType": "alarm",
+      "resourceId": "MSCQR-mumbai-EC2-CPU-70",
+      "resourceName": "MSCQR-mumbai-EC2-CPU-70",
+      "arn": "arn:aws:cloudwatch:ap-south-1:368992683803:alarm:MSCQR-mumbai-EC2-CPU-70",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region ap-south-1.",
+        "Search for alarm MSCQR-mumbai-EC2-CPU-70.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "ap-south-1",
+      "resourceType": "alarm",
+      "resourceId": "MSCQR-mumbai-Target-5XX",
+      "resourceName": "MSCQR-mumbai-Target-5XX",
+      "arn": "arn:aws:cloudwatch:ap-south-1:368992683803:alarm:MSCQR-mumbai-Target-5XX",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region ap-south-1.",
+        "Search for alarm MSCQR-mumbai-Target-5XX.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "ap-south-1",
+      "resourceType": "alarm",
+      "resourceId": "MSCQR-mumbai-TargetResponseTime-p95",
+      "resourceName": "MSCQR-mumbai-TargetResponseTime-p95",
+      "arn": "arn:aws:cloudwatch:ap-south-1:368992683803:alarm:MSCQR-mumbai-TargetResponseTime-p95",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region ap-south-1.",
+        "Search for alarm MSCQR-mumbai-TargetResponseTime-p95.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "ap-south-1",
+      "resourceType": "alarm",
+      "resourceId": "MSCQR-mumbai-UnhealthyHosts",
+      "resourceName": "MSCQR-mumbai-UnhealthyHosts",
+      "arn": "arn:aws:cloudwatch:ap-south-1:368992683803:alarm:MSCQR-mumbai-UnhealthyHosts",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region ap-south-1.",
+        "Search for alarm MSCQR-mumbai-UnhealthyHosts.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "ap-south-1",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-mumbai-ec2-cpu-high",
+      "resourceName": "mscqr-mumbai-ec2-cpu-high",
+      "arn": "arn:aws:cloudwatch:ap-south-1:368992683803:alarm:mscqr-mumbai-ec2-cpu-high",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region ap-south-1.",
+        "Search for alarm mscqr-mumbai-ec2-cpu-high.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "ap-south-1",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-mumbai-ec2-status-check-failed",
+      "resourceName": "mscqr-mumbai-ec2-status-check-failed",
+      "arn": "arn:aws:cloudwatch:ap-south-1:368992683803:alarm:mscqr-mumbai-ec2-status-check-failed",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region ap-south-1.",
+        "Search for alarm mscqr-mumbai-ec2-status-check-failed.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "ap-south-1",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-mumbai-rds-cpu-high",
+      "resourceName": "mscqr-mumbai-rds-cpu-high",
+      "arn": "arn:aws:cloudwatch:ap-south-1:368992683803:alarm:mscqr-mumbai-rds-cpu-high",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region ap-south-1.",
+        "Search for alarm mscqr-mumbai-rds-cpu-high.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "ap-south-1",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-mumbai-rds-db-connections-high",
+      "resourceName": "mscqr-mumbai-rds-db-connections-high",
+      "arn": "arn:aws:cloudwatch:ap-south-1:368992683803:alarm:mscqr-mumbai-rds-db-connections-high",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region ap-south-1.",
+        "Search for alarm mscqr-mumbai-rds-db-connections-high.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "ap-south-1",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-mumbai-rds-free-storage-low",
+      "resourceName": "mscqr-mumbai-rds-free-storage-low",
+      "arn": "arn:aws:cloudwatch:ap-south-1:368992683803:alarm:mscqr-mumbai-rds-free-storage-low",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region ap-south-1.",
+        "Search for alarm mscqr-mumbai-rds-free-storage-low.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "af-south-1",
+      "resourceType": "instance",
+      "resourceId": "i-01b1f9da435ed2f99",
+      "resourceName": "",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:instance/i-01b1f9da435ed2f99",
+      "evidence": [
+        "Current production EC2/ASG/GitHub runner instance."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region af-south-1.",
+        "Search for instance i-01b1f9da435ed2f99.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Running production or operational instance."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "af-south-1",
+      "resourceType": "instance",
+      "resourceId": "i-064223a25caf64770",
+      "resourceName": "mscqr-prod-capetown",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:instance/i-064223a25caf64770",
+      "evidence": [
+        "Current production EC2/ASG/GitHub runner instance."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region af-south-1.",
+        "Search for instance i-064223a25caf64770.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Running production or operational instance."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "af-south-1",
+      "resourceType": "instance",
+      "resourceId": "i-0ec7b53df203291ff",
+      "resourceName": "",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:instance/i-0ec7b53df203291ff",
+      "evidence": [
+        "Current production EC2/ASG/GitHub runner instance."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region af-south-1.",
+        "Search for instance i-0ec7b53df203291ff.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Running production or operational instance."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ebs",
+      "region": "af-south-1",
+      "resourceType": "volume",
+      "resourceId": "vol-01c1a3af78626c883",
+      "resourceName": "vol-01c1a3af78626c883",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:volume/vol-01c1a3af78626c883",
+      "evidence": [
+        "EBS volume is attached/in-use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Elastic Block Store.",
+        "Verify region af-south-1.",
+        "Search for volume vol-01c1a3af78626c883.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached volumes are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ebs",
+      "region": "af-south-1",
+      "resourceType": "volume",
+      "resourceId": "vol-03ecace0015529ecf",
+      "resourceName": "vol-03ecace0015529ecf",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:volume/vol-03ecace0015529ecf",
+      "evidence": [
+        "EBS volume is attached/in-use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Elastic Block Store.",
+        "Verify region af-south-1.",
+        "Search for volume vol-03ecace0015529ecf.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached volumes are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ebs",
+      "region": "af-south-1",
+      "resourceType": "volume",
+      "resourceId": "vol-069f748509579be8f",
+      "resourceName": "vol-069f748509579be8f",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:volume/vol-069f748509579be8f",
+      "evidence": [
+        "EBS volume is attached/in-use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Elastic Block Store.",
+        "Verify region af-south-1.",
+        "Search for volume vol-069f748509579be8f.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached volumes are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "af-south-1",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-0966c373ad1b03e69",
+      "resourceName": "13.247.109.230",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region af-south-1.",
+        "Search for elastic-ip eipalloc-0966c373ad1b03e69.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "af-south-1",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-0e1efff274edfe8d7",
+      "resourceName": "13.247.165.129",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region af-south-1.",
+        "Search for elastic-ip eipalloc-0e1efff274edfe8d7.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "af-south-1",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-01e38750bd4be698f",
+      "resourceName": "15.240.28.113",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region af-south-1.",
+        "Search for elastic-ip eipalloc-01e38750bd4be698f.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "elbv2",
+      "region": "af-south-1",
+      "resourceType": "load-balancer",
+      "resourceId": "arn:aws:elasticloadbalancing:af-south-1:368992683803:loadbalancer/app/mscqr-capetown-alb/b7defd5707ad181c",
+      "resourceName": "mscqr-capetown-alb",
+      "arn": "arn:aws:elasticloadbalancing:af-south-1:368992683803:loadbalancer/app/mscqr-capetown-alb/b7defd5707ad181c",
+      "evidence": [
+        "Current regional production ALB DNS name."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Load Balancing.",
+        "Verify region af-south-1.",
+        "Search for load-balancer arn:aws:elasticloadbalancing:af-south-1:368992683803:loadbalancer/app/mscqr-capetown-alb/b7defd5707ad181c.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current DNS policy target."
+    },
+    {
+      "classification": "KEEP",
+      "service": "elbv2",
+      "region": "af-south-1",
+      "resourceType": "target-group",
+      "resourceId": "arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d",
+      "resourceName": "mscqr-capetown-frontend-tg",
+      "arn": "arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d",
+      "evidence": [
+        "Target group is attached to current ALB or referenced by ASG."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Load Balancing.",
+        "Verify region af-south-1.",
+        "Search for target-group arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production routing dependency."
+    },
+    {
+      "classification": "KEEP",
+      "service": "autoscaling",
+      "region": "af-south-1",
+      "resourceType": "auto-scaling-group",
+      "resourceId": "mscqr-capetown-dr-asg",
+      "resourceName": "mscqr-capetown-dr-asg",
+      "arn": "arn:aws:autoscaling:af-south-1:368992683803:autoScalingGroup:a14a5b2a-0e92-47bb-ada6-c8e906a6f224:autoScalingGroupName/mscqr-capetown-dr-asg",
+      "evidence": [
+        "Current production regional ASG."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Auto Scaling Groups.",
+        "Verify region af-south-1.",
+        "Search for auto-scaling-group mscqr-capetown-dr-asg.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current regional DR/prod capacity."
+    },
+    {
+      "classification": "KEEP",
+      "service": "launch-template",
+      "region": "af-south-1",
+      "resourceType": "launch-template",
+      "resourceId": "lt-04eeeecdf7ff884fe",
+      "resourceName": "mscqr-capetown-dr-lt",
+      "arn": "",
+      "evidence": [
+        "Launch template belongs to current regional ASG standard."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Launch Templates.",
+        "Verify region af-south-1.",
+        "Search for launch-template lt-04eeeecdf7ff884fe.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current ASG launch template."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "af-south-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-0f768d6fc564123b1",
+      "resourceName": "mscqr-rds-sg-afs1",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:security-group/sg-0f768d6fc564123b1",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region af-south-1.",
+        "Search for security-group sg-0f768d6fc564123b1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "security-group",
+      "region": "af-south-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-0d6af4df627e3fe43",
+      "resourceName": "default",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:security-group/sg-0d6af4df627e3fe43",
+      "evidence": [
+        "No attachment found in inventory; hard rule requires review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region af-south-1.",
+        "Search for security-group sg-0d6af4df627e3fe43.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Security group requires ENI/reference console review."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "af-south-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-061c4ffc734e1d149",
+      "resourceName": "mscqr-redis-sg-afs1",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:security-group/sg-061c4ffc734e1d149",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region af-south-1.",
+        "Search for security-group sg-061c4ffc734e1d149.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "af-south-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-0ad358fd72d15bd3f",
+      "resourceName": "mscqr-capetown-alb-sg",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:security-group/sg-0ad358fd72d15bd3f",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region af-south-1.",
+        "Search for security-group sg-0ad358fd72d15bd3f.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "af-south-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-0d8f560e4f6452aa5",
+      "resourceName": "mscqr-ec2-web-sg-afs1",
+      "arn": "arn:aws:ec2:af-south-1:368992683803:security-group/sg-0d8f560e4f6452aa5",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region af-south-1.",
+        "Search for security-group sg-0d8f560e4f6452aa5.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "af-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0f44c7a9f12a7173a",
+      "resourceName": "ELB app/mscqr-capetown-alb/b7defd5707ad181c",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region af-south-1.",
+        "Search for network-interface eni-0f44c7a9f12a7173a.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "af-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-06f2da01d828ec730",
+      "resourceName": "eni-06f2da01d828ec730",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region af-south-1.",
+        "Search for network-interface eni-06f2da01d828ec730.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "af-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-03315255108a10d77",
+      "resourceName": "ElastiCache mscqr-redis-afs1-primary-001",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region af-south-1.",
+        "Search for network-interface eni-03315255108a10d77.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "af-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-00a2c0cfe854768c5",
+      "resourceName": "RDSNetworkInterface",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region af-south-1.",
+        "Search for network-interface eni-00a2c0cfe854768c5.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "af-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-059f35b271ff4ed7c",
+      "resourceName": "ElastiCache mscqr-redis-afs1-primary-002",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region af-south-1.",
+        "Search for network-interface eni-059f35b271ff4ed7c.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "af-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-06d9d12a42b3e1054",
+      "resourceName": "ELB app/mscqr-capetown-alb/b7defd5707ad181c",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region af-south-1.",
+        "Search for network-interface eni-06d9d12a42b3e1054.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "af-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0f834b8389774d57e",
+      "resourceName": "eni-0f834b8389774d57e",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region af-south-1.",
+        "Search for network-interface eni-0f834b8389774d57e.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "af-south-1",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0afad4f6297c8dd80",
+      "resourceName": "eni-0afad4f6297c8dd80",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region af-south-1.",
+        "Search for network-interface eni-0afad4f6297c8dd80.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "NEVER_DELETE_WITHOUT_BACKUP",
+      "service": "rds",
+      "region": "af-south-1",
+      "resourceType": "db-instance",
+      "resourceId": "mscqr-prod-db-afs1",
+      "resourceName": "mscqr-prod-db-afs1",
+      "arn": "arn:aws:rds:af-south-1:368992683803:db:mscqr-prod-db-afs1",
+      "evidence": [
+        "RDS DB instance is data-bearing."
+      ],
+      "risk": "NEVER_DELETE_WITHOUT_BACKUP",
+      "consoleReviewRequired": true,
+      "recommendedAction": "backup-before-any-action",
+      "consoleReviewChecklist": [
+        "Open AWS Console > RDS.",
+        "Verify region af-south-1.",
+        "Search for db-instance mscqr-prod-db-afs1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Never delete without backup/export/snapshot and explicit approval."
+    },
+    {
+      "classification": "NEVER_DELETE_WITHOUT_BACKUP",
+      "service": "rds",
+      "region": "af-south-1",
+      "resourceType": "manual-snapshot",
+      "resourceId": "mscqr-dr-capetown-restore-test-20260512-snapshot",
+      "resourceName": "mscqr-dr-capetown-restore-test-20260512-snapshot",
+      "arn": "arn:aws:rds:af-south-1:368992683803:snapshot:mscqr-dr-capetown-restore-test-20260512-snapshot",
+      "evidence": [
+        "RDS manual snapshot is backup/recovery evidence."
+      ],
+      "risk": "NEVER_DELETE_WITHOUT_BACKUP",
+      "consoleReviewRequired": true,
+      "recommendedAction": "backup-before-any-action",
+      "consoleReviewChecklist": [
+        "Open AWS Console > RDS.",
+        "Verify region af-south-1.",
+        "Search for manual-snapshot mscqr-dr-capetown-restore-test-20260512-snapshot.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Never delete without retention review and explicit approval."
+    },
+    {
+      "classification": "KEEP",
+      "service": "acm",
+      "region": "af-south-1",
+      "resourceType": "certificate",
+      "resourceId": "arn:aws:acm:af-south-1:368992683803:certificate/989885f0-4a26-4995-8b83-30be93ab2cfc",
+      "resourceName": "mscqr.com",
+      "arn": "arn:aws:acm:af-south-1:368992683803:certificate/989885f0-4a26-4995-8b83-30be93ab2cfc",
+      "evidence": [
+        "ACM certificate is marked in use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Certificate Manager.",
+        "Verify region af-south-1.",
+        "Search for certificate arn:aws:acm:af-south-1:368992683803:certificate/989885f0-4a26-4995-8b83-30be93ab2cfc.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Certificate attached to active infrastructure."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "af-south-1",
+      "resourceType": "alarm",
+      "resourceId": "MSCQR-capetown-ALB-5XX",
+      "resourceName": "MSCQR-capetown-ALB-5XX",
+      "arn": "arn:aws:cloudwatch:af-south-1:368992683803:alarm:MSCQR-capetown-ALB-5XX",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region af-south-1.",
+        "Search for alarm MSCQR-capetown-ALB-5XX.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "af-south-1",
+      "resourceType": "alarm",
+      "resourceId": "MSCQR-capetown-EC2-CPU-70",
+      "resourceName": "MSCQR-capetown-EC2-CPU-70",
+      "arn": "arn:aws:cloudwatch:af-south-1:368992683803:alarm:MSCQR-capetown-EC2-CPU-70",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region af-south-1.",
+        "Search for alarm MSCQR-capetown-EC2-CPU-70.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "af-south-1",
+      "resourceType": "alarm",
+      "resourceId": "MSCQR-capetown-Target-5XX",
+      "resourceName": "MSCQR-capetown-Target-5XX",
+      "arn": "arn:aws:cloudwatch:af-south-1:368992683803:alarm:MSCQR-capetown-Target-5XX",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region af-south-1.",
+        "Search for alarm MSCQR-capetown-Target-5XX.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "af-south-1",
+      "resourceType": "alarm",
+      "resourceId": "MSCQR-capetown-TargetResponseTime-p95",
+      "resourceName": "MSCQR-capetown-TargetResponseTime-p95",
+      "arn": "arn:aws:cloudwatch:af-south-1:368992683803:alarm:MSCQR-capetown-TargetResponseTime-p95",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region af-south-1.",
+        "Search for alarm MSCQR-capetown-TargetResponseTime-p95.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "af-south-1",
+      "resourceType": "alarm",
+      "resourceId": "MSCQR-capetown-UnhealthyHosts",
+      "resourceName": "MSCQR-capetown-UnhealthyHosts",
+      "arn": "arn:aws:cloudwatch:af-south-1:368992683803:alarm:MSCQR-capetown-UnhealthyHosts",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region af-south-1.",
+        "Search for alarm MSCQR-capetown-UnhealthyHosts.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "af-south-1",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-capetown-ec2-cpu-high",
+      "resourceName": "mscqr-capetown-ec2-cpu-high",
+      "arn": "arn:aws:cloudwatch:af-south-1:368992683803:alarm:mscqr-capetown-ec2-cpu-high",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region af-south-1.",
+        "Search for alarm mscqr-capetown-ec2-cpu-high.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "af-south-1",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-capetown-ec2-status-check-failed",
+      "resourceName": "mscqr-capetown-ec2-status-check-failed",
+      "arn": "arn:aws:cloudwatch:af-south-1:368992683803:alarm:mscqr-capetown-ec2-status-check-failed",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region af-south-1.",
+        "Search for alarm mscqr-capetown-ec2-status-check-failed.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "af-south-1",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-capetown-rds-cpu-high",
+      "resourceName": "mscqr-capetown-rds-cpu-high",
+      "arn": "arn:aws:cloudwatch:af-south-1:368992683803:alarm:mscqr-capetown-rds-cpu-high",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region af-south-1.",
+        "Search for alarm mscqr-capetown-rds-cpu-high.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "af-south-1",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-capetown-rds-db-connections-high",
+      "resourceName": "mscqr-capetown-rds-db-connections-high",
+      "arn": "arn:aws:cloudwatch:af-south-1:368992683803:alarm:mscqr-capetown-rds-db-connections-high",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region af-south-1.",
+        "Search for alarm mscqr-capetown-rds-db-connections-high.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "af-south-1",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-capetown-rds-free-storage-low",
+      "resourceName": "mscqr-capetown-rds-free-storage-low",
+      "arn": "arn:aws:cloudwatch:af-south-1:368992683803:alarm:mscqr-capetown-rds-free-storage-low",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region af-south-1.",
+        "Search for alarm mscqr-capetown-rds-free-storage-low.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "eu-west-2",
+      "resourceType": "instance",
+      "resourceId": "i-024ec40bcbdb30035",
+      "resourceName": "mscqr-prod_london",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:instance/i-024ec40bcbdb30035",
+      "evidence": [
+        "Current production EC2/ASG/GitHub runner instance."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region eu-west-2.",
+        "Search for instance i-024ec40bcbdb30035.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Running production or operational instance."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "eu-west-2",
+      "resourceType": "instance",
+      "resourceId": "i-0628b4a4a06f6e4d3",
+      "resourceName": "mscqr-github-actions-runner",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:instance/i-0628b4a4a06f6e4d3",
+      "evidence": [
+        "Current production EC2/ASG/GitHub runner instance."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region eu-west-2.",
+        "Search for instance i-0628b4a4a06f6e4d3.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Running production or operational instance."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ebs",
+      "region": "eu-west-2",
+      "resourceType": "volume",
+      "resourceId": "vol-05b02fe2ee329505f",
+      "resourceName": "vol-05b02fe2ee329505f",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:volume/vol-05b02fe2ee329505f",
+      "evidence": [
+        "EBS volume is attached/in-use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Elastic Block Store.",
+        "Verify region eu-west-2.",
+        "Search for volume vol-05b02fe2ee329505f.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached volumes are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ebs",
+      "region": "eu-west-2",
+      "resourceType": "volume",
+      "resourceId": "vol-05cc68f5d86b0ccc6",
+      "resourceName": "vol-05cc68f5d86b0ccc6",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:volume/vol-05cc68f5d86b0ccc6",
+      "evidence": [
+        "EBS volume is attached/in-use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Elastic Block Store.",
+        "Verify region eu-west-2.",
+        "Search for volume vol-05cc68f5d86b0ccc6.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached volumes are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "eu-west-2",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-0e355030bdb47ec4d",
+      "resourceName": "13.135.108.69",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region eu-west-2.",
+        "Search for elastic-ip eipalloc-0e355030bdb47ec4d.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "eu-west-2",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-0e1f6867d5a411bb1",
+      "resourceName": "16.61.0.97",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region eu-west-2.",
+        "Search for elastic-ip eipalloc-0e1f6867d5a411bb1.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "eu-west-2",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-00779949767f21cfa",
+      "resourceName": "18.133.208.221",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region eu-west-2.",
+        "Search for elastic-ip eipalloc-00779949767f21cfa.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "eu-west-2",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-056bbb4cf49779295",
+      "resourceName": "18.135.158.1",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region eu-west-2.",
+        "Search for elastic-ip eipalloc-056bbb4cf49779295.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "eu-west-2",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-0d048b9168225c496",
+      "resourceName": "3.9.15.121",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region eu-west-2.",
+        "Search for elastic-ip eipalloc-0d048b9168225c496.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "ec2",
+      "region": "eu-west-2",
+      "resourceType": "elastic-ip",
+      "resourceId": "eipalloc-0d5bae537b16aece4",
+      "resourceName": "35.179.203.86",
+      "arn": "",
+      "evidence": [
+        "Elastic IP is associated or service-managed."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2.",
+        "Verify region eu-west-2.",
+        "Search for elastic-ip eipalloc-0d5bae537b16aece4.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Associated EIP is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "elbv2",
+      "region": "eu-west-2",
+      "resourceType": "load-balancer",
+      "resourceId": "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608",
+      "resourceName": "mscqr-alb-euw2",
+      "arn": "arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608",
+      "evidence": [
+        "Current regional production ALB DNS name."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Load Balancing.",
+        "Verify region eu-west-2.",
+        "Search for load-balancer arn:aws:elasticloadbalancing:eu-west-2:368992683803:loadbalancer/app/mscqr-alb-euw2/cda0292be6e39608.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current DNS policy target."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "elbv2",
+      "region": "eu-west-2",
+      "resourceType": "target-group",
+      "resourceId": "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2/6e970e6a19a28d75",
+      "resourceName": "mscqr-backend-tg-euw2",
+      "arn": "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2/6e970e6a19a28d75",
+      "evidence": [
+        "No current production attachment proven, or target-health evidence is missing."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Load Balancing.",
+        "Verify region eu-west-2.",
+        "Search for target-group arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2/6e970e6a19a28d75.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Target group needs listener/ASG/target-health review."
+    },
+    {
+      "classification": "KEEP",
+      "service": "elbv2",
+      "region": "eu-west-2",
+      "resourceType": "target-group",
+      "resourceId": "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-frontend-tg-euw2/09ef3648e65481e6",
+      "resourceName": "mscqr-frontend-tg-euw2",
+      "arn": "arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-frontend-tg-euw2/09ef3648e65481e6",
+      "evidence": [
+        "Target group is attached to current ALB or referenced by ASG."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Load Balancing.",
+        "Verify region eu-west-2.",
+        "Search for target-group arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-frontend-tg-euw2/09ef3648e65481e6.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current production routing dependency."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "security-group",
+      "region": "eu-west-2",
+      "resourceType": "security-group",
+      "resourceId": "sg-099af13ddef6abf9c",
+      "resourceName": "rds_sg_mscqr_euw2",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-099af13ddef6abf9c",
+      "evidence": [
+        "No attachment found in inventory; hard rule requires review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region eu-west-2.",
+        "Search for security-group sg-099af13ddef6abf9c.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Security group requires ENI/reference console review."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "eu-west-2",
+      "resourceType": "security-group",
+      "resourceId": "sg-017d8b3b4be470165",
+      "resourceName": "ec2-rds-1",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-017d8b3b4be470165",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region eu-west-2.",
+        "Search for security-group sg-017d8b3b4be470165.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "eu-west-2",
+      "resourceType": "security-group",
+      "resourceId": "sg-0a7cbddd9770b220d",
+      "resourceName": "mscqr-alb-sg-euw2",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-0a7cbddd9770b220d",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region eu-west-2.",
+        "Search for security-group sg-0a7cbddd9770b220d.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "eu-west-2",
+      "resourceType": "security-group",
+      "resourceId": "sg-0e669ac5a54fdca9d",
+      "resourceName": "mscqr-ec2-web-sg-euw2",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-0e669ac5a54fdca9d",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region eu-west-2.",
+        "Search for security-group sg-0e669ac5a54fdca9d.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "security-group",
+      "region": "eu-west-2",
+      "resourceType": "security-group",
+      "resourceId": "sg-0cf8506e2e846ef51",
+      "resourceName": "launch-wizard-1",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-0cf8506e2e846ef51",
+      "evidence": [
+        "No attachment found in inventory; hard rule requires review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region eu-west-2.",
+        "Search for security-group sg-0cf8506e2e846ef51.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Security group requires ENI/reference console review."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "eu-west-2",
+      "resourceType": "security-group",
+      "resourceId": "sg-05128bf9006ff6ea9",
+      "resourceName": "mscqr-github-runner-sg-euw2",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-05128bf9006ff6ea9",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region eu-west-2.",
+        "Search for security-group sg-05128bf9006ff6ea9.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "security-group",
+      "region": "eu-west-2",
+      "resourceType": "security-group",
+      "resourceId": "sg-0f70603411e227960",
+      "resourceName": "default",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-0f70603411e227960",
+      "evidence": [
+        "No attachment found in inventory; hard rule requires review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region eu-west-2.",
+        "Search for security-group sg-0f70603411e227960.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Security group requires ENI/reference console review."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "eu-west-2",
+      "resourceType": "security-group",
+      "resourceId": "sg-0db971332ae625441",
+      "resourceName": "mscqr-ecs-sg-euw2",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-0db971332ae625441",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region eu-west-2.",
+        "Search for security-group sg-0db971332ae625441.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "security-group",
+      "region": "eu-west-2",
+      "resourceType": "security-group",
+      "resourceId": "sg-07db1a9130c6df8d5",
+      "resourceName": "rds-ec2-1",
+      "arn": "arn:aws:ec2:eu-west-2:368992683803:security-group/sg-07db1a9130c6df8d5",
+      "evidence": [
+        "Security group is attached to ENI, load balancer, RDS, or instance evidence."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region eu-west-2.",
+        "Search for security-group sg-07db1a9130c6df8d5.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached security groups are protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "eu-west-2",
+      "resourceType": "network-interface",
+      "resourceId": "eni-076c3556f9a8097f2",
+      "resourceName": "ElastiCache mscqr-redis-euw2-primary-001",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region eu-west-2.",
+        "Search for network-interface eni-076c3556f9a8097f2.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "eu-west-2",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0f7e94c94c71d04ba",
+      "resourceName": "ELB app/mscqr-alb-euw2/cda0292be6e39608",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region eu-west-2.",
+        "Search for network-interface eni-0f7e94c94c71d04ba.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "eu-west-2",
+      "resourceType": "network-interface",
+      "resourceId": "eni-04093255d4b517221",
+      "resourceName": "Interface for NAT Gateway nat-0a51226e1f9190b2e",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region eu-west-2.",
+        "Search for network-interface eni-04093255d4b517221.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "eu-west-2",
+      "resourceType": "network-interface",
+      "resourceId": "eni-006057d805dacec95",
+      "resourceName": "eni-006057d805dacec95",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region eu-west-2.",
+        "Search for network-interface eni-006057d805dacec95.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "eu-west-2",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0a5cd8d8da0c87d0a",
+      "resourceName": "ELB app/mscqr-alb-euw2/cda0292be6e39608",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region eu-west-2.",
+        "Search for network-interface eni-0a5cd8d8da0c87d0a.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "eu-west-2",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0e08a5968473dfc3f",
+      "resourceName": "ElastiCache mscqr-redis-euw2-primary-002",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region eu-west-2.",
+        "Search for network-interface eni-0e08a5968473dfc3f.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "eu-west-2",
+      "resourceType": "network-interface",
+      "resourceId": "eni-04f64b96fad9969ce",
+      "resourceName": "eni-04f64b96fad9969ce",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region eu-west-2.",
+        "Search for network-interface eni-04f64b96fad9969ce.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "eu-west-2",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0f10f3b7d7d976e14",
+      "resourceName": "RDSNetworkInterface",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region eu-west-2.",
+        "Search for network-interface eni-0f10f3b7d7d976e14.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "KEEP",
+      "service": "network-interface",
+      "region": "eu-west-2",
+      "resourceType": "network-interface",
+      "resourceId": "eni-0bcec4c899f2fa5bc",
+      "resourceName": "Interface for NAT Gateway nat-0be609dfc6ce97dc3",
+      "arn": "",
+      "evidence": [
+        "Network interface is attached."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Network Interfaces.",
+        "Verify region eu-west-2.",
+        "Search for network-interface eni-0bcec4c899f2fa5bc.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Attached ENI is protected."
+    },
+    {
+      "classification": "NEVER_DELETE_WITHOUT_BACKUP",
+      "service": "rds",
+      "region": "eu-west-2",
+      "resourceType": "db-instance",
+      "resourceId": "mscqr-prod-db",
+      "resourceName": "mscqr-prod-db",
+      "arn": "arn:aws:rds:eu-west-2:368992683803:db:mscqr-prod-db",
+      "evidence": [
+        "RDS DB instance is data-bearing."
+      ],
+      "risk": "NEVER_DELETE_WITHOUT_BACKUP",
+      "consoleReviewRequired": true,
+      "recommendedAction": "backup-before-any-action",
+      "consoleReviewChecklist": [
+        "Open AWS Console > RDS.",
+        "Verify region eu-west-2.",
+        "Search for db-instance mscqr-prod-db.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Never delete without backup/export/snapshot and explicit approval."
+    },
+    {
+      "classification": "NEVER_DELETE_WITHOUT_BACKUP",
+      "service": "rds",
+      "region": "eu-west-2",
+      "resourceType": "manual-snapshot",
+      "resourceId": "mscqr-dr-restore-test-20260511-snapshot",
+      "resourceName": "mscqr-dr-restore-test-20260511-snapshot",
+      "arn": "arn:aws:rds:eu-west-2:368992683803:snapshot:mscqr-dr-restore-test-20260511-snapshot",
+      "evidence": [
+        "RDS manual snapshot is backup/recovery evidence."
+      ],
+      "risk": "NEVER_DELETE_WITHOUT_BACKUP",
+      "consoleReviewRequired": true,
+      "recommendedAction": "backup-before-any-action",
+      "consoleReviewChecklist": [
+        "Open AWS Console > RDS.",
+        "Verify region eu-west-2.",
+        "Search for manual-snapshot mscqr-dr-restore-test-20260511-snapshot.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Never delete without retention review and explicit approval."
+    },
+    {
+      "classification": "NEVER_DELETE_WITHOUT_BACKUP",
+      "service": "rds",
+      "region": "eu-west-2",
+      "resourceType": "manual-snapshot",
+      "resourceId": "mscqr-prod-db-post-deploy-2026-04-27",
+      "resourceName": "mscqr-prod-db-post-deploy-2026-04-27",
+      "arn": "arn:aws:rds:eu-west-2:368992683803:snapshot:mscqr-prod-db-post-deploy-2026-04-27",
+      "evidence": [
+        "RDS manual snapshot is backup/recovery evidence."
+      ],
+      "risk": "NEVER_DELETE_WITHOUT_BACKUP",
+      "consoleReviewRequired": true,
+      "recommendedAction": "backup-before-any-action",
+      "consoleReviewChecklist": [
+        "Open AWS Console > RDS.",
+        "Verify region eu-west-2.",
+        "Search for manual-snapshot mscqr-prod-db-post-deploy-2026-04-27.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Never delete without retention review and explicit approval."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "ecs",
+      "region": "eu-west-2",
+      "resourceType": "cluster",
+      "resourceId": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
+      "resourceName": "mscqr-prod-euw2-main",
+      "arn": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main",
+      "evidence": [
+        "ECS resources require workflow/runtime usage review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > ECS.",
+        "Verify region eu-west-2.",
+        "Search for cluster arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Review whether ECS release workflows still use this resource."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "ecr",
+      "region": "eu-west-2",
+      "resourceType": "repository",
+      "resourceId": "mscqr-backend",
+      "resourceName": "mscqr-backend",
+      "arn": "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+      "evidence": [
+        "ECR resources require workflow/image-retention review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > ECR.",
+        "Verify region eu-west-2.",
+        "Search for repository mscqr-backend.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Do not remove images/repos without release history review."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "ecr",
+      "region": "eu-west-2",
+      "resourceType": "repository",
+      "resourceId": "mscqr-worker",
+      "resourceName": "mscqr-worker",
+      "arn": "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker",
+      "evidence": [
+        "ECR resources require workflow/image-retention review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > ECR.",
+        "Verify region eu-west-2.",
+        "Search for repository mscqr-worker.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Do not remove images/repos without release history review."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "ecr",
+      "region": "eu-west-2",
+      "resourceType": "repository",
+      "resourceId": "mscqr-web",
+      "resourceName": "mscqr-web",
+      "arn": "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+      "evidence": [
+        "ECR resources require workflow/image-retention review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > ECR.",
+        "Verify region eu-west-2.",
+        "Search for repository mscqr-web.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Do not remove images/repos without release history review."
+    },
+    {
+      "classification": "KEEP",
+      "service": "acm",
+      "region": "eu-west-2",
+      "resourceType": "certificate",
+      "resourceId": "arn:aws:acm:eu-west-2:368992683803:certificate/297215d5-aebb-4c76-8323-564c147b0271",
+      "resourceName": "mscqr.com",
+      "arn": "arn:aws:acm:eu-west-2:368992683803:certificate/297215d5-aebb-4c76-8323-564c147b0271",
+      "evidence": [
+        "ACM certificate is marked in use."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > Certificate Manager.",
+        "Verify region eu-west-2.",
+        "Search for certificate arn:aws:acm:eu-west-2:368992683803:certificate/297215d5-aebb-4c76-8323-564c147b0271.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Certificate attached to active infrastructure."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "eu-west-2",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-ec2-cpu-high",
+      "resourceName": "mscqr-ec2-cpu-high",
+      "arn": "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-ec2-cpu-high",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region eu-west-2.",
+        "Search for alarm mscqr-ec2-cpu-high.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "eu-west-2",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-ec2-status-check-failed",
+      "resourceName": "mscqr-ec2-status-check-failed",
+      "arn": "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-ec2-status-check-failed",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region eu-west-2.",
+        "Search for alarm mscqr-ec2-status-check-failed.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "eu-west-2",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-rds-cpu-high",
+      "resourceName": "mscqr-rds-cpu-high",
+      "arn": "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-rds-cpu-high",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region eu-west-2.",
+        "Search for alarm mscqr-rds-cpu-high.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "eu-west-2",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-rds-db-connections-high",
+      "resourceName": "mscqr-rds-db-connections-high",
+      "arn": "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-rds-db-connections-high",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region eu-west-2.",
+        "Search for alarm mscqr-rds-db-connections-high.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "KEEP",
+      "service": "cloudwatch",
+      "region": "eu-west-2",
+      "resourceType": "alarm",
+      "resourceId": "mscqr-rds-free-storage-low",
+      "resourceName": "mscqr-rds-free-storage-low",
+      "arn": "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-rds-free-storage-low",
+      "evidence": [
+        "Alarm name matches current MSCQR production/DR naming."
+      ],
+      "risk": "LOW",
+      "consoleReviewRequired": false,
+      "recommendedAction": "keep",
+      "consoleReviewChecklist": [
+        "Open AWS Console > CloudWatch > Alarms.",
+        "Verify region eu-west-2.",
+        "Search for alarm mscqr-rds-free-storage-low.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Current operational alarm candidate."
+    },
+    {
+      "classification": "REVIEW_REQUIRED",
+      "service": "security-group",
+      "region": "us-east-1",
+      "resourceType": "security-group",
+      "resourceId": "sg-03a7f996516587951",
+      "resourceName": "default",
+      "arn": "arn:aws:ec2:us-east-1:368992683803:security-group/sg-03a7f996516587951",
+      "evidence": [
+        "No attachment found in inventory; hard rule requires review."
+      ],
+      "risk": "MEDIUM",
+      "consoleReviewRequired": true,
+      "recommendedAction": "review",
+      "consoleReviewChecklist": [
+        "Open AWS Console > EC2 > Security Groups.",
+        "Verify region us-east-1.",
+        "Search for security-group sg-03a7f996516587951.",
+        "Verify no attachment, DNS reference, listener, ASG, IAM, data, or workflow dependency exists.",
+        "Capture screenshot before any future deletion or stop action."
+      ],
+      "notes": "Security group requires ENI/reference console review."
+    }
+  ],
+  "summary": {
+    "total": 153,
+    "counts": {
+      "KEEP": 130,
+      "REVIEW_REQUIRED": 16,
+      "SAFE_TO_STOP": 0,
+      "SAFE_TO_DELETE_LATER": 0,
+      "NEVER_DELETE_WITHOUT_BACKUP": 7
+    }
+  }
+}

@@ -1,0 +1,55 @@
+source=/Users/abhiramteja/Downloads/genuine-scan-main/artifacts/aws-cleanup-inventory/20260603T103903Z.tar.gz
+generatedAt=2026-06-03T11:05:22.906Z
+total=153
+KEEP=130
+REVIEW_REQUIRED=16
+SAFE_TO_STOP=0
+SAFE_TO_DELETE_LATER=0
+NEVER_DELETE_WITHOUT_BACKUP=7
+
+safe_to_stop:
+- None
+
+safe_to_delete_later:
+- None
+
+never_delete_without_backup:
+- rds/ap-south-1/db-instance mscqr-prod-db-aps1 mscqr-prod-db-aps1
+- rds/ap-south-1/manual-snapshot mscqr-prod-db-aps1-manual-2026-04-27 mscqr-prod-db-aps1-manual-2026-04-27
+- rds/af-south-1/db-instance mscqr-prod-db-afs1 mscqr-prod-db-afs1
+- rds/af-south-1/manual-snapshot mscqr-dr-capetown-restore-test-20260512-snapshot mscqr-dr-capetown-restore-test-20260512-snapshot
+- rds/eu-west-2/db-instance mscqr-prod-db mscqr-prod-db
+- rds/eu-west-2/manual-snapshot mscqr-dr-restore-test-20260511-snapshot mscqr-dr-restore-test-20260511-snapshot
+- rds/eu-west-2/manual-snapshot mscqr-prod-db-post-deploy-2026-04-27 mscqr-prod-db-post-deploy-2026-04-27
+
+review_required_by_service_region:
+route53/global: 3
+- record dr-capetown.mscqr.com. A dr-capetown.mscqr.com.
+- record dr-mumbai.mscqr.com. A dr-mumbai.mscqr.com.
+- record _b038cd46106cbc0a3d8683da0d9481d8.www.mscqr.com. CNAME _b038cd46106cbc0a3d8683da0d9481d8.www.mscqr.com.
+iam/global: 2
+- role mscqr-ecs-execution-role mscqr-ecs-execution-role
+- role mscqr-ecs-task-role mscqr-ecs-task-role
+security-group/ap-south-1: 1
+- security-group sg-080278ac70122fce1 default
+security-group/af-south-1: 1
+- security-group sg-0d6af4df627e3fe43 default
+elbv2/eu-west-2: 1
+- target-group arn:aws:elasticloadbalancing:eu-west-2:368992683803:targetgroup/mscqr-backend-tg-euw2/6e970e6a19a28d75 mscqr-backend-tg-euw2
+security-group/eu-west-2: 3
+- security-group sg-099af13ddef6abf9c rds_sg_mscqr_euw2
+- security-group sg-0cf8506e2e846ef51 launch-wizard-1
+- security-group sg-0f70603411e227960 default
+ecs/eu-west-2: 1
+- cluster arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main mscqr-prod-euw2-main
+ecr/eu-west-2: 3
+- repository mscqr-backend mscqr-backend
+- repository mscqr-worker mscqr-worker
+- repository mscqr-web mscqr-web
+security-group/us-east-1: 1
+- security-group sg-03a7f996516587951 default
+
+inventory_validation:
+- 20260603T100141Z.tar.gz complete=false reasons=broken region-loop directory detected: ap-south-1 af-south-1 eu-west-2 us-east-1; missing region directory ap-south-1; missing region directory af-south-1; missing region directory eu-west-2; missing region directory us-east-1
+- 20260603T102835Z.tar.gz complete=true reasons=none
+- 20260603T103903Z.tar.gz complete=true reasons=none
