@@ -118,44 +118,7 @@ E2E_VERIFY_CODE=A0000000051 \
 npm run test:e2e
 ```
 
-## 3. Repository Layout
 
-```text
-.
-├── src/                              # Frontend React app
-│   ├── features/                     # Feature-first UI/data domains
-│   ├── pages/                        # Thin route wrappers
-│   ├── components/                   # Shared and feature UI
-│   ├── contexts/                     # Auth/session context
-│   └── lib/api-client.ts             # Stable API client entrypoint
-├── e2e/                              # Playwright smoke coverage for critical workflows
-├── shared/contracts/                 # Shared DTO/type boundaries
-├── backend/
-│   ├── src/
-│   │   ├── controllers/              # HTTP handlers
-│   │   ├── observability/            # Release metadata, request metrics, Sentry hooks
-│   │   ├── services/                 # Core business logic
-│   │   ├── middleware/               # Auth/RBAC/tenant isolation
-│   │   ├── routes/                   # API route registration
-│   │   └── config/database.ts        # Prisma client
-│   ├── prisma/
-│   │   ├── schema.prisma             # Data model + enums
-│   │   ├── migrations/               # Migration history
-│   │   └── seed.ts                   # Seed script
-│   ├── scripts/                      # Ops/dev scripts
-│   └── tests/                        # Lightweight backend tests
-├── documents/
-│   ├── SUPER_ADMIN_GUIDE.md          # Super Admin manual source
-│   ├── manuals/
-│   │   ├── MSCQR_LICENSEE_ADMIN_MANUAL.md
-│   │   ├── MSCQR_MANUFACTURER_MANUAL.md
-│   │   └── MSCQR_CUSTOMER_MANUAL.md
-│   └── generated-docx/                # Generated DOCX copies of documents markdown
-├── docker-compose.yml
-├── Dockerfile                        # Frontend image
-├── backend/Dockerfile                # Backend image
-└── nginx.conf                        # Frontend reverse proxy for /api
-```
 
 ## 4. Architecture
 
