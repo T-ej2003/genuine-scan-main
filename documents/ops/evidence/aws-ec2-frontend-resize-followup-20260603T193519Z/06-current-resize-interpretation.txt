@@ -1,0 +1,13 @@
+instance_id: i-024ec40bcbdb30035
+instance_state: running
+instance_type: t3.small
+private_ip: 10.0.14.142
+public_ip: 13.135.108.69
+target_states: healthy
+ami_id: ami-0fe5ba33e4407c12f
+ami_state: pending
+snapshot_id: snap-0415b3af4c3bba637
+snapshot_state: pending
+snapshot_progress: 70%
+
+DECISION: KEEP_T3_SMALL

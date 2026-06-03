@@ -1,0 +1,14 @@
+=== curl -I https://www.mscqr.com ===
+HTTP/2 200 
+date: Wed, 03 Jun 2026 19:35:25 GMT
+content-type: text/html
+content-length: 4189
+server: nginx/1.29.8
+last-modified: Sun, 31 May 2026 23:49:19 GMT
+etag: "6a1cc8ff-105d"
+cache-control: no-store, no-cache, must-revalidate
+accept-ranges: bytes
+
+
+=== curl title check ===
+    <title>MSCQR | Garment Authentication QR Platform</title>

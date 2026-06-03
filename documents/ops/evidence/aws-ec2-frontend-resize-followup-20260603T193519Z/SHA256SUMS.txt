@@ -1,0 +1,6 @@
+7aada84116a365199a926da8856e57306f5eab9bb6085686b5d7d375ff25b07c  ./01-current-instance.json
+30364d37d99ca9fe1d149ce5fc123bdf330a2b001674677236b2e2f8818bcbc0  ./02-current-target-health.json
+527546dc3b72829048d6c354600a586d448800b98f720d4df97dc92e5c2a3848  ./03-current-external-https-check.txt
+0647b71bb29a19af28cfd5c4ffe0b3a49e020462ebac6efc50fb22be156db310  ./04-current-ami-state.json
+f61e8f5d77f0eb8984ec9eb0ced5752c428f3f53fe2abc70ad8699dbc5b1f203  ./05-current-ami-snapshot-state.json
+edfd6b7a389dc5ed24734cb3ec14878d5a22fea8b3d42ad713836cdec774c79e  ./06-current-resize-interpretation.txt
