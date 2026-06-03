@@ -17,6 +17,7 @@ const objectStorageApplyWorkflow = ".github/workflows/aws-dr-object-storage-appl
 const albApplyWorkflow = ".github/workflows/aws-dr-alb-apply.yml";
 const hardeningApplyWorkflow = ".github/workflows/aws-dr-hardening-apply.yml";
 const operationsWorkflow = ".github/workflows/aws-dr-operations.yml";
+const autoFailoverMonitorWorkflow = ".github/workflows/auto-failover-monitor.yml";
 const africaDnsPlanScript = "scripts/dr/generate-route53-africa-dns-plan.sh";
 const applyWorkflowPaths = new Set([
   dnsApplyWorkflow,
@@ -333,6 +334,38 @@ for (const scanRoot of scanRoots) {
               message: `Read-only DR operations workflow must not expose mutation operation ${operationName}.`,
             });
           }
+        }
+      }
+
+      if (repoPath === autoFailoverMonitorWorkflow) {
+        const blockedMonitorTokens = [
+          "ops:route53-rollback-apply-approved",
+          "apply-route53-rollback-approved.mjs",
+          "APPROVED_ROUTE53_ROLLBACK=true",
+          "change-resource-record-sets",
+        ];
+        for (const token of blockedMonitorTokens) {
+          if (source.includes(token)) {
+            findings.push({
+              repoPath,
+              line: 1,
+              message: `Auto failover monitor must remain non-mutating and must not include ${token}.`,
+            });
+          }
+        }
+        if (!source.includes("ops:auto-failover-dry-run")) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: "Auto failover monitor must run the dry-run controller.",
+          });
+        }
+        if (!source.includes("actions/upload-artifact")) {
+          findings.push({
+            repoPath,
+            line: 1,
+            message: "Auto failover monitor must upload dry-run evidence artifacts.",
+          });
         }
       }
 

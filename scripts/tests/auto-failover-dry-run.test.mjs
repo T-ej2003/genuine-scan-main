@@ -135,3 +135,18 @@ test("CLI writes hashed recommendation artifact and does not mutate AWS", () => 
   assert.doesNotMatch(source, /change-resource-record-sets/);
   assert.doesNotMatch(source, /\baws\b/);
 });
+
+test("auto-failover monitor workflow stays non-mutating", () => {
+  const source = readFileSync(path.join(repoRoot, ".github/workflows/auto-failover-monitor.yml"), "utf8");
+
+  assert.match(source, /on:\n[\s\S]*workflow_dispatch:/);
+  assert.match(source, /schedule:/);
+  assert.match(source, /npm run ops:three-region-truth-table/);
+  assert.match(source, /npm run ops:auto-failover-dry-run --/);
+  assert.match(source, /actions\/upload-artifact/);
+  assert.match(source, /Manual approval is still required/);
+  assert.doesNotMatch(source, /ops:route53-rollback-apply-approved/);
+  assert.doesNotMatch(source, /apply-route53-rollback-approved\.mjs/);
+  assert.doesNotMatch(source, /APPROVED_ROUTE53_ROLLBACK\s*=\s*true/);
+  assert.doesNotMatch(source, /change-resource-record-sets/);
+});

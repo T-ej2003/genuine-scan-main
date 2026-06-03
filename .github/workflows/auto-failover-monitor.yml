@@ -1,0 +1,159 @@
+name: Auto Failover Monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: "Consecutive failed samples required for a dry-run recommendation"
+        required: false
+        type: string
+        default: "2"
+      sample_delay_seconds:
+        description: "Delay between truth-table samples"
+        required: false
+        type: string
+        default: "30"
+      strict_warn:
+        description: "Treat WARN rows as dry-run failures"
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  dry_run_monitor:
+    name: Auto failover dry-run monitor
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HOSTED_ZONE_ID: ${{ vars.MSCQR_HOSTED_ZONE_ID }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.AUTO_FAILOVER_READONLY_ROLE_TO_ASSUME }}
+      AWS_REGION: ${{ vars.AUTO_FAILOVER_AWS_REGION || 'us-east-1' }}
+      AUTO_FAILOVER_THRESHOLD: ${{ github.event.inputs.threshold || '2' }}
+      AUTO_FAILOVER_SAMPLE_DELAY_SECONDS: ${{ github.event.inputs.sample_delay_seconds || '30' }}
+      AUTO_FAILOVER_STRICT_WARN: ${{ github.event.inputs.strict_warn || 'false' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run AWS DR safety scanner
+        run: npm run check:aws-dr-safety
+
+      - name: Configure read-only AWS credentials when available
+        if: ${{ env.AWS_ROLE_TO_ASSUME != '' && env.HOSTED_ZONE_ID != '' }}
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Capture three-region truth-table samples
+        if: ${{ env.AWS_ROLE_TO_ASSUME != '' && env.HOSTED_ZONE_ID != '' }}
+        run: |
+          set -euo pipefail
+
+          sample_count=2
+          delay_seconds="${AUTO_FAILOVER_SAMPLE_DELAY_SECONDS:-30}"
+          case "$delay_seconds" in
+            ''|*[!0-9]*) delay_seconds=30 ;;
+          esac
+
+          for sample in 1 2; do
+            echo "Capturing three-region truth-table sample ${sample}/${sample_count}."
+            set +e
+            npm run ops:three-region-truth-table
+            status=$?
+            set -e
+
+            if [ "$status" -eq 2 ]; then
+              echo "::error::Truth-table controller errored before producing reliable evidence."
+              exit "$status"
+            fi
+            if [ "$status" -ne 0 ]; then
+              echo "::warning::Truth-table sample ${sample} completed with review-required rows; continuing to dry-run decision."
+            fi
+            if [ "$sample" -lt "$sample_count" ]; then
+              sleep "$delay_seconds"
+            fi
+          done
+
+      - name: Note missing live truth-table prerequisites
+        if: ${{ env.AWS_ROLE_TO_ASSUME == '' || env.HOSTED_ZONE_ID == '' }}
+        run: |
+          echo "::warning::Skipping live truth-table capture because MSCQR_HOSTED_ZONE_ID or AUTO_FAILOVER_READONLY_ROLE_TO_ASSUME is not configured."
+          echo "The dry-run controller will still run against any existing artifacts/dr evidence in this workflow workspace."
+
+      - name: Run automatic failover controller in dry-run mode
+        run: |
+          set -euo pipefail
+
+          args=(--evidence-dir artifacts/dr --threshold "${AUTO_FAILOVER_THRESHOLD:-2}")
+          if [ "${AUTO_FAILOVER_STRICT_WARN:-false}" = "true" ]; then
+            args+=(--strict-warn)
+          fi
+
+          npm run ops:auto-failover-dry-run -- "${args[@]}"
+
+      - name: Summarize dry-run decision
+        id: decision
+        run: |
+          set -euo pipefail
+
+          decision_json="$(find artifacts/dr -path '*/auto-failover-dry-run/decision.json' -type f | sort | tail -n 1)"
+          if [ -z "$decision_json" ]; then
+            echo "::error::No auto-failover dry-run decision artifact was produced."
+            exit 2
+          fi
+
+          DECISION_JSON="$decision_json" node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from "node:fs";
+
+          const decisionPath = process.env.DECISION_JSON;
+          const decision = JSON.parse(readFileSync(decisionPath, "utf8"));
+          const output = process.env.GITHUB_OUTPUT;
+          appendFileSync(output, `decision_status=${decision.decisionStatus || ""}\n`);
+          appendFileSync(output, `selected_operation=${decision.selectedOperation || ""}\n`);
+          appendFileSync(output, `plan_sha256=${decision.recommendedPlanJsonSha256 || ""}\n`);
+          appendFileSync(output, `decision_json=${decisionPath}\n`);
+
+          console.log(`Decision status: ${decision.decisionStatus}`);
+          console.log(`Selected operation: ${decision.selectedOperation || "none"}`);
+          console.log(`Plan SHA256: ${decision.recommendedPlanJsonSha256 || "none"}`);
+          console.log(`Reason: ${decision.reason || "none"}`);
+          console.log("Manual approval is still required for any live Route 53 mutation. This workflow does not apply anything.");
+
+          if (decision.decisionStatus === "RECOMMEND_FAILOVER") {
+            console.log(`::warning::Auto failover dry-run recommends ${decision.selectedOperation}; plan SHA256=${decision.recommendedPlanJsonSha256 || "missing"}. Manual approval is still required.`);
+          } else if (decision.decisionStatus === "BLOCKED_MANUAL_REVIEW") {
+            console.log(`::warning::Auto failover dry-run is blocked for manual review: ${decision.reason || "review decision artifact"}. No changes were applied.`);
+          }
+          NODE
+
+      - name: Upload auto-failover dry-run artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: auto-failover-dry-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/dr/**/auto-failover-dry-run/**
+            artifacts/dr/**/three-region-truth-table/**
+          if-no-files-found: warn

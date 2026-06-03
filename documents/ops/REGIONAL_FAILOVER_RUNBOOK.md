@@ -279,6 +279,29 @@ npm run ops:route53-rollback-apply-approved
 
 Legacy cleanup remains blocked until the dry-run decision engine has passed rehearsal with captured artifacts and the post-rehearsal truth table is reviewed.
 
+## Automatic Failover Monitor
+
+GitHub Actions `Auto Failover Monitor` wraps the same dry-run controller on a schedule and through `workflow_dispatch`. It is read-only:
+
+- It checks out the repo and installs dependencies.
+- When `MSCQR_HOSTED_ZONE_ID` and `AUTO_FAILOVER_READONLY_ROLE_TO_ASSUME` repository variables are configured, it captures two three-region truth-table samples.
+- It runs `npm run ops:auto-failover-dry-run -- --evidence-dir artifacts/dr --threshold 2`.
+- It uploads the generated `auto-failover-dry-run` artifact.
+- It emits a GitHub Actions warning for `RECOMMEND_FAILOVER` or `BLOCKED_MANUAL_REVIEW`.
+- It does not call the approved apply script, does not set `APPROVED_ROUTE53_ROLLBACK=true`, and does not run `aws route53 change-resource-record-sets`.
+
+If the monitor recommends failover, treat the decision artifact and plan SHA256 as evidence for incident review only. Live DNS mutation still requires the manual approved apply path:
+
+```bash
+# DO NOT RUN until manually approved by the incident commander.
+APPROVED_ROUTE53_ROLLBACK=true \
+HOSTED_ZONE_ID=Z0569586VLFIGGVI7HAZ \
+CHANGE_BATCH_JSON=artifacts/dr/<timestamp>/auto-failover-dry-run/rollback-europe-cutover.json \
+npm run ops:route53-rollback-apply-approved
+```
+
+Legacy cleanup remains blocked until rollback/failover is fully proven by monitor evidence, manual approval records, approved apply evidence when applicable, and a post-action truth table.
+
 ## Validation Checklist After Cutover
 
 1. `https://www.mscqr.com/api/health/ready` returns HTTP 200 JSON.

@@ -195,6 +195,27 @@ Behavior:
 
 The selected plan JSON is still only a recommendation. Apply remains the protected manual command below with `APPROVED_ROUTE53_ROLLBACK=true`, `HOSTED_ZONE_ID`, and a reviewed `CHANGE_BATCH_JSON`.
 
+## Automatic Failover Monitor Workflow
+
+GitHub Actions `auto-failover-monitor.yml` is the scheduled/manual read-only wrapper around the dry-run controller. It can assume `AUTO_FAILOVER_READONLY_ROLE_TO_ASSUME` only to list Route 53 records for truth-table evidence. It does not run the approved apply script, does not set `APPROVED_ROUTE53_ROLLBACK=true`, and does not call `aws route53 change-resource-record-sets`.
+
+Configure repository variables before relying on scheduled live evidence:
+
+- `MSCQR_HOSTED_ZONE_ID`
+- `AUTO_FAILOVER_READONLY_ROLE_TO_ASSUME`
+- Optional `AUTO_FAILOVER_AWS_REGION`
+
+The monitor runs:
+
+```bash
+npm run ops:three-region-truth-table
+npm run ops:auto-failover-dry-run -- --evidence-dir artifacts/dr --threshold 2
+```
+
+`NOOP`, `RECOMMEND_FAILOVER`, and `BLOCKED_MANUAL_REVIEW` are controller decisions, not mutations. The workflow fails only when the controller or evidence capture errors. For `RECOMMEND_FAILOVER`, it emits a GitHub Actions warning with the selected operation and plan SHA256, uploads artifacts, and stops. Live DNS mutation still requires the separate manual command with `APPROVED_ROUTE53_ROLLBACK=true`.
+
+Legacy cleanup remains blocked until rollback/failover is fully proven by dry-run monitor artifacts, manual approval evidence, any approved apply evidence, and a post-action truth table.
+
 ## Approved Regional Route 53 Rollback Apply
 
 Do not run this until the incident commander has manually approved the reviewed JSON path. The apply script refuses to run unless `APPROVED_ROUTE53_ROLLBACK=true` is present, validates that the batch contains only geolocation A records with set identifiers, captures before/change/after evidence, and waits for `INSYNC`.
