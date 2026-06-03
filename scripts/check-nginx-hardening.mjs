@@ -55,14 +55,28 @@ for (const filePath of nginxFiles) {
   if (/\$scheme:\/\/www\.mscqr\.com/i.test(contents) || /return\s+301\s+http:\/\/www\.mscqr\.com/i.test(contents)) {
     failures.push(`${relative}: apex canonical redirects must not downgrade HTTPS traffic behind ALB TLS termination`);
   }
+  if (!/map\s+"\$host:\$external_scheme"\s+\$redirect_www_http_to_https\s*\{[\s\S]*"www\.mscqr\.com:http"\s+1;[\s\S]*\}/i.test(contents)) {
+    failures.push(`${relative}: www HTTP redirects must be gated by Host plus X-Forwarded-Proto-aware external scheme`);
+  }
+  if (!/if\s*\(\$redirect_www_http_to_https\)\s*\{[\s\S]*return\s+301\s+https:\/\/www\.mscqr\.com\$request_uri;[\s\S]*\}/i.test(contents)) {
+    failures.push(`${relative}: www HTTP redirect must not catch ALB-forwarded HTTPS requests`);
+  }
   if (/Report-To[\s\S]*http:\/\/www\.mscqr\.com/i.test(contents)) {
     failures.push(`${relative}: Report-To endpoint must stay HTTPS canonical`);
   }
 }
 
 const httpConfig = readFileSync(path.join(repoRoot, "nginx.conf"), "utf8");
-if (!/return\s+301\s+\$external_scheme:\/\/www\.mscqr\.com\$request_uri/i.test(httpConfig)) {
-  failures.push("nginx.conf: apex redirect must use $external_scheme so X-Forwarded-Proto=https redirects to https://www.mscqr.com/");
+if (!/server_name\s+mscqr\.com;[\s\S]*return\s+301\s+https:\/\/www\.mscqr\.com\$request_uri/i.test(httpConfig)) {
+  failures.push("nginx.conf: apex redirect must canonicalize directly to https://www.mscqr.com/");
+}
+
+const httpsConfig = readFileSync(path.join(repoRoot, "nginx.https.conf"), "utf8");
+if (/server_name\s+mscqr\.com\s+www\.mscqr\.com\s+_/i.test(httpsConfig)) {
+  failures.push("nginx.https.conf: redirect-only HTTP server must not claim www/_ behind ALB TLS termination");
+}
+if (!/listen\s+80\s+default_server;[\s\S]*listen\s+443\s+ssl;[\s\S]*server_name\s+www\.mscqr\.com\s+_/i.test(httpsConfig)) {
+  failures.push("nginx.https.conf: canonical www app server must serve ALB-forwarded HTTPS on port 80 and direct TLS on port 443");
 }
 
 if (failures.length > 0) {

@@ -173,15 +173,53 @@
   hosts: active
   gather_facts: false
   tasks:
-    - name: Check homepage
+    - name: Check public healthz
+      uri:
+        url: https://www.mscqr.com/healthz
+        method: GET
+        status_code: 200
+        follow_redirects: none
+      register: public_healthz_check
+      retries: 5
+      delay: 5
+      until: public_healthz_check.status == 200
+
+    - name: Probe homepage without following redirects
       uri:
         url: https://www.mscqr.com/
         method: GET
-        status_code: 200
+        status_code:
+          - 200
+          - 301
+          - 302
+          - 303
+          - 307
+          - 308
+        follow_redirects: none
       register: homepage_check
       retries: 5
       delay: 5
       until: homepage_check.status == 200
+      failed_when: false
+
+    - name: Capture homepage redirect-chain evidence
+      command: >
+        curl -sS -I -L --max-redirs 8
+        -w '\nfinal_url=%{url_effective}\nhttp_status=%{http_code}\nredirects=%{num_redirects}\n'
+        https://www.mscqr.com/
+      register: homepage_redirect_chain
+      changed_when: false
+      failed_when: false
+      when: homepage_check.status | default(0) != 200
+
+    - name: Fail when homepage is not HTTP 200
+      fail:
+        msg:
+          - "Expected https://www.mscqr.com/ to return HTTP 200 without redirects."
+          - "Observed status={{ homepage_check.status | default('unknown') }} location={{ homepage_check.location | default('none') }}"
+          - "Redirect-chain stdout={{ homepage_redirect_chain.stdout_lines | default([]) }}"
+          - "Redirect-chain stderr={{ homepage_redirect_chain.stderr_lines | default([]) }}"
+      when: homepage_check.status | default(0) != 200
 
     - name: Check robots.txt
       uri:
