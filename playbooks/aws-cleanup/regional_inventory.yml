@@ -1,0 +1,462 @@
+---
+- name: Read-only AWS regional cleanup inventory evidence
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../../ansible/aws-cleanup/regions.yml
+  vars:
+    evidence_root: "{{ playbook_dir }}/../../documents/ops/evidence"
+
+  tasks:
+    - name: Generate one UTC evidence timestamp
+      ansible.builtin.command: date -u +%Y%m%dT%H%M%SZ
+      register: cleanup_timestamp
+      changed_when: false
+
+    - name: Prepare regional evidence directories
+      ansible.builtin.file:
+        path: "{{ evidence_root }}/aws-regional-cleanup-{{ item.label }}-{{ cleanup_timestamp.stdout }}"
+        state: directory
+        mode: "0755"
+      loop: "{{ aws_cleanup_regions }}"
+      loop_control:
+        label: "{{ item.label }} {{ item.region }}"
+
+    - name: Capture read-only AWS inventory for each region
+      ansible.builtin.shell: |
+        evidence_dir="{{ evidence_root }}/aws-regional-cleanup-{{ item.label }}-{{ cleanup_timestamp.stdout }}"
+        region="{{ item.region }}"
+
+        run_json() {
+          stem="$1"
+          shift
+          set +e
+          "$@" > "${evidence_dir}/${stem}.json" 2> "${evidence_dir}/${stem}.stderr"
+          status=$?
+          echo "$status" > "${evidence_dir}/${stem}.status"
+          return 0
+        }
+
+        run_json "00-account-identity" aws sts get-caller-identity --output json
+        run_json "01-ec2-instances" aws ec2 describe-instances --region "$region" --output json
+        run_json "02-addresses" aws ec2 describe-addresses --region "$region" --output json
+        run_json "03-nat-gateways" aws ec2 describe-nat-gateways --region "$region" --output json
+        run_json "04-route-tables" aws ec2 describe-route-tables --region "$region" --output json
+        run_json "05-load-balancers" aws elbv2 describe-load-balancers --region "$region" --output json
+        run_json "06-target-groups" aws elbv2 describe-target-groups --region "$region" --output json
+        run_json "07-rds-instances" aws rds describe-db-instances --region "$region" --output json
+        run_json "08-rds-clusters" aws rds describe-db-clusters --region "$region" --output json
+        run_json "09-elasticache-replication-groups" aws elasticache describe-replication-groups --region "$region" --output json
+        run_json "10-elasticache-cache-clusters" aws elasticache describe-cache-clusters --region "$region" --show-cache-node-info --output json
+        run_json "11-ecs-clusters" aws ecs list-clusters --region "$region" --output json
+        run_json "12-auto-scaling-groups" aws autoscaling describe-auto-scaling-groups --region "$region" --output json
+        run_json "13-launch-templates" aws ec2 describe-launch-templates --region "$region" --output json
+        run_json "14-launch-configurations" aws autoscaling describe-launch-configurations --region "$region" --output json
+        run_json "15-volumes" aws ec2 describe-volumes --region "$region" --output json
+        run_json "16-snapshots-owned" aws ec2 describe-snapshots --region "$region" --owner-ids self --output json
+        run_json "17-network-interfaces" aws ec2 describe-network-interfaces --region "$region" --output json
+        run_json "18-vpc-endpoints" aws ec2 describe-vpc-endpoints --region "$region" --output json
+        run_json "19-security-groups" aws ec2 describe-security-groups --region "$region" --output json
+        exit 0
+      args:
+        executable: /bin/bash
+      loop: "{{ aws_cleanup_regions }}"
+      loop_control:
+        label: "{{ item.label }} {{ item.region }}"
+      changed_when: true
+
+    - name: Capture target health summaries where target groups exist
+      ansible.builtin.shell: |
+        evidence_dir="{{ evidence_root }}/aws-regional-cleanup-{{ item.label }}-{{ cleanup_timestamp.stdout }}"
+        region="{{ item.region }}"
+        output_file="${evidence_dir}/20-target-health.txt"
+        stderr_file="${evidence_dir}/20-target-health.stderr"
+        status_file="${evidence_dir}/20-target-health.status"
+        : > "$output_file"
+        : > "$stderr_file"
+
+        set +e
+        python3 - "$evidence_dir/06-target-groups.json" > "${evidence_dir}/.target-groups.tsv" 2>> "$stderr_file" <<'PY'
+        import json
+        import sys
+
+        path = sys.argv[1]
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception as exc:
+            print(f"ERROR\t{exc}")
+            raise SystemExit(0)
+
+        for group in data.get("TargetGroups", []):
+            arn = group.get("TargetGroupArn", "")
+            name = group.get("TargetGroupName", "")
+            if arn:
+                print(f"{arn}\t{name}")
+        PY
+
+        while IFS="$(printf '\t')" read -r target_group_arn target_group_name; do
+          [ -n "$target_group_arn" ] || continue
+          if [ "$target_group_arn" = "ERROR" ]; then
+            printf '{"TargetGroupArn":"ERROR","TargetGroupName":"","Status":1,"Error":%s}\n' "$(printf '%s' "$target_group_name" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" >> "$output_file"
+            continue
+          fi
+          tmp_json="$(mktemp)"
+          tmp_err="$(mktemp)"
+          aws elbv2 describe-target-health --region "$region" --target-group-arn "$target_group_arn" --output json > "$tmp_json" 2> "$tmp_err"
+          status=$?
+          python3 - "$target_group_arn" "$target_group_name" "$status" "$tmp_json" "$tmp_err" >> "$output_file" <<'PY'
+        import json
+        import sys
+
+        arn, name, status, json_path, err_path = sys.argv[1:6]
+        result = {
+            "TargetGroupArn": arn,
+            "TargetGroupName": name,
+            "Status": int(status),
+            "TargetHealth": {},
+            "Error": "",
+        }
+        try:
+            with open(json_path, "r", encoding="utf-8") as handle:
+                raw = handle.read().strip()
+            if raw:
+                result["TargetHealth"] = json.loads(raw)
+        except Exception as exc:
+            result["Error"] = f"json parse: {exc}"
+        try:
+            with open(err_path, "r", encoding="utf-8") as handle:
+                stderr = handle.read().strip()
+            if stderr:
+                result["Error"] = (result["Error"] + " " + stderr).strip()
+        except Exception as exc:
+            result["Error"] = (result["Error"] + f" stderr parse: {exc}").strip()
+        print(json.dumps(result, sort_keys=True))
+        PY
+          rm -f "$tmp_json" "$tmp_err"
+        done < "${evidence_dir}/.target-groups.tsv"
+        rm -f "${evidence_dir}/.target-groups.tsv"
+        echo "0" > "$status_file"
+        exit 0
+      args:
+        executable: /bin/bash
+      loop: "{{ aws_cleanup_regions }}"
+      loop_control:
+        label: "{{ item.label }} {{ item.region }}"
+      changed_when: true
+
+    - name: Capture ECS service summaries where clusters exist
+      ansible.builtin.shell: |
+        evidence_dir="{{ evidence_root }}/aws-regional-cleanup-{{ item.label }}-{{ cleanup_timestamp.stdout }}"
+        region="{{ item.region }}"
+        output_file="${evidence_dir}/21-ecs-services-summary.txt"
+        stderr_file="${evidence_dir}/21-ecs-services-summary.stderr"
+        status_file="${evidence_dir}/21-ecs-services-summary.status"
+        : > "$output_file"
+        : > "$stderr_file"
+
+        set +e
+        python3 - "$evidence_dir/11-ecs-clusters.json" > "${evidence_dir}/.ecs-clusters.txt" 2>> "$stderr_file" <<'PY'
+        import json
+        import sys
+
+        path = sys.argv[1]
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception as exc:
+            print(f"ERROR {exc}")
+            raise SystemExit(0)
+
+        for arn in data.get("clusterArns", []):
+            print(arn)
+        PY
+
+        while IFS= read -r cluster_arn; do
+          [ -n "$cluster_arn" ] || continue
+          if [ "${cluster_arn#ERROR }" != "$cluster_arn" ]; then
+            printf '{"ClusterArn":"ERROR","Status":1,"Error":%s}\n' "$(printf '%s' "$cluster_arn" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" >> "$output_file"
+            continue
+          fi
+          list_json="$(mktemp)"
+          list_err="$(mktemp)"
+          aws ecs list-services --region "$region" --cluster "$cluster_arn" --output json > "$list_json" 2> "$list_err"
+          list_status=$?
+          python3 - "$cluster_arn" "$list_status" "$list_json" "$list_err" >> "$output_file" <<'PY'
+        import json
+        import sys
+
+        cluster, status, json_path, err_path = sys.argv[1:5]
+        result = {"ClusterArn": cluster, "ListStatus": int(status), "ServiceArns": [], "Error": ""}
+        try:
+            with open(json_path, "r", encoding="utf-8") as handle:
+                raw = handle.read().strip()
+            if raw:
+                result["ServiceArns"] = json.loads(raw).get("serviceArns", [])
+        except Exception as exc:
+            result["Error"] = f"list parse: {exc}"
+        try:
+            with open(err_path, "r", encoding="utf-8") as handle:
+                stderr = handle.read().strip()
+            if stderr:
+                result["Error"] = (result["Error"] + " " + stderr).strip()
+        except Exception as exc:
+            result["Error"] = (result["Error"] + f" stderr parse: {exc}").strip()
+        print(json.dumps(result, sort_keys=True))
+        PY
+          services="$(python3 - "$list_json" <<'PY'
+        import json
+        import sys
+        try:
+            with open(sys.argv[1], "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception:
+            raise SystemExit(0)
+        print(" ".join(data.get("serviceArns", [])))
+        PY
+        )"
+          rm -f "$list_json" "$list_err"
+          [ -n "$services" ] || continue
+          describe_json="$(mktemp)"
+          describe_err="$(mktemp)"
+          aws ecs describe-services --region "$region" --cluster "$cluster_arn" --services $services --output json > "$describe_json" 2> "$describe_err"
+          describe_status=$?
+          python3 - "$cluster_arn" "$describe_status" "$describe_json" "$describe_err" >> "$output_file" <<'PY'
+        import json
+        import sys
+
+        cluster, status, json_path, err_path = sys.argv[1:5]
+        result = {"ClusterArn": cluster, "DescribeStatus": int(status), "Services": [], "Error": ""}
+        try:
+            with open(json_path, "r", encoding="utf-8") as handle:
+                raw = handle.read().strip()
+            if raw:
+                parsed = json.loads(raw)
+                result["Services"] = [
+                    {
+                        "serviceName": service.get("serviceName"),
+                        "status": service.get("status"),
+                        "desiredCount": service.get("desiredCount"),
+                        "runningCount": service.get("runningCount"),
+                        "pendingCount": service.get("pendingCount"),
+                    }
+                    for service in parsed.get("services", [])
+                ]
+        except Exception as exc:
+            result["Error"] = f"describe parse: {exc}"
+        try:
+            with open(err_path, "r", encoding="utf-8") as handle:
+                stderr = handle.read().strip()
+            if stderr:
+                result["Error"] = (result["Error"] + " " + stderr).strip()
+        except Exception as exc:
+            result["Error"] = (result["Error"] + f" stderr parse: {exc}").strip()
+        print(json.dumps(result, sort_keys=True))
+        PY
+          rm -f "$describe_json" "$describe_err"
+        done < "${evidence_dir}/.ecs-clusters.txt"
+        rm -f "${evidence_dir}/.ecs-clusters.txt"
+        echo "0" > "$status_file"
+        exit 0
+      args:
+        executable: /bin/bash
+      loop: "{{ aws_cleanup_regions }}"
+      loop_control:
+        label: "{{ item.label }} {{ item.region }}"
+      changed_when: true
+
+    - name: Generate human regional cleanup summary
+      ansible.builtin.shell: |
+        evidence_dir="{{ evidence_root }}/aws-regional-cleanup-{{ item.label }}-{{ cleanup_timestamp.stdout }}"
+        label="{{ item.label }}"
+        region="{{ item.region }}"
+        set +e
+        python3 - "$evidence_dir" "$label" "$region" > "${evidence_dir}/22-regional-cleanup-summary.txt" 2> "${evidence_dir}/22-regional-cleanup-summary.stderr" <<'PY'
+        import json
+        import os
+        import sys
+        from collections import Counter
+
+        evidence_dir, label, region = sys.argv[1:4]
+
+        def load_json(stem):
+            path = os.path.join(evidence_dir, f"{stem}.json")
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    return json.load(handle)
+            except Exception:
+                return {}
+
+        def lines_from(path):
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    return [line.strip() for line in handle if line.strip()]
+            except Exception:
+                return []
+
+        ec2 = load_json("01-ec2-instances")
+        addresses = load_json("02-addresses")
+        nat = load_json("03-nat-gateways")
+        routes = load_json("04-route-tables")
+        lbs = load_json("05-load-balancers")
+        target_groups = load_json("06-target-groups")
+        rds_instances = load_json("07-rds-instances")
+        rds_clusters = load_json("08-rds-clusters")
+        cache_groups = load_json("09-elasticache-replication-groups")
+        cache_clusters = load_json("10-elasticache-cache-clusters")
+        asgs = load_json("12-auto-scaling-groups")
+        volumes = load_json("15-volumes")
+        snapshots = load_json("16-snapshots-owned")
+        enis = load_json("17-network-interfaces")
+        endpoints = load_json("18-vpc-endpoints")
+
+        instances = [instance for reservation in ec2.get("Reservations", []) for instance in reservation.get("Instances", [])]
+        instance_states = Counter(instance.get("State", {}).get("Name", "unknown") for instance in instances)
+        eips = addresses.get("Addresses", [])
+        associated_eips = [addr for addr in eips if addr.get("AssociationId") or addr.get("NetworkInterfaceId") or addr.get("InstanceId")]
+        idle_eips = [addr for addr in eips if addr not in associated_eips]
+        nat_gateways = nat.get("NatGateways", [])
+        nat_states = Counter(gateway.get("State", "unknown") for gateway in nat_gateways)
+        route_nat_ids = {
+            route.get("NatGatewayId")
+            for table in routes.get("RouteTables", [])
+            for route in table.get("Routes", [])
+            if route.get("NatGatewayId")
+        }
+        load_balancers = lbs.get("LoadBalancers", [])
+        target_group_items = target_groups.get("TargetGroups", [])
+        tg_lb_arns = {arn for group in target_group_items for arn in group.get("LoadBalancerArns", [])}
+        lb_without_target_groups = [lb for lb in load_balancers if lb.get("LoadBalancerArn") not in tg_lb_arns]
+
+        empty_target_groups = []
+        for line in lines_from(os.path.join(evidence_dir, "20-target-health.txt")):
+            try:
+                item = json.loads(line)
+            except Exception:
+                continue
+            descriptions = item.get("TargetHealth", {}).get("TargetHealthDescriptions", [])
+            if item.get("Status") == 0 and not descriptions:
+                empty_target_groups.append(item)
+
+        db_instances = rds_instances.get("DBInstances", [])
+        db_clusters = rds_clusters.get("DBClusters", [])
+        replication_groups = cache_groups.get("ReplicationGroups", [])
+        cache_cluster_items = cache_clusters.get("CacheClusters", [])
+        asg_items = asgs.get("AutoScalingGroups", [])
+        volume_items = volumes.get("Volumes", [])
+        volume_states = Counter(volume.get("State", "unknown") for volume in volume_items)
+        unattached_volumes = [volume for volume in volume_items if volume.get("State") == "available" or not volume.get("Attachments")]
+        snapshot_items = snapshots.get("Snapshots", [])
+        eni_items = enis.get("NetworkInterfaces", [])
+        eni_states = Counter(eni.get("Status", "unknown") for eni in eni_items)
+        endpoint_items = endpoints.get("VpcEndpoints", [])
+        stopped_instances = [instance for instance in instances if instance.get("State", {}).get("Name") == "stopped"]
+        zero_desired_asgs = [asg for asg in asg_items if asg.get("DesiredCapacity") == 0]
+        unreferenced_nat = [gateway for gateway in nat_gateways if gateway.get("NatGatewayId") not in route_nat_ids]
+
+        def bullet(items, formatter):
+            if not items:
+                print("- none")
+                return
+            for item in items:
+                print(f"- {formatter(item)}")
+
+        print(f"# AWS Regional Cleanup Inventory Summary: {label} ({region})")
+        print()
+        print("This is read-only inventory evidence. Preliminary candidates are not deletion approval.")
+        print()
+        print("## Counts")
+        print(f"- EC2 instances by state: {dict(instance_states)}")
+        print(f"- EIPs total: {len(eips)}")
+        print(f"- EIPs associated: {len(associated_eips)}")
+        print(f"- EIPs idle/unassociated: {len(idle_eips)}")
+        print(f"- NAT gateways by state: {dict(nat_states)}")
+        print(f"- NAT gateways referenced by route tables: {sorted(route_nat_ids)}")
+        print(f"- Load balancers: {len(load_balancers)}")
+        print(f"- Target groups: {len(target_group_items)}")
+        print(f"- RDS instances: {len(db_instances)}")
+        print(f"- RDS clusters: {len(db_clusters)}")
+        print(f"- ElastiCache replication groups: {len(replication_groups)}")
+        print(f"- ElastiCache cache clusters: {len(cache_cluster_items)}")
+        print(f"- ASGs: {len(asg_items)}")
+        print(f"- EBS volumes by state: {dict(volume_states)}")
+        print(f"- Unattached EBS volumes: {len(unattached_volumes)}")
+        print(f"- Owned snapshots: {len(snapshot_items)}")
+        print(f"- ENIs by status: {dict(eni_states)}")
+        print(f"- VPC endpoints: {len(endpoint_items)}")
+        print()
+        print("## Load balancers")
+        bullet(load_balancers, lambda lb: f"{lb.get('LoadBalancerName')} state={lb.get('State', {}).get('Code', 'unknown')} type={lb.get('Type')}")
+        print()
+        print("## Target groups")
+        bullet(target_group_items, lambda group: f"{group.get('TargetGroupName')} targetType={group.get('TargetType')} protocol={group.get('Protocol')} port={group.get('Port')}")
+        print()
+        print("## RDS instances")
+        bullet(db_instances, lambda db: f"{db.get('DBInstanceIdentifier')} class={db.get('DBInstanceClass')} status={db.get('DBInstanceStatus')} engine={db.get('Engine')}")
+        print()
+        print("## RDS clusters")
+        bullet(db_clusters, lambda cluster: f"{cluster.get('DBClusterIdentifier')} status={cluster.get('Status')} engine={cluster.get('Engine')}")
+        print()
+        print("## ElastiCache replication groups")
+        bullet(replication_groups, lambda group: f"{group.get('ReplicationGroupId')} status={group.get('Status')} nodeGroups={len(group.get('NodeGroups', []))}")
+        print()
+        print("## ElastiCache cache clusters")
+        bullet(cache_cluster_items, lambda cluster: f"{cluster.get('CacheClusterId')} nodeType={cluster.get('CacheNodeType')} status={cluster.get('CacheClusterStatus')}")
+        print()
+        print("## Auto Scaling groups")
+        bullet(asg_items, lambda asg: f"{asg.get('AutoScalingGroupName')} min={asg.get('MinSize')} desired={asg.get('DesiredCapacity')} max={asg.get('MaxSize')}")
+        print()
+        print("## Preliminary cleanup candidates")
+        print("These candidates require console screenshots, resource ID/ARN, cost evidence, rollback path, backup check, and manual approval. They are not deletion approval.")
+        print()
+        print("### Idle EIPs")
+        bullet(idle_eips, lambda addr: f"{addr.get('AllocationId', 'no-allocation-id')} publicIp={addr.get('PublicIp')}")
+        print()
+        print("### Unreferenced NAT gateways")
+        bullet(unreferenced_nat, lambda gateway: f"{gateway.get('NatGatewayId')} state={gateway.get('State')} vpc={gateway.get('VpcId')} subnet={gateway.get('SubnetId')}")
+        print()
+        print("### Stopped EC2 instances")
+        bullet(stopped_instances, lambda instance: f"{instance.get('InstanceId')} type={instance.get('InstanceType')}")
+        print()
+        print("### Unattached EBS volumes")
+        bullet(unattached_volumes, lambda volume: f"{volume.get('VolumeId')} state={volume.get('State')} sizeGiB={volume.get('Size')} type={volume.get('VolumeType')}")
+        print()
+        print("### Empty target groups")
+        bullet(empty_target_groups, lambda group: f"{group.get('TargetGroupName')} arn={group.get('TargetGroupArn')}")
+        print()
+        print("### ASGs with desired 0")
+        bullet(zero_desired_asgs, lambda asg: f"{asg.get('AutoScalingGroupName')} min={asg.get('MinSize')} desired={asg.get('DesiredCapacity')} max={asg.get('MaxSize')}")
+        print()
+        print("### Load balancers with no target groups")
+        bullet(lb_without_target_groups, lambda lb: f"{lb.get('LoadBalancerName')} arn={lb.get('LoadBalancerArn')}")
+        print()
+        print("## Warning")
+        print("Preliminary candidates are not deletion approval. No cleanup action is approved by this inventory.")
+        PY
+        status=$?
+        echo "$status" > "${evidence_dir}/22-regional-cleanup-summary.status"
+        exit 0
+      args:
+        executable: /bin/bash
+      loop: "{{ aws_cleanup_regions }}"
+      loop_control:
+        label: "{{ item.label }} {{ item.region }}"
+      changed_when: true
+
+    - name: Hash regional evidence files
+      ansible.builtin.shell: |
+        evidence_dir="{{ evidence_root }}/aws-regional-cleanup-{{ item.label }}-{{ cleanup_timestamp.stdout }}"
+        set +e
+        (
+          cd "$evidence_dir" &&
+          find . -type f -maxdepth 1 ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 shasum -a 256 > SHA256SUMS.txt
+        )
+        status=$?
+        echo "$status" > "${evidence_dir}/SHA256SUMS.status"
+        exit 0
+      args:
+        executable: /bin/bash
+      loop: "{{ aws_cleanup_regions }}"
+      loop_control:
+        label: "{{ item.label }} {{ item.region }}"
+      changed_when: true

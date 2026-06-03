@@ -1,0 +1,5 @@
+aws_cleanup_regions:
+  - label: mumbai
+    region: ap-south-1
+  - label: capetown
+    region: af-south-1
