@@ -72,7 +72,7 @@ jobs:
 
           for workflow_file in "${required_workflows[@]}"; do
             echo "Triggering ${workflow_file} for ${TARGET_SHA}"
-            gh workflow run "$workflow_file" --ref "$TARGET_SHA" || {
+            gh workflow run "$workflow_file" --ref "${GIT_REF:-main}" || {
               echo "::error::Unable to dispatch ${workflow_file} for ${TARGET_SHA}. Confirm the workflow has workflow_dispatch and the SHA is reachable on main."
               exit 1
             }
@@ -100,7 +100,7 @@ jobs:
           echo "All required gates passed for ${TARGET_SHA}."
           echo "Triggering release-gate.yml for exact target SHA ${TARGET_SHA}."
           gh workflow run release-gate.yml \
-            --ref "$TARGET_SHA" \
+            --ref "${GIT_REF:-main}" \
             -f git_ref="$TARGET_REF" \
             -f target_sha="$TARGET_SHA" \
             -f release_train_run_id="$GITHUB_RUN_ID" \
