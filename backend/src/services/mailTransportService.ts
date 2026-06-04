@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import nodemailer, { type SendMailOptions, type Transporter } from "nodemailer";
 import { normalizeEmailAddress } from "../utils/email";
 
@@ -245,6 +247,45 @@ export const getMailTransportDiagnostics = () => {
 
 export const formatFromAddress = (email: string) => `"${getMailFromDisplayName()}" <${email}>`;
 
+const isTestEmailCaptureEnabled = () => {
+  if (process.env.NODE_ENV === "production") return false;
+  const captureDir = String(process.env.EMAIL_CAPTURE_DIR || process.env.EMAIL_JSON_CAPTURE_DIR || "").trim();
+  if (!captureDir) return false;
+  if (process.env.NODE_ENV === "test") return true;
+  return parseBool(process.env.EMAIL_CAPTURE_ENABLED, false) || parseBool(process.env.E2E_EMAIL_CAPTURE_ENABLED, false);
+};
+
+const writeCapturedEmailForTests = (input: {
+  toAddress: string | null;
+  fromAddress: string | null;
+  replyTo: string | null;
+  subject: string;
+  text: string;
+  html?: string;
+  template?: string | null;
+  diagnostic: string;
+  errorCode?: EmailErrorCode | null;
+}) => {
+  if (!isTestEmailCaptureEnabled()) return;
+
+  const captureDir = String(process.env.EMAIL_CAPTURE_DIR || process.env.EMAIL_JSON_CAPTURE_DIR || "").trim();
+  const entry = {
+    capturedAt: new Date().toISOString(),
+    toAddress: input.toAddress,
+    fromAddress: input.fromAddress,
+    replyTo: input.replyTo,
+    subject: input.subject,
+    text: input.text,
+    html: input.html || null,
+    template: input.template || null,
+    diagnostic: input.diagnostic,
+    errorCode: input.errorCode || null,
+  };
+
+  fs.mkdirSync(captureDir, { recursive: true });
+  fs.appendFileSync(path.join(captureDir, "emails.jsonl"), `${JSON.stringify(entry)}\n`, "utf8");
+};
+
 const classifyMailError = (error: any): EmailErrorCode => {
   if (error?.name === "EmailTimeoutError") return "SMTP_TIMEOUT";
   const code = String(error?.code || "").toUpperCase();
@@ -430,8 +471,19 @@ export const sendMailSafely = async (input: {
             ? "Email delivery is in dry-run mode; no SMTP message was sent."
             : transportState.configErrorCode === "EMAIL_DISABLED"
               ? "Email delivery is disabled for this environment."
-            : "SMTP transport is not configured.",
+              : "SMTP transport is not configured.",
       };
+      writeCapturedEmailForTests({
+        toAddress,
+        fromAddress,
+        replyTo,
+        subject: input.subject,
+        text: input.text,
+        html: input.html,
+        template: input.template,
+        diagnostic: result.diagnostic,
+        errorCode: result.errorCode,
+      });
       console.error("MAIL delivery skipped", logMeta(result));
       return result;
     }
@@ -472,6 +524,17 @@ export const sendMailSafely = async (input: {
       acceptedRecipients: summary.acceptedRecipients,
       rejectedRecipients: summary.rejectedRecipients,
     };
+    writeCapturedEmailForTests({
+      toAddress,
+      fromAddress,
+      replyTo,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+      template: input.template,
+      diagnostic: result.diagnostic,
+      errorCode: result.errorCode,
+    });
     console[summary.delivered ? "info" : "error"]("MAIL delivery completed", logMeta(result));
     return result;
   } catch (error: any) {

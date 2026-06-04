@@ -153,62 +153,6 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     });
   },
 
-  async requestDirectPrintTokens(_jobId: string, _printLockToken: string, _count = 1) {
-    return {
-      success: false as const,
-      error:
-        "Direct browser printing is no longer available. Start a print run in MSCQR and let the printer helper handle it securely.",
-    };
-  },
-
-  async resolveDirectPrintToken(_jobId: string, _payload: { printLockToken: string; renderToken: string }) {
-    return {
-      success: false as const,
-      error:
-        "Direct browser printing is no longer available. Start a print run in MSCQR and let the printer helper handle it securely.",
-    };
-  },
-
-  async confirmDirectPrintItem(
-    jobId: string,
-    payload: {
-      printLockToken: string;
-      printItemId: string;
-      agentMetadata?: any;
-    }
-  ) {
-    return {
-      success: false as const,
-      error:
-        "Manual browser confirmation is no longer available. MSCQR now waits for the printer helper or saved printer to confirm completion.",
-    };
-  },
-
-  async reportDirectPrintFailure(
-    jobId: string,
-    payload: {
-      printLockToken: string;
-      reason: string;
-      printItemId?: string;
-      retries?: number;
-      agentMetadata?: any;
-    }
-  ) {
-    return {
-      success: false as const,
-      error:
-        "Manual browser failure reporting is no longer available. MSCQR now waits for the printer helper or saved printer to report the result.",
-    };
-  },
-
-  async confirmPrintJob(_jobId: string, _printLockToken: string) {
-    return {
-      success: false as const,
-      error:
-        "Manual browser confirmation is no longer available. Wait for the printer helper or saved printer to confirm the print run.",
-    };
-  },
-
   async reportPrinterHeartbeat(payload: {
     connected: boolean;
     printerName?: string;
@@ -603,31 +547,6 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     } finally {
       window.clearTimeout(timeout);
     }
-  },
-
-  async printWithLocalAgent(payload: {
-    printJobId: string;
-    qrId: string;
-    code: string;
-    scanUrl: string;
-    payloadType?: "ZPL" | "TSPL" | "SBPL" | "EPL" | "CPCL" | "ESC_POS" | "JSON" | "OTHER";
-    payloadContent?: string;
-    payloadHash?: string;
-    previewLabel?: string;
-    commandLanguage?: string;
-    copies?: number;
-    printerId?: string;
-    printPath?: "auto" | "spooler" | "raw-9100" | "label-language" | "pdf-raster";
-    labelLanguage?: "AUTO" | "ZPL" | "EPL" | "CPCL" | "TSPL" | "ESC_POS";
-    mediaSize?: string;
-    calibrationProfile?: Record<string, unknown> | null;
-  }) {
-    void payload;
-    return {
-      success: false as const,
-      error:
-        "Direct browser printing is no longer available. Start a print run in MSCQR and let the printer helper handle it securely.",
-    };
   },
 
   async getManufacturers(arg?: string | { licenseeId?: string; includeInactive?: boolean }) {

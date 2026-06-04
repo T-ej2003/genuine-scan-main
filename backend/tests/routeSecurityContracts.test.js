@@ -11,6 +11,7 @@ const readNormalized = (relativePath) =>
     .trim();
 
 const indexSource = readNormalized("src/index.ts");
+const appSource = readNormalized("src/app.ts");
 const authRoutesSource = readNormalized("src/routes/modules/authRoutes.ts");
 const routesSource = readNormalized("src/routes/index.ts");
 const realtimeRoutesSource = readNormalized("src/routes/modules/realtimeRoutes.ts");
@@ -18,6 +19,7 @@ const governanceRoutesSource = readNormalized("src/routes/modules/governanceRout
 const auditRoutesSource = readNormalized("src/routes/auditRoutes.ts");
 
 assert(!indexSource.includes("app.use(cookieParser())"), "app root should not mount cookie parsing globally");
+assert(!appSource.includes("app.use(cookieParser())"), "app root should not mount cookie parsing globally");
 assert(!authRoutesSource.includes("router.use(cookieParser());"), "auth routes should not hide cookie parsing behind router.use");
 assert(!routesSource.includes("cookiePublicRouter.use(cookieParser());"), "cookie-aware verify routes should not hide cookie parsing behind router.use");
 assert(!routesSource.includes("protectedRouter.use(cookieParser());"), "protected routes should not hide cookie parsing behind router.use");
@@ -27,7 +29,7 @@ assert(!governanceRoutesSource.includes("const createJsonRateLimitHandler"), "go
 assert(!auditRoutesSource.includes("const createJsonRateLimitHandler"), "audit routes should use shared rate-limit telemetry handlers");
 assert(!routesSource.includes("const createJsonRateLimitHandler"), "main routes should use shared rate-limit telemetry handlers");
 assert(
-  indexSource.includes("app.use(express.urlencoded({ extended: false, limit: \"1mb\" })); app.use(express.json({ limit: \"1mb\" })); app.use(sanitizeRequestInput);"),
+  appSource.includes("app.use(express.urlencoded({ extended: false, limit: \"1mb\" })); app.use(express.json({ limit: \"1mb\" })); app.use(sanitizeRequestInput);"),
   "app root should mount request sanitization globally after body parsers and before routes"
 );
 

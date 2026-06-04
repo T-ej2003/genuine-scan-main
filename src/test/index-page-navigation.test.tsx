@@ -34,9 +34,9 @@ describe("Index page navigation", () => {
     const contactLink = screen.getAllByRole("link", { name: "Contact" })[0];
 
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 1, name: "MSCQR Garment Authentication Platform" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "MSCQR" })).toBeInTheDocument();
     expect(
-      screen.getByText("MSCQR is a garment authentication QR platform for brands, manufacturers, and licensees.", {
+      screen.getByText("A production authentication platform for QR-labelled products", {
         exact: false,
       }),
     ).toBeInTheDocument();

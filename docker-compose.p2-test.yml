@@ -1,0 +1,21 @@
+name: mscqr-p2-auth-security
+
+services:
+  p2-postgres:
+    image: postgres:16
+    container_name: mscqr-p2-auth-security-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mscqr_p2_admin_test
+      POSTGRES_USER: mscqr_p2_test
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mscqr_p2_test -d mscqr_p2_admin_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    tmpfs:
+      - /var/lib/postgresql/data

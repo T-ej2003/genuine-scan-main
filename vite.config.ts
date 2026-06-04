@@ -19,6 +19,7 @@ const releaseTag =
   shortGitSha === "unknown"
     ? `${packageJson.name}@${packageJson.version}`
     : `${packageJson.name}@${packageJson.version}+${shortGitSha}`;
+const disableE2ePrinterAgentPolling = process.env.VITE_E2E_DISABLE_PRINTER_AGENT_POLLING === "true";
 
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
@@ -35,7 +36,21 @@ export default defineConfig(() => ({
       overlay: false,
     },
   },
-  plugins: [react()],
+  plugins: [
+    react(),
+    disableE2ePrinterAgentPolling
+      ? {
+          name: "mscqr-e2e-printer-agent-claim-stub",
+          configureServer(server) {
+            server.middlewares.use("/api/printer-agent/local/claim", (_req, res) => {
+              res.statusCode = 200;
+              res.setHeader("content-type", "application/json");
+              res.end(JSON.stringify({ success: true, data: null, retryAfterMs: 60_000 }));
+            });
+          },
+        }
+      : null,
+  ].filter(Boolean),
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

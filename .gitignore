@@ -18,6 +18,7 @@ playwright-report
 test-results
 coverage
 *.log
+gitleaks-report.json
 .env
 .env.*
 !.env.example

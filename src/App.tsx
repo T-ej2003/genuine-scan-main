@@ -382,15 +382,6 @@ function AppRoutes() {
         />
 
         <Route
-          path="/qr-codes"
-          element={
-            <ProtectedRoute>
-              <RedirectWithQuery to={APP_PATHS.scanActivity} />
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
           path="/batches"
           element={
             <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
@@ -437,6 +428,14 @@ function AppRoutes() {
         />
         <Route
           path="/qr-tracking"
+          element={
+            <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
+              <RedirectWithQuery to={APP_PATHS.scanActivity} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/qr-codes"
           element={
             <ProtectedRoute allowedRoles={["super_admin", "licensee_admin", "manufacturer"]}>
               <RedirectWithQuery to={APP_PATHS.scanActivity} />

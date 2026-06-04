@@ -14,6 +14,10 @@ if (!explicitSmokeBaseUrl && !allowLocalDefault) {
 
 const baseUrl = trimTrailingSlash(explicitSmokeBaseUrl || process.env.PUBLIC_ADMIN_WEB_BASE_URL || process.env.WEB_APP_BASE_URL || "http://127.0.0.1:4000");
 const apiBaseUrl = trimTrailingSlash(process.env.SMOKE_API_BASE_URL || `${baseUrl}/api`);
+const smokeRequired = parseBool(process.env.SMOKE_REQUIRED, true);
+const allowDegradedReadyOnPr = parseBool(process.env.ALLOW_STAGING_SMOKE_DEGRADED_ON_PR, false);
+const isPullRequestSmoke = process.env.GITHUB_EVENT_NAME === "pull_request";
+const smokeRequestTimeoutMs = Number.parseInt(process.env.SMOKE_REQUEST_TIMEOUT_MS || "15000", 10);
 
 const cookieJar = new Map();
 
@@ -43,6 +47,8 @@ const cookieHeader = () =>
     .join("; ");
 
 const requestJson = async (url, options = {}) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number.isFinite(smokeRequestTimeoutMs) ? smokeRequestTimeoutMs : 15_000);
   const headers = {
     Accept: "application/json",
     ...(options.headers || {}),
@@ -62,11 +68,14 @@ const requestJson = async (url, options = {}) => {
     response = await fetch(url, {
       ...options,
       headers,
+      signal: controller.signal,
     });
   } catch (error) {
     throw new Error(
       `Smoke request failed for ${url}. Confirm backend/frontend target is reachable and SMOKE_BASE_URL is correct. (${error instanceof Error ? error.message : String(error)})`
     );
+  } finally {
+    clearTimeout(timeout);
   }
 
   recordSetCookies(response.headers);
@@ -109,6 +118,29 @@ const ensureOk = (label, status, payload) => {
   throw new Error(`${label} failed with HTTP ${status}: ${JSON.stringify(payload)}`);
 };
 
+const redactHealthDetail = (value) =>
+  String(value || "")
+    .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, "postgres://[redacted]")
+    .replace(/password=[^;\s"']+/gi, "password=[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [redacted]")
+    .slice(0, 320);
+
+const summarizeReadyHealth = (payload) => {
+  const dependencies = payload?.dependencies && typeof payload.dependencies === "object" ? payload.dependencies : {};
+  const dependencySummary = Object.entries(dependencies)
+    .map(([name, detail]) => `${name}:${detail?.ready === true ? "ready" : "not-ready"}`)
+    .join(", ");
+  const databaseError = dependencies.database?.error ? `; database=${redactHealthDetail(dependencies.database.error)}` : "";
+  return `status=${String(payload?.status || "unknown")}; dependencies=${dependencySummary || "unknown"}${databaseError}`;
+};
+
+const shouldSoftSkipDegradedReady = (status, payload) =>
+  isPullRequestSmoke &&
+  !smokeRequired &&
+  allowDegradedReadyOnPr &&
+  status >= 500 &&
+  String(payload?.status || "").toLowerCase() === "degraded";
+
 const logPass = (message) => {
   console.log(`PASS ${message}`);
 };
@@ -123,6 +155,11 @@ const run = async () => {
 
   {
     const { response, payload } = await requestJson(`${apiBaseUrl}/health/ready`);
+    if (shouldSoftSkipDegradedReady(response.status, payload)) {
+      logSkip(`ready health degraded for pull request (${summarizeReadyHealth(payload)})`);
+      logSkip("staging smoke remaining steps because SMOKE_REQUIRED=false and staging readiness is degraded");
+      return;
+    }
     ensureOk("health/ready", response.status, payload);
     logPass("ready health");
   }

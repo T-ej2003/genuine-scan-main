@@ -206,7 +206,24 @@ const extractPlainTextFromHtml = (value: string) => {
   return extractPlainTextFromHtmlWithDom(normalized);
 };
 
-const normalizeErrorMessage = (status: number, payload: unknown) => {
+const isPublicScanOrVerifyEndpoint = (endpoint?: string) =>
+  Boolean(endpoint && (endpoint.startsWith("/scan") || endpoint.startsWith("/verify")));
+
+const publicScanOrVerifyFallback = (status: number) => {
+  if (status === 400) return "This scan link is invalid or expired. Please scan the label again.";
+  if (status === 404) return "This label could not be found in the MSCQR registry.";
+  if (status === 410) return "This label is no longer active. Please contact the brand for support.";
+  if (status === 429) return "Too many verification attempts. Please wait a moment and try again.";
+  if (status >= 500) return "We could not verify this label right now. Please try again shortly.";
+  return "We could not verify this label. Please check the code and try again.";
+};
+
+const looksLikeTechnicalPublicError = (message: string) =>
+  /^HTTP\s+\d{3}$/i.test(message) ||
+  /^Cannot\s+(GET|POST|PUT|PATCH|DELETE)\s+/i.test(message) ||
+  /<!doctype html|<html/i.test(message);
+
+const normalizeErrorMessage = (status: number, payload: unknown, endpoint?: string) => {
   if (payload && typeof payload === "object") {
     const message = String((payload as any).error || (payload as any).message || "").trim();
     if (message) return message;
@@ -214,9 +231,12 @@ const normalizeErrorMessage = (status: number, payload: unknown) => {
 
   const raw = typeof payload === "string" ? payload.trim() : "";
   if (status === 413) return "Upload too large. Please retry with a smaller attachment.";
-  if (!raw) return `HTTP ${status}`;
+  if (!raw) return isPublicScanOrVerifyEndpoint(endpoint) ? publicScanOrVerifyFallback(status) : `HTTP ${status}`;
 
   const cleaned = stripHtmlError(raw);
+  if (isPublicScanOrVerifyEndpoint(endpoint) && (!cleaned || looksLikeTechnicalPublicError(cleaned))) {
+    return publicScanOrVerifyFallback(status);
+  }
   return cleaned || `HTTP ${status}`;
 };
 
@@ -404,7 +424,7 @@ export function createApiClientCore(): ApiClientCore {
       }
 
       if (!response.ok) {
-        const message = normalizeErrorMessage(response.status, payload);
+        const message = normalizeErrorMessage(response.status, payload, endpoint);
         pushNetworkLog({ status: response.status, ok: false, error: message });
         const responseCode =
           payload && typeof payload === "object" && typeof (payload as any).code === "string"
