@@ -407,29 +407,30 @@ export default function Dashboard() {
           />
         )}
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-4" data-testid="dashboard-kpi-grid">
           {cards.map((item) => (
             <MotionPanel
               key={item.title}
-              className="h-full"
+              className="h-full min-w-0"
             >
               <button
                 type="button"
                 onClick={() => (("action" in item && item.action === "scope") ? setScopeDialogOpen(true) : navigate(item.href))}
-                className="group rounded-[1.55rem] border border-mscqr-border bg-mscqr-surface/92 p-5 text-left shadow-[0_18px_46px_-38px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5 hover:border-mscqr-accent/45 hover:bg-mscqr-surface-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mscqr-accent motion-reduce:hover:translate-y-0"
+                className="group flex h-full min-h-[15.5rem] w-full min-w-0 flex-col rounded-[1.55rem] border border-mscqr-border bg-mscqr-surface/92 p-5 text-left shadow-[0_18px_46px_-38px_rgba(15,23,42,0.55)] transition hover:-translate-y-0.5 hover:border-mscqr-accent/45 hover:bg-mscqr-surface-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mscqr-accent motion-reduce:hover:translate-y-0"
+                data-testid="dashboard-kpi-card"
               >
                 <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-mscqr-muted">{item.title}</p>
-                    <p className="mt-3 text-3xl font-semibold tracking-tight text-mscqr-primary">{item.value.toLocaleString()}</p>
+                  <div className="min-w-0">
+                    <p className="break-words font-mono text-[11px] uppercase tracking-[0.2em] text-mscqr-muted">{item.title}</p>
+                    <p className="mt-3 break-words text-3xl font-semibold tracking-tight text-mscqr-primary">{item.value.toLocaleString()}</p>
                   </div>
-                  <div className="flex size-11 items-center justify-center rounded-2xl border border-mscqr-border bg-mscqr-surface-muted text-mscqr-accent transition group-hover:border-mscqr-accent/35">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-mscqr-border bg-mscqr-surface-muted text-mscqr-accent transition group-hover:border-mscqr-accent/35">
                     <item.icon className="size-5" />
                   </div>
                 </div>
-                <p className="mt-4 min-h-10 text-sm leading-6 text-mscqr-secondary">{item.subtitle}</p>
-                <div className="mt-4 flex items-center justify-between text-sm font-medium text-mscqr-accent">
-                  <span>{item.ctaLabel}</span>
+                <p className="mt-4 min-h-12 text-sm leading-6 text-mscqr-secondary">{item.subtitle}</p>
+                <div className="mt-auto flex items-center justify-between gap-3 pt-4 text-sm font-medium text-mscqr-accent">
+                  <span className="min-w-0 break-words">{item.ctaLabel}</span>
                   <ArrowRight className="size-4 transition group-hover:translate-x-1" />
                 </div>
               </button>

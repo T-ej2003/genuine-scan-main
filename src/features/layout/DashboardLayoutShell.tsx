@@ -363,7 +363,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
                     <span className="text-sm font-semibold text-primary">{user?.name?.charAt(0) || "U"}</span>
                   </div>
-                  <span className="hidden sm:inline">{user?.name || "User"}</span>
+                  <span className="hidden xl:inline">{user?.name || "User"}</span>
                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>

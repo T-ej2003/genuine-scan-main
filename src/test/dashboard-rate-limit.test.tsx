@@ -75,6 +75,14 @@ describe("Dashboard rate-limit partial state", () => {
 
     expect(await screen.findByText("QR labels available")).toBeInTheDocument();
     expect(screen.getByText("20 not used yet • 30 assigned")).toBeInTheDocument();
+    const kpiCards = screen.getAllByTestId("dashboard-kpi-card");
+
+    expect(kpiCards).toHaveLength(4);
+    for (const card of kpiCards) {
+      expect(card).toHaveClass("h-full");
+      expect(card).toHaveClass("w-full");
+      expect(card).toHaveClass("min-h-[15.5rem]");
+    }
 
     await waitFor(() => {
       expect(screen.getByText(/Recent activity is temporarily unavailable/i)).toBeInTheDocument();
