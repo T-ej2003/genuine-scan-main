@@ -1,10 +1,8 @@
-import express from "express";
-import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
-import { createHash, randomUUID } from "crypto";
+import { createHash } from "crypto";
 import packageJson from "../package.json";
-import routes from "./routes";
+import { createBackendApp } from "./app";
 import prisma from "./config/database";
 import { logger } from "./utils/logger";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
@@ -16,16 +14,7 @@ import { startPrintConfirmationReconciler } from "./services/printConfirmationRe
 import { startAnalyticsRollupWorker } from "./services/analyticsRollupService";
 import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
-import { getLatencySummary, recordRequestMetric } from "./observability/requestMetrics";
-import { sanitizeRequestInput } from "./middleware/requestSanitizer";
-import {
-  createPublicActorRateLimiter,
-  createPublicIpRateLimiter,
-  fromUserAgent,
-  parsePositiveIntEnv,
-} from "./middleware/publicRateLimit";
 import { hasConfiguredSecret } from "./utils/secretConfig";
-import { buildReadyPayload } from "./controllers/healthController";
 import { getObjectStorageConfiguration } from "./services/objectStorageService";
 import { isRedisConfigured } from "./services/redisService";
 import {
@@ -48,6 +37,10 @@ const parseBool = (value: unknown, fallback = false) => {
   if (["0", "false", "no", "off"].includes(normalized)) return false;
   return fallback;
 };
+const asErrorRecord = (error: unknown) =>
+  typeof error === "object" && error !== null
+    ? (error as { code?: unknown; message?: unknown; safeCryptoMetadata?: unknown })
+    : null;
 const isKnownInsecureStorageCredential = (value: string) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return false;
@@ -184,10 +177,11 @@ if (process.env.NODE_ENV === "production") {
 
   try {
     validateQrSigningConfiguration();
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorRecord = asErrorRecord(error);
     logger.error("Refusing to start: QR signing configuration failed runtime validation.", {
-      code: String(error?.code || "").trim() || null,
-      cryptoMetadata: error?.safeCryptoMetadata || null,
+      code: String(errorRecord?.code || "").trim() || null,
+      cryptoMetadata: errorRecord?.safeCryptoMetadata || null,
     });
     process.exit(1);
   }
@@ -274,12 +268,9 @@ for (const warning of legacyFallbackWarnings) {
   }
 }
 
-const app = express();
-app.disable("etag");
-app.set("trust proxy", 1);
+const app = createBackendApp();
 const PORT = process.env.PORT || 4000;
 const runBackgroundWorkers = parseBool(process.env.RUN_BACKGROUND_WORKERS, true);
-const publicVersionEndpointEnabled = parseBool(process.env.PUBLIC_VERSION_ENDPOINT_ENABLED, false);
 const sentryEnabled = initBackendMonitoring();
 
 if (sentryEnabled) {
@@ -288,248 +279,6 @@ if (sentryEnabled) {
     release: releaseMetadata.release,
   });
 }
-
-// ✅ Allow multiple dev frontends (WEB APP 1 on 8081, landing on 8080, default Vite on 5173)
-const allowedOrigins = new Set<string>([
-  "http://localhost:5173",
-  "http://localhost:8080",
-  "http://localhost:8081",
-]);
-
-// ✅ Support env override: CORS_ORIGIN can be a comma-separated list
-// Example: CORS_ORIGIN=http://localhost:8081,http://localhost:8080
-if (process.env.CORS_ORIGIN) {
-  process.env.CORS_ORIGIN.split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .forEach((o) => allowedOrigins.add(o));
-}
-
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      // Allow non-browser requests (no Origin header)
-      if (!origin) return cb(null, true);
-
-      if (allowedOrigins.has(origin)) return cb(null, true);
-
-      return cb(new Error(`CORS blocked for origin: ${origin}`), false);
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "X-Device-Fp",
-      "X-CSRF-Token",
-      "X-Captcha-Token",
-      "Cache-Control",
-      "Pragma",
-    ],
-  })
-);
-
-app.use(express.urlencoded({ extended: false, limit: "1mb" }));
-app.use(express.json({ limit: "1mb" }));
-app.use(sanitizeRequestInput);
-
-app.use((req, res, next) => {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
-  res.setHeader("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-  res.setHeader("Cross-Origin-Resource-Policy", "same-site");
-
-  const forwardedProto = String(req.get("x-forwarded-proto") || "").toLowerCase();
-  const isHttps = req.secure || forwardedProto.includes("https");
-  if (process.env.NODE_ENV === "production" && isHttps) {
-    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
-  }
-  next();
-});
-
-const requestTelemetryDebugPaths = new Set(["/health", "/healthz", "/health/db", "/health/latency"]);
-
-app.use((req, res, next) => {
-  const requestId = String(req.get("x-request-id") || randomUUID());
-  const startedAt = process.hrtime.bigint();
-
-  (req as express.Request & { requestId?: string }).requestId = requestId;
-  res.setHeader("X-Request-Id", requestId);
-
-  res.on("finish", () => {
-    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
-    const pathName = req.originalUrl.split("?")[0] || req.path || "/";
-    const claims = (req as express.Request & { user?: any }).user || null;
-
-    recordRequestMetric({
-      at: Date.now(),
-      method: req.method,
-      route: pathName,
-      status: res.statusCode,
-      durationMs,
-    });
-
-    const meta = {
-      requestId,
-      method: req.method,
-      path: pathName,
-      status: res.statusCode,
-      durationMs: Math.round(durationMs * 10) / 10,
-      release: releaseMetadata.release,
-      actorUserId: claims?.userId || null,
-      actorRole: claims?.role || null,
-      actorLicenseeId: claims?.licenseeId || null,
-      actorOrgId: claims?.orgId || null,
-      sessionStage: claims?.sessionStage || null,
-      authAssurance: claims?.authAssurance || null,
-    };
-
-    if (requestTelemetryDebugPaths.has(pathName)) {
-      logger.debug("HTTP request completed", meta);
-      return;
-    }
-
-    if (res.statusCode >= 500) {
-      logger.error("HTTP request failed", meta);
-      return;
-    }
-
-    if (res.statusCode >= 400 || durationMs >= 1500) {
-      logger.warn("HTTP request completed", meta);
-      return;
-    }
-
-    logger.info("HTTP request completed", meta);
-  });
-
-  next();
-});
-
-const healthPayload = () => ({
-  status: "ok",
-  timestamp: new Date().toISOString(),
-  release: {
-    name: releaseMetadata.name,
-    version: releaseMetadata.version,
-    gitSha: releaseMetadata.shortGitSha,
-    environment: releaseMetadata.environment,
-  },
-});
-
-const publicStatusIpLimiter = createPublicIpRateLimiter({
-  scope: "status.direct:ip",
-  windowMs: 60 * 1000,
-  max: parsePositiveIntEnv("PUBLIC_STATUS_RATE_LIMIT_PER_MIN", 240, 60, 5000),
-  message: "Too many status checks. Please wait before retrying.",
-});
-const publicStatusActorLimiter = createPublicActorRateLimiter({
-  scope: "status.direct:actor",
-  windowMs: 60 * 1000,
-  max: parsePositiveIntEnv("PUBLIC_STATUS_RATE_LIMIT_PER_MIN", 240, 60, 5000),
-  message: "Too many status checks. Please wait before retrying.",
-  actorResolver: fromUserAgent,
-});
-
-app.get("/health", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
-  res.json(healthPayload());
-});
-
-app.get("/healthz", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
-  res.json(healthPayload());
-});
-
-app.get("/health/live", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
-  res.json({
-    ...healthPayload(),
-    status: "live",
-  });
-});
-
-if (publicVersionEndpointEnabled) {
-  app.get("/version", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
-    res.json({
-      name: releaseMetadata.name,
-      version: releaseMetadata.version,
-      gitSha: releaseMetadata.gitSha,
-      shortGitSha: releaseMetadata.shortGitSha,
-      release: releaseMetadata.release,
-      environment: releaseMetadata.environment,
-    });
-  });
-}
-
-app.get("/health/latency", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
-  res.json({
-    ...healthPayload(),
-    latency: getLatencySummary(),
-  });
-});
-
-app.get("/health/ready", publicStatusIpLimiter, publicStatusActorLimiter, async (_req, res) => {
-  const payload = await buildReadyPayload();
-  return res.status(payload.success ? 200 : 503).json(payload);
-});
-
-app.get("/health/db", publicStatusIpLimiter, publicStatusActorLimiter, async (_req, res) => {
-  const payload = await buildReadyPayload();
-  if (payload.dependencies.database.ready) {
-    return res.json({
-      status: "ok",
-      database: "reachable",
-      redis: payload.dependencies.redis.ready || !payload.dependencies.redis.configured ? "ready" : "unreachable",
-      objectStorage:
-        payload.dependencies.objectStorage.ready || !payload.dependencies.objectStorage.configured ? "ready" : "unreachable",
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  const detail =
-    process.env.NODE_ENV === "development"
-      ? payload.dependencies.database.error || "Database connectivity failed"
-      : "Database connectivity failed";
-  return res.status(503).json({
-    status: "degraded",
-    database: "unreachable",
-    error: detail,
-    timestamp: new Date().toISOString(),
-  });
-});
-
-app.use("/api", (_req, res, next) => {
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Pragma", "no-cache");
-  next();
-});
-
-app.use("/api", routes);
-
-app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  const requestId = (req as express.Request & { requestId?: string }).requestId;
-  captureBackendException(err, {
-    requestId,
-    method: req.method,
-    path: req.originalUrl,
-    status: 500,
-  });
-  logger.error("Unhandled error", {
-    requestId,
-    method: req.method,
-    path: req.originalUrl,
-    error: err?.message || err,
-  });
-  res.status(500).json({
-    success: false,
-    requestId,
-    error: process.env.NODE_ENV === "development" ? err.message : "Internal server error",
-  });
-});
-
-app.use((_req, res) => {
-  res.status(404).json({ success: false, error: "Endpoint not found" });
-});
 
 let server: ReturnType<typeof app.listen> | null = null;
 let shuttingDown = false;
@@ -630,9 +379,10 @@ const shutdown = async (signal: string) => {
     clearTimeout(forceExit);
     logger.info("Shutdown complete");
     process.exit(0);
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorRecord = asErrorRecord(error);
     clearTimeout(forceExit);
-    logger.error("Graceful shutdown failed", { error: error?.message || error });
+    logger.error("Graceful shutdown failed", { error: errorRecord?.message || error });
     process.exit(1);
   }
 };

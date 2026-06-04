@@ -1,0 +1,93 @@
+name: Auth Security Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - codex/**
+
+concurrency:
+  group: auth-security-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  db-backed-auth-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: mscqr_p2_ci_admin_test
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mscqr_p2_ci_admin_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Prisma migration replay gate
+        env:
+          NODE_ENV: test
+          P2_TEST_DATABASE_REQUIRED: "true"
+          P2_TEST_DATABASE_ADMIN_URL: postgresql://postgres@127.0.0.1:5432/mscqr_p2_ci_admin_test
+        run: npm --prefix backend run test:db:migrate-replay
+
+      - name: Prisma migration drift gate
+        env:
+          NODE_ENV: test
+          P2_TEST_DATABASE_REQUIRED: "true"
+          P2_TEST_DATABASE_ADMIN_URL: postgresql://postgres@127.0.0.1:5432/mscqr_p2_ci_admin_test
+        run: npm --prefix backend run test:db:drift
+
+      - name: Run DB-backed auth/security proof
+        env:
+          NODE_ENV: test
+          EMAIL_USE_JSON_TRANSPORT: "true"
+          EMAIL_DRY_RUN: "true"
+          P2_TEST_DATABASE_REQUIRED: "true"
+          P2_TEST_DATABASE_ADMIN_URL: postgresql://postgres@127.0.0.1:5432/mscqr_p2_ci_admin_test
+        run: npm run test:p2:api-authz-db
+
+      - name: Run P2 email capture proof
+        env:
+          NODE_ENV: test
+        run: npm --prefix backend run test:p2:email-capture
+
+      - name: Run P1 backend auth/security regressions
+        run: npm --prefix backend run test:p1:api-authz
+
+      - name: Run P0 backend auth/security regressions
+        run: npm --prefix backend run test:p0-authz
+
+      - name: Frontend typecheck
+        run: npm run typecheck
+
+      - name: Frontend unit tests
+        run: npm test
+
+      - name: Frontend production build
+        run: npm run build

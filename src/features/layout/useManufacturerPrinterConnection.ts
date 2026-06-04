@@ -29,6 +29,14 @@ import {
   resolvePreferredLocalPrinter,
   type LocalPrinterStatusPayload,
 } from "@/features/layout/printer-heartbeat-payload";
+import {
+  defaultPrinterStatus,
+  DISABLE_E2E_PRINTER_AGENT_POLLING,
+  PRINTER_BACKGROUND_REFRESH_MS,
+  PRINTER_DIALOG_SESSION_STORAGE_VERSION,
+  PRINTER_FAILURE_REPORT_COOLDOWN_MS,
+  PRINTER_ONBOARDING_STORAGE_VERSION,
+} from "@/features/layout/manufacturerPrinterConnectionUtils";
 import type { User } from "@/types";
 import type { PrinterConnectionStatusDTO } from "../../../shared/contracts/runtime/printing.ts";
 
@@ -43,41 +51,6 @@ type UseManufacturerPrinterConnectionParams = {
   contextualHelpRoute: string;
   navigate: (to: string) => void;
   toast: ToastLike;
-};
-
-const PRINTER_FAILURE_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
-const PRINTER_BACKGROUND_REFRESH_MS = 30_000;
-const PRINTER_DIALOG_SESSION_STORAGE_VERSION = "v1";
-const PRINTER_ONBOARDING_STORAGE_VERSION = "v1";
-
-const defaultPrinterStatus: PrinterConnectionStatusDTO = {
-  connected: false,
-  trusted: false,
-  compatibilityMode: false,
-  degraded: false,
-  compatibilityReason: null,
-  eligibleForPrinting: false,
-  connectionClass: "BLOCKED",
-  stale: true,
-  requiredForPrinting: true,
-  trustStatus: "UNREGISTERED",
-  trustReason: "No trusted printer registration",
-  lastHeartbeatAt: null,
-  ageSeconds: null,
-  registrationId: null,
-  agentId: null,
-  deviceFingerprint: null,
-  mtlsFingerprint: null,
-  printerName: null,
-  printerId: null,
-  selectedPrinterId: null,
-  selectedPrinterName: null,
-  deviceName: null,
-  agentVersion: null,
-  capabilitySummary: null,
-  printers: [],
-  calibrationProfile: null,
-  error: "No trusted printer heartbeat yet",
 };
 
 export function useManufacturerPrinterConnection({
@@ -277,6 +250,24 @@ export function useManufacturerPrinterConnection({
 
   const syncManufacturerPrinterStatus = async (options?: { silent?: boolean; force?: boolean }) => {
     if (!user || user.role !== "manufacturer") return;
+    if (DISABLE_E2E_PRINTER_AGENT_POLLING) {
+      applyPrinterStatusSnapshot(
+        {
+          ...defaultPrinterStatus,
+          refreshPaused: true,
+          notice: "Printer polling is disabled for this automated test run.",
+        } as PrinterConnectionStatusDTO,
+        { fallbackPrinters: [], updatedAt: new Date().toISOString() }
+      );
+      setLocalPrinterAgent({
+        reachable: false,
+        connected: false,
+        error: null,
+        checkedAt: new Date().toISOString(),
+      });
+      setManagedPrinterProfilesLoaded(true);
+      return;
+    }
 
     await loadManagedPrinterProfiles({ force: Boolean(options?.force) });
 
@@ -456,6 +447,7 @@ export function useManufacturerPrinterConnection({
 
   useEffect(() => {
     if (!user || user.role !== "manufacturer") return;
+    if (DISABLE_E2E_PRINTER_AGENT_POLLING) return;
 
     const stop = apiClient.streamPrinterConnectionStatus(
       (payload) => {

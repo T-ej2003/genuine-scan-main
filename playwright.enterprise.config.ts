@@ -26,6 +26,10 @@ const webServer = [
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: {
+      ...process.env,
+      VITE_E2E_DISABLE_PRINTER_AGENT_POLLING: "true",
+    },
   },
 ];
 

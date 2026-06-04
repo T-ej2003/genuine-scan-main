@@ -1,7 +1,10 @@
 const assert = require("assert");
+const { randomBytes } = require("crypto");
 
-process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret";
-process.env.CUSTOMER_VERIFY_OTP_SECRET = process.env.CUSTOMER_VERIFY_OTP_SECRET || "test-customer-otp-secret";
+const randomTestSecret = () => randomBytes(32).toString("base64url");
+
+process.env.JWT_SECRET = process.env.JWT_SECRET || randomTestSecret();
+process.env.CUSTOMER_VERIFY_OTP_SECRET = process.env.CUSTOMER_VERIFY_OTP_SECRET || randomTestSecret();
 
 const authEmailService = require("../dist/services/auth/authEmailService");
 const auditService = require("../dist/services/auditService");

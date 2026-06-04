@@ -1,6 +1,7 @@
 const assert = require("assert");
+const { randomBytes } = require("crypto");
 
-process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret";
+process.env.JWT_SECRET = process.env.JWT_SECRET || randomBytes(32).toString("base64url");
 
 const {
   __resetRateLimitMetricsForTests,

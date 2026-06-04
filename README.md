@@ -841,8 +841,15 @@ Frontend tests:
 
 Auth/security DB-backed proof:
 
-- `npm run test:p3:auth-security-db` starts a disposable Postgres 16 test service, applies Prisma migrations to a generated test database, seeds P2 auth/security fixtures, and runs DB-backed authorization/IDOR/export/printer checks.
+- `npm run test:p3:auth-security-db` starts a local-only disposable Postgres 16 test service using trust auth on `127.0.0.1`, generates runtime app signing/session secrets inside the test wrappers, applies Prisma migrations to a generated test database, seeds P2 auth/security fixtures, and runs DB-backed authorization/IDOR/export/printer checks.
+- `npm run test:p3:migration-gate` starts the disposable Postgres service, validates Prisma schema, replays migrations from zero with `prisma migrate deploy`, and runs Prisma migration drift detection against a disposable shadow database.
 - `npm run test:p2:db:down` destroys the local disposable test database service and volume.
+
+CI auth/security gate:
+
+- Require GitHub check `Auth Security Tests / db-backed-auth-security` in branch protection.
+- This check runs migration replay, migration drift detection, DB-backed auth/security tests with `P2_TEST_DATABASE_REQUIRED=true`, P0/P1 regressions, typecheck, unit tests, and production build.
+- Before staging or production deploys, audit the edited historical migration checksum risk with `documents/qa/mscqr-migration-checksum-audit-runbook.md`.
 
 Recommended smoke checks after changes:
 

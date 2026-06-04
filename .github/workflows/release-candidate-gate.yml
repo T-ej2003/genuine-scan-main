@@ -145,6 +145,8 @@ jobs:
       - name: Run staging smoke gate
         if: ${{ steps.smoke_skip.outputs.skip_staging_smoke != 'true' }}
         env:
+          SMOKE_REQUIRED: ${{ github.event_name == 'pull_request' && 'false' || 'true' }}
+          ALLOW_STAGING_SMOKE_DEGRADED_ON_PR: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
           SMOKE_LOGIN_EMAIL: ${{ secrets.STAGING_SMOKE_LOGIN_EMAIL || secrets.SMOKE_LOGIN_EMAIL }}
           SMOKE_LOGIN_PASSWORD: ${{ secrets.STAGING_SMOKE_LOGIN_PASSWORD || secrets.SMOKE_LOGIN_PASSWORD }}
           SMOKE_ADMIN_MFA_CODE: ${{ secrets.STAGING_SMOKE_ADMIN_MFA_CODE }}

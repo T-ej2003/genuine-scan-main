@@ -203,7 +203,6 @@
               }
             }
           ],
-          "ClientToken": "d84c5081-bb3b-4be1-a9e9-8be67aab233b",
           "EbsOptimized": true,
           "EnaSupport": true,
           "Hypervisor": "xen",
@@ -368,7 +367,6 @@
               }
             }
           ],
-          "ClientToken": "e9867a12-9742-5104-4497-649581739d71",
           "EbsOptimized": false,
           "EnaSupport": true,
           "Hypervisor": "xen",

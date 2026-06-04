@@ -13,7 +13,7 @@ authors = [{name = "T-ej2003"}]
 dependencies = ["boto3>=1.34"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pygments>=2.20.0"]
 
 [project.scripts]
 aws-webapp-cost-optimizer = "aws_webapp_cost_optimizer.cli:main"

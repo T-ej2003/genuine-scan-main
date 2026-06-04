@@ -119,15 +119,6 @@ export const getPageGuidance = (pathname: string, role?: UserRole | null): PageG
     };
   }
 
-  if (starts(pathname, "/qr-codes")) {
-    return {
-      title: "Review QR inventory",
-      summary: "Inspect code status and lifecycle readiness across allocations and prints.",
-      firstAction: "Use status filters to identify dormant, blocked, or active stock.",
-      note: "Avoid deleting records unless operational policy requires it.",
-    };
-  }
-
   if (starts(pathname, "/printer-setup") || starts(pathname, "/printer-diagnostics")) {
     return {
       title: "Set up printing",

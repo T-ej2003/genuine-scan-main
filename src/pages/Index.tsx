@@ -1,17 +1,20 @@
-import { type ElementType, type ReactNode } from "react";
+import { type ElementType } from "react";
 import { Link } from "react-router-dom";
 import {
-  AlertTriangle,
   ArrowRight,
   BadgeCheck,
   ClipboardCheck,
   Factory,
+  Fingerprint,
+  Headphones,
+  History,
+  Mail,
   PackageCheck,
   QrCode,
   ScanLine,
-  Shirt,
   ShieldCheck,
   Store,
+  TriangleAlert,
   Users,
 } from "lucide-react";
 
@@ -21,78 +24,61 @@ import { cn } from "@/lib/utils";
 
 type Icon = ElementType;
 
-const scanFlow = [
+const workflow = [
   {
-    title: "Brand creates QR labels",
-    body: "Each label is prepared for a garment collection or batch.",
+    title: "Issue signed labels",
+    body: "Generate label records for approved batches and bind each customer-facing scan to server-side registry state.",
     icon: QrCode,
   },
   {
-    title: "Manufacturer attaches the label",
-    body: "The factory prints or attaches the label and confirms the work is complete.",
-    icon: Factory,
-  },
-  {
-    title: "Customer scans the garment",
-    body: "A shopper scans the QR label before or after purchase.",
-    icon: ScanLine,
-  },
-  {
-    title: "MSCQR shows the result",
-    body: "The customer sees a clear result while the brand can review suspicious repeat scans.",
-    icon: ShieldCheck,
-  },
-] as const;
-
-const problemPoints = [
-  "Fake garments damage brand trust and customer confidence.",
-  "Customers need a quick way to check whether a garment is genuine.",
-  "Brands need visibility when the same QR label is scanned in unusual ways.",
-  "QR codes can be copied, so MSCQR looks at label status, print confirmation, scan history, and suspicious repeat activity.",
-] as const;
-
-const howItWorks = [
-  {
-    title: "Issue QR labels",
-    body: "Prepare QR labels for garments, batches, collections, or brand-approved manufacturing runs.",
-    icon: QrCode,
-  },
-  {
-    title: "Print and attach",
-    body: "Give manufacturers a clear process to print, attach, and confirm garment labels.",
+    title: "Confirm production",
+    body: "Require controlled print or attachment confirmation before a label can present as customer-ready.",
     icon: ClipboardCheck,
   },
   {
-    title: "Customer scans",
-    body: "Show the verification result first, then explain what it means in plain language.",
+    title: "Verify in public",
+    body: "Route public scans through one verification decision path with label state, proof source, and scan history.",
     icon: ScanLine,
   },
   {
-    title: "Review suspicious scans",
-    body: "Help teams spot unusual repeat scans and follow up without overwhelming customers.",
-    icon: AlertTriangle,
+    title: "Review anomalies",
+    body: "Surface suspicious repeat activity, ownership conflicts, and scan patterns for operations teams.",
+    icon: TriangleAlert,
   },
 ] as const;
 
-const audiences = [
+const securityPillars = [
   {
-    title: "Clothing brands",
-    body: "Give customers a simple authenticity check and protect brand trust after products leave your control.",
-    icon: Store,
+    title: "Signed label proof",
+    body: "Signed QR payloads are checked against stored token state, label lifecycle, and tenant/batch bindings.",
+    icon: Fingerprint,
   },
   {
-    title: "Garment manufacturers",
-    body: "Receive assigned QR labels, print or attach garment tags, and confirm completion for brand partners.",
-    icon: Factory,
-  },
-  {
-    title: "Authenticity teams",
-    body: "Review scan activity, suspicious repeat scans, and garment label status from one workspace.",
+    title: "Print-state integrity",
+    body: "Labels stay limited until the print workflow confirms they are ready for customer verification.",
     icon: BadgeCheck,
   },
   {
-    title: "Customers",
-    body: "Scan a garment QR label and see a clear result without needing technical knowledge.",
+    title: "Replay-aware decisions",
+    body: "Repeat scans are evaluated against first-use state, trusted context, and recent scan behavior.",
+    icon: History,
+  },
+] as const;
+
+const roles = [
+  {
+    title: "Brands and licensees",
+    body: "Allocate labels, monitor scan activity, review investigations, and keep customer support grounded in the label record.",
+    icon: Store,
+  },
+  {
+    title: "Manufacturers",
+    body: "Receive assigned batches, run controlled print jobs, and confirm label production without exposing raw customer flows.",
+    icon: Factory,
+  },
+  {
+    title: "Verification teams",
+    body: "Use one operating view for genuine scans, repeat checks, suspicious duplicates, blocked labels, and support context.",
     icon: Users,
   },
 ] as const;
@@ -100,13 +86,12 @@ const audiences = [
 export default function Index() {
   return (
     <PublicShell>
-      <main>
+      <main className="bg-mscqr-background text-foreground">
         <HeroSection />
-        <ProblemSection />
         <HowItWorksSection />
-        <AudienceSection />
-        <TrustSection />
-        <FinalCTA />
+        <SecuritySection />
+        <RolesSection />
+        <SupportSection />
       </main>
     </PublicShell>
   );
@@ -114,129 +99,42 @@ export default function Index() {
 
 function HeroSection() {
   return (
-    <section className="relative overflow-hidden border-b border-border bg-white">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_12%,rgba(204,204,255,0.42),transparent_32%),linear-gradient(180deg,#ffffff_0%,#fafaff_100%)]" />
-      <div className="relative mx-auto grid w-full max-w-7xl gap-12 px-4 py-16 lg:min-h-[calc(100svh-84px)] lg:grid-cols-[0.92fr_1.08fr] lg:items-center lg:py-20">
-        <div className="max-w-3xl">
-          <h1 className="text-balance text-5xl font-semibold leading-[1.02] tracking-normal text-foreground sm:text-6xl lg:text-7xl">
-            MSCQR Garment Authentication Platform
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
-            MSCQR is a garment authentication QR platform for brands, manufacturers, and licensees. It helps teams make
-            garment QR labels verifiable, review suspicious scans, and support customers with clearer authenticity information.
+    <section className="relative isolate overflow-hidden bg-[#162019] text-white">
+      <img
+        src="/docs/customer-result-verified.png"
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 -z-20 h-full w-full object-cover object-[58%_34%] opacity-[0.38]"
+      />
+      <div className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(10,18,14,0.94)_0%,rgba(10,18,14,0.82)_42%,rgba(10,18,14,0.46)_100%)]" />
+
+      <div className="mx-auto flex min-h-[78svh] w-full max-w-7xl flex-col justify-center px-4 py-16 sm:py-20 lg:py-24">
+        <div className="max-w-3xl animate-fade-in">
+          <p className="mb-5 inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-emerald-200">
+            <ShieldCheck className="size-4" />
+            Authentication service platform
           </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-            <Button asChild size="lg">
+          <h1 className="max-w-4xl text-4xl font-semibold leading-[1.05] tracking-normal sm:text-6xl lg:text-7xl">
+            MSCQR
+          </h1>
+          <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-100 sm:text-xl">
+            A production authentication platform for QR-labelled products, controlled print workflows, and public
+            verification decisions that stay honest about scan history and suspicious repeat use.
+          </p>
+          <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+            <Button asChild size="lg" className="bg-white text-[#162019] hover:bg-emerald-50">
               <Link to="/request-access">
                 Request Access
                 <ArrowRight data-icon="inline-end" />
               </Link>
             </Button>
-            <Button asChild size="lg" variant="outline">
-              <Link to="/how-scanning-works">
-                See how scanning works
-                <ArrowRight data-icon="inline-end" />
-              </Link>
-            </Button>
-            <Button asChild size="lg" variant="ghost">
+            <Button asChild size="lg" variant="outline" className="border-white/60 bg-white/10 text-white hover:bg-white/20">
               <Link to="/verify">
                 <ScanLine data-icon="inline-start" />
                 Verify a Product
               </Link>
             </Button>
           </div>
-        </div>
-
-        <div className="rounded-3xl border border-moonlight-300/70 bg-white p-4 shadow-xl shadow-moonlight-900/10 sm:p-6">
-          <div className="grid gap-4 sm:grid-cols-2">
-            {scanFlow.map((step, index) => (
-              <FlowCard key={step.title} step={step} index={index} />
-            ))}
-          </div>
-          <div className="mt-5 rounded-2xl border border-border bg-mscqr-background p-5">
-            <div className="grid gap-5 sm:grid-cols-[148px_1fr] sm:items-center">
-              <GarmentLabelVisual />
-              <div>
-                <p className="text-sm font-semibold text-foreground">Customer result preview</p>
-                <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
-                  <div className="flex items-center gap-2 text-sm font-semibold">
-                    <ShieldCheck className="size-4" />
-                    This garment is genuine
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-emerald-700">Verified by MSCQR</p>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                  If scan behavior looks unusual, the brand can review the activity inside the workspace.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function FlowCard({ step, index }: { step: (typeof scanFlow)[number]; index: number }) {
-  return (
-    <article className="rounded-2xl border border-border bg-white p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
-          <step.icon className="size-5" />
-        </div>
-        <span className="text-sm font-semibold text-moonlight-700">{index + 1}</span>
-      </div>
-      <h2 className="mt-4 text-lg font-semibold text-foreground">{step.title}</h2>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{step.body}</p>
-    </article>
-  );
-}
-
-function GarmentLabelVisual() {
-  return (
-    <div className="rounded-2xl border border-border bg-white p-4" aria-label="Garment QR label preview" role="img">
-      <div className="flex items-center gap-2 text-sm font-semibold text-moonlight-900">
-        <Shirt className="size-4" />
-        Garment Tag
-      </div>
-      <div className="mt-4 grid size-28 grid-cols-7 gap-1 rounded-xl border border-border bg-mscqr-background p-2">
-        {Array.from({ length: 49 }, (_, index) => (
-          <span
-            key={index}
-            className={cn(
-              "rounded-[3px]",
-              [0, 1, 2, 4, 5, 6, 7, 14, 16, 18, 20, 21, 22, 24, 28, 30, 31, 33, 35, 39, 42, 43, 44, 46, 48].includes(index)
-                ? "bg-moonlight-900"
-                : "bg-white",
-            )}
-          />
-        ))}
-      </div>
-      <p className="mt-4 text-xs leading-5 text-muted-foreground">Scan to verify authenticity</p>
-    </div>
-  );
-}
-
-function ProblemSection() {
-  return (
-    <section className="border-b border-border bg-mscqr-background">
-      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-16 lg:grid-cols-[0.42fr_0.58fr] lg:py-20">
-        <div>
-          <h2 className="text-3xl font-semibold leading-tight text-foreground lg:text-5xl">
-            Fake garments are a trust problem, not just a label problem.
-          </h2>
-          <p className="mt-5 text-base leading-7 text-muted-foreground">
-            MSCQR gives brands and manufacturers a clearer way to connect QR labels, printing, customer scans, and review
-            workflows.
-          </p>
-        </div>
-        <div className="grid gap-4">
-          {problemPoints.map((point) => (
-            <div key={point} className="grid grid-cols-[32px_1fr] gap-4 rounded-2xl border border-border bg-white p-5">
-              <PackageCheck className="mt-1 size-5 text-primary" />
-              <p className="text-sm leading-7 text-foreground">{point}</p>
-            </div>
-          ))}
         </div>
       </div>
     </section>
@@ -245,15 +143,16 @@ function ProblemSection() {
 
 function HowItWorksSection() {
   return (
-    <section id="how-scanning-works" className="scroll-mt-28 border-b border-border bg-white">
+    <section className="border-b border-border bg-white">
       <div className="mx-auto w-full max-w-7xl px-4 py-16 lg:py-20">
         <SectionHeader
-          title="How MSCQR works"
-          body="A simple garment flow for teams and customers: prepare the QR label, attach it to the garment, let the customer scan, and review suspicious activity when needed."
+          eyebrow="How MSCQR Works"
+          title="One verification path from label issue to customer result."
+          body="MSCQR keeps public verification tied to server-side label state instead of treating every QR scan as a standalone URL visit."
         />
         <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {howItWorks.map((item) => (
-            <InfoCard key={item.title} item={item} />
+          {workflow.map((item, index) => (
+            <ProcessItem key={item.title} item={item} index={index} />
           ))}
         </div>
       </div>
@@ -261,14 +160,18 @@ function HowItWorksSection() {
   );
 }
 
-function AudienceSection() {
+function SecuritySection() {
   return (
     <section className="border-b border-border bg-mscqr-background">
-      <div className="mx-auto w-full max-w-7xl px-4 py-16 lg:py-20">
-        <SectionHeader title="Who MSCQR is for" body="Built only for garment verification workflows, from brand owners to public customers scanning clothing QR labels." />
-        <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {audiences.map((item) => (
-            <InfoCard key={item.title} item={item} />
+      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-16 lg:grid-cols-[0.44fr_0.56fr] lg:items-start lg:py-20">
+        <SectionHeader
+          eyebrow="Security Posture"
+          title="Trust is based on state, proof, and behavior."
+          body="MSCQR does not pretend a printed QR code is impossible to copy. It verifies issued label proof, print readiness, first-use state, and repeat-scan context."
+        />
+        <div className="grid gap-4">
+          {securityPillars.map((item) => (
+            <WideItem key={item.title} item={item} />
           ))}
         </div>
       </div>
@@ -276,91 +179,150 @@ function AudienceSection() {
   );
 }
 
-function TrustSection() {
+function RolesSection() {
   return (
     <section className="border-b border-border bg-white">
-      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-16 lg:grid-cols-[0.52fr_0.48fr] lg:items-center lg:py-20">
-        <div>
-          <h2 className="text-3xl font-semibold leading-tight text-foreground lg:text-5xl">
-            Honest garment verification, built around real scan context.
-          </h2>
-          <p className="mt-5 text-base leading-7 text-muted-foreground">
-            MSCQR checks label status, print confirmation, scan history, and unusual repeat activity. It helps teams
-            detect misuse without claiming that a printed QR code can never be copied.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Button asChild>
-              <Link to="/trust">
-                Trust & Security
-                <ArrowRight data-icon="inline-end" />
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/solutions/apparel-authenticity">Apparel Authenticity</Link>
-            </Button>
-          </div>
-        </div>
-        <div className="rounded-3xl border border-moonlight-300 bg-moonlight-100 p-6">
-          <div className="grid gap-4">
-            {["Label status", "Print confirmation", "Scan history", "Suspicious repeat activity"].map((item) => (
-              <div key={item} className="flex items-center gap-3 rounded-2xl border border-moonlight-300/70 bg-white p-4">
-                <ShieldCheck className="size-5 text-primary" />
-                <span className="text-sm font-semibold text-foreground">{item}</span>
-              </div>
-            ))}
-          </div>
+      <div className="mx-auto w-full max-w-7xl px-4 py-16 lg:py-20">
+        <SectionHeader
+          eyebrow="Platform Operations"
+          title="Built for the teams that operate product authentication."
+          body="The workspace separates customer verification from internal controls, giving each role only the workflows needed to issue, print, review, and support labels."
+        />
+        <div className="mt-10 grid gap-4 lg:grid-cols-3">
+          {roles.map((item) => (
+            <RoleItem key={item.title} item={item} />
+          ))}
         </div>
       </div>
     </section>
   );
 }
 
-function FinalCTA() {
+function SupportSection() {
   return (
-    <section className="bg-mscqr-background">
-      <div className="mx-auto w-full max-w-4xl px-4 py-16 text-center lg:py-20">
-        <h2 className="text-3xl font-semibold leading-tight text-foreground lg:text-5xl">
-          Ready to make your garments verifiable?
-        </h2>
-        <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-muted-foreground">
-          Request access to discuss how MSCQR can support your brand, manufacturer, or authenticity team.
-        </p>
-        <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-          <Button asChild size="lg">
-            <Link to="/request-access">
-              Request Access
-              <ArrowRight data-icon="inline-end" />
-            </Link>
-          </Button>
-          <Button asChild size="lg" variant="outline">
-            <Link to="/verify">
-              <ScanLine data-icon="inline-start" />
-              Verify a Product
-            </Link>
-          </Button>
+    <section className="bg-[#f5f7f2]">
+      <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-16 lg:grid-cols-[0.56fr_0.44fr] lg:items-center lg:py-20">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-mscqr-verified">Support</p>
+          <h2 className="mt-3 max-w-3xl text-3xl font-semibold leading-tight text-foreground lg:text-5xl">
+            Start with a verification result, then bring in the right team.
+          </h2>
+          <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground">
+            Customers can verify a product publicly. Brands and operators can request access, review support context, and
+            investigate labels that need attention.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+          <SupportLink
+            icon={PackageCheck}
+            title="Public verification"
+            body="Check a product label and see the current decision."
+            to="/verify"
+          />
+          <SupportLink
+            icon={Headphones}
+            title="Support centre"
+            body="Find customer guidance and report concerns."
+            to="/help/support"
+          />
+          <SupportLink
+            icon={Users}
+            title="Platform access"
+            body="Speak with MSCQR about onboarding."
+            to="/request-access"
+          />
+          <SupportLink
+            icon={Mail}
+            title="Contact MSCQR"
+            body="Reach the team for commercial or operational questions."
+            to="/contact"
+          />
         </div>
       </div>
     </section>
   );
 }
 
-function SectionHeader({ title, body }: { title: string; body: string }) {
+function SectionHeader({ eyebrow, title, body }: { eyebrow: string; title: string; body: string }) {
   return (
     <div className="max-w-3xl">
-      <h2 className="text-3xl font-semibold leading-tight text-foreground lg:text-5xl">{title}</h2>
+      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">{eyebrow}</p>
+      <h2 className="mt-3 text-3xl font-semibold leading-tight text-foreground lg:text-5xl">{title}</h2>
       <p className="mt-4 text-base leading-7 text-muted-foreground">{body}</p>
     </div>
   );
 }
 
-function InfoCard({ item }: { item: { title: string; body: string; icon: Icon } }) {
+function ProcessItem({ item, index }: { item: { title: string; body: string; icon: Icon }; index: number }) {
   return (
-    <article className="rounded-2xl border border-border bg-white p-6 shadow-sm">
-      <div className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
+    <article
+      className={cn(
+        "animate-fade-in rounded-md border border-border bg-white p-5 shadow-sm",
+        index > 0 && "delay-100",
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex size-10 items-center justify-center rounded-md bg-mscqr-background text-primary">
+          <item.icon className="size-5" />
+        </div>
+        <span className="text-sm font-semibold text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+      </div>
+      <h3 className="mt-5 text-lg font-semibold text-foreground">{item.title}</h3>
+      <p className="mt-3 text-sm leading-7 text-muted-foreground">{item.body}</p>
+    </article>
+  );
+}
+
+function WideItem({ item }: { item: { title: string; body: string; icon: Icon } }) {
+  return (
+    <article className="grid gap-4 rounded-md border border-border bg-white p-5 shadow-sm sm:grid-cols-[44px_1fr]">
+      <div className="flex size-11 items-center justify-center rounded-md bg-emerald-50 text-mscqr-verified">
+        <item.icon className="size-5" />
+      </div>
+      <div>
+        <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
+        <p className="mt-2 text-sm leading-7 text-muted-foreground">{item.body}</p>
+      </div>
+    </article>
+  );
+}
+
+function RoleItem({ item }: { item: { title: string; body: string; icon: Icon } }) {
+  return (
+    <article className="rounded-md border border-border bg-white p-6 shadow-sm">
+      <div className="flex size-11 items-center justify-center rounded-md bg-[#f5f7f2] text-[#244b37]">
         <item.icon className="size-5" />
       </div>
       <h3 className="mt-5 text-lg font-semibold text-foreground">{item.title}</h3>
       <p className="mt-3 text-sm leading-7 text-muted-foreground">{item.body}</p>
     </article>
+  );
+}
+
+function SupportLink({
+  icon: IconComponent,
+  title,
+  body,
+  to,
+}: {
+  icon: Icon;
+  title: string;
+  body: string;
+  to: string;
+}) {
+  return (
+    <Link
+      to={to}
+      className="group grid gap-3 rounded-md border border-border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-mscqr-border-strong hover:shadow-md"
+    >
+      <div className="flex items-center gap-3">
+        <div className="flex size-10 items-center justify-center rounded-md bg-mscqr-background text-primary">
+          <IconComponent className="size-5" />
+        </div>
+        <h3 className="text-base font-semibold text-foreground">{title}</h3>
+        <ArrowRight className="ml-auto size-4 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-primary" />
+      </div>
+      <p className="text-sm leading-6 text-muted-foreground">{body}</p>
+    </Link>
   );
 }
