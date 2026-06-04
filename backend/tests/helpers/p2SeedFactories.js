@@ -1,4 +1,6 @@
 const path = require("path");
+const fs = require("fs");
+const JSZip = require("jszip");
 const {
   IncidentPriority,
   IncidentSeverity,
@@ -14,6 +16,7 @@ const {
 } = require("@prisma/client");
 
 const backendRoot = path.resolve(__dirname, "../..");
+const compliancePackDir = path.join(backendRoot, "uploads/compliance-packs");
 
 const ids = {
   orgA: "00000000-0000-4202-8000-000000000001",
@@ -90,6 +93,21 @@ const resetP2Fixtures = async (prisma) => {
   await prisma.user.deleteMany({ where: { id: { in: p2UserIds } } });
   await prisma.licensee.deleteMany({ where: { id: { in: p2LicenseeIds } } });
   await prisma.organization.deleteMany({ where: { id: { in: [ids.orgA, ids.orgB] } } });
+
+  for (const fileName of ["p2-a-pack.zip", "p2-b-pack.zip"]) {
+    const filePath = path.join(compliancePackDir, fileName);
+    if (fs.existsSync(filePath)) fs.rmSync(filePath, { force: true });
+  }
+};
+
+const writeCompliancePackFixture = async (fileName, licenseeId, marker) => {
+  fs.mkdirSync(compliancePackDir, { recursive: true });
+  const zip = new JSZip();
+  zip.file("compliance-report.json", JSON.stringify({ licenseeId, marker, controls: [] }, null, 2));
+  zip.file("controls-map.json", JSON.stringify([], null, 2));
+  zip.file("evidence-map.json", JSON.stringify([], null, 2));
+  zip.file("integrity.json", JSON.stringify({ licenseeId, marker, fileHashes: {} }, null, 2));
+  fs.writeFileSync(path.join(compliancePackDir, fileName), await zip.generateAsync({ type: "nodebuffer" }));
 };
 
 const createUser = async (prisma, hashPassword, key, role, licenseeId = null, orgId = null) =>
@@ -224,10 +242,13 @@ const seedP2Fixtures = async (prisma) => {
     ],
   });
 
+  await writeCompliancePackFixture("p2-a-pack.zip", ids.licenseeA, "p2-a-pack");
+  await writeCompliancePackFixture("p2-b-pack.zip", ids.licenseeB, "p2-b-pack");
+
   await prisma.compliancePackJob.createMany({
     data: [
-      { id: ids.complianceJobA, licenseeId: ids.licenseeA, status: "COMPLETED", triggerType: "P2_TEST", fileName: "p2-a-pack.zip", storageKey: "p2/a/pack.zip", integrityHash: "p2-a-integrity", startedByUserId: ids.superAdmin, finishedAt: new Date() },
-      { id: ids.complianceJobB, licenseeId: ids.licenseeB, status: "COMPLETED", triggerType: "P2_TEST", fileName: "p2-b-pack.zip", storageKey: "p2/b/pack.zip", integrityHash: "p2-b-integrity", startedByUserId: ids.superAdmin, finishedAt: new Date() },
+      { id: ids.complianceJobA, licenseeId: ids.licenseeA, status: "COMPLETED", triggerType: "P2_TEST", fileName: "p2-a-pack.zip", storageKey: "p2-a-pack.zip", integrityHash: "p2-a-integrity", startedByUserId: ids.superAdmin, finishedAt: new Date() },
+      { id: ids.complianceJobB, licenseeId: ids.licenseeB, status: "COMPLETED", triggerType: "P2_TEST", fileName: "p2-b-pack.zip", storageKey: "p2-b-pack.zip", integrityHash: "p2-b-integrity", startedByUserId: ids.superAdmin, finishedAt: new Date() },
     ],
   });
 

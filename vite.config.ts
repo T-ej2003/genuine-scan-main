@@ -21,72 +21,81 @@ const releaseTag =
     : `${packageJson.name}@${packageJson.version}+${shortGitSha}`;
 const disableE2ePrinterAgentPolling = process.env.VITE_E2E_DISABLE_PRINTER_AGENT_POLLING === "true";
 
+// Vite loads local .env files before config evaluation. Keep production builds
+// immune to a developer .env that sets NODE_ENV=development, otherwise React's
+// dev transform can leak source metadata into the built bundle.
 // https://vitejs.dev/config/
-export default defineConfig(() => ({
-  server: {
-    host: "::",
-    port: 8080,
-    proxy: {
-      "/api": {
-        target: process.env.VITE_API_PROXY_TARGET || "http://localhost:4000",
-        changeOrigin: true,
+export default defineConfig(({ command }) => {
+  if (command === "build") {
+    process.env.NODE_ENV = "production";
+  }
+
+  return {
+    server: {
+      host: "::",
+      port: 8080,
+      proxy: {
+        "/api": {
+          target: process.env.VITE_API_PROXY_TARGET || "http://localhost:4000",
+          changeOrigin: true,
+        },
+      },
+      hmr: {
+        overlay: false,
       },
     },
-    hmr: {
-      overlay: false,
-    },
-  },
-  plugins: [
-    react(),
-    disableE2ePrinterAgentPolling
-      ? {
-          name: "mscqr-e2e-printer-agent-claim-stub",
-          configureServer(server) {
-            server.middlewares.use("/api/printer-agent/local/claim", (_req, res) => {
-              res.statusCode = 200;
-              res.setHeader("content-type", "application/json");
-              res.end(JSON.stringify({ success: true, data: null, retryAfterMs: 60_000 }));
-            });
-          },
-        }
-      : null,
-  ].filter(Boolean),
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
-  define: {
-    __APP_NAME__: JSON.stringify(packageJson.name),
-    __APP_VERSION__: JSON.stringify(packageJson.version),
-    __APP_GIT_SHA__: JSON.stringify(gitSha),
-    __APP_RELEASE__: JSON.stringify(releaseTag),
-  },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return;
-
-          if (
-            id.includes("/react/") ||
-            id.includes("react-dom") ||
-            id.includes("scheduler") ||
-            id.includes("react-router")
-          ) {
-            return "react-core";
+    plugins: [
+      react(),
+      disableE2ePrinterAgentPolling
+        ? {
+            name: "mscqr-e2e-printer-agent-claim-stub",
+            configureServer(server) {
+              server.middlewares.use("/api/printer-agent/local/claim", (_req, res) => {
+                res.statusCode = 200;
+                res.setHeader("content-type", "application/json");
+                res.end(JSON.stringify({ success: true, data: null, retryAfterMs: 60_000 }));
+              });
+            },
           }
+        : null,
+    ].filter(Boolean),
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "./src"),
+      },
+    },
+    define: {
+      __APP_NAME__: JSON.stringify(packageJson.name),
+      __APP_VERSION__: JSON.stringify(packageJson.version),
+      __APP_GIT_SHA__: JSON.stringify(gitSha),
+      __APP_RELEASE__: JSON.stringify(releaseTag),
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return;
 
-          if (id.includes("@radix-ui")) return "radix-ui";
-          if (id.includes("@tanstack/react-query")) return "react-query";
-          if (id.includes("html2canvas")) return "capture";
-          if (id.includes("date-fns")) return "date-utils";
-          if (id.includes("zod")) return "schema";
-          if (id.includes("lucide-react")) return "icons";
+            if (
+              id.includes("/react/") ||
+              id.includes("react-dom") ||
+              id.includes("scheduler") ||
+              id.includes("react-router")
+            ) {
+              return "react-core";
+            }
 
-          return;
+            if (id.includes("@radix-ui")) return "radix-ui";
+            if (id.includes("@tanstack/react-query")) return "react-query";
+            if (id.includes("html2canvas")) return "capture";
+            if (id.includes("date-fns")) return "date-utils";
+            if (id.includes("zod")) return "schema";
+            if (id.includes("lucide-react")) return "icons";
+
+            return;
+          },
         },
       },
     },
-  },
-}));
+  };
+});

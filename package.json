@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "NODE_ENV=production vite build",
     "build:dev": "vite build --mode development",
     "docs:docx": "npm run docs:role-screenshots && node scripts/generate-user-manual-docx.mjs",
     "docs:docx:printing": "npm run docs:printing:images && node scripts/generate-printing-docx.mjs",

@@ -1,4 +1,7 @@
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+const JSZip = require("jszip");
 const { P2TestDbSkip, withP2TestApp } = require("./helpers/p2TestDb");
 const { emails, ids, issueBearerTokens, passwords, seedP2Fixtures } = require("./helpers/p2SeedFactories");
 
@@ -24,7 +27,7 @@ const assertNoCrossTenantLeak = (response, forbiddenMarker, label) => {
 };
 
 (async () => {
-  await withP2TestApp(async ({ request, prisma }) => {
+  await withP2TestApp(async ({ baseUrl, request, prisma }) => {
     const fixtures = await seedP2Fixtures(prisma);
     const tokens = await issueBearerTokens();
 
@@ -141,6 +144,25 @@ const assertNoCrossTenantLeak = (response, forbiddenMarker, label) => {
     });
     assertDenied(complianceDownloadTamper, "licensee A compliance pack B download");
     assertNoCrossTenantLeak(complianceDownloadTamper, "p2-b-pack", "licensee A compliance pack B download");
+
+    const ownComplianceDownload = await fetch(`${baseUrl}/api/governance/compliance/pack/jobs/${ids.complianceJobA}/download`, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    const ownComplianceBytes = Buffer.from(await ownComplianceDownload.arrayBuffer());
+    assert.strictEqual(ownComplianceDownload.status, 200, ownComplianceBytes.toString("utf8"));
+    assert.match(ownComplianceDownload.headers.get("content-type") || "", /application\/zip/i);
+    const ownComplianceZip = await JSZip.loadAsync(ownComplianceBytes);
+    const integrity = JSON.parse(await ownComplianceZip.file("integrity.json").async("string"));
+    assert.strictEqual(integrity.licenseeId, ids.licenseeA, "platform admin compliance pack integrity licensee scope");
+    assert.notStrictEqual(integrity.licenseeId, ids.licenseeB, "platform admin compliance pack leaked tenant B scope");
+    assert(ownComplianceZip.file("compliance-report.json"), "platform admin compliance pack missing compliance-report.json");
+    assert(ownComplianceZip.file("controls-map.json"), "platform admin compliance pack missing controls-map.json");
+    assert(ownComplianceZip.file("evidence-map.json"), "platform admin compliance pack missing evidence-map.json");
+    assertSafeResponse({ text: ownComplianceBytes.toString("latin1") }, "platform admin compliance pack download");
+    for (const fileName of ["p2-a-pack.zip", "p2-b-pack.zip"]) {
+      const localPackPath = path.resolve(__dirname, "../uploads/compliance-packs", path.basename(fileName));
+      if (fs.existsSync(localPackPath)) fs.rmSync(localPackPath, { force: true });
+    }
 
     const ownPrintPack = await request("GET", `/api/manufacturer/print-jobs/${ids.printJobA}/pack`, null, {
       headers: authHeader(tokens.manufacturerA),
