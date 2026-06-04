@@ -261,6 +261,12 @@ import {
   respondToSupportIssueReport,
   serveSupportIssueScreenshot,
 } from "../controllers/supportIssueController";
+import {
+  listRequestAccessRecords,
+  patchRequestAccessRecord,
+  submitPublicRequestAccess,
+  submitPublicSupportIssue,
+} from "../controllers/publicIntakeController";
 import { supportIssueUpload } from "../middleware/supportIssueUpload";
 import { enforceUploadedFileSignatures } from "../middleware/uploadSignatureValidation";
 import {
@@ -1123,6 +1129,24 @@ const [supportTicketTrackIpLimiter, supportTicketTrackActorLimiter]: [RequestHan
   resourceResolver: supportTicketTrackResourceResolver,
 });
 
+const [requestAccessIpLimiter, requestAccessActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
+  scope: "public.request-access",
+  windowMs: 15 * 60 * 1000,
+  ipMax: parsePositiveIntEnv("PUBLIC_REQUEST_ACCESS_IP_MAX", 12, 1, 200),
+  actorMax: parsePositiveIntEnv("PUBLIC_REQUEST_ACCESS_ACTOR_MAX", 3, 1, 50),
+  message: "Too many access requests. Please wait before submitting again.",
+  actorResolver: composeRequestResolvers(fromBodyFields("workEmail", "companyName"), publicClientActor),
+});
+
+const [publicSupportIpLimiter, publicSupportActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
+  scope: "public.support",
+  windowMs: 15 * 60 * 1000,
+  ipMax: parsePositiveIntEnv("PUBLIC_SUPPORT_IP_MAX", 20, 1, 300),
+  actorMax: parsePositiveIntEnv("PUBLIC_SUPPORT_ACTOR_MAX", 5, 1, 80),
+  message: "Too many support requests. Please wait before submitting again.",
+  actorResolver: composeRequestResolvers(fromBodyFields("email", "verificationCode", "productReference"), publicClientActor),
+});
+
 const [telemetryIpLimiter, telemetryActorLimiter]: [RequestHandler, RequestHandler] = buildPublicRateLimitPair({
   scope: "telemetry.route-transition",
   windowMs: 60 * 1000,
@@ -1288,6 +1312,20 @@ protectedMutationRouter.use(createGovernanceMutationRoutes());
 publicReadRouter.get("/public/connector/releases", connectorManifestIpLimiter, connectorManifestActorLimiter, listConnectorReleasesController);
 publicReadRouter.get("/public/connector/releases/latest", connectorManifestIpLimiter, connectorManifestActorLimiter, getLatestConnectorReleaseController);
 publicReadRouter.get("/public/connector/download/:version/:platform", connectorDownloadIpLimiter, connectorDownloadActorLimiter, downloadConnectorReleaseController);
+publicMutationRouter.post(
+  "/public/request-access",
+  requestAccessIpLimiter,
+  requestAccessActorLimiter,
+  sanitizeRequestInput,
+  submitPublicRequestAccess
+);
+publicMutationRouter.post(
+  "/public/support",
+  publicSupportIpLimiter,
+  publicSupportActorLimiter,
+  sanitizeRequestInput,
+  submitPublicSupportIssue
+);
 cookieReadRouter.get("/verify/:code", verifyLookupRouteLimiter, verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, verifyQRCode);
 cookieMutationRouter.post("/verify/session/start", verifyLookupRouteLimiter, verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, startCustomerVerificationSession);
 cookieReadRouter.get("/verify/session/:id", verifyLookupRouteLimiter, verifyCodeIpLimiter, verifyCodeActorLimiter, optionalCustomerVerifyAuth, getCustomerVerificationSessionState);
@@ -1957,6 +1995,26 @@ protectedReadRouter.get(
 );
 
 // ==================== SUPPORT TICKETS ====================
+protectedReadRouter.get(
+  "/support/request-access",
+  supportReadPreAuthRouteLimiter,
+  authenticate,
+  requirePlatformAdmin,
+  supportReadRouteLimiter,
+  protectedReadRouteLimiter,
+  listRequestAccessRecords
+);
+protectedMutationRouter.patch(
+  "/support/request-access/:id",
+  supportMutationPreAuthRouteLimiter,
+  authenticate,
+  requirePlatformAdmin,
+  supportMutationRouteLimiter,
+  protectedMutationRouteLimiter,
+  requireRecentAdminMfa,
+  requireCsrf,
+  patchRequestAccessRecord
+);
 protectedReadRouter.get("/support/tickets", supportReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, supportReadRouteLimiter, protectedReadRouteLimiter, listSupportTickets);
 protectedReadRouter.get("/support/tickets/:id", supportReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, supportReadRouteLimiter, protectedReadRouteLimiter, getSupportTicket);
 protectedMutationRouter.patch(

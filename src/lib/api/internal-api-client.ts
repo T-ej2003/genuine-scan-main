@@ -3,6 +3,7 @@ import { createAuthApi } from "@/lib/api/internal-client-auth";
 import { createApiClientCore, type ApiResponse } from "@/lib/api/internal-client-core";
 import { createLicenseeQrApi } from "@/lib/api/internal-client-licensee-qr";
 import { createPrintingApi } from "@/lib/api/internal-client-printing";
+import { createSupportIntakeApi } from "@/lib/api/internal-client-support-intake";
 import { createVerifySupportApi } from "@/lib/api/internal-client-verify-support";
 
 const core = createApiClientCore();
@@ -16,6 +17,7 @@ const apiClient = {
   ...createPrintingApi(core),
   ...createAdminOpsApi(core),
   ...createVerifySupportApi(core),
+  ...createSupportIntakeApi(core),
 };
 
 export default apiClient;

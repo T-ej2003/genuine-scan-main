@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bug, Loader2, MessageSquareText, RefreshCw, Send, ShieldCheck, TimerReset } from "lucide-react";
+import { MessageSquareText, RefreshCw, TimerReset } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { formatDistanceToNowStrict } from "date-fns";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DataTablePagePattern, PageEmptyState, PageInlineNotice, PageSection } from "@/components/page-patterns/PagePatterns";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ActionButton } from "@/components/ui/action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,20 +19,24 @@ import {
   SUPPORT_PRIORITIES,
   SUPPORT_STATUSES,
   toLabel,
+  type RequestAccessRecord,
   type SupportIssueReport,
   type SupportQueueFilters,
 } from "@/features/support/types";
 import {
   useAddSupportTicketMessageMutation,
+  useRequestAccessRecords,
   useRespondToIssueReportMutation,
   useSupportAssignableUsers,
   useSupportIssueReports,
   useSupportTicketDetail,
   useSupportTickets,
+  useUpdateRequestAccessMutation,
   useUpdateSupportTicketMutation,
 } from "@/features/support/hooks";
+import { SupportIssueReportsPanel } from "@/features/support/SupportIssueReportsPanel";
+import { SupportRequestAccessPanel } from "@/features/support/SupportRequestAccessPanel";
 import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
-import apiClient from "@/lib/api-client";
 import { createUiActionState } from "@/lib/ui-actions";
 import { getSupportStatusLabel } from "@/lib/ui-copy";
 import { useToast } from "@/hooks/use-toast";
@@ -56,6 +59,7 @@ export default function SupportCenterPage() {
   const [selectedId, setSelectedId] = useState("");
   const [newMessage, setNewMessage] = useState("");
   const [issueReplyDrafts, setIssueReplyDrafts] = useState<Record<string, string>>({});
+  const [requestNotes, setRequestNotes] = useState<Record<string, string>>({});
   const [editState, setEditState] = useState({
     status: "OPEN",
     assignedToUserId: "unassigned",
@@ -74,16 +78,19 @@ export default function SupportCenterPage() {
 
   const ticketsQuery = useSupportTickets(appliedFilters);
   const reportsQuery = useSupportIssueReports();
+  const requestAccessQuery = useRequestAccessRecords();
   const detailQuery = useSupportTicketDetail(selectedId);
   const assigneesQuery = useSupportAssignableUsers(canEdit);
 
   const updateTicketMutation = useUpdateSupportTicketMutation();
   const addMessageMutation = useAddSupportTicketMessageMutation();
   const respondToReportMutation = useRespondToIssueReportMutation();
+  const updateRequestAccessMutation = useUpdateRequestAccessMutation();
 
   const tickets = ticketsQuery.data?.tickets || [];
   const total = ticketsQuery.data?.total || 0;
   const issueReports = reportsQuery.data?.reports || [];
+  const requestAccessRecords = requestAccessQuery.data?.records || [];
 
   useEffect(() => {
     if (tickets.length === 0) {
@@ -118,7 +125,7 @@ export default function SupportCenterPage() {
   const selected = useMemo(() => tickets.find((ticket) => ticket.id === selectedId) || null, [tickets, selectedId]);
 
   const refreshAll = async () => {
-    await Promise.all([ticketsQuery.refetch(), reportsQuery.refetch(), detailQuery.refetch()]);
+    await Promise.all([ticketsQuery.refetch(), reportsQuery.refetch(), requestAccessQuery.refetch(), detailQuery.refetch()]);
   };
 
   const saveTicket = async () => {
@@ -190,6 +197,26 @@ export default function SupportCenterPage() {
       toast({
         title: "Response failed",
         description: error instanceof Error ? error.message : "Could not send support response.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const updateRequestAccess = async (record: RequestAccessRecord, status: RequestAccessRecord["status"]) => {
+    try {
+      await updateRequestAccessMutation.mutateAsync({
+        id: record.id,
+        status,
+        internalNote: requestNotes[record.id]?.trim() || record.internalNote || null,
+      });
+      toast({
+        title: "Access request updated",
+        description: `${record.referenceCode} moved to ${toLabel(status)}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Update failed",
+        description: error instanceof Error ? error.message : "Could not update access request.",
         variant: "destructive",
       });
     }
@@ -282,120 +309,34 @@ export default function SupportCenterPage() {
           />
         ) : null}
 
-        <PageSection
-          title="New help requests"
-          description="Reply to newly reported issues without leaving the help desk."
-          action={<Badge variant="outline">{issueReports.length}</Badge>}
-        >
-          {reportsQuery.isLoading ? (
-            <div className="text-sm text-muted-foreground">Loading issue reports...</div>
-          ) : issueReports.length === 0 ? (
-            <PageEmptyState
-              title="No new help requests"
-              description="When a user asks for help from the app, it will appear here."
-            />
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {issueReports.slice(0, 8).map((report) => (
-                <div key={report.id} className="rounded-2xl border p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold leading-5">{report.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {report.reporterUser?.name || report.reporterUser?.email || "Unknown user"}
-                        {report.licensee?.name ? ` · ${report.licensee.name}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <Badge variant={report.autoDetected ? "default" : "outline"}>
-                        {report.autoDetected ? "Reported by app" : "Manual"}
-                      </Badge>
-                      <Badge variant="outline">{toLabel(report.status)}</Badge>
-                    </div>
-                  </div>
+        {requestAccessQuery.error ? (
+          <PageInlineNotice
+            variant="destructive"
+            title="Could not load access requests"
+            description={requestAccessQuery.error instanceof Error ? requestAccessQuery.error.message : "Please refresh and try again."}
+          />
+        ) : null}
 
-                  {report.description ? <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{report.description}</p> : null}
+        <SupportIssueReportsPanel
+          reports={issueReports}
+          isLoading={reportsQuery.isLoading}
+          canEdit={canEdit}
+          replyDrafts={issueReplyDrafts}
+          respondingReportId={respondToReportMutation.variables?.reportId}
+          isResponding={respondToReportMutation.isPending}
+          onDraftChange={(reportId, value) => setIssueReplyDrafts((prev) => ({ ...prev, [reportId]: value }))}
+          onRespond={(report) => void respondToIssueReport(report)}
+        />
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                    <span>{formatDistanceToNowStrict(new Date(report.createdAt), { addSuffix: true })}</span>
-                    {report.sourcePath ? <span>Screen: {report.sourcePath}</span> : null}
-                  </div>
-
-                  {report.screenshotPath ? (
-                    <a
-                      className="mt-3 inline-flex text-xs font-medium text-primary hover:underline"
-                      href={apiClient.getSupportIssueScreenshotUrl(report.screenshotPath)}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Open screenshot
-                    </a>
-                  ) : null}
-
-                  {report.responseMessage ? (
-                    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3">
-                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-emerald-800">
-                        <span className="font-semibold">Latest response sent</span>
-                        {report.respondedByUser?.name || report.respondedByUser?.email ? (
-                          <span>by {report.respondedByUser?.name || report.respondedByUser?.email}</span>
-                        ) : null}
-                        {report.respondedAt ? (
-                          <span>{formatDistanceToNowStrict(new Date(report.respondedAt), { addSuffix: true })}</span>
-                        ) : null}
-                      </div>
-                      <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">{report.responseMessage}</p>
-                    </div>
-                  ) : null}
-
-                  {canEdit ? (
-                    <div className="mt-3 space-y-2 rounded-lg border bg-muted/30 p-3">
-                      <Label htmlFor={`issue-response-${report.id}`} className="text-xs font-semibold">
-                        Respond to reporter
-                      </Label>
-                      <Textarea
-                        id={`issue-response-${report.id}`}
-                        rows={3}
-                        value={issueReplyDrafts[report.id] ?? ""}
-                        onChange={(event) =>
-                          setIssueReplyDrafts((prev) => ({
-                            ...prev,
-                            [report.id]: event.target.value,
-                          }))
-                        }
-                        placeholder="Tell the user what happens next."
-                      />
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-[11px] text-muted-foreground">
-                          This reply is sent by email and also appears in the user&apos;s notification feed.
-                        </p>
-                        <ActionButton
-                          data-testid="support-issue-report-reply"
-                          size="sm"
-                          onClick={() => void respondToIssueReport(report)}
-                          state={
-                            respondToReportMutation.isPending && respondToReportMutation.variables?.reportId === report.id
-                              ? createUiActionState("pending", "Sending the reply now.")
-                              : !String(issueReplyDrafts[report.id] || "").trim()
-                                ? createUiActionState("disabled", "Write the reply before you send it.")
-                                : createUiActionState("enabled")
-                          }
-                          idleLabel={
-                            <>
-                              <Send className="mr-2 h-4 w-4" />
-                              {report.responseMessage ? "Update reply" : "Send reply"}
-                            </>
-                          }
-                          pendingLabel="Sending..."
-                          showReasonBelow={false}
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
-        </PageSection>
+        <SupportRequestAccessPanel
+          records={requestAccessRecords}
+          isLoading={requestAccessQuery.isLoading}
+          canEdit={canEdit}
+          notes={requestNotes}
+          isUpdating={updateRequestAccessMutation.isPending}
+          onNoteChange={(recordId, value) => setRequestNotes((prev) => ({ ...prev, [recordId]: value }))}
+          onUpdate={(record, status) => void updateRequestAccess(record, status)}
+        />
 
         <PageSection
           title="Case queue"

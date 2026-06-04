@@ -514,6 +514,8 @@ model User {
   supportTicketMessages SupportTicketMessage[] @relation("SupportTicketMessageAuthor")
   supportIssueReportsSubmitted SupportIssueReport[] @relation("SupportIssueReportSubmittedBy")
   supportIssueReportsResponded SupportIssueReport[] @relation("SupportIssueReportRespondedBy")
+  requestAccessAssigned RequestAccess[] @relation("RequestAccessAssignedTo")
+  requestAccessReviewed RequestAccess[] @relation("RequestAccessReviewedBy")
   notifications Notification[] @relation("UserNotifications")
   tenantFeatureFlagsUpdated TenantFeatureFlag[] @relation("TenantFeatureFlagUpdatedBy")
   evidenceRetentionPoliciesUpdated EvidenceRetentionPolicy[] @relation("EvidenceRetentionPolicyUpdatedBy")
@@ -2327,6 +2329,43 @@ model SupportTicketMessage {
   @@index([createdAt])
 }
 
+model RequestAccess {
+  id String @id @default(uuid())
+
+  referenceCode String @unique
+  fullName String
+  workEmail String
+  companyName String
+  roleTitle String
+  country String
+  monthlyGarmentVolume String
+  message String
+  sourcePage String?
+  referrer String?
+
+  status String @default("NEW")
+  internalNote String?
+  assignedToUserId String?
+  assignedToUser User? @relation("RequestAccessAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  reviewedByUserId String?
+  reviewedByUser User? @relation("RequestAccessReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  reviewedAt DateTime?
+
+  adminEmailDeliveryStatus String @default("NOT_ATTEMPTED")
+  adminEmailErrorCode String?
+  acknowledgementEmailDeliveryStatus String @default("NOT_ATTEMPTED")
+  acknowledgementEmailErrorCode String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([workEmail])
+  @@index([companyName])
+  @@index([assignedToUserId])
+  @@index([reviewedByUserId, reviewedAt])
+}
+
 model SupportIssueReport {
   id String @id @default(uuid())
 
@@ -2337,13 +2376,26 @@ model SupportIssueReport {
   licenseeId String?
   licensee Licensee? @relation(fields: [licenseeId], references: [id], onDelete: SetNull)
 
+  referenceCode String? @unique
+  publicName String?
+  publicEmail String?
+  issueType String?
+  verificationCode String?
+  productReference String?
+  priority String @default("P3")
+
   title String
   description String?
   status String @default("OPEN")
+  internalNote String?
   responseMessage String?
   respondedAt DateTime?
   respondedByUserId String?
   respondedByUser User? @relation("SupportIssueReportRespondedBy", fields: [respondedByUserId], references: [id], onDelete: SetNull)
+  emailDeliveryStatus String @default("NOT_ATTEMPTED")
+  emailErrorCode String?
+  acknowledgementEmailDeliveryStatus String @default("NOT_ATTEMPTED")
+  acknowledgementEmailErrorCode String?
   sourcePath String?
   pageUrl String?
   autoDetected Boolean @default(false)
@@ -2361,6 +2413,9 @@ model SupportIssueReport {
   @@index([reporterUserId, createdAt])
   @@index([respondedByUserId, respondedAt])
   @@index([status])
+  @@index([publicEmail, createdAt])
+  @@index([priority, createdAt])
+  @@index([issueType, createdAt])
 }
 
 model Notification {

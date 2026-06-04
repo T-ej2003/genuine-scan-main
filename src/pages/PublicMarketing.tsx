@@ -1,11 +1,13 @@
-import { type ElementType, type FormEvent, type ReactNode, useMemo, useState } from "react";
+import { type ElementType, type FormEvent, type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
   BadgeCheck,
+  CheckCircle2,
   ClipboardCheck,
   Factory,
+  Loader2,
   Mail,
   QrCode,
   ScanLine,
@@ -19,6 +21,7 @@ import { BrandLockup } from "@/components/brand/BrandLockup";
 import { PublicShell } from "@/components/public/PublicShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import apiClient from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
 export const CONTACT_EMAIL = "administration@mscqr.com";
@@ -458,27 +461,18 @@ const initialFormValues: FormValues = {
 function RequestAccessForm() {
   const [values, setValues] = useState<FormValues>(initialFormValues);
   const [errors, setErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
-  const [readyToEmail, setReadyToEmail] = useState(false);
-
-  const mailtoHref = useMemo(() => {
-    const body = [
-      `Full name: ${values.fullName}`,
-      `Work email: ${values.workEmail}`,
-      `Company / brand name: ${values.company}`,
-      `Role: ${values.role}`,
-      `Monthly garment volume: ${values.volume}`,
-      `Country: ${values.country}`,
-      "",
-      "Message:",
-      values.message,
-    ].join("\n");
-
-    return `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("MSCQR Request Access")}&body=${encodeURIComponent(body)}`;
-  }, [values]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<{
+    referenceCode: string;
+    message: string;
+    emailDeliveryStatus?: string;
+  } | null>(null);
+  const [submitError, setSubmitError] = useState("");
 
   const updateField = (field: keyof FormValues, value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
-    setReadyToEmail(false);
+    setSubmitResult(null);
+    setSubmitError("");
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
 
@@ -497,11 +491,48 @@ function RequestAccessForm() {
     return nextErrors;
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const nextErrors = validate();
     setErrors(nextErrors);
-    setReadyToEmail(Object.keys(nextErrors).length === 0);
+    setSubmitResult(null);
+    setSubmitError("");
+    if (Object.keys(nextErrors).length > 0) return;
+
+    setIsSubmitting(true);
+    try {
+      const response = await apiClient.submitRequestAccess({
+        fullName: values.fullName.trim(),
+        workEmail: values.workEmail.trim(),
+        companyName: values.company.trim(),
+        role: values.role.trim(),
+        monthlyGarmentVolume: values.volume.trim(),
+        country: values.country.trim(),
+        message: values.message.trim(),
+        sourcePage: "/request-access",
+        referrer: typeof document !== "undefined" ? document.referrer : "",
+        website: "",
+      });
+
+      if (!response.success || !response.data) {
+        throw new Error(response.error || "Could not submit your request.");
+      }
+
+      setSubmitResult({
+        referenceCode: response.data.referenceCode,
+        message: response.data.message || "Request received. MSCQR will review your access request.",
+        emailDeliveryStatus: response.data.emailDeliveryStatus,
+      });
+      setValues(initialFormValues);
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "We could not submit the request right now. You can still contact MSCQR administration by email."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -509,15 +540,15 @@ function RequestAccessForm() {
       <div>
         <h2 className="text-3xl font-semibold text-foreground">Tell us about your garment workflow.</h2>
         <p className="mt-4 text-sm leading-7 text-muted-foreground">
-          There is no public self-serve signup connected here yet. This form checks the fields locally and prepares an
-          email to MSCQR administration.
+          Share the operating context MSCQR needs to review your fit. Your request is stored for the platform team and
+          routed to MSCQR administration.
         </p>
         <div className="mt-6 rounded-2xl border border-border bg-white p-5">
           <div className="flex items-start gap-3">
             <Mail className="mt-1 size-5 text-primary" />
             <p className="text-sm leading-6 text-muted-foreground">
-              Your email app will open after the form is complete. No information is stored by this page until a backend
-              request-access endpoint is connected.
+              You will receive a reference number after submission. If email delivery is temporarily unavailable, the
+              request still remains visible to MSCQR operators.
             </p>
           </div>
         </div>
@@ -602,16 +633,33 @@ function RequestAccessForm() {
         </FormField>
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Button type="submit">Check form</Button>
-          {readyToEmail ? (
-            <Button asChild variant="outline">
-              <a href={mailtoHref}>Open email draft</a>
-            </Button>
-          ) : null}
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="mr-2 size-4 animate-spin" />
+                Submitting...
+              </>
+            ) : (
+              "Submit request"
+            )}
+          </Button>
+          <Button asChild variant="outline">
+            <a href={`mailto:${CONTACT_EMAIL}`}>Email MSCQR</a>
+          </Button>
         </div>
-        {readyToEmail ? (
-          <p className="mt-4 text-sm leading-6 text-emerald-700">
-            The form is complete. Open the email draft to send your request to MSCQR administration.
+        {submitResult ? (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-800">
+            <p className="flex items-center gap-2 font-semibold">
+              <CheckCircle2 className="size-4" />
+              Request received
+            </p>
+            <p className="mt-1">{submitResult.message}</p>
+            <p className="mt-2 font-mono text-xs">Reference: {submitResult.referenceCode}</p>
+          </div>
+        ) : null}
+        {submitError ? (
+          <p className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-sm leading-6 text-destructive">
+            {submitError}
           </p>
         ) : null}
       </form>

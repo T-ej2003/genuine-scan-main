@@ -9,8 +9,39 @@ import type {
 export type SupportTicket = RuntimeSupportTicket;
 export type SupportTicketDetail = RuntimeSupportTicketDetail;
 export type SupportTicketMessage = RuntimeSupportTicketMessage;
-export type SupportIssueReport = RuntimeSupportIssueReport;
+export type SupportIssueReport = RuntimeSupportIssueReport & {
+  referenceCode?: string | null;
+  publicName?: string | null;
+  publicEmail?: string | null;
+  issueType?: string | null;
+  priority?: string | null;
+  emailDeliveryStatus?: string | null;
+};
 export type SupportAssignee = RuntimeSupportAssignee;
+
+export type RequestAccessRecord = {
+  id: string;
+  referenceCode: string;
+  fullName: string;
+  workEmail: string;
+  companyName: string;
+  roleTitle: string;
+  country: string;
+  monthlyGarmentVolume: string;
+  message: string;
+  sourcePage?: string | null;
+  status: "NEW" | "REVIEWING" | "CONTACTED" | "QUALIFIED" | "CLOSED";
+  internalNote?: string | null;
+  adminEmailDeliveryStatus?: string | null;
+  adminEmailErrorCode?: string | null;
+  acknowledgementEmailDeliveryStatus?: string | null;
+  acknowledgementEmailErrorCode?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  assignedToUserId?: string | null;
+  assignedToUser?: { id: string; name?: string | null; email?: string | null } | null;
+  reviewedByUser?: { id: string; name?: string | null; email?: string | null } | null;
+};
 
 export type SupportTicketStatus = SupportTicket["status"];
 export type SupportTicketPriority = SupportTicket["priority"];
@@ -30,6 +61,14 @@ export const SUPPORT_STATUSES: SupportTicketStatus[] = [
 ];
 
 export const SUPPORT_PRIORITIES: SupportTicketPriority[] = ["P1", "P2", "P3", "P4"];
+
+export const REQUEST_ACCESS_STATUSES: RequestAccessRecord["status"][] = [
+  "NEW",
+  "REVIEWING",
+  "CONTACTED",
+  "QUALIFIED",
+  "CLOSED",
+];
 
 export const STATUS_TONE: Record<string, string> = {
   OPEN: "border-slate-300 bg-slate-100 text-slate-700",
