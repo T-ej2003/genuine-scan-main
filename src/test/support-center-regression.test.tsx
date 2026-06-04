@@ -27,6 +27,8 @@ vi.mock("@/lib/api-client", () => ({
     getUsers: vi.fn(),
     patchSupportTicket: vi.fn(),
     addSupportTicketMessage: vi.fn(),
+    getRequestAccessRecords: vi.fn(),
+    patchRequestAccessRecord: vi.fn(),
   },
 }));
 
@@ -60,6 +62,23 @@ describe("SupportCenter regression", () => {
     licensee: { id: "lic-1", name: "Acme Brands", prefix: "ACM" },
   };
 
+  const requestAccessRecord = {
+    id: "request-access-1",
+    referenceCode: "RA-260604-ABC123",
+    fullName: "Asha Patel",
+    workEmail: "asha@brand.example",
+    companyName: "Phase E Brand",
+    roleTitle: "Operations lead",
+    country: "United Kingdom",
+    monthlyGarmentVolume: "25,000 garments",
+    message: "We need garment QR authentication for production batches.",
+    status: "NEW",
+    adminEmailDeliveryStatus: "DRY_RUN",
+    acknowledgementEmailDeliveryStatus: "DRY_RUN",
+    createdAt: "2026-06-04T18:00:00.000Z",
+    updatedAt: "2026-06-04T18:00:00.000Z",
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(apiClient.getSupportTickets).mockResolvedValue({ success: true, data: { tickets: [ticket], total: 1 } } as any);
@@ -73,6 +92,14 @@ describe("SupportCenter regression", () => {
     } as any);
     vi.mocked(apiClient.patchSupportTicket).mockResolvedValue({ success: true, data: detail } as any);
     vi.mocked(apiClient.addSupportTicketMessage).mockResolvedValue({ success: true, data: { id: "msg-1" } } as any);
+    vi.mocked(apiClient.getRequestAccessRecords).mockResolvedValue({
+      success: true,
+      data: { records: [requestAccessRecord], total: 1 },
+    } as any);
+    vi.mocked(apiClient.patchRequestAccessRecord).mockResolvedValue({
+      success: true,
+      data: { ...requestAccessRecord, status: "REVIEWING" },
+    } as any);
   });
 
   it("loads detail and allows workflow save + message append", async () => {
@@ -138,6 +165,33 @@ describe("SupportCenter regression", () => {
         expect.objectContaining({
           message: "We reviewed the issue. Reopen the dashboard after the print agent is running.",
           status: "RESPONDED",
+        })
+      );
+    });
+  });
+
+  it("shows request access intake and updates status", async () => {
+    renderWithQueryClient(
+      <MemoryRouter>
+        <SupportCenter />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Phase E Brand")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Next step, owner, or qualification note."), {
+      target: { value: "Ask for garment volume proof before invite." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reviewing" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.patchRequestAccessRecord)).toHaveBeenCalledWith(
+        requestAccessRecord.id,
+        expect.objectContaining({
+          status: "REVIEWING",
+          internalNote: "Ask for garment volume proof before invite.",
         })
       );
     });

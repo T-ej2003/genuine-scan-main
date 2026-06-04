@@ -16,20 +16,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   PRIORITY_TONE,
+  REQUEST_ACCESS_STATUSES,
   STATUS_TONE,
   SUPPORT_PRIORITIES,
   SUPPORT_STATUSES,
   toLabel,
+  type RequestAccessRecord,
   type SupportIssueReport,
   type SupportQueueFilters,
 } from "@/features/support/types";
 import {
   useAddSupportTicketMessageMutation,
+  useRequestAccessRecords,
   useRespondToIssueReportMutation,
   useSupportAssignableUsers,
   useSupportIssueReports,
   useSupportTicketDetail,
   useSupportTickets,
+  useUpdateRequestAccessMutation,
   useUpdateSupportTicketMutation,
 } from "@/features/support/hooks";
 import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
@@ -56,6 +60,7 @@ export default function SupportCenterPage() {
   const [selectedId, setSelectedId] = useState("");
   const [newMessage, setNewMessage] = useState("");
   const [issueReplyDrafts, setIssueReplyDrafts] = useState<Record<string, string>>({});
+  const [requestNotes, setRequestNotes] = useState<Record<string, string>>({});
   const [editState, setEditState] = useState({
     status: "OPEN",
     assignedToUserId: "unassigned",
@@ -74,16 +79,19 @@ export default function SupportCenterPage() {
 
   const ticketsQuery = useSupportTickets(appliedFilters);
   const reportsQuery = useSupportIssueReports();
+  const requestAccessQuery = useRequestAccessRecords();
   const detailQuery = useSupportTicketDetail(selectedId);
   const assigneesQuery = useSupportAssignableUsers(canEdit);
 
   const updateTicketMutation = useUpdateSupportTicketMutation();
   const addMessageMutation = useAddSupportTicketMessageMutation();
   const respondToReportMutation = useRespondToIssueReportMutation();
+  const updateRequestAccessMutation = useUpdateRequestAccessMutation();
 
   const tickets = ticketsQuery.data?.tickets || [];
   const total = ticketsQuery.data?.total || 0;
   const issueReports = reportsQuery.data?.reports || [];
+  const requestAccessRecords = requestAccessQuery.data?.records || [];
 
   useEffect(() => {
     if (tickets.length === 0) {
@@ -118,7 +126,7 @@ export default function SupportCenterPage() {
   const selected = useMemo(() => tickets.find((ticket) => ticket.id === selectedId) || null, [tickets, selectedId]);
 
   const refreshAll = async () => {
-    await Promise.all([ticketsQuery.refetch(), reportsQuery.refetch(), detailQuery.refetch()]);
+    await Promise.all([ticketsQuery.refetch(), reportsQuery.refetch(), requestAccessQuery.refetch(), detailQuery.refetch()]);
   };
 
   const saveTicket = async () => {
@@ -190,6 +198,26 @@ export default function SupportCenterPage() {
       toast({
         title: "Response failed",
         description: error instanceof Error ? error.message : "Could not send support response.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const updateRequestAccess = async (record: RequestAccessRecord, status: RequestAccessRecord["status"]) => {
+    try {
+      await updateRequestAccessMutation.mutateAsync({
+        id: record.id,
+        status,
+        internalNote: requestNotes[record.id]?.trim() || record.internalNote || null,
+      });
+      toast({
+        title: "Access request updated",
+        description: `${record.referenceCode} moved to ${toLabel(status)}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Update failed",
+        description: error instanceof Error ? error.message : "Could not update access request.",
         variant: "destructive",
       });
     }
@@ -282,6 +310,14 @@ export default function SupportCenterPage() {
           />
         ) : null}
 
+        {requestAccessQuery.error ? (
+          <PageInlineNotice
+            variant="destructive"
+            title="Could not load access requests"
+            description={requestAccessQuery.error instanceof Error ? requestAccessQuery.error.message : "Please refresh and try again."}
+          />
+        ) : null}
+
         <PageSection
           title="New help requests"
           description="Reply to newly reported issues without leaving the help desk."
@@ -302,7 +338,8 @@ export default function SupportCenterPage() {
                     <div className="space-y-1">
                       <p className="text-sm font-semibold leading-5">{report.title}</p>
                       <p className="text-xs text-muted-foreground">
-                        {report.reporterUser?.name || report.reporterUser?.email || "Unknown user"}
+                        {(report as any).publicName || report.reporterUser?.name || report.reporterUser?.email || "Unknown user"}
+                        {(report as any).publicEmail ? ` · ${(report as any).publicEmail}` : ""}
                         {report.licensee?.name ? ` · ${report.licensee.name}` : ""}
                       </p>
                     </div>
@@ -317,8 +354,12 @@ export default function SupportCenterPage() {
                   {report.description ? <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{report.description}</p> : null}
 
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    {(report as any).referenceCode ? <span className="font-mono">{(report as any).referenceCode}</span> : null}
+                    {(report as any).issueType ? <span>{toLabel((report as any).issueType)}</span> : null}
+                    {(report as any).priority ? <span>{(report as any).priority}</span> : null}
                     <span>{formatDistanceToNowStrict(new Date(report.createdAt), { addSuffix: true })}</span>
                     {report.sourcePath ? <span>Screen: {report.sourcePath}</span> : null}
+                    {(report as any).emailDeliveryStatus ? <span>Email: {toLabel((report as any).emailDeliveryStatus)}</span> : null}
                   </div>
 
                   {report.screenshotPath ? (
@@ -388,6 +429,79 @@ export default function SupportCenterPage() {
                           pendingLabel="Sending..."
                           showReasonBelow={false}
                         />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </PageSection>
+
+        <PageSection
+          title="Access requests"
+          description="Review onboarding requests from brands and manufacturers before inviting platform users."
+          action={<Badge variant="outline">{requestAccessRecords.length}</Badge>}
+        >
+          {requestAccessQuery.isLoading ? (
+            <div className="text-sm text-muted-foreground">Loading access requests...</div>
+          ) : requestAccessRecords.length === 0 ? (
+            <PageEmptyState
+              title="No access requests"
+              description="Public access requests will appear here after the request-access form is submitted."
+            />
+          ) : (
+            <div className="grid gap-3 xl:grid-cols-2">
+              {requestAccessRecords.slice(0, 8).map((record) => (
+                <div key={record.id} className="rounded-2xl border p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">{record.companyName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {record.fullName} · {record.workEmail}
+                      </p>
+                      <p className="mt-1 font-mono text-[11px] text-muted-foreground">{record.referenceCode}</p>
+                    </div>
+                    <Badge variant="outline">{toLabel(record.status)}</Badge>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                    <span>Role: {record.roleTitle}</span>
+                    <span>Country: {record.country}</span>
+                    <span>Volume: {record.monthlyGarmentVolume}</span>
+                    <span>Email: {toLabel(record.adminEmailDeliveryStatus || "UNKNOWN")}</span>
+                  </div>
+                  <p className="mt-3 line-clamp-3 text-xs text-slate-700">{record.message}</p>
+                  {canEdit ? (
+                    <div className="mt-3 space-y-2 rounded-lg border bg-muted/30 p-3">
+                      <Label htmlFor={`request-access-note-${record.id}`} className="text-xs font-semibold">
+                        Internal note
+                      </Label>
+                      <Textarea
+                        id={`request-access-note-${record.id}`}
+                        rows={2}
+                        value={requestNotes[record.id] ?? record.internalNote ?? ""}
+                        onChange={(event) => setRequestNotes((prev) => ({ ...prev, [record.id]: event.target.value }))}
+                        placeholder="Next step, owner, or qualification note."
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        {REQUEST_ACCESS_STATUSES.filter((status) => status !== record.status)
+                          .slice(0, 3)
+                          .map((status) => (
+                            <ActionButton
+                              key={status}
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void updateRequestAccess(record, status)}
+                              state={
+                                updateRequestAccessMutation.isPending
+                                  ? createUiActionState("pending", "Saving access request update.")
+                                  : createUiActionState("enabled")
+                              }
+                              idleLabel={toLabel(status)}
+                              pendingLabel="Saving..."
+                              showReasonBelow={false}
+                            />
+                          ))}
                       </div>
                     </div>
                   ) : null}

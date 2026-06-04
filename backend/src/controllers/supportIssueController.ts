@@ -9,6 +9,7 @@ import { AuthRequest } from "../middleware/auth";
 import { sanitizeUnknownInput } from "../middleware/requestSanitizer";
 import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications, createUserNotification } from "../services/notificationService";
+import { sendSupportIssueReply, toDeliveryStatus } from "../services/supportIntakeMailService";
 import { resolveSupportIssueUploadPath, supportIssueUploadsDirectory } from "../middleware/supportIssueUpload";
 import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
@@ -32,6 +33,8 @@ const responseSchema = z.object({
   message: z.string().trim().min(5).max(5000),
   status: z.enum(["OPEN", "RESPONDED", "CLOSED"]).optional(),
 }).strict();
+
+const safeEmailError = (value?: string | null) => String(value || "").slice(0, 80) || null;
 
 const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -241,6 +244,19 @@ export const respondToSupportIssueReport = async (req: AuthRequest, res: Respons
     const respondedAt = new Date();
     const status = parsed.data.status || "RESPONDED";
 
+    const replyRecipient = existing.publicEmail || existing.reporterUser?.email || null;
+    const replyMail =
+      replyRecipient && !parsed.data.status?.includes("CLOSED")
+        ? await sendSupportIssueReply({
+            referenceCode: (existing as any).referenceCode || null,
+            toAddress: replyRecipient,
+            reporterName: (existing as any).publicName || existing.reporterUser?.name || null,
+            subject: existing.title,
+            message: parsed.data.message,
+            responderEmail: req.user.email || null,
+          })
+        : null;
+
     const updated = await prisma.supportIssueReport.update({
       where: { id: existing.id },
       data: {
@@ -248,6 +264,8 @@ export const respondToSupportIssueReport = async (req: AuthRequest, res: Respons
         responseMessage: parsed.data.message,
         respondedAt,
         respondedByUserId: req.user.userId,
+        emailDeliveryStatus: replyMail ? toDeliveryStatus(replyMail) : undefined,
+        emailErrorCode: replyMail ? safeEmailError(replyMail.errorCode) : undefined,
       },
       include: {
         reporterUser: { select: { id: true, name: true, email: true, role: true } },
@@ -266,6 +284,7 @@ export const respondToSupportIssueReport = async (req: AuthRequest, res: Respons
       details: {
         status,
         responseLength: parsed.data.message.length,
+        emailDeliveryStatus: replyMail ? toDeliveryStatus(replyMail) : "NOT_SENT",
       },
       ipAddress: req.ip,
     });

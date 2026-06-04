@@ -22,6 +22,7 @@ import type {
   SupportTicketPriority,
   SupportTicketStatus,
   SupportTicketDetail,
+  RequestAccessRecord,
 } from "@/features/support/types";
 
 type SupportTicketListResponse = {
@@ -31,6 +32,11 @@ type SupportTicketListResponse = {
 
 type SupportIssueReportListResponse = {
   reports: SupportIssueReport[];
+  total: number;
+};
+
+type RequestAccessListResponse = {
+  records: RequestAccessRecord[];
   total: number;
 };
 
@@ -99,6 +105,25 @@ export function useSupportIssueReports() {
   });
 }
 
+export function useRequestAccessRecords() {
+  return useQuery({
+    queryKey: queryKeys.support.requestAccess(),
+    queryFn: async (): Promise<RequestAccessListResponse> => {
+      const payload = unwrapApiResponse<unknown>(
+        await apiClient.getRequestAccessRecords({ limit: 60 }),
+        "Could not load request access records."
+      );
+      const rawRecords = Array.isArray((payload as { records?: unknown[] })?.records)
+        ? ((payload as { records: unknown[] }).records as RequestAccessRecord[])
+        : [];
+      return {
+        records: rawRecords,
+        total: Number((payload as { total?: unknown })?.total || rawRecords.length),
+      };
+    },
+  });
+}
+
 export function useSupportTicketDetail(ticketId?: string) {
   return useQuery({
     queryKey: queryKeys.support.ticketDetail(ticketId),
@@ -137,6 +162,7 @@ const invalidateSupportQueries = async (queryClient: ReturnType<typeof useQueryC
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: queryKeys.support.tickets() }),
     queryClient.invalidateQueries({ queryKey: queryKeys.support.reports() }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.support.requestAccess() }),
     queryClient.invalidateQueries({ queryKey: queryKeys.support.ticketDetail() }),
   ]);
 };
@@ -204,6 +230,32 @@ export function useRespondToIssueReportMutation() {
     },
     onSuccess: async () => {
       emitMutationEvent({ endpoint: "/support/reports/respond", method: "POST" });
+      await invalidateSupportQueries(queryClient);
+    },
+  });
+}
+
+export function useUpdateRequestAccessMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: {
+      id: string;
+      status?: RequestAccessRecord["status"];
+      internalNote?: string | null;
+      assignedToUserId?: string | null;
+    }) => {
+      const response = await apiClient.patchRequestAccessRecord(params.id, {
+        status: params.status,
+        internalNote: params.internalNote,
+        assignedToUserId: params.assignedToUserId,
+      });
+
+      if (!response.success) throw new Error(response.error || "Could not update request access record.");
+      return response.data;
+    },
+    onSuccess: async () => {
+      emitMutationEvent({ endpoint: "/support/request-access", method: "PATCH" });
       await invalidateSupportQueries(queryClient);
     },
   });

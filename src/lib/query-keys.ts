@@ -31,6 +31,7 @@ export const queryKeys = {
     tickets: (filters?: Record<string, unknown>) => ["support", "tickets", filters ?? {}] as const,
     ticketDetail: (id?: string) => ["support", "ticket", scopedValue(id)] as const,
     reports: () => ["support", "reports"] as const,
+    requestAccess: () => ["support", "request-access"] as const,
     assignees: () => ["support", "assignees"] as const,
   },
 };
