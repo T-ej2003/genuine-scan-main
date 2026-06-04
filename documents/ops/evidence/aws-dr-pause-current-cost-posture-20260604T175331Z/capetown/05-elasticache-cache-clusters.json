@@ -1,0 +1,108 @@
+{
+    "CacheClusters": [
+        {
+            "CacheClusterId": "mscqr-redis-afs1-primary-001",
+            "ClientDownloadLandingPage": "https://console.aws.amazon.com/elasticache/home#client-download:",
+            "CacheNodeType": "cache.t3.micro",
+            "Engine": "valkey",
+            "EngineVersion": "9.0.0",
+            "CacheClusterStatus": "available",
+            "NumCacheNodes": 1,
+            "PreferredAvailabilityZone": "af-south-1b",
+            "CacheClusterCreateTime": "2026-05-14T22:39:38.595000+00:00",
+            "PreferredMaintenanceWindow": "mon:22:00-mon:23:00",
+            "PendingModifiedValues": {},
+            "CacheSecurityGroups": [],
+            "CacheParameterGroup": {
+                "CacheParameterGroupName": "default.valkey9",
+                "ParameterApplyStatus": "in-sync",
+                "CacheNodeIdsToReboot": []
+            },
+            "CacheSubnetGroupName": "mscqr-redis-subnet-afs1",
+            "CacheNodes": [
+                {
+                    "CacheNodeId": "0001",
+                    "CacheNodeStatus": "available",
+                    "CacheNodeCreateTime": "2026-05-14T22:39:38.595000+00:00",
+                    "Endpoint": {
+                        "Address": "mscqr-redis-afs1-primary-001.mscqr-redis-afs1-primary.nmqrjd.afs1.cache.amazonaws.com",
+                        "Port": 6379
+                    },
+                    "ParameterGroupStatus": "in-sync",
+                    "CustomerAvailabilityZone": "af-south-1b"
+                }
+            ],
+            "AutoMinorVersionUpgrade": true,
+            "SecurityGroups": [
+                {
+                    "SecurityGroupId": "sg-061c4ffc734e1d149",
+                    "Status": "active"
+                }
+            ],
+            "ReplicationGroupId": "mscqr-redis-afs1-primary",
+            "SnapshotRetentionLimit": 0,
+            "SnapshotWindow": "02:00-03:00",
+            "AuthTokenEnabled": false,
+            "TransitEncryptionEnabled": true,
+            "AtRestEncryptionEnabled": true,
+            "ARN": "arn:aws:elasticache:af-south-1:368992683803:cluster:mscqr-redis-afs1-primary-001",
+            "ReplicationGroupLogDeliveryEnabled": false,
+            "LogDeliveryConfigurations": [],
+            "NetworkType": "ipv4",
+            "IpDiscovery": "ipv4",
+            "TransitEncryptionMode": "required"
+        },
+        {
+            "CacheClusterId": "mscqr-redis-afs1-primary-002",
+            "ClientDownloadLandingPage": "https://console.aws.amazon.com/elasticache/home#client-download:",
+            "CacheNodeType": "cache.t3.micro",
+            "Engine": "valkey",
+            "EngineVersion": "9.0.0",
+            "CacheClusterStatus": "available",
+            "NumCacheNodes": 1,
+            "PreferredAvailabilityZone": "af-south-1a",
+            "CacheClusterCreateTime": "2026-05-14T22:39:38.595000+00:00",
+            "PreferredMaintenanceWindow": "mon:22:00-mon:23:00",
+            "PendingModifiedValues": {},
+            "CacheSecurityGroups": [],
+            "CacheParameterGroup": {
+                "CacheParameterGroupName": "default.valkey9",
+                "ParameterApplyStatus": "in-sync",
+                "CacheNodeIdsToReboot": []
+            },
+            "CacheSubnetGroupName": "mscqr-redis-subnet-afs1",
+            "CacheNodes": [
+                {
+                    "CacheNodeId": "0001",
+                    "CacheNodeStatus": "available",
+                    "CacheNodeCreateTime": "2026-05-14T22:39:38.595000+00:00",
+                    "Endpoint": {
+                        "Address": "mscqr-redis-afs1-primary-002.mscqr-redis-afs1-primary.nmqrjd.afs1.cache.amazonaws.com",
+                        "Port": 6379
+                    },
+                    "ParameterGroupStatus": "in-sync",
+                    "CustomerAvailabilityZone": "af-south-1a"
+                }
+            ],
+            "AutoMinorVersionUpgrade": true,
+            "SecurityGroups": [
+                {
+                    "SecurityGroupId": "sg-061c4ffc734e1d149",
+                    "Status": "active"
+                }
+            ],
+            "ReplicationGroupId": "mscqr-redis-afs1-primary",
+            "SnapshotRetentionLimit": 0,
+            "SnapshotWindow": "02:00-03:00",
+            "AuthTokenEnabled": false,
+            "TransitEncryptionEnabled": true,
+            "AtRestEncryptionEnabled": true,
+            "ARN": "arn:aws:elasticache:af-south-1:368992683803:cluster:mscqr-redis-afs1-primary-002",
+            "ReplicationGroupLogDeliveryEnabled": false,
+            "LogDeliveryConfigurations": [],
+            "NetworkType": "ipv4",
+            "IpDiscovery": "ipv4",
+            "TransitEncryptionMode": "required"
+        }
+    ]
+}

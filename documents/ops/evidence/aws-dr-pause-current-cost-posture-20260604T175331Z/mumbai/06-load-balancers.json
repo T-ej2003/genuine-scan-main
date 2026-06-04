@@ -1,0 +1,34 @@
+{
+    "LoadBalancers": [
+        {
+            "LoadBalancerArn": "arn:aws:elasticloadbalancing:ap-south-1:368992683803:loadbalancer/app/mscqr-mumbai-alb/025ad0cb77546ee0",
+            "DNSName": "mscqr-mumbai-alb-1249752376.ap-south-1.elb.amazonaws.com",
+            "CanonicalHostedZoneId": "ZP97RAFLXTNZK",
+            "CreatedTime": "2026-05-14T00:43:58.889000+00:00",
+            "LoadBalancerName": "mscqr-mumbai-alb",
+            "Scheme": "internet-facing",
+            "VpcId": "vpc-0e728e3a63292a9b7",
+            "State": {
+                "Code": "active"
+            },
+            "Type": "application",
+            "AvailabilityZones": [
+                {
+                    "ZoneName": "ap-south-1a",
+                    "SubnetId": "subnet-02bc2a99031a9addf",
+                    "LoadBalancerAddresses": []
+                },
+                {
+                    "ZoneName": "ap-south-1b",
+                    "SubnetId": "subnet-06859c5885399fe90",
+                    "LoadBalancerAddresses": []
+                }
+            ],
+            "SecurityGroups": [
+                "sg-0924027a22e96be48"
+            ],
+            "IpAddressType": "ipv4",
+            "EnablePrefixForIpv6SourceNat": "off"
+        }
+    ]
+}

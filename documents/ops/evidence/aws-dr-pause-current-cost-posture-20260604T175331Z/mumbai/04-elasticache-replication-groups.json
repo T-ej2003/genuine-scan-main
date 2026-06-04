@@ -1,0 +1,70 @@
+{
+    "ReplicationGroups": [
+        {
+            "ReplicationGroupId": "mscqr-redis-aps1-primary",
+            "Description": "MSCQR Mumbai shared Redis Valkey primary",
+            "GlobalReplicationGroupInfo": {},
+            "Status": "available",
+            "PendingModifiedValues": {},
+            "MemberClusters": [
+                "mscqr-redis-aps1-primary-001",
+                "mscqr-redis-aps1-primary-002"
+            ],
+            "NodeGroups": [
+                {
+                    "NodeGroupId": "0001",
+                    "Status": "available",
+                    "PrimaryEndpoint": {
+                        "Address": "master.mscqr-redis-aps1-primary.os3ab4.aps1.cache.amazonaws.com",
+                        "Port": 6379
+                    },
+                    "ReaderEndpoint": {
+                        "Address": "replica.mscqr-redis-aps1-primary.os3ab4.aps1.cache.amazonaws.com",
+                        "Port": 6379
+                    },
+                    "NodeGroupMembers": [
+                        {
+                            "CacheClusterId": "mscqr-redis-aps1-primary-001",
+                            "CacheNodeId": "0001",
+                            "ReadEndpoint": {
+                                "Address": "mscqr-redis-aps1-primary-001.mscqr-redis-aps1-primary.os3ab4.aps1.cache.amazonaws.com",
+                                "Port": 6379
+                            },
+                            "PreferredAvailabilityZone": "ap-south-1a",
+                            "CurrentRole": "primary"
+                        },
+                        {
+                            "CacheClusterId": "mscqr-redis-aps1-primary-002",
+                            "CacheNodeId": "0001",
+                            "ReadEndpoint": {
+                                "Address": "mscqr-redis-aps1-primary-002.mscqr-redis-aps1-primary.os3ab4.aps1.cache.amazonaws.com",
+                                "Port": 6379
+                            },
+                            "PreferredAvailabilityZone": "ap-south-1b",
+                            "CurrentRole": "replica"
+                        }
+                    ]
+                }
+            ],
+            "AutomaticFailover": "enabled",
+            "MultiAZ": "enabled",
+            "SnapshotRetentionLimit": 0,
+            "SnapshotWindow": "03:00-04:00",
+            "ClusterEnabled": false,
+            "CacheNodeType": "cache.t4g.small",
+            "AuthTokenEnabled": false,
+            "TransitEncryptionEnabled": true,
+            "AtRestEncryptionEnabled": true,
+            "ARN": "arn:aws:elasticache:ap-south-1:368992683803:replicationgroup:mscqr-redis-aps1-primary",
+            "LogDeliveryConfigurations": [],
+            "ReplicationGroupCreateTime": "2026-05-14T22:30:05.029000+00:00",
+            "DataTiering": "disabled",
+            "AutoMinorVersionUpgrade": true,
+            "NetworkType": "ipv4",
+            "IpDiscovery": "ipv4",
+            "TransitEncryptionMode": "required",
+            "ClusterMode": "disabled",
+            "Engine": "valkey"
+        }
+    ]
+}

@@ -21,6 +21,27 @@ const smokeRequestTimeoutMs = Number.parseInt(process.env.SMOKE_REQUEST_TIMEOUT_
 
 const cookieJar = new Map();
 
+class SmokeRequestError extends Error {
+  constructor(message, { url, status = null, contentType = "", preview = "", kind = "request" } = {}) {
+    super(message);
+    this.name = "SmokeRequestError";
+    this.url = url || "unknown";
+    this.status = status;
+    this.contentType = contentType;
+    this.preview = preview;
+    this.kind = kind;
+  }
+}
+
+const sanitizeResponsePreview = (value) =>
+  String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, "postgres://[redacted]")
+    .replace(/password=[^;\s"']+/gi, "password=[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [redacted]")
+    .slice(0, 220);
+
 const recordSetCookies = (headers) => {
   const getter = headers?.getSetCookie;
   const rawCookies =
@@ -71,8 +92,10 @@ const requestJson = async (url, options = {}) => {
       signal: controller.signal,
     });
   } catch (error) {
-    throw new Error(
-      `Smoke request failed for ${url}. Confirm backend/frontend target is reachable and SMOKE_BASE_URL is correct. (${error instanceof Error ? error.message : String(error)})`
+    const preview = sanitizeResponsePreview(error instanceof Error ? error.message : String(error));
+    throw new SmokeRequestError(
+      `Smoke request failed for ${url}. Confirm backend/frontend target is reachable and SMOKE_BASE_URL is correct. (${preview})`,
+      { url, preview, kind: "network" }
     );
   } finally {
     clearTimeout(timeout);
@@ -82,7 +105,7 @@ const requestJson = async (url, options = {}) => {
 
   const contentType = response.headers.get("content-type") || "";
   const text = await response.text();
-  const preview = text.replace(/\s+/g, " ").trim().slice(0, 220);
+  const preview = sanitizeResponsePreview(text);
   const lowerPreview = preview.toLowerCase();
   const looksLikeHtml =
     contentType.toLowerCase().includes("text/html") ||
@@ -90,10 +113,11 @@ const requestJson = async (url, options = {}) => {
     lowerPreview.startsWith("<html");
 
   if (looksLikeHtml) {
-    throw new Error(
+    throw new SmokeRequestError(
       `Smoke request expected JSON but received HTML from ${url}. ` +
         `This usually means an API route is being served by the frontend SPA fallback or nginx error page instead of backend JSON. ` +
-        `Status=${response.status}; content-type=${contentType || "unknown"}; preview=${preview}`
+        `Status=${response.status}; content-type=${contentType || "unknown"}; preview=${preview}`,
+      { url, status: response.status, contentType, preview, kind: "html" }
     );
   }
 
@@ -102,10 +126,11 @@ const requestJson = async (url, options = {}) => {
     try {
       payload = JSON.parse(text);
     } catch (error) {
-      throw new Error(
+      throw new SmokeRequestError(
         `Smoke request expected JSON but could not parse response from ${url}. ` +
           `Status=${response.status}; content-type=${contentType || "unknown"}; preview=${preview}; ` +
-          `parseError=${error instanceof Error ? error.message : String(error)}`
+          `parseError=${error instanceof Error ? error.message : String(error)}`,
+        { url, status: response.status, contentType, preview, kind: "non-json" }
       );
     }
   }
@@ -141,6 +166,23 @@ const shouldSoftSkipDegradedReady = (status, payload) =>
   status >= 500 &&
   String(payload?.status || "").toLowerCase() === "degraded";
 
+const shouldSoftSkipUnavailableReady = (error) =>
+  error instanceof SmokeRequestError &&
+  isPullRequestSmoke &&
+  !smokeRequired &&
+  allowDegradedReadyOnPr &&
+  (error.kind === "network" || error.kind === "html" || error.status === 503 || (error.status != null && error.status >= 500));
+
+const formatUnavailableReadySkip = (error) => {
+  const status = error.status == null ? "unreachable" : String(error.status);
+  const contentType = error.contentType || "unknown";
+  const preview = error.preview || "no response body";
+  return (
+    `PR smoke degraded/unavailable; not release-blocking. ` +
+    `target=${error.url}; status=${status}; content-type=${contentType}; preview=${preview}`
+  );
+};
+
 const logPass = (message) => {
   console.log(`PASS ${message}`);
 };
@@ -154,7 +196,18 @@ const run = async () => {
   console.log(`Smoke API: ${apiBaseUrl}`);
 
   {
-    const { response, payload } = await requestJson(`${apiBaseUrl}/health/ready`);
+    let response;
+    let payload;
+    try {
+      ({ response, payload } = await requestJson(`${apiBaseUrl}/health/ready`));
+    } catch (error) {
+      if (shouldSoftSkipUnavailableReady(error)) {
+        logSkip(formatUnavailableReadySkip(error));
+        logSkip("staging smoke remaining steps because SMOKE_REQUIRED=false and staging readiness is unavailable for this pull request");
+        return;
+      }
+      throw error;
+    }
     if (shouldSoftSkipDegradedReady(response.status, payload)) {
       logSkip(`ready health degraded for pull request (${summarizeReadyHealth(payload)})`);
       logSkip("staging smoke remaining steps because SMOKE_REQUIRED=false and staging readiness is degraded");

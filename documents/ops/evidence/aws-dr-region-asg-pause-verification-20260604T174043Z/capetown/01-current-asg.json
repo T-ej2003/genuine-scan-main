@@ -1,0 +1,111 @@
+{
+    "AutoScalingGroups": [
+        {
+            "AutoScalingGroupName": "mscqr-capetown-dr-asg",
+            "AutoScalingGroupARN": "arn:aws:autoscaling:af-south-1:368992683803:autoScalingGroup:a14a5b2a-0e92-47bb-ada6-c8e906a6f224:autoScalingGroupName/mscqr-capetown-dr-asg",
+            "LaunchTemplate": {
+                "LaunchTemplateId": "lt-04eeeecdf7ff884fe",
+                "LaunchTemplateName": "mscqr-capetown-dr-lt",
+                "Version": "1"
+            },
+            "MinSize": 0,
+            "MaxSize": 4,
+            "DesiredCapacity": 0,
+            "DefaultCooldown": 300,
+            "AvailabilityZones": [
+                "af-south-1a",
+                "af-south-1b"
+            ],
+            "AvailabilityZoneIds": [
+                "afs1-az1",
+                "afs1-az2"
+            ],
+            "LoadBalancerNames": [],
+            "TargetGroupARNs": [
+                "arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d"
+            ],
+            "HealthCheckType": "ELB",
+            "HealthCheckGracePeriod": 900,
+            "Instances": [],
+            "CreatedTime": "2026-06-01T16:25:07.122000+00:00",
+            "SuspendedProcesses": [
+                {
+                    "ProcessName": "ReplaceUnhealthy",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:09Z"
+                },
+                {
+                    "ProcessName": "ScheduledActions",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:09Z"
+                },
+                {
+                    "ProcessName": "HealthCheck",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:09Z"
+                },
+                {
+                    "ProcessName": "AlarmNotification",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:09Z"
+                },
+                {
+                    "ProcessName": "InstanceRefresh",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:09Z"
+                },
+                {
+                    "ProcessName": "AZRebalance",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:09Z"
+                },
+                {
+                    "ProcessName": "Launch",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:09Z"
+                }
+            ],
+            "VPCZoneIdentifier": "subnet-0f790d50a4dd152be,subnet-04c638841c2a6b5ed",
+            "EnabledMetrics": [],
+            "Tags": [
+                {
+                    "ResourceId": "mscqr-capetown-dr-asg",
+                    "ResourceType": "auto-scaling-group",
+                    "Key": "Project",
+                    "Value": "MSCQR",
+                    "PropagateAtLaunch": true
+                },
+                {
+                    "ResourceId": "mscqr-capetown-dr-asg",
+                    "ResourceType": "auto-scaling-group",
+                    "Key": "Purpose",
+                    "Value": "DR",
+                    "PropagateAtLaunch": true
+                },
+                {
+                    "ResourceId": "mscqr-capetown-dr-asg",
+                    "ResourceType": "auto-scaling-group",
+                    "Key": "RegionGroup",
+                    "Value": "capetown",
+                    "PropagateAtLaunch": true
+                }
+            ],
+            "TerminationPolicies": [
+                "Default"
+            ],
+            "NewInstancesProtectedFromScaleIn": false,
+            "ServiceLinkedRoleARN": "arn:aws:iam::368992683803:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling",
+            "DefaultInstanceWarmup": 900,
+            "TrafficSources": [
+                {
+                    "Identifier": "arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d",
+                    "Type": "elbv2"
+                }
+            ],
+            "AvailabilityZoneDistribution": {
+                "CapacityDistributionStrategy": "balanced-best-effort"
+            },
+            "CapacityReservationSpecification": {
+                "CapacityReservationPreference": "default"
+            },
+            "InstanceLifecyclePolicy": {
+                "RetentionTriggers": {
+                    "TerminateHookAbandon": "terminate"
+                }
+            }
+        }
+    ]
+}

@@ -1,0 +1,24 @@
+=== mscqr-capetown-frontend-tg ===
+arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d
+{
+    "TargetHealthDescriptions": [
+        {
+            "Target": {
+                "Id": "i-064223a25caf64770",
+                "Port": 80
+            },
+            "HealthCheckPort": "80",
+            "TargetHealth": {
+                "State": "unused",
+                "Reason": "Target.InvalidState",
+                "Description": "Target is in the stopped state"
+            },
+            "AdministrativeOverride": {
+                "State": "no_override",
+                "Reason": "AdministrativeOverride.NoOverride",
+                "Description": "No override is currently active on target"
+            }
+        }
+    ]
+}
+

@@ -1,0 +1,34 @@
+# mumbai
+asg: mscqr-mumbai-dr-asg
+asg_min: 0
+asg_desired: 0
+asg_max: 4
+asg_instances: 0
+suspended_processes: AZRebalance, AlarmNotification, HealthCheck, InstanceRefresh, Launch, ReplaceUnhealthy, ScheduledActions
+ec2_states: {'stopped': 1}
+rds_count: 1
+- rds: mscqr-prod-db-aps1 status=stopped class=db.t4g.medium
+elasticache_replication_groups: 1
+- elasticache_rg: mscqr-redis-aps1-primary status=available node_type=cache.t4g.small members=2
+elasticache_cache_clusters: 2
+load_balancers: 1
+- lb: mscqr-mumbai-alb state=active type=application
+target_groups: 1
+
+# capetown
+asg: mscqr-capetown-dr-asg
+asg_min: 0
+asg_desired: 0
+asg_max: 4
+asg_instances: 0
+suspended_processes: AZRebalance, AlarmNotification, HealthCheck, InstanceRefresh, Launch, ReplaceUnhealthy, ScheduledActions
+ec2_states: {'stopped': 1}
+rds_count: 1
+- rds: mscqr-prod-db-afs1 status=stopped class=db.t4g.small
+elasticache_replication_groups: 1
+- elasticache_rg: mscqr-redis-afs1-primary status=available node_type=cache.t3.micro members=2
+elasticache_cache_clusters: 2
+load_balancers: 1
+- lb: mscqr-capetown-alb state=active type=application
+target_groups: 1
+
