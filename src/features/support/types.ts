@@ -9,7 +9,14 @@ import type {
 export type SupportTicket = RuntimeSupportTicket;
 export type SupportTicketDetail = RuntimeSupportTicketDetail;
 export type SupportTicketMessage = RuntimeSupportTicketMessage;
-export type SupportIssueReport = RuntimeSupportIssueReport;
+export type SupportIssueReport = RuntimeSupportIssueReport & {
+  referenceCode?: string | null;
+  publicName?: string | null;
+  publicEmail?: string | null;
+  issueType?: string | null;
+  priority?: string | null;
+  emailDeliveryStatus?: string | null;
+};
 export type SupportAssignee = RuntimeSupportAssignee;
 
 export type RequestAccessRecord = {

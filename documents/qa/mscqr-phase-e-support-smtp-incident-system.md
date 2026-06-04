@@ -62,6 +62,11 @@
 - `e2e/phase-e-support-intake.spec.ts`
 - Updated `src/test/support-center-regression.test.tsx`
 
+## Frontend Guardrail Refactor
+
+- `src/features/support/SupportCenterPage.tsx` was reduced below the default 700-line page threshold by extracting the issue-report cards and request-access queue into focused support feature components without changing support workflow behavior.
+- The Phase E public intake API methods were also moved into a focused support-intake transport so the frontend code-size budget remains green without adding an allowlist or bypass.
+
 ## Commands Run
 
 - `PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin npm --prefix backend run build`

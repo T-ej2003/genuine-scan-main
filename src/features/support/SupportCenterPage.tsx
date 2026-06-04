@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bug, Loader2, MessageSquareText, RefreshCw, Send, ShieldCheck, TimerReset } from "lucide-react";
+import { MessageSquareText, RefreshCw, TimerReset } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { formatDistanceToNowStrict } from "date-fns";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DataTablePagePattern, PageEmptyState, PageInlineNotice, PageSection } from "@/components/page-patterns/PagePatterns";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ActionButton } from "@/components/ui/action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +15,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   PRIORITY_TONE,
-  REQUEST_ACCESS_STATUSES,
   STATUS_TONE,
   SUPPORT_PRIORITIES,
   SUPPORT_STATUSES,
@@ -36,8 +34,9 @@ import {
   useUpdateRequestAccessMutation,
   useUpdateSupportTicketMutation,
 } from "@/features/support/hooks";
+import { SupportIssueReportsPanel } from "@/features/support/SupportIssueReportsPanel";
+import { SupportRequestAccessPanel } from "@/features/support/SupportRequestAccessPanel";
 import { friendlyReferenceLabel, shortRawReference } from "@/lib/friendly-reference";
-import apiClient from "@/lib/api-client";
 import { createUiActionState } from "@/lib/ui-actions";
 import { getSupportStatusLabel } from "@/lib/ui-copy";
 import { useToast } from "@/hooks/use-toast";
@@ -318,198 +317,26 @@ export default function SupportCenterPage() {
           />
         ) : null}
 
-        <PageSection
-          title="New help requests"
-          description="Reply to newly reported issues without leaving the help desk."
-          action={<Badge variant="outline">{issueReports.length}</Badge>}
-        >
-          {reportsQuery.isLoading ? (
-            <div className="text-sm text-muted-foreground">Loading issue reports...</div>
-          ) : issueReports.length === 0 ? (
-            <PageEmptyState
-              title="No new help requests"
-              description="When a user asks for help from the app, it will appear here."
-            />
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {issueReports.slice(0, 8).map((report) => (
-                <div key={report.id} className="rounded-2xl border p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold leading-5">{report.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {(report as any).publicName || report.reporterUser?.name || report.reporterUser?.email || "Unknown user"}
-                        {(report as any).publicEmail ? ` · ${(report as any).publicEmail}` : ""}
-                        {report.licensee?.name ? ` · ${report.licensee.name}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <Badge variant={report.autoDetected ? "default" : "outline"}>
-                        {report.autoDetected ? "Reported by app" : "Manual"}
-                      </Badge>
-                      <Badge variant="outline">{toLabel(report.status)}</Badge>
-                    </div>
-                  </div>
+        <SupportIssueReportsPanel
+          reports={issueReports}
+          isLoading={reportsQuery.isLoading}
+          canEdit={canEdit}
+          replyDrafts={issueReplyDrafts}
+          respondingReportId={respondToReportMutation.variables?.reportId}
+          isResponding={respondToReportMutation.isPending}
+          onDraftChange={(reportId, value) => setIssueReplyDrafts((prev) => ({ ...prev, [reportId]: value }))}
+          onRespond={(report) => void respondToIssueReport(report)}
+        />
 
-                  {report.description ? <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{report.description}</p> : null}
-
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                    {(report as any).referenceCode ? <span className="font-mono">{(report as any).referenceCode}</span> : null}
-                    {(report as any).issueType ? <span>{toLabel((report as any).issueType)}</span> : null}
-                    {(report as any).priority ? <span>{(report as any).priority}</span> : null}
-                    <span>{formatDistanceToNowStrict(new Date(report.createdAt), { addSuffix: true })}</span>
-                    {report.sourcePath ? <span>Screen: {report.sourcePath}</span> : null}
-                    {(report as any).emailDeliveryStatus ? <span>Email: {toLabel((report as any).emailDeliveryStatus)}</span> : null}
-                  </div>
-
-                  {report.screenshotPath ? (
-                    <a
-                      className="mt-3 inline-flex text-xs font-medium text-primary hover:underline"
-                      href={apiClient.getSupportIssueScreenshotUrl(report.screenshotPath)}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Open screenshot
-                    </a>
-                  ) : null}
-
-                  {report.responseMessage ? (
-                    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3">
-                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-emerald-800">
-                        <span className="font-semibold">Latest response sent</span>
-                        {report.respondedByUser?.name || report.respondedByUser?.email ? (
-                          <span>by {report.respondedByUser?.name || report.respondedByUser?.email}</span>
-                        ) : null}
-                        {report.respondedAt ? (
-                          <span>{formatDistanceToNowStrict(new Date(report.respondedAt), { addSuffix: true })}</span>
-                        ) : null}
-                      </div>
-                      <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">{report.responseMessage}</p>
-                    </div>
-                  ) : null}
-
-                  {canEdit ? (
-                    <div className="mt-3 space-y-2 rounded-lg border bg-muted/30 p-3">
-                      <Label htmlFor={`issue-response-${report.id}`} className="text-xs font-semibold">
-                        Respond to reporter
-                      </Label>
-                      <Textarea
-                        id={`issue-response-${report.id}`}
-                        rows={3}
-                        value={issueReplyDrafts[report.id] ?? ""}
-                        onChange={(event) =>
-                          setIssueReplyDrafts((prev) => ({
-                            ...prev,
-                            [report.id]: event.target.value,
-                          }))
-                        }
-                        placeholder="Tell the user what happens next."
-                      />
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-[11px] text-muted-foreground">
-                          This reply is sent by email and also appears in the user&apos;s notification feed.
-                        </p>
-                        <ActionButton
-                          data-testid="support-issue-report-reply"
-                          size="sm"
-                          onClick={() => void respondToIssueReport(report)}
-                          state={
-                            respondToReportMutation.isPending && respondToReportMutation.variables?.reportId === report.id
-                              ? createUiActionState("pending", "Sending the reply now.")
-                              : !String(issueReplyDrafts[report.id] || "").trim()
-                                ? createUiActionState("disabled", "Write the reply before you send it.")
-                                : createUiActionState("enabled")
-                          }
-                          idleLabel={
-                            <>
-                              <Send className="mr-2 h-4 w-4" />
-                              {report.responseMessage ? "Update reply" : "Send reply"}
-                            </>
-                          }
-                          pendingLabel="Sending..."
-                          showReasonBelow={false}
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
-        </PageSection>
-
-        <PageSection
-          title="Access requests"
-          description="Review onboarding requests from brands and manufacturers before inviting platform users."
-          action={<Badge variant="outline">{requestAccessRecords.length}</Badge>}
-        >
-          {requestAccessQuery.isLoading ? (
-            <div className="text-sm text-muted-foreground">Loading access requests...</div>
-          ) : requestAccessRecords.length === 0 ? (
-            <PageEmptyState
-              title="No access requests"
-              description="Public access requests will appear here after the request-access form is submitted."
-            />
-          ) : (
-            <div className="grid gap-3 xl:grid-cols-2">
-              {requestAccessRecords.slice(0, 8).map((record) => (
-                <div key={record.id} className="rounded-2xl border p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold">{record.companyName}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {record.fullName} · {record.workEmail}
-                      </p>
-                      <p className="mt-1 font-mono text-[11px] text-muted-foreground">{record.referenceCode}</p>
-                    </div>
-                    <Badge variant="outline">{toLabel(record.status)}</Badge>
-                  </div>
-                  <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                    <span>Role: {record.roleTitle}</span>
-                    <span>Country: {record.country}</span>
-                    <span>Volume: {record.monthlyGarmentVolume}</span>
-                    <span>Email: {toLabel(record.adminEmailDeliveryStatus || "UNKNOWN")}</span>
-                  </div>
-                  <p className="mt-3 line-clamp-3 text-xs text-slate-700">{record.message}</p>
-                  {canEdit ? (
-                    <div className="mt-3 space-y-2 rounded-lg border bg-muted/30 p-3">
-                      <Label htmlFor={`request-access-note-${record.id}`} className="text-xs font-semibold">
-                        Internal note
-                      </Label>
-                      <Textarea
-                        id={`request-access-note-${record.id}`}
-                        rows={2}
-                        value={requestNotes[record.id] ?? record.internalNote ?? ""}
-                        onChange={(event) => setRequestNotes((prev) => ({ ...prev, [record.id]: event.target.value }))}
-                        placeholder="Next step, owner, or qualification note."
-                      />
-                      <div className="flex flex-wrap gap-2">
-                        {REQUEST_ACCESS_STATUSES.filter((status) => status !== record.status)
-                          .slice(0, 3)
-                          .map((status) => (
-                            <ActionButton
-                              key={status}
-                              size="sm"
-                              variant="outline"
-                              onClick={() => void updateRequestAccess(record, status)}
-                              state={
-                                updateRequestAccessMutation.isPending
-                                  ? createUiActionState("pending", "Saving access request update.")
-                                  : createUiActionState("enabled")
-                              }
-                              idleLabel={toLabel(status)}
-                              pendingLabel="Saving..."
-                              showReasonBelow={false}
-                            />
-                          ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
-        </PageSection>
+        <SupportRequestAccessPanel
+          records={requestAccessRecords}
+          isLoading={requestAccessQuery.isLoading}
+          canEdit={canEdit}
+          notes={requestNotes}
+          isUpdating={updateRequestAccessMutation.isPending}
+          onNoteChange={(recordId, value) => setRequestNotes((prev) => ({ ...prev, [recordId]: value }))}
+          onUpdate={(record, status) => void updateRequestAccess(record, status)}
+        />
 
         <PageSection
           title="Case queue"
