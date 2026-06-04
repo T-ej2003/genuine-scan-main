@@ -1,0 +1,5 @@
+asg: mscqr-mumbai-dr-asg
+launch_template: {'LaunchTemplateId': 'lt-02570cc00f696ee4c', 'LaunchTemplateName': 'mscqr-mumbai-dr-lt', 'Version': '18'}
+mixed_instances_policy: None
+traffic_sources: [{'Identifier': 'arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1', 'Type': 'elbv2'}]
+vpc_zone_identifier: subnet-02bc2a99031a9addf,subnet-06859c5885399fe90

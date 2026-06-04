@@ -1,0 +1,2 @@
+mumbai ap-south-1 mscqr-mumbai-dr-asg
+capetown af-south-1 mscqr-capetown-dr-asg

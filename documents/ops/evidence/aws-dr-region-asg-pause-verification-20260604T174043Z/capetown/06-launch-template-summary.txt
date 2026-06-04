@@ -1,0 +1,5 @@
+asg: mscqr-capetown-dr-asg
+launch_template: {'LaunchTemplateId': 'lt-04eeeecdf7ff884fe', 'LaunchTemplateName': 'mscqr-capetown-dr-lt', 'Version': '1'}
+mixed_instances_policy: None
+traffic_sources: [{'Identifier': 'arn:aws:elasticloadbalancing:af-south-1:368992683803:targetgroup/mscqr-capetown-frontend-tg/a9b43fd2d346e26d', 'Type': 'elbv2'}]
+vpc_zone_identifier: subnet-0f790d50a4dd152be,subnet-04c638841c2a6b5ed

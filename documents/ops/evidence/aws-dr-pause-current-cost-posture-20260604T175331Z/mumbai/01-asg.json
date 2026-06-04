@@ -1,0 +1,111 @@
+{
+    "AutoScalingGroups": [
+        {
+            "AutoScalingGroupName": "mscqr-mumbai-dr-asg",
+            "AutoScalingGroupARN": "arn:aws:autoscaling:ap-south-1:368992683803:autoScalingGroup:ba76e370-d733-4483-8703-d58c0cf20c77:autoScalingGroupName/mscqr-mumbai-dr-asg",
+            "LaunchTemplate": {
+                "LaunchTemplateId": "lt-02570cc00f696ee4c",
+                "LaunchTemplateName": "mscqr-mumbai-dr-lt",
+                "Version": "18"
+            },
+            "MinSize": 0,
+            "MaxSize": 4,
+            "DesiredCapacity": 0,
+            "DefaultCooldown": 300,
+            "AvailabilityZones": [
+                "ap-south-1b",
+                "ap-south-1a"
+            ],
+            "AvailabilityZoneIds": [
+                "aps1-az3",
+                "aps1-az1"
+            ],
+            "LoadBalancerNames": [],
+            "TargetGroupARNs": [
+                "arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1"
+            ],
+            "HealthCheckType": "ELB",
+            "HealthCheckGracePeriod": 900,
+            "Instances": [],
+            "CreatedTime": "2026-05-15T00:21:01.868000+00:00",
+            "SuspendedProcesses": [
+                {
+                    "ProcessName": "InstanceRefresh",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:02Z"
+                },
+                {
+                    "ProcessName": "AlarmNotification",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:02Z"
+                },
+                {
+                    "ProcessName": "ReplaceUnhealthy",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:02Z"
+                },
+                {
+                    "ProcessName": "ScheduledActions",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:02Z"
+                },
+                {
+                    "ProcessName": "Launch",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:02Z"
+                },
+                {
+                    "ProcessName": "AZRebalance",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:02Z"
+                },
+                {
+                    "ProcessName": "HealthCheck",
+                    "SuspensionReason": "User suspended at 2026-06-04T17:36:02Z"
+                }
+            ],
+            "VPCZoneIdentifier": "subnet-02bc2a99031a9addf,subnet-06859c5885399fe90",
+            "EnabledMetrics": [],
+            "Tags": [
+                {
+                    "ResourceId": "mscqr-mumbai-dr-asg",
+                    "ResourceType": "auto-scaling-group",
+                    "Key": "Project",
+                    "Value": "MSCQR",
+                    "PropagateAtLaunch": true
+                },
+                {
+                    "ResourceId": "mscqr-mumbai-dr-asg",
+                    "ResourceType": "auto-scaling-group",
+                    "Key": "Purpose",
+                    "Value": "DR",
+                    "PropagateAtLaunch": true
+                },
+                {
+                    "ResourceId": "mscqr-mumbai-dr-asg",
+                    "ResourceType": "auto-scaling-group",
+                    "Key": "RegionGroup",
+                    "Value": "mumbai",
+                    "PropagateAtLaunch": true
+                }
+            ],
+            "TerminationPolicies": [
+                "Default"
+            ],
+            "NewInstancesProtectedFromScaleIn": false,
+            "ServiceLinkedRoleARN": "arn:aws:iam::368992683803:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling",
+            "DefaultInstanceWarmup": 900,
+            "TrafficSources": [
+                {
+                    "Identifier": "arn:aws:elasticloadbalancing:ap-south-1:368992683803:targetgroup/mscqr-mumbai-frontend-tg/68982ccd4d8c26c1",
+                    "Type": "elbv2"
+                }
+            ],
+            "AvailabilityZoneDistribution": {
+                "CapacityDistributionStrategy": "balanced-best-effort"
+            },
+            "CapacityReservationSpecification": {
+                "CapacityReservationPreference": "default"
+            },
+            "InstanceLifecyclePolicy": {
+                "RetentionTriggers": {
+                    "TerminateHookAbandon": "terminate"
+                }
+            }
+        }
+    ]
+}

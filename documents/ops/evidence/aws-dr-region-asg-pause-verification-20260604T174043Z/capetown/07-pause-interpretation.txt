@@ -1,0 +1,12 @@
+region_label: capetown
+region: af-south-1
+asg: mscqr-capetown-dr-asg
+min_size: 0
+desired_capacity: 0
+max_size: 4
+instance_count: 0
+suspended_processes: AZRebalance, AlarmNotification, HealthCheck, InstanceRefresh, Launch, ReplaceUnhealthy, ScheduledActions
+required_suspended_present: AZRebalance, AlarmNotification, HealthCheck, InstanceRefresh, Launch, ReplaceUnhealthy, ScheduledActions
+
+DECISION: DR_ASG_PAUSED_CONFIRMED
+ASG-managed DR compute is paused. Launch is suspended, so ASG should not recreate standby instances.
