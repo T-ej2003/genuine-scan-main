@@ -60,7 +60,7 @@ export function ManufacturerInviteDialog({
         </DialogHeader>
 
         <Form {...form}>
-          <form className="space-y-4" onSubmit={form.handleSubmit((values) => void onSubmit(values))}>
+          <form className="space-y-5" onSubmit={form.handleSubmit((values) => void onSubmit(values))}>
             {isSuperAdmin ? (
               <FormField
                 control={form.control}
@@ -88,7 +88,7 @@ export function ManufacturerInviteDialog({
               />
             ) : null}
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-5 sm:grid-cols-2">
               <FormField
                 control={form.control}
                 name="name"
@@ -118,11 +118,11 @@ export function ManufacturerInviteDialog({
               />
             </div>
 
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-900">
               The invite email includes the activation link and connector download page. It expires after 24 hours.
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-5 sm:grid-cols-2">
               <FormField
                 control={form.control}
                 name="location"
@@ -159,7 +159,7 @@ export function ManufacturerInviteDialog({
               </div>
             ) : null}
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:justify-end">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
                 Cancel
               </Button>

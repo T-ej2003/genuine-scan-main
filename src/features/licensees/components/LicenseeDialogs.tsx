@@ -98,7 +98,7 @@ export function LicenseeDialogs({
         <DialogTrigger asChild>
           <span className="hidden" />
         </DialogTrigger>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[720px]">
+        <DialogContent className="sm:max-w-[720px]">
           <DialogHeader>
             <DialogTitle>Create new brand</DialogTitle>
             <DialogDescription>
@@ -106,8 +106,8 @@ export function LicenseeDialogs({
             </DialogDescription>
           </DialogHeader>
 
-          <form className="mt-4 space-y-4" onSubmit={onCreateSubmit}>
-            <div className="grid grid-cols-2 gap-4">
+          <form className="space-y-5" onSubmit={onCreateSubmit}>
+            <div className="grid gap-5 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Organization Name</Label>
                 <Input
@@ -143,7 +143,7 @@ export function LicenseeDialogs({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-5 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Brand Name</Label>
                 <Input
@@ -164,7 +164,7 @@ export function LicenseeDialogs({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-5 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Official Website</Label>
                 <Input
@@ -201,7 +201,7 @@ export function LicenseeDialogs({
             <div className="space-y-3 rounded-md border p-3">
               <p className="text-sm font-medium">Brand Admin (required)</p>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-5 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Admin Name</Label>
                   <Input
@@ -225,7 +225,7 @@ export function LicenseeDialogs({
                   />
                 </div>
 
-                <div className="col-span-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 sm:col-span-2">
                   Access setup: invite link only. We'll create a secure invite link and attempt to email it to the admin.
                 </div>
               </div>
@@ -241,7 +241,7 @@ export function LicenseeDialogs({
               ) : null}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-5 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>First QR label number</Label>
                 <Input
@@ -282,7 +282,7 @@ export function LicenseeDialogs({
               </div>
 
               {createForm.createManufacturerNow ? (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-5 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Manufacturer Name</Label>
                     <Input
@@ -308,14 +308,14 @@ export function LicenseeDialogs({
                     />
                   </div>
 
-                  <div className="col-span-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 sm:col-span-2">
                     Access setup: invite link only. We'll create a secure invite link and attempt to email it to the manufacturer admin.
                   </div>
                 </div>
               ) : null}
             </div>
 
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:justify-end">
               <Button type="button" variant="outline" onClick={() => onCreateDialogOpenChange(false)} disabled={creating}>
                 Cancel
               </Button>
@@ -335,7 +335,7 @@ export function LicenseeDialogs({
           </DialogHeader>
 
           {editForm ? (
-            <form className="mt-4 space-y-4" onSubmit={onEditSubmit}>
+            <form className="space-y-5" onSubmit={onEditSubmit}>
               <div className="space-y-2">
                 <Label>Organization Name</Label>
                 <Input
@@ -358,7 +358,7 @@ export function LicenseeDialogs({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-5 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Brand Name</Label>
                   <Input
@@ -383,7 +383,7 @@ export function LicenseeDialogs({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-5 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Official Website</Label>
                   <Input
@@ -436,7 +436,7 @@ export function LicenseeDialogs({
                 </Button>
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:justify-end">
                 <Button type="button" variant="outline" onClick={() => onEditDialogOpenChange(false)} disabled={savingEdit}>
                   Cancel
                 </Button>
@@ -457,7 +457,7 @@ export function LicenseeDialogs({
           </DialogHeader>
 
           {userForm ? (
-            <form className="mt-4 space-y-4" onSubmit={onUserSubmit}>
+            <form className="space-y-5" onSubmit={onUserSubmit}>
               <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
                 Access setup: invite link only (expires in 24 hours).
               </div>
@@ -506,7 +506,7 @@ export function LicenseeDialogs({
                 </Select>
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:justify-end">
                 <Button type="button" variant="outline" onClick={() => onUserDialogOpenChange(false)} disabled={creatingUser}>
                   Cancel
                 </Button>
@@ -539,7 +539,7 @@ export function LicenseeDialogs({
               onClose={() => onRangeDialogOpenChange(false)}
             />
           ) : (
-            <form className="mt-2 space-y-4" onSubmit={onRangeSubmit}>
+            <form className="space-y-5" onSubmit={onRangeSubmit}>
               <div className="space-y-1 rounded-md border p-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Last QR label group</span>
@@ -603,7 +603,7 @@ export function LicenseeDialogs({
 	                  </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-5 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Start Number</Label>
                     <Input

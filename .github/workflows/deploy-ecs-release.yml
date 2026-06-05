@@ -348,6 +348,7 @@ jobs:
           CONTAINER_NAME: ${{ inputs.backend_container_name }}
           IMAGE_URI: ${{ steps.backend-image.outputs.image_ref }}
           VERSION_URL: ${{ inputs.backend_version_url }}
+          RELEASE_GIT_SHA: ${{ needs.prepare_release.outputs.image_tag }}
           EXPECTED_GIT_SHA: ${{ needs.prepare_release.outputs.image_tag }}
           METADATA_FILE: ${{ runner.temp }}/backend-deployment.json
         run: ./scripts/aws/deploy-ecs-service.sh
@@ -356,6 +357,7 @@ jobs:
         env:
           VERSION_URL: ${{ inputs.backend_version_url }}
           READY_URL: ${{ inputs.backend_ready_url }}
+          RELEASE_GIT_SHA: ${{ needs.prepare_release.outputs.image_tag }}
           EXPECTED_GIT_SHA: ${{ needs.prepare_release.outputs.image_tag }}
           CANARY_ATTEMPTS: ${{ inputs.backend_canary_attempts }}
           CANARY_DELAY_SECONDS: ${{ inputs.backend_canary_delay_seconds }}

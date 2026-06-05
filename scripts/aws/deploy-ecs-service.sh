@@ -22,7 +22,7 @@ Optional environment:
   DRY_RUN           Default: false. When true, prints the register payload only.
   METADATA_FILE     Optional path to write deployment metadata JSON.
   VERSION_URL       Backend /version URL for post-deploy verification.
-  EXPECTED_GIT_SHA  Full expected git SHA for VERSION_URL verification.
+  EXPECTED_GIT_SHA  Full expected git SHA for VERSION_URL verification and runtime RELEASE_GIT_SHA.
 
 Example:
   AWS_REGION=eu-west-2 \
@@ -99,9 +99,10 @@ const containerDefinitions = (taskDefinition.containerDefinitions || []).map((co
   if (container.name !== containerName) return container;
   containerFound = true;
   const environment = Array.isArray(container.environment)
-    ? container.environment.filter((entry) => entry?.name !== "GIT_SHA")
+    ? container.environment.filter((entry) => entry?.name !== "GIT_SHA" && entry?.name !== "RELEASE_GIT_SHA")
     : [];
   if (expectedGitSha) {
+    environment.push({ name: "RELEASE_GIT_SHA", value: expectedGitSha });
     environment.push({ name: "GIT_SHA", value: expectedGitSha });
   }
   return { ...container, image: imageUri, environment };

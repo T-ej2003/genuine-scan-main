@@ -165,6 +165,7 @@ ansible -i ops/deploy/inventory.ini standby -m shell -a 'cd /home/ubuntu/genuine
 ## Post-Deploy Operator Checklist
 
 - Confirm London, Mumbai, and Cape Town run the intended commit.
+- Confirm `/api/health/live` and `/api/health/ready` report the intended `release.gitSha` after deploy; `unknown` means `RELEASE_GIT_SHA` was not passed into the backend runtime.
 - Confirm backend and frontend containers are healthy where expected.
 - Confirm `https://www.mscqr.com/verify` visibly renders while logged out.
 - Confirm `https://www.mscqr.com/verify/` canonicalizes to `/verify`.

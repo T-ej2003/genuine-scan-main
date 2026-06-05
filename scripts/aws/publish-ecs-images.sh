@@ -122,6 +122,7 @@ docker buildx build \
   --platform "$PLATFORMS" \
   --file "$DOCKERFILE" \
   --build-arg "GIT_SHA=${IMAGE_TAG}" \
+  --build-arg "RELEASE_GIT_SHA=${IMAGE_TAG}" \
   --label "org.opencontainers.image.revision=${IMAGE_TAG}" \
   --label "org.opencontainers.image.source=${REMOTE_URL}" \
   --push \

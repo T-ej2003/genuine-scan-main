@@ -83,6 +83,7 @@
     "test:p3:auth-security-db": "npm run test:p2:db:up && P2_TEST_DATABASE_REQUIRED=true P2_TEST_DATABASE_ADMIN_URL=\"$(node scripts/p2-test-db-env.mjs --print-admin-url)\" npm run test:p2:api-authz-db",
     "test:p3:fullstack": "npm run test:p3:auth-security-db && npm --prefix backend run test:p2:email-capture && npm --prefix backend run test:p1:api-authz && npm --prefix backend run test:p0-authz && npm run typecheck && npm test && npm run build",
     "test:phase-e-support": "npm run test:p2:db:up && P2_TEST_DATABASE_REQUIRED=true P2_TEST_DATABASE_ADMIN_URL=\"$(node scripts/p2-test-db-env.mjs --print-admin-url)\" npm --prefix backend run test:phase-e-support",
+    "test:health-release": "npm --prefix backend run test:health-release",
     "test:smtp:capture": "npm --prefix backend run test:p2:email-capture",
     "smoke:smtp": "npm --prefix backend run smoke:smtp",
     "test:db:migrate-replay": "npm run test:p2:db:up && P2_TEST_DATABASE_REQUIRED=true P2_TEST_DATABASE_ADMIN_URL=\"$(node scripts/p2-test-db-env.mjs --print-admin-url)\" npm --prefix backend run test:db:migrate-replay",

@@ -58,6 +58,8 @@
 ## Tests Added Or Updated
 
 - `backend/tests/phaseESupportIntake.test.js`
+- `backend/tests/healthReleaseMetadata.test.js`
+- `src/test/dialog-layout-regression.test.tsx`
 - `src/test/phase-e-public-support-forms.test.tsx`
 - `e2e/phase-e-support-intake.spec.ts`
 - Updated `src/test/support-center-regression.test.tsx`
@@ -66,6 +68,13 @@
 
 - `src/features/support/SupportCenterPage.tsx` was reduced below the default 700-line page threshold by extracting the issue-report cards and request-access queue into focused support feature components without changing support workflow behavior.
 - The Phase E public intake API methods were also moved into a focused support-intake transport so the frontend code-size budget remains green without adding an allowlist or bypass.
+
+## Production Hotfix Follow-Up
+
+- The platform request-access list endpoint now returns a safe storage-unavailable response when the `RequestAccess` table has not been migrated instead of leaking an unclassified backend 500. With the Phase E migration applied, authorized admins receive `200` with an empty `records` array when no access requests exist.
+- Shared dialog primitives now provide default production spacing, viewport-safe width/height, scroll handling, and footer gaps so platform modals such as invite manufacturer, create brand, and create policy rule do not render cramped at launch breakpoints.
+- Health release metadata now uses `RELEASE_GIT_SHA` first, falls back to GitHub/commit build variables, and exposes the full deployed SHA on public live/ready health payloads for release traceability.
+- Live screenshots showing nginx `502` for `/api/auth/me`, `/api/auth/login`, and `/api/health/live` indicate a deployed backend upstream outage. This requires a server-side migration/redeploy/restart check; frontend code must not mask it as a login-form error.
 
 ## Commands Run
 

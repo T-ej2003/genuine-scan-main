@@ -38,6 +38,14 @@ const assertSafe = (response, label) => {
     await seedP2Fixtures(prisma);
     const tokens = await issueBearerTokens();
 
+    const emptyAdminList = await request("GET", "/api/support/request-access?limit=60", null, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assert.strictEqual(emptyAdminList.status, 200, emptyAdminList.text);
+    assert.deepStrictEqual(emptyAdminList.payload.data.records, []);
+    assert.strictEqual(emptyAdminList.payload.data.total, 0);
+    assertSafe(emptyAdminList, "empty request access admin list");
+
     const badAccess = await request("POST", "/api/public/request-access", {
       fullName: "",
       workEmail: "not-an-email",
@@ -107,6 +115,9 @@ const assertSafe = (response, label) => {
     });
     assert.strictEqual(adminList.status, 200, adminList.text);
     assert.match(adminList.text, /Phase E Brand/);
+    assert.strictEqual(adminList.payload.data.records[0].referenceCode, access.payload.data.referenceCode);
+    assert.strictEqual(adminList.payload.data.records[0].companyName, "Phase E Brand");
+    assert.strictEqual(adminList.payload.data.records[0].adminEmailDeliveryStatus, "DRY_RUN");
     assertSafe(adminList, "request access admin list");
 
     const manufacturerList = await request("GET", "/api/support/request-access", null, {
