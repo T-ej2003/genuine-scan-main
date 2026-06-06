@@ -7,11 +7,23 @@ const dotenv = require("dotenv");
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 dotenv.config();
 
-const enabled = ["1", "true", "yes", "on"].includes(String(process.env.SMTP_SMOKE_ENABLED || "").trim().toLowerCase());
+const isTruthy = (value) => ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+const enabled = isTruthy(process.env.SMTP_SMOKE_ENABLED);
+const requiredSmoke = isTruthy(process.env.SMTP_SMOKE_REQUIRED);
 const toAddress = String(process.env.SMTP_SMOKE_TO || "").trim();
 const smokeId = `SMTP-${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")}-${crypto.randomBytes(3).toString("hex")}`;
 
 const print = (payload) => console.log(JSON.stringify(payload, null, 2));
+const skipOrFail = (reason, extra = {}) => {
+  print({
+    ok: !requiredSmoke,
+    skipped: true,
+    required: requiredSmoke,
+    reason,
+    ...extra,
+  });
+  process.exit(requiredSmoke ? 1 : 0);
+};
 
 const load = () => {
   try {
@@ -32,32 +44,17 @@ const load = () => {
 };
 
 if (!enabled) {
-  print({
-    ok: true,
-    skipped: true,
-    reason: "SMTP_SMOKE_ENABLED is not true; no SMTP messages were sent.",
-  });
-  process.exit(0);
+  skipOrFail("SMTP_SMOKE_ENABLED is not true; no SMTP messages were sent.");
 }
 
 if (!toAddress) {
-  print({
-    ok: true,
-    skipped: true,
-    reason: "SMTP_SMOKE_TO is missing; no SMTP messages were sent.",
-  });
-  process.exit(0);
+  skipOrFail("SMTP_SMOKE_TO is missing; no SMTP messages were sent.");
 }
 
 const required = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"];
 const missing = required.filter((key) => !String(process.env[key] || "").trim());
 if (missing.length) {
-  print({
-    ok: true,
-    skipped: true,
-    reason: `Missing SMTP smoke configuration: ${missing.join(", ")}.`,
-  });
-  process.exit(0);
+  skipOrFail(`Missing SMTP smoke configuration: ${missing.join(", ")}.`, { missing });
 }
 
 process.env.REQUEST_ACCESS_NOTIFY_EMAIL = process.env.REQUEST_ACCESS_NOTIFY_EMAIL || toAddress;
@@ -77,6 +74,23 @@ process.env.SUPPORT_NOTIFY_EMAIL = process.env.SUPPORT_NOTIFY_EMAIL || toAddress
     monthlyGarmentVolume: "Smoke only",
     message: "SMTP smoke request-access admin notification. No customer data.",
     sourcePage: "/request-access",
+  });
+
+  const requestAccessAck = await support.sendRequestAccessAcknowledgement({
+    referenceCode: `${smokeId}-RA`,
+    fullName: "MSCQR SMTP Smoke",
+    workEmail: toAddress,
+    companyName: "MSCQR staging smoke",
+  });
+
+  const supportAdmin = await support.sendPublicSupportAdminNotification({
+    referenceCode: `${smokeId}-SUP`,
+    name: "MSCQR SMTP Smoke",
+    email: toAddress,
+    issueType: "launch_smoke",
+    title: "SMTP smoke support admin notification",
+    message: "SMTP smoke support admin notification. No customer data.",
+    sourcePath: "/help/support",
   });
 
   const supportAck = await support.sendPublicSupportAcknowledgement({
@@ -110,6 +124,8 @@ process.env.SUPPORT_NOTIFY_EMAIL = process.env.SUPPORT_NOTIFY_EMAIL || toAddress
 
   const results = {
     requestAccess,
+    requestAccessAck,
+    supportAdmin,
     supportAck,
     supportReply,
     incidentUpdate,

@@ -61,6 +61,27 @@ const parseDiagnostics = (raw?: string | null) => {
 
 const isPlatform = (role: UserRole) => role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
 
+const serializeSupportIssueReport = (report: any, platform: boolean) => {
+  if (platform) return report;
+  const {
+    internalNote: _internalNote,
+    emailErrorCode: _emailErrorCode,
+    acknowledgementEmailErrorCode: _acknowledgementEmailErrorCode,
+    respondedByUser,
+    ...safeReport
+  } = report;
+  return {
+    ...safeReport,
+    respondedByUser: respondedByUser
+      ? {
+          id: respondedByUser.id,
+          name: respondedByUser.name,
+          role: respondedByUser.role,
+        }
+      : null,
+  };
+};
+
 export const createSupportIssueReport = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
@@ -193,10 +214,12 @@ export const listSupportIssueReports = async (req: AuthRequest, res: Response) =
       prisma.supportIssueReport.count({ where }),
     ]);
 
+    const platform = isPlatform(req.user.role);
+
     return res.json({
       success: true,
       data: {
-        reports,
+        reports: reports.map((report) => serializeSupportIssueReport(report, platform)),
         total,
         limit,
         offset,
