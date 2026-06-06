@@ -158,6 +158,31 @@ const routePayload = (path: string) => {
   if (path.startsWith("/trace/timeline")) return { success: true, data: [] };
   if (path.startsWith("/analytics/")) return { success: true, data: { rows: [], totals: {} } };
   if (path.startsWith("/policy/")) return { success: true, data: { items: [], config: {} } };
+  if (path.startsWith("/support/request-access")) {
+    return {
+      success: true,
+      data: {
+        records: [
+          {
+            id: "request-access-phase-e2",
+            referenceCode: "REQ-E2",
+            fullName: "Phase E2 Request Access",
+            workEmail: "request-access-secret@example.test",
+            companyName: "Protected Platform Queue",
+            roleTitle: "Operations",
+            country: "Test",
+            monthlyGarmentVolume: "1000",
+            status: "NEW",
+            internalNote: "phase-e2-request-access-internal-note",
+            createdAt: "2026-06-01T00:00:00.000Z",
+          },
+        ],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      },
+    };
+  }
   if (path.startsWith("/support/tickets") || path.startsWith("/support/reports")) return { success: true, data: emptyPage };
   if (path.startsWith("/ir/incidents") || path.startsWith("/incidents")) return { success: true, data: emptyPage };
   if (path.startsWith("/ir/policies") || path.startsWith("/ir/alerts")) return { success: true, data: emptyPage };

@@ -75,6 +75,7 @@
     "test:p2:scan": "playwright test --config=playwright.enterprise.config.ts e2e/p1-signed-scan-token.spec.ts",
     "test:p2:exports": "npm --prefix backend run test:p2:exports",
     "test:p2:printer": "npm --prefix backend run test:p2:printer",
+    "test:phase-e2-authz": "npm run test:p2:db:up && P2_TEST_DATABASE_REQUIRED=true P2_TEST_DATABASE_ADMIN_URL=\"$(node scripts/p2-test-db-env.mjs --print-admin-url)\" npm --prefix backend run test:phase-e2-authz",
     "test:p2:fullstack": "npm run test:p2:api-authz-db && npm --prefix backend run test:p2:email-capture && playwright test --config=playwright.enterprise.config.ts e2e/p2-real-auth-db.spec.ts e2e/p1-signed-scan-token.spec.ts",
     "test:p2:db:env": "node scripts/p2-test-db-env.mjs",
     "test:p2:db:up": "npm run test:p2:db:env && docker compose -f docker-compose.p2-test.yml up -d --wait p2-postgres",

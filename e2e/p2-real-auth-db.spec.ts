@@ -4,10 +4,15 @@ import { expect, test } from "@playwright/test";
 import { loginAsSeededRole } from "./fixtures/authenticated";
 
 const realAuthEnabled = String(process.env.E2E_REAL_AUTH || "").toLowerCase() === "true";
+const realAuthRequired = String(process.env.E2E_REAL_AUTH_REQUIRED || "").toLowerCase() === "true";
 const emailCaptureEnabled =
   realAuthEnabled &&
   String(process.env.E2E_EMAIL_CAPTURE_ENABLED || "").toLowerCase() === "true" &&
   Boolean(String(process.env.EMAIL_CAPTURE_DIR || process.env.EMAIL_JSON_CAPTURE_DIR || "").trim());
+
+if (realAuthRequired && !realAuthEnabled) {
+  throw new Error("E2E_REAL_AUTH_REQUIRED=true requires E2E_REAL_AUTH=true; refusing to skip deployed auth smoke.");
+}
 
 test.describe("P2 real DB-backed auth E2E", () => {
   test.skip(!realAuthEnabled, "Set E2E_REAL_AUTH=true with a P2 seeded DB/backend to run real auth E2E.");
@@ -24,6 +29,15 @@ test.describe("P2 real DB-backed auth E2E", () => {
     await expect(page.locator("main")).toBeVisible();
     await expect(page.locator("body")).toContainText(/manufacturer|print|batch|dashboard/i);
     await expect(page.locator("body")).not.toContainText(/super admin|platform admin|debug|tokenHash|passwordHash/i);
+
+    const me = await page.evaluate(async () => {
+      const response = await fetch("/api/auth/me", { credentials: "include" });
+      const text = await response.text();
+      return { status: response.status, text };
+    });
+    expect(me.status).toBe(200);
+    expect(me.text).toMatch(/MANUFACTURER|manufacturer/i);
+    expect(me.text).not.toMatch(/passwordHash|tokenHash|Bearer\s+[A-Za-z0-9._-]+|JWT_SECRET|DATABASE_URL/i);
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.locator("main")).toBeVisible();

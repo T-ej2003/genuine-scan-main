@@ -90,7 +90,10 @@ jobs:
           chmod +x osv-scanner
 
       - name: Run OSV Scanner
-        run: ./osv-scanner --recursive .
+        # Keep vulnerability coverage on committed manifests/lockfiles while
+        # avoiding transient deps.dev resolver outages from failing audits with
+        # no vulnerabilities found.
+        run: ./osv-scanner --recursive --no-resolve .
 
       - name: Install Gitleaks
         shell: bash
