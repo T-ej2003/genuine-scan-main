@@ -1,4 +1,4 @@
-# MSCQR Final Launch Blocker Evidence Pack
+## MSCQR Final Launch Blocker Evidence Pack
 
 Date: 2026-06-06
 Branch: `codex/final-launch-evidence-pack`
@@ -10,7 +10,7 @@ This pack collects the final launch blockers that require proof rather than feat
 
 | Area | Evidence doc | Current status |
 |---|---|---|
-| Prisma checksum metadata | `documents/qa/mscqr-prisma-checksum-signoff.md` | Yellow |
+| Prisma checksum metadata | `documents/qa/mscqr-prisma-checksum-signoff.md` | Green |
 | Real deployed auth smoke | `documents/qa/mscqr-real-auth-smoke-signoff.md` | Yellow |
 | SMTP smoke and inbox proof | `documents/qa/mscqr-smtp-smoke-signoff.md` | Yellow |
 | Printer artifact launch sign-off | `documents/qa/mscqr-printer-artifact-launch-signoff.md` | Green for disabled no-leak, Yellow for positive artifact |
