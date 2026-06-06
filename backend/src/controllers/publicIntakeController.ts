@@ -292,6 +292,13 @@ export const listRequestAccessRecords = async (req: Request, res: Response) => {
     ]);
     return res.json({ success: true, data: { records, total, limit, offset } });
   } catch (error) {
+    if (isPrismaMissingTableError(error, ["requestaccess"])) {
+      warnStorageUnavailableOnce("request-access-list-storage", "[request-access] request access list storage unavailable.");
+      return res.status(503).json({
+        success: false,
+        error: "Request access records are temporarily unavailable. Run the latest database migration and retry.",
+      });
+    }
     console.error("listRequestAccessRecords error:", error);
     return res.status(500).json({ success: false, error: "Failed to load request access records" });
   }
@@ -344,6 +351,13 @@ export const patchRequestAccessRecord = async (req: Request, res: Response) => {
 
     return res.json({ success: true, data: updated });
   } catch (error) {
+    if (isPrismaMissingTableError(error, ["requestaccess"])) {
+      warnStorageUnavailableOnce("request-access-update-storage", "[request-access] request access update storage unavailable.");
+      return res.status(503).json({
+        success: false,
+        error: "Request access records are temporarily unavailable. Run the latest database migration and retry.",
+      });
+    }
     console.error("patchRequestAccessRecord error:", error);
     return res.status(500).json({ success: false, error: "Failed to update request access record" });
   }

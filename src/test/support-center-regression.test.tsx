@@ -196,4 +196,24 @@ describe("SupportCenter regression", () => {
       );
     });
   });
+
+  it("shows an empty request access queue without an error banner", async () => {
+    vi.mocked(apiClient.getRequestAccessRecords).mockResolvedValue({
+      success: true,
+      data: { records: [], total: 0 },
+    } as any);
+
+    renderWithQueryClient(
+      <MemoryRouter>
+        <SupportCenter />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("No access requests")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Could not load access requests")).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed to load request access records")).not.toBeInTheDocument();
+  });
 });

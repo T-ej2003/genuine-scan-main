@@ -6,6 +6,7 @@ services:
       dockerfile: backend/Dockerfile
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
+        RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-unknown}
         RUN_VERIFY: ${DOCKER_BUILD_VERIFY:-false}
     container_name: genuine-scan-backend
     restart: unless-stopped
@@ -16,6 +17,7 @@ services:
       NODE_ENV: production
       PORT: ${BACKEND_PORT:-4000}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-unknown}
       RUN_DB_MIGRATIONS_ON_START: ${RUN_DB_MIGRATIONS_ON_START:-false}
       RUN_BACKGROUND_WORKERS: "false"
       REDIS_URL: ${REDIS_URL:?Set shared regional REDIS_URL for ASG web nodes}
@@ -62,6 +64,7 @@ services:
       args:
         VITE_API_URL: /api
         GIT_SHA: ${GIT_SHA:-unknown}
+        RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-unknown}
         RUN_VERIFY: ${DOCKER_BUILD_VERIFY:-false}
         VITE_APP_ENV: ${VITE_APP_ENV:-production}
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}

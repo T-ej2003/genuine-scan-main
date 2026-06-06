@@ -160,7 +160,8 @@ export const createBackendApp = () => {
     release: {
       name: releaseMetadata.name,
       version: releaseMetadata.version,
-      gitSha: releaseMetadata.shortGitSha,
+      gitSha: releaseMetadata.gitSha,
+      shortGitSha: releaseMetadata.shortGitSha,
       environment: releaseMetadata.environment,
     },
   });

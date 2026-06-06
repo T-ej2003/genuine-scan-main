@@ -15,6 +15,8 @@ RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline --no-audit --no
 FROM deps AS builder
 
 ARG RUN_VERIFY=false
+ARG GIT_SHA=unknown
+ARG RELEASE_GIT_SHA=${GIT_SHA}
 COPY backend/prisma ./prisma
 COPY backend/prisma.config.ts ./prisma.config.ts
 RUN npx prisma generate
@@ -32,11 +34,13 @@ FROM node:24-bookworm-slim AS runtime
 
 WORKDIR /app
 ARG GIT_SHA=unknown
+ARG RELEASE_GIT_SHA=${GIT_SHA}
 ENV NODE_ENV=production
 ENV PORT=4000
 ENV GIT_SHA=${GIT_SHA}
+ENV RELEASE_GIT_SHA=${RELEASE_GIT_SHA}
 ENV RUN_DB_MIGRATIONS_ON_START=false
-LABEL org.opencontainers.image.revision=${GIT_SHA}
+LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA}
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*

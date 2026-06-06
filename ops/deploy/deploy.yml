@@ -82,11 +82,15 @@
         chdir: "{{ app_dir }}"
 
     - name: Capture deployed commit
-      command: git rev-parse --short HEAD
+      command: git rev-parse HEAD
       args:
         chdir: "{{ app_dir }}"
       register: deployed_commit
       changed_when: false
+
+    - name: Build Docker Compose release environment
+      set_fact:
+        release_compose_environment: "{{ qr_sign_compose_environment | combine({'RELEASE_GIT_SHA': deployed_commit.stdout, 'GIT_SHA': deployed_commit.stdout}) }}"
 
     - name: Install dependencies
       command: npm ci
@@ -137,21 +141,21 @@
       command: docker compose --profile worker build backend worker frontend
       args:
         chdir: "{{ app_dir }}"
-      environment: "{{ qr_sign_compose_environment }}"
+      environment: "{{ release_compose_environment }}"
       no_log: true
 
     - name: Preflight QR signing runtime configuration
       command: docker compose run --rm --no-deps backend node dist/scripts/qrSigningPreflight.js
       args:
         chdir: "{{ app_dir }}"
-      environment: "{{ qr_sign_compose_environment }}"
+      environment: "{{ release_compose_environment }}"
       no_log: true
 
     - name: Restart production Docker Compose services
       command: docker compose --profile worker up -d --no-build redis backend worker frontend
       args:
         chdir: "{{ app_dir }}"
-      environment: "{{ qr_sign_compose_environment }}"
+      environment: "{{ release_compose_environment }}"
       no_log: true
 
     - name: Assert MinIO containers are not running in production
@@ -168,7 +172,7 @@
         chdir: "{{ app_dir }}"
       register: compose_ps
       changed_when: false
-      environment: "{{ qr_sign_compose_environment }}"
+      environment: "{{ release_compose_environment }}"
       no_log: true
 
     - name: Print deployed commit and Docker Compose status

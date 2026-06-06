@@ -101,6 +101,7 @@ jobs:
     env:
       ANSIBLE_HOST_KEY_CHECKING: "true"
       DEPLOY_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+      RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
     steps:
       - name: Checkout deployment tooling
         uses: actions/checkout@v6
@@ -165,6 +166,7 @@ jobs:
           QR_SIGN_PRIVATE_KEY: ${{ secrets.QR_SIGN_PRIVATE_KEY }}
           QR_SIGN_PROVIDER: ${{ secrets.QR_SIGN_PROVIDER }}
           QR_SIGN_PUBLIC_KEY: ${{ secrets.QR_SIGN_PUBLIC_KEY }}
+          RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
         run: |
           set -euo pipefail
 

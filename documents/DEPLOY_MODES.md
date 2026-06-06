@@ -10,13 +10,15 @@ git fetch origin
 git checkout codex/industry-grade-hardening
 git pull --ff-only origin codex/industry-grade-hardening
 
-export GIT_SHA=$(git rev-parse --short HEAD)
+export RELEASE_GIT_SHA="$(git rev-parse HEAD)"
+export GIT_SHA="$RELEASE_GIT_SHA"
 unset DOCKER_BUILD_VERIFY
 unset RUN_DB_MIGRATIONS_ON_START
 
 docker compose build backend frontend
 docker compose run --rm backend npx prisma migrate deploy
 docker compose --profile worker up -d --force-recreate redis backend worker frontend
+curl -fsS https://www.mscqr.com/api/health/live | grep "$RELEASE_GIT_SHA"
 ```
 
 ## Strict Pre-Release Verify
@@ -29,13 +31,15 @@ git fetch origin
 git checkout codex/industry-grade-hardening
 git pull --ff-only origin codex/industry-grade-hardening
 
-export GIT_SHA=$(git rev-parse --short HEAD)
+export RELEASE_GIT_SHA="$(git rev-parse HEAD)"
+export GIT_SHA="$RELEASE_GIT_SHA"
 export DOCKER_BUILD_VERIFY=true
 
 npm run verify:release
 docker compose build backend frontend
 docker compose run --rm backend npx prisma migrate deploy
 docker compose --profile worker up -d --force-recreate redis backend worker frontend
+curl -fsS https://www.mscqr.com/api/health/live | grep "$RELEASE_GIT_SHA"
 
 unset DOCKER_BUILD_VERIFY
 ```
@@ -48,6 +52,7 @@ docker compose logs backend --tail=120
 docker compose logs worker --tail=120
 docker compose logs frontend --tail=120
 curl -fsS http://127.0.0.1:4000/health/ready
+curl -fsS http://127.0.0.1:4000/health/live | grep "$(git rev-parse HEAD)"
 npm run smoke:release
 ```
 

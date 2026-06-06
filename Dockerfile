@@ -26,11 +26,12 @@ COPY src ./src
 
 ARG VITE_API_URL=/api
 ARG GIT_SHA=unknown
+ARG RELEASE_GIT_SHA=${GIT_SHA}
 ARG VITE_APP_ENV=production
 ARG VITE_SENTRY_DSN=
 ARG RUN_VERIFY=false
 ENV VITE_API_URL=${VITE_API_URL}
-ENV GIT_SHA=${GIT_SHA}
+ENV GIT_SHA=${RELEASE_GIT_SHA}
 ENV VITE_APP_ENV=${VITE_APP_ENV}
 ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
 
@@ -40,6 +41,10 @@ RUN if [ "$RUN_VERIFY" = "true" ]; then npm run check:security-guardrails \
   && npm run build
 
 FROM nginx:1.29-alpine
+
+ARG GIT_SHA=unknown
+ARG RELEASE_GIT_SHA=${GIT_SHA}
+LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA}
 
 COPY nginx.conf /etc/nginx/templates/default.http.conf
 COPY nginx.https.conf /etc/nginx/templates/default.https.conf

@@ -16,6 +16,8 @@ const releasePayloadInternal = {
 };
 
 const releasePayloadPublic = {
+  gitSha: releaseMetadata.gitSha,
+  shortGitSha: releaseMetadata.shortGitSha,
   environment: releaseMetadata.environment,
 };
 

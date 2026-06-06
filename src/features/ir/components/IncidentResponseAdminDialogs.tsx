@@ -50,8 +50,8 @@ export function IncidentResponseAdminDialogs({
             <DialogDescription>Use this for manual cases or escalations from policy alerts.</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-5">
+            <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Code value</Label>
                 <Input
@@ -82,7 +82,7 @@ export function IncidentResponseAdminDialogs({
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-5 md:grid-cols-3">
               <div className="space-y-2">
                 <Label>Type</Label>
                 <Select value={newIncident.incidentType} onValueChange={(value) => onNewIncidentChange((previous) => ({ ...previous, incidentType: value }))}>
@@ -140,7 +140,7 @@ export function IncidentResponseAdminDialogs({
               />
             </div>
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:justify-end">
               <Button type="button" variant="outline" onClick={() => onNewIncidentOpenChange(false)} disabled={creatingIncident}>
                 Cancel
               </Button>
@@ -161,8 +161,8 @@ export function IncidentResponseAdminDialogs({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-5">
+            <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Name</Label>
                 <Input
@@ -201,7 +201,7 @@ export function IncidentResponseAdminDialogs({
               />
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-5 md:grid-cols-3">
               <div className="space-y-2">
                 <Label>Rule type</Label>
                 <Select value={policyForm.ruleType} onValueChange={(value) => onPolicyFormChange((previous) => ({ ...previous, ruleType: value }))}>
@@ -229,7 +229,7 @@ export function IncidentResponseAdminDialogs({
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Alert severity</Label>
                 <Select value={policyForm.severity} onValueChange={(value) => onPolicyFormChange((previous) => ({ ...previous, severity: value }))}>
@@ -267,7 +267,7 @@ export function IncidentResponseAdminDialogs({
               </label>
 
               {policyForm.autoCreateIncident ? (
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-5 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Incident severity</Label>
                     <Select
@@ -306,7 +306,7 @@ export function IncidentResponseAdminDialogs({
               ) : null}
             </div>
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-col-reverse gap-3 border-t pt-4 sm:flex-row sm:justify-end">
               <Button type="button" variant="outline" onClick={() => onPolicyDialogOpenChange(false)} disabled={policySaving}>
                 Cancel
               </Button>

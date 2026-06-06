@@ -75,6 +75,7 @@ tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mscqr-asg-bootstrap.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 params_json="$tmp_dir/ssm-parameters.json"
 compose_env_path="$tmp_dir/compose.env"
+release_git_sha="$(cd "$project_dir" && git rev-parse HEAD 2>/dev/null || printf 'unknown')"
 
 printf 'Fetching ASG web-node parameters from SSM path %s in %s...\n' "$ssm_prefix" "$aws_region"
 aws ssm get-parameters-by-path \
@@ -85,7 +86,7 @@ aws ssm get-parameters-by-path \
   --output json > "$params_json"
 
 umask 077
-node --input-type=module - "$manifest_path" "$params_json" "$ssm_prefix" "$root_env_path" "$backend_env_path" "$compose_env_path" "$aws_region" <<'NODE'
+node --input-type=module - "$manifest_path" "$params_json" "$ssm_prefix" "$root_env_path" "$backend_env_path" "$compose_env_path" "$aws_region" "$release_git_sha" <<'NODE'
 import fs from "node:fs";
 import path from "node:path";
 
@@ -97,6 +98,7 @@ const [
   backendEnvPath,
   composeEnvPath,
   awsRegion,
+  releaseGitSha,
 ] = process.argv.slice(2);
 
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
@@ -183,6 +185,12 @@ const buildSection = (section) => {
 const rootEnv = buildSection(manifest.rootEnv || {});
 const backendEnv = buildSection(manifest.backendEnv || {});
 const composeEnv = new Map([...rootEnv.entries(), ...backendEnv.entries()]);
+const normalizedReleaseGitSha = String(releaseGitSha || "").trim() || "unknown";
+rootEnv.set("GIT_SHA", normalizedReleaseGitSha);
+rootEnv.set("RELEASE_GIT_SHA", normalizedReleaseGitSha);
+backendEnv.set("RELEASE_GIT_SHA", normalizedReleaseGitSha);
+composeEnv.set("GIT_SHA", normalizedReleaseGitSha);
+composeEnv.set("RELEASE_GIT_SHA", normalizedReleaseGitSha);
 
 for (const key of ["AWS_REGION", "OBJECT_STORAGE_REGION"]) {
   if (rootEnv.get(key) !== awsRegion) {
