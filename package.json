@@ -86,6 +86,7 @@
     "test:phase-e-support": "npm run test:p2:db:up && P2_TEST_DATABASE_REQUIRED=true P2_TEST_DATABASE_ADMIN_URL=\"$(node scripts/p2-test-db-env.mjs --print-admin-url)\" npm --prefix backend run test:phase-e-support",
     "test:health-release": "npm --prefix backend run test:health-release",
     "test:smtp:capture": "npm --prefix backend run test:p2:email-capture",
+    "smoke:prisma-checksum": "npm --prefix backend run smoke:prisma-checksum",
     "smoke:smtp": "npm --prefix backend run smoke:smtp",
     "test:db:migrate-replay": "npm run test:p2:db:up && P2_TEST_DATABASE_REQUIRED=true P2_TEST_DATABASE_ADMIN_URL=\"$(node scripts/p2-test-db-env.mjs --print-admin-url)\" npm --prefix backend run test:db:migrate-replay",
     "test:db:drift": "npm run test:p2:db:up && P2_TEST_DATABASE_REQUIRED=true P2_TEST_DATABASE_ADMIN_URL=\"$(node scripts/p2-test-db-env.mjs --print-admin-url)\" npm --prefix backend run test:db:drift",
