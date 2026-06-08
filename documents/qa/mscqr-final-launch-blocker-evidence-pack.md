@@ -159,7 +159,7 @@ Do not mark final launch Green from this branch alone. The tooling is stronger n
 
 ## SMTP deployed provider smoke
 
-Status: GREEN
+Status: YELLOW overall; Green only for provider acceptance.
 
 Evidence:
 - `documents/qa/evidence/smtp-smoke-evidence.txt`
@@ -167,3 +167,5 @@ Evidence:
 - SMTP auth verification: passed
 - Required SMTP smoke: `ok: true`
 - Provider accepted all intended recipients for request-access, support, support reply, and incident update templates.
+- Recorded inbox proof used a Gmail recipient, not a staging-owned inbox.
+- Final SMTP launch readiness remains Yellow until the smoke is rerun against a staging-owned inbox or approved staging-owned provider mailbox.

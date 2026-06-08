@@ -87,15 +87,15 @@ Required subject set:
 
 CTO recommendation: use a dedicated retained launch-smoke mailbox and provider API access for repeatable evidence. Manual screenshots are acceptable for launch, but provider API verification is more scalable for future release gates.
 
-## Real deployed SMTP smoke evidence
+## Real deployed SMTP provider smoke evidence
 
-Status: GREEN
+Status: YELLOW overall; Green only for provider acceptance.
 
 Environment: production EC2 deployed backend container  
 Checked at UTC: 2026-06-08T14:25:42.754Z  
 Evidence file: `documents/qa/evidence/smtp-smoke-evidence.txt`
 
-Result:
+Provider result:
 - SMTP auth verification passed.
 - Required SMTP smoke completed with `ok: true`.
 - Smoke ID: `SMTP-20260608T142542Z-9bd03f`.
@@ -108,15 +108,20 @@ Result:
 - Rejected recipient count: 0 for all templates.
 - Fallback used: false.
 
+Inbox proof:
+- Recorded recipient was a masked Gmail inbox.
+- Gmail receipt proves arrival to that mailbox only.
+- This does not satisfy the staging-owned inbox requirement in this sign-off.
+
 Security note:
 - SMTP mailbox password was rotated after accidental exposure during diagnostics.
 - Evidence is redacted and excludes SMTP password, full recipient, cookies, tokens, and secrets.
 
-Status: GREEN for deployed production SMTP provider acceptance.
+Status: Green for deployed production SMTP provider acceptance. Yellow for launch SMTP sign-off until staging-owned inbox proof is attached.
 
 ## Real deployed SMTP smoke and inbox evidence
 
-Status: GREEN
+Status: YELLOW
 
 Environment: production EC2 deployed backend container  
 Checked at UTC: 2026-06-08T14:25:42.754Z  
@@ -135,7 +140,7 @@ SMTP result:
 - Rejected recipient count: 0 for all templates.
 - Fallback used: false.
 
-Inbox proof:
+Inbox observation:
 - Gmail inbox shows the request-access admin notification.
 - Gmail inbox shows the request-access acknowledgement.
 - Gmail inbox shows the support admin notification.
@@ -143,9 +148,10 @@ Inbox proof:
 - Gmail inbox shows the support reply/update.
 - Gmail inbox shows the incident update smoke.
 - Gmail subjects include `SMTP-20260608T142542Z-9bd03f`.
+- This Gmail observation is not staging-owned inbox proof and cannot be used to mark final SMTP launch readiness Green.
 
 Security note:
 - SMTP mailbox password was rotated after accidental exposure during diagnostics.
 - Evidence is redacted and excludes SMTP password, full recipient, cookies, tokens, and secrets.
 
-Status: GREEN for deployed production SMTP provider acceptance and inbox receipt.
+Status: Green for deployed production SMTP provider acceptance. Yellow for final SMTP launch readiness because staging-owned inbox proof is still missing.

@@ -1,6 +1,6 @@
 MSCQR SMTP required smoke and inbox evidence
 
-Status: GREEN
+Status: YELLOW
 
 Environment:
 - Production EC2 backend container
@@ -10,6 +10,7 @@ Environment:
 - SMTP requireTLS: true
 - SMTP user/from: ad***@mscqr.com
 - Smoke recipient: ab***@gmail.com
+- Inbox ownership assessment: not staging-owned; this cannot satisfy final launch inbox proof.
 
 Auth verification:
 - SMTP_AUTH_VERIFY_OK
@@ -28,7 +29,7 @@ Templates accepted by SMTP provider:
 - public_support_reply: sent=true, delivered=true, acceptedCount=1, rejectedCount=0
 - incident_update_smoke: sent=true, delivered=true, acceptedCount=1, rejectedCount=0
 
-Inbox proof:
+Inbox observation:
 - Gmail received request-access admin notification.
 - Gmail received request-access acknowledgement.
 - Gmail received support admin notification.
@@ -37,6 +38,7 @@ Inbox proof:
 - Gmail received incident update smoke.
 - Visible reference: SMTP-20260608T142542Z-9bd03f
 - Screenshots captured by operator in Gmail inbox.
+- This Gmail observation proves message arrival to that mailbox only. It does not satisfy the staging-owned inbox proof required by the launch sign-off criteria.
 
 Provider diagnostics:
 - SMTP provider accepted the intended recipient.
@@ -54,3 +56,8 @@ Secrets policy:
 - Full recipient excluded.
 - Full provider mailbox excluded.
 - Cookies/tokens/secrets excluded.
+
+Launch sign-off:
+- Provider acceptance: GREEN for the deployed SMTP provider smoke.
+- Staging-owned inbox proof: YELLOW, not satisfied by this Gmail recipient.
+- Final SMTP launch readiness: YELLOW until the same smoke is rerun against a staging-owned inbox or an approved staging-owned provider mailbox.
