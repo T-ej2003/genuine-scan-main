@@ -1,6 +1,6 @@
 # MSCQR Incident/SLA Launch Scope
 
-Date: 2026-06-06
+Date: 2026-06-08
 Status: Green for launch MVP foundation; Yellow for operational SLA drill evidence.
 
 ## Launch MVP Scope

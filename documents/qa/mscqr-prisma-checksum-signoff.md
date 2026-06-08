@@ -1,7 +1,7 @@
 # MSCQR Prisma Checksum Sign-off
 
-Date: 2026-06-06
-Status: Yellow until staging and production read-only metadata evidence is attached.
+Date: 2026-06-08
+Status: Green for recorded production metadata; Yellow for staging if it uses a separate DB and no staging evidence is attached.
 
 ## Scope
 
@@ -61,76 +61,29 @@ ORDER BY migration_name;
 
 Attach redacted evidence showing only migration metadata, environment, timestamp, release SHA, and operator. Do not include connection strings.
 
-## Current Sign-off
+## Recorded Production Evidence
 
-- Staging: Yellow, awaiting read-only evidence.
-- Production: Yellow, awaiting read-only evidence.
-- Local mutation: None.
+Environment: production EC2 deployed backend container
 
-CTO recommendation: keep this launch blocker open until both environments have matching, timestamped evidence tied to the intended release SHA.
+Checked at UTC: `2026-06-06T11:58:47.429Z`
 
-##Real Evidence:
-## Real deployed DB metadata evidence
+Evidence type: read-only Prisma migration metadata query
 
-Environment: production EC2 deployed backend container  
-Checked at UTC: 2026-06-06T11:58:47.429Z  
-Evidence type: read-only Prisma migration metadata query  
 Command location: EC2 `/home/ubuntu/genuine-scan-main`, `docker compose exec -T backend node -`
 
-Query scope:
+Result summary:
 
-```sql
-SELECT
-  migration_name,
-  checksum,
-  finished_at,
-  rolled_back_at,
-  applied_steps_count,
-  logs
-FROM "_prisma_migrations"
-WHERE migration_name IN (
-  '20260304113000_add_direct_print_render_tokens',
-  '20260603120000_repair_batch_print_pack_schema'
-)
-ORDER BY migration_name;
+| Migration | Checksum | Finished at | Rolled back | Applied steps | Logs | Status |
+|---|---|---|---|---:|---|---|
+| `20260304113000_add_direct_print_render_tokens` | `088de3165a0165edc50e5107f86e4198d8556d6834f6ab732b97bb5360da151a` | `2026-04-26T21:29:35.875Z` | no | 0 | empty | Green |
+| `20260603120000_repair_batch_print_pack_schema` | `64496c72c50ae0b9c4204765ec54fb6803555215d3b6cae00e38e75e5e52fc94` | `2026-06-06T00:18:42.833Z` | no | 1 | empty/null | Green |
 
-##Result:
-{
-  "checkedAt": "2026-06-06T11:58:47.429Z",
-  "evidenceType": "read_only_prisma_migration_metadata",
-  "migrations": [
-    {
-      "migration_name": "20260304113000_add_direct_print_render_tokens",
-      "checksum": "088de3165a0165edc50e5107f86e4198d8556d6834f6ab732b97bb5360da151a",
-      "finished_at": "2026-04-26T21:29:35.875Z",
-      "rolled_back_at": null,
-      "applied_steps_count": 0,
-      "logs": ""
-    },
-    {
-      "migration_name": "20260603120000_repair_batch_print_pack_schema",
-      "checksum": "64496c72c50ae0b9c4204765ec54fb6803555215d3b6cae00e38e75e5e52fc94",
-      "finished_at": "2026-06-06T00:18:42.833Z",
-      "rolled_back_at": null,
-      "applied_steps_count": 1,
-      "logs": null
-    }
-  ]
-}
+Assessment: Green for this deployed production DB metadata check. If staging uses a separate DB, run the same read-only metadata query against staging before marking staging Green.
 
-//Assessment:
+## Current Sign-off
 
-* 20260304113000_add_direct_print_render_tokens is present in _prisma_migrations.
-* It has rolled_back_at: null.
-* It has empty logs.
-* It has applied_steps_count: 0, so this DB did not execute schema-changing steps for that migration record.
-* 20260603120000_repair_batch_print_pack_schema is present.
-* It has rolled_back_at: null.
-* It has applied_steps_count: 1.
-* It has no error logs.
+- Production: Green for the recorded deployed DB metadata check above.
+- Staging: Yellow if separate from production and no read-only evidence is attached.
+- Local mutation: None.
 
-Status: GREEN for this deployed production DB metadata check.
-
-Launch condition:
-
-This sign-off covers the deployed DB reached by the production EC2 backend container on 2026-06-06 at 11:58:47 UTC. If staging uses a separate DB, run the same read-only metadata query against staging before marking staging Green.//
+CTO recommendation: keep the script as a standard release gate and attach the JSON output to every release candidate. The current production sign-off is usable for this launch only if the intended release still targets the same deployed DB state.

@@ -1,6 +1,6 @@
 # MSCQR Printer Artifact Launch Sign-off
 
-Date: 2026-06-06
+Date: 2026-06-08
 Status: Yellow for positive printer artifact proof; Green for disabled-route no-leak posture.
 
 ## Current Route State

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "prisma generate && tsx watch src/index.ts",
     "auth:mfa:break-glass": "tsx scripts/break-glass-mfa-reset.ts",
+    "seed:launch-smoke-users": "node scripts/seed-launch-smoke-users.js",
     "check:smtp": "node scripts/check-smtp-delivery.js",
     "check:email:dns": "node scripts/check-email-dns.js",
     "analytics:refresh-rollups": "tsx scripts/refresh-analytics-rollups.ts",
@@ -35,6 +36,7 @@
     "test:phase-e-support": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/phaseESupportIntake.test.js\"",
     "test:health-release": "npm run build && node tests/healthReleaseMetadata.test.js",
     "test:prisma-checksum-smoke": "node tests/prismaChecksumSmokeScript.test.js",
+    "test:launch-smoke-seed": "node tests/launchSmokeSeedScript.test.js",
     "smoke:prisma-checksum": "node scripts/smoke-prisma-checksum.js",
     "smoke:smtp": "npm run build && node scripts/smoke-smtp-phase-e.js",
     "test:p2:fullstack": "npm run test:p2:db && npm run test:p2:email-capture",

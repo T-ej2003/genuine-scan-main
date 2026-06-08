@@ -33,9 +33,24 @@ const seededCredentials: Record<SeededRole, RoleCredentials> = {
   },
 };
 
+const adminRoles = new Set<SeededRole>(["superAdmin", "licenseeAdmin"]);
+
 const goto = async (page: Page, path: string) => {
   await page.goto(path, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle").catch(() => undefined);
+};
+
+const readBodyText = async (page: Page) => page.locator("body").innerText({ timeout: 5_000 }).catch(() => "");
+
+const assertNotMfaBlocked = async (page: Page, role: SeededRole) => {
+  if (!adminRoles.has(role)) return;
+  const path = new URL(page.url()).pathname;
+  const bodyText = await readBodyText(page);
+  if (/mfa|multi-factor|two-factor|authenticator/i.test(path) || /set up admin MFA|MFA|authentication code|authenticator/i.test(bodyText)) {
+    throw new Error(
+      `Real auth smoke reached admin MFA for ${seededCredentials[role].displayName}. Complete manual MFA or run the launch-smoke seed with LAUNCH_SMOKE_REFRESH_ADMIN_MFA=true and LAUNCH_SMOKE_MFA_CONFIRM=MSCQR_REFRESH_LAUNCH_SMOKE_ADMIN_MFA for launch-test accounts only.`
+    );
+  }
 };
 
 export const loginAsSeededRole = async (page: Page, role: SeededRole) => {
@@ -48,11 +63,20 @@ export const loginAsSeededRole = async (page: Page, role: SeededRole) => {
   await page.locator("#email").fill(credentials.email);
   await page.locator("#password").fill(credentials.password);
   await page.getByRole("button", { name: /^sign in$/i }).click();
-  await page.waitForFunction(
-    () => !["/login", "/forgot-password", "/reset-password", "/accept-invite"].includes(window.location.pathname),
-    undefined,
-    { timeout: 60_000 },
-  );
+  await page
+    .waitForFunction(
+      () => !["/login", "/forgot-password", "/reset-password", "/accept-invite"].includes(window.location.pathname),
+      undefined,
+      { timeout: 60_000 },
+    )
+    .catch(async (error) => {
+      const bodyText = await readBodyText(page);
+      if (/invalid|incorrect|email or password|disabled|verify your email|locked/i.test(bodyText)) {
+        throw new Error(`Real auth smoke login failed for ${credentials.displayName}; verify launch-test credentials and account status.`);
+      }
+      throw error;
+    });
+  await assertNotMfaBlocked(page, role);
   await expect(page.locator("main")).toBeVisible({ timeout: 20_000 });
 };
 

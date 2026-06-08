@@ -12,6 +12,7 @@ const enabled = isTruthy(process.env.SMTP_SMOKE_ENABLED);
 const requiredSmoke = isTruthy(process.env.SMTP_SMOKE_REQUIRED);
 const toAddress = String(process.env.SMTP_SMOKE_TO || "").trim();
 const smokeId = `SMTP-${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")}-${crypto.randomBytes(3).toString("hex")}`;
+const generatedAt = new Date().toISOString();
 
 const print = (payload) => console.log(JSON.stringify(payload, null, 2));
 const skipOrFail = (reason, extra = {}) => {
@@ -130,6 +131,23 @@ process.env.SUPPORT_NOTIFY_EMAIL = process.env.SUPPORT_NOTIFY_EMAIL || toAddress
     supportReply,
     incidentUpdate,
   };
+  const subjects = {
+    requestAccess: `MSCQR access request ${smokeId}-RA: MSCQR staging smoke`,
+    requestAccessAck: `MSCQR access request received (${smokeId}-RA)`,
+    supportAdmin: `MSCQR support issue ${smokeId}-SUP: SMTP smoke support admin notification`,
+    supportAck: `MSCQR support request received (${smokeId}-SUP)`,
+    supportReply: `Re: SMTP smoke support reply [${smokeId}-SUP]`,
+    incidentUpdate: `MSCQR incident update smoke ${smokeId}`,
+  };
+  const references = {
+    requestAccess: `${smokeId}-RA`,
+    requestAccessAck: `${smokeId}-RA`,
+    supportAdmin: `${smokeId}-SUP`,
+    supportAck: `${smokeId}-SUP`,
+    supportReply: `${smokeId}-SUP`,
+    incidentUpdate: smokeId,
+  };
+  const maskList = (items) => (Array.isArray(items) ? items.map(mail.maskEmailForLog).filter(Boolean) : []);
   const summary = Object.fromEntries(
     Object.entries(results).map(([key, result]) => [
       key,
@@ -137,8 +155,15 @@ process.env.SUPPORT_NOTIFY_EMAIL = process.env.SUPPORT_NOTIFY_EMAIL || toAddress
         attempted: result.attempted,
         sent: result.sent,
         delivered: result.delivered,
+        providerMessageId: result.providerMessageId || result.messageId || null,
+        providerResponseCode: result.providerResponseCode || null,
+        acceptedRecipients: maskList(result.acceptedRecipients || result.accepted),
+        rejectedRecipients: maskList(result.rejectedRecipients || result.rejected),
         acceptedCount: result.accepted?.length || result.acceptedRecipients?.length || 0,
         rejectedCount: result.rejected?.length || result.rejectedRecipients?.length || 0,
+        subject: subjects[key],
+        reference: references[key],
+        timestamp: generatedAt,
         errorCode: result.errorCode || null,
         diagnostic: result.diagnostic || null,
       },
@@ -150,6 +175,7 @@ process.env.SUPPORT_NOTIFY_EMAIL = process.env.SUPPORT_NOTIFY_EMAIL || toAddress
     ok,
     skipped: false,
     smokeId,
+    generatedAt,
     recipient: mail.maskEmailForLog(toAddress),
     smtp: mail.getMailTransportDiagnostics(),
     results: summary,

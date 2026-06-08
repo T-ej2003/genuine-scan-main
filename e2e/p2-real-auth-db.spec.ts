@@ -9,6 +9,7 @@ const emailCaptureEnabled =
   realAuthEnabled &&
   String(process.env.E2E_EMAIL_CAPTURE_ENABLED || "").toLowerCase() === "true" &&
   Boolean(String(process.env.EMAIL_CAPTURE_DIR || process.env.EMAIL_JSON_CAPTURE_DIR || "").trim());
+const apiBaseUrl = String(process.env.E2E_API_BASE_URL || "").trim();
 
 const requiredCredentialNames = [
   "E2E_SUPERADMIN_EMAIL",
@@ -31,11 +32,12 @@ if (realAuthRequired) {
 }
 
 const fetchAuthMe = async (page: Page) =>
-  page.evaluate(async () => {
-    const response = await fetch("/api/auth/me", { credentials: "include" });
+  page.evaluate(async (configuredApiBaseUrl) => {
+    const url = configuredApiBaseUrl ? new URL("/api/auth/me", configuredApiBaseUrl).toString() : "/api/auth/me";
+    const response = await fetch(url, { credentials: "include" });
     const text = await response.text();
     return { status: response.status, text };
-  });
+  }, apiBaseUrl);
 
 const logoutFromShell = async (page: Page, accountNamePattern = /admin|manufacturer|factory|account|profile|user/i) => {
   const accountButton = page.getByRole("button", { name: accountNamePattern }).first();
