@@ -167,3 +167,30 @@ Evidence:
 - SMTP auth verification: passed
 - Required SMTP smoke: `ok: true`
 - Provider accepted all intended recipients for request-access, support, support reply, and incident update templates.
+
+
+## Printer launch blocker
+
+Status: RED / BLOCKING
+
+Evidence:
+- `documents/qa/evidence/printer-launch-evidence-matrix.md`
+- `documents/qa/evidence/printer-windows-usb-positive-evidence.md`
+- `documents/qa/evidence/printer-windows-network-positive-evidence.md`
+- `documents/qa/evidence/printer-failure-safety-evidence.md`
+- `documents/qa/mscqr-printer-physical-validation-runbook.md`
+
+Decision:
+- Direct printing is launch-critical for MSCQR.
+- Launch Green requires physical validation for Windows connector health, Windows USB/local connector printing, Windows network printer printing, and disabled/failure safety.
+- USB-only proof does not validate network printing.
+- Disabled/failure posture does not validate positive physical printing.
+- Network printer validation cannot be deferred if MSCQR is launching with direct printer connection as a core capability.
+
+Required before full launch Green:
+1. Windows connector install/startup/health proof.
+2. Positive Windows USB/local connector print artifact.
+3. Positive Windows network printer print artifact.
+4. Disabled/unreachable/failure route safety proof.
+5. Cross-tenant printer/job denial proof.
+6. Secret leakage check for print routes, logs, and generated artifacts.
