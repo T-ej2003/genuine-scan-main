@@ -1,4 +1,4 @@
-MSCQR SMTP required smoke evidence
+MSCQR SMTP required smoke and inbox evidence
 
 Status: GREEN
 
@@ -28,6 +28,16 @@ Templates accepted by SMTP provider:
 - public_support_reply: sent=true, delivered=true, acceptedCount=1, rejectedCount=0
 - incident_update_smoke: sent=true, delivered=true, acceptedCount=1, rejectedCount=0
 
+Inbox proof:
+- Gmail received request-access admin notification.
+- Gmail received request-access acknowledgement.
+- Gmail received support admin notification.
+- Gmail received support acknowledgement.
+- Gmail received support reply.
+- Gmail received incident update smoke.
+- Visible reference: SMTP-20260608T142542Z-9bd03f
+- Screenshots captured by operator in Gmail inbox.
+
 Provider diagnostics:
 - SMTP provider accepted the intended recipient.
 - No rejected recipients.
@@ -43,3 +53,4 @@ Secrets policy:
 - SMTP password excluded.
 - Full recipient excluded.
 - Full provider mailbox excluded.
+- Cookies/tokens/secrets excluded.
