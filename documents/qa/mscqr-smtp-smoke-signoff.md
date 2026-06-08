@@ -86,3 +86,66 @@ Required subject set:
 - Real provider/inbox proof: Yellow, awaiting staging credentials and inbox verification.
 
 CTO recommendation: use a dedicated retained launch-smoke mailbox and provider API access for repeatable evidence. Manual screenshots are acceptable for launch, but provider API verification is more scalable for future release gates.
+
+## Real deployed SMTP smoke evidence
+
+Status: GREEN
+
+Environment: production EC2 deployed backend container  
+Checked at UTC: 2026-06-08T14:25:42.754Z  
+Evidence file: `documents/qa/evidence/smtp-smoke-evidence.txt`
+
+Result:
+- SMTP auth verification passed.
+- Required SMTP smoke completed with `ok: true`.
+- Smoke ID: `SMTP-20260608T142542Z-9bd03f`.
+- Request-access admin notification accepted by provider.
+- Request-access acknowledgement accepted by provider.
+- Public support admin notification accepted by provider.
+- Public support acknowledgement accepted by provider.
+- Public support reply accepted by provider.
+- Incident update smoke accepted by provider.
+- Rejected recipient count: 0 for all templates.
+- Fallback used: false.
+
+Security note:
+- SMTP mailbox password was rotated after accidental exposure during diagnostics.
+- Evidence is redacted and excludes SMTP password, full recipient, cookies, tokens, and secrets.
+
+Status: GREEN for deployed production SMTP provider acceptance.
+
+## Real deployed SMTP smoke and inbox evidence
+
+Status: GREEN
+
+Environment: production EC2 deployed backend container  
+Checked at UTC: 2026-06-08T14:25:42.754Z  
+Evidence file: `documents/qa/evidence/smtp-smoke-evidence.txt`
+
+SMTP result:
+- SMTP auth verification passed.
+- Required SMTP smoke completed with `ok: true`.
+- Smoke ID: `SMTP-20260608T142542Z-9bd03f`.
+- Request-access admin notification accepted by provider.
+- Request-access acknowledgement accepted by provider.
+- Public support admin notification accepted by provider.
+- Public support acknowledgement accepted by provider.
+- Public support reply accepted by provider.
+- Incident update smoke accepted by provider.
+- Rejected recipient count: 0 for all templates.
+- Fallback used: false.
+
+Inbox proof:
+- Gmail inbox shows the request-access admin notification.
+- Gmail inbox shows the request-access acknowledgement.
+- Gmail inbox shows the support admin notification.
+- Gmail inbox shows the support acknowledgement.
+- Gmail inbox shows the support reply/update.
+- Gmail inbox shows the incident update smoke.
+- Gmail subjects include `SMTP-20260608T142542Z-9bd03f`.
+
+Security note:
+- SMTP mailbox password was rotated after accidental exposure during diagnostics.
+- Evidence is redacted and excludes SMTP password, full recipient, cookies, tokens, and secrets.
+
+Status: GREEN for deployed production SMTP provider acceptance and inbox receipt.

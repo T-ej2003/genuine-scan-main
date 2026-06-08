@@ -155,3 +155,15 @@ No-go if:
 ## Current Recommendation
 
 Do not mark final launch Green from this branch alone. The tooling is stronger now, including operator-controlled launch user seeding, but real deployed auth and SMTP remain Yellow until credentials are supplied and unskipped evidence is attached.
+
+
+## SMTP deployed provider smoke
+
+Status: GREEN
+
+Evidence:
+- `documents/qa/evidence/smtp-smoke-evidence.txt`
+- Smoke ID: `SMTP-20260608T142542Z-9bd03f`
+- SMTP auth verification: passed
+- Required SMTP smoke: `ok: true`
+- Provider accepted all intended recipients for request-access, support, support reply, and incident update templates.
