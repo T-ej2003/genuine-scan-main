@@ -1,0 +1,45 @@
+MSCQR SMTP required smoke evidence
+
+Status: GREEN
+
+Environment:
+- Production EC2 backend container
+- SMTP provider: Namecheap Private Email / mail.privateemail.com
+- SMTP port: 587
+- SMTP secure: false
+- SMTP requireTLS: true
+- SMTP user/from: ad***@mscqr.com
+- Smoke recipient: ab***@gmail.com
+
+Auth verification:
+- SMTP_AUTH_VERIFY_OK
+
+Smoke run:
+- smokeId: SMTP-20260608T142542Z-9bd03f
+- generatedAt: 2026-06-08T14:25:42.754Z
+- ok: true
+- skipped: false
+
+Templates accepted by SMTP provider:
+- request_access_admin: sent=true, delivered=true, acceptedCount=1, rejectedCount=0
+- request_access_ack: sent=true, delivered=true, acceptedCount=1, rejectedCount=0
+- public_support_admin: sent=true, delivered=true, acceptedCount=1, rejectedCount=0
+- public_support_ack: sent=true, delivered=true, acceptedCount=1, rejectedCount=0
+- public_support_reply: sent=true, delivered=true, acceptedCount=1, rejectedCount=0
+- incident_update_smoke: sent=true, delivered=true, acceptedCount=1, rejectedCount=0
+
+Provider diagnostics:
+- SMTP provider accepted the intended recipient.
+- No rejected recipients.
+- No fallback used.
+- No SMTP_AUTH_FAILED after credential correction.
+
+Root cause fixed:
+- Previous SMTP_USER was misspelled as administartion@mscqr.com.
+- Corrected to administration@mscqr.com.
+- Rotated exposed mailbox password before successful verification.
+
+Secrets policy:
+- SMTP password excluded.
+- Full recipient excluded.
+- Full provider mailbox excluded.
