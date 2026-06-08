@@ -39,10 +39,31 @@ const fetchAuthMe = async (page: Page) =>
     return { status: response.status, text };
   }, apiBaseUrl);
 
-const logoutFromShell = async (page: Page, accountNamePattern = /admin|manufacturer|factory|account|profile|user/i) => {
-  const accountButton = page.getByRole("button", { name: accountNamePattern }).first();
+const logoutFromShell = async (
+  page: Page,
+  accountNamePattern = /mscqr|platform|licensee|manufacturer|super admin|brand admin|admin|account|profile|user/i,
+) => {
+  const header = page.getByRole("banner");
+  const accountButton = header.getByRole("button", { name: accountNamePattern }).last();
+
+  await expect(accountButton).toBeVisible({ timeout: 15_000 });
   await accountButton.click();
-  await page.getByRole("menuitem", { name: /log out/i }).click();
+
+  const logoutControl = page
+    .getByRole("menuitem", { name: /^log out$/i })
+    .or(page.getByRole("button", { name: /^log out$/i }))
+    .or(page.getByRole("link", { name: /^log out$/i }))
+    .last();
+
+  await expect(logoutControl).toBeVisible({ timeout: 10_000 });
+  await logoutControl.click();
+
+  await expect
+    .poll(async () => {
+      const me = await fetchAuthMe(page);
+      return me.status;
+    }, { timeout: 15_000 })
+    .toBe(401);
 };
 
 test.describe("P2 real DB-backed auth E2E", () => {
@@ -65,6 +86,7 @@ test.describe("P2 real DB-backed auth E2E", () => {
 
     const me = await fetchAuthMe(page);
     expect(me.status).toBe(200);
+    console.info("MSCQR_REAL_AUTH_PROOF SUPERADMIN_AUTH_ME_200_OK");
     expect(me.text).toMatch(/SUPER_ADMIN|super_admin|PLATFORM_SUPER_ADMIN/i);
     expect(me.text).not.toMatch(/passwordHash|tokenHash|Bearer\s+[A-Za-z0-9._-]+|JWT_SECRET|DATABASE_URL/i);
 
@@ -72,12 +94,14 @@ test.describe("P2 real DB-backed auth E2E", () => {
     await expect(page.locator("main")).toBeVisible();
 
     await logoutFromShell(page);
+    console.info("MSCQR_REAL_AUTH_PROOF SUPERADMIN_LOGOUT_401_OK");
     const afterLogoutMe = await fetchAuthMe(page);
     expect(afterLogoutMe.status).toBe(401);
     expect(afterLogoutMe.text).not.toMatch(/passwordHash|tokenHash|Bearer\s+[A-Za-z0-9._-]+|JWT_SECRET|DATABASE_URL/i);
 
     await page.goto("/dashboard");
     await expect(page).toHaveURL(/\/login/);
+    console.info("MSCQR_REAL_AUTH_PROOF SUPERADMIN_PROTECTED_ROUTE_REDIRECT_OK");
     await expect(page.locator("body")).not.toContainText(/P2 Batch A|P2A000001|tokenHash|passwordHash/i);
 
     await page.goto("/support");
@@ -88,6 +112,7 @@ test.describe("P2 real DB-backed auth E2E", () => {
   test("licensee admin and manufacturer land in scoped workspaces and wrong-role URLs are denied", async ({ page }) => {
     await loginAsSeededRole(page, "licenseeAdmin");
     await expect(page).toHaveURL(/\/dashboard$/);
+    console.info("MSCQR_REAL_AUTH_PROOF LICENSEE_LOGIN_OK");
     await expect(page.locator("main")).toBeVisible();
     await expect(page.locator("body")).not.toContainText(/platform super admin|all licensees|raw json|stack trace/i);
 
@@ -96,8 +121,9 @@ test.describe("P2 real DB-backed auth E2E", () => {
     await page.goto("/support");
     await expect(page).not.toHaveURL(/\/support$/);
     await expect(page.locator("body")).not.toContainText(/P2 Brand B|tokenHash|passwordHash/i);
-
-    await logoutFromShell(page, /brand|admin|account|profile|user/i);
+    console.info("MSCQR_REAL_AUTH_PROOF LICENSEE_WRONG_ROLE_DENIED_OK");
+    await logoutFromShell(page);
+    console.info("MSCQR_REAL_AUTH_PROOF LICENSEE_LOGOUT_401_OK");
     await expect(page).toHaveURL(/\/login/);
 
     await loginAsSeededRole(page, "manufacturer");
@@ -108,6 +134,7 @@ test.describe("P2 real DB-backed auth E2E", () => {
 
     const manufacturerMe = await fetchAuthMe(page);
     expect(manufacturerMe.status).toBe(200);
+    console.info("MSCQR_REAL_AUTH_PROOF MANUFACTURER_AUTH_ME_200_OK");
     expect(manufacturerMe.text).toMatch(/MANUFACTURER|manufacturer/i);
     expect(manufacturerMe.text).not.toMatch(/passwordHash|tokenHash|Bearer\s+[A-Za-z0-9._-]+|JWT_SECRET|DATABASE_URL/i);
 
@@ -116,6 +143,7 @@ test.describe("P2 real DB-backed auth E2E", () => {
     await page.goto("/licensees");
     await expect(page).not.toHaveURL(/\/licensees$/);
     await expect(page.locator("body")).not.toContainText(/request access queue|P2 Brand B|tokenHash|passwordHash/i);
+    console.info("MSCQR_REAL_AUTH_PROOF MANUFACTURER_WRONG_ROLE_DENIED_OK");
   });
 
   test("password reset request writes to local JSON email capture when configured", async ({ page }) => {

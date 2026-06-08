@@ -1,0 +1,53 @@
+MSCQR Launch Smoke User Seed Evidence
+
+Environment: production
+Host: EC2 backend container
+Date/time UTC: 2026-06-08T10:36:37.888Z
+Release SHA: a66c71a
+
+Command:
+docker compose exec -T backend npm run seed:launch-smoke-users
+
+Result:
+{
+  "ok": true,
+  "redactedEvidence": {
+    "generatedAt": "2026-06-08T10:36:37.888Z",
+    "environment": "production",
+    "queryScope": "launch smoke user seed; operator-triggered DB mutation",
+    "licenseePrefix": "LSMK",
+    "users": [
+      {
+        "roleKey": "superAdmin",
+        "email": "la***n@mscqr.com",
+        "role": "SUPER_ADMIN",
+        "userId": "ab0e96c9-e32d-43b1-87db-72ae332d1d3f",
+        "action": "created",
+        "adminMfaFreshened": true
+      },
+      {
+        "roleKey": "licenseeAdmin",
+        "email": "la***n@mscqr.com",
+        "role": "LICENSEE_ADMIN",
+        "userId": "50a10729-ec89-4b63-8b16-b1974d9fd208",
+        "action": "created",
+        "adminMfaFreshened": true
+      },
+      {
+        "roleKey": "manufacturer",
+        "email": "la***r@mscqr.com",
+        "role": "MANUFACTURER",
+        "userId": "e02b6d8b-8413-4b24-8f90-5f41157a1252",
+        "action": "created",
+        "adminMfaFreshened": false
+      }
+    ],
+    "adminMfa": "Fresh admin MFA markers were refreshed only for launch-smoke admin users.",
+    "auditId": "9608e295-f622-48d2-97cc-df0d37d0c085"
+  }
+}
+
+Secrets policy:
+- Passwords were generated but intentionally excluded from this evidence file.
+- No cookies logged.
+- No tokens logged.

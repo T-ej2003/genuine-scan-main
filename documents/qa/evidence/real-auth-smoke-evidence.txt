@@ -1,0 +1,60 @@
+MSCQR Real Deployed Auth Smoke Evidence
+
+Environment: production
+Base URL: https://www.mscqr.com
+Release SHA: a66c71a
+Date/time UTC: 2026-06-08
+Run mode: Playwright Chromium, headless, single worker
+
+Command:
+npm run test:p2:e2e-real-auth 2>&1 | tee /tmp/mscqr-real-auth-smoke.log
+
+Result:
+Running 3 tests using 1 worker
+
+MSCQR_REAL_AUTH_PROOF SUPERADMIN_AUTH_ME_200_OK
+MSCQR_REAL_AUTH_PROOF SUPERADMIN_LOGOUT_401_OK
+MSCQR_REAL_AUTH_PROOF SUPERADMIN_PROTECTED_ROUTE_REDIRECT_OK
+PASS login page, invalid login, super admin auth-me, dashboard, logout, and post-logout denial are safe
+
+MSCQR_REAL_AUTH_PROOF LICENSEE_LOGIN_OK
+MSCQR_REAL_AUTH_PROOF LICENSEE_WRONG_ROLE_DENIED_OK
+MSCQR_REAL_AUTH_PROOF LICENSEE_LOGOUT_401_OK
+MSCQR_REAL_AUTH_PROOF MANUFACTURER_AUTH_ME_200_OK
+MSCQR_REAL_AUTH_PROOF MANUFACTURER_WRONG_ROLE_DENIED_OK
+PASS licensee admin and manufacturer land in scoped workspaces and wrong-role URLs are denied
+
+SKIP password reset request writes to local JSON email capture when configured
+
+Summary:
+2 passed
+1 skipped
+Duration: 12.1s
+
+Coverage:
+- invalid login rejects safely
+- superadmin login succeeds
+- /api/auth/me returns authenticated SUPER_ADMIN state
+- dashboard shell loads
+- production UI logout succeeds
+- /api/auth/me returns 401 after logout
+- protected dashboard route redirects to login after logout
+- licensee admin login succeeds
+- licensee admin lands in scoped workspace
+- licensee admin wrong-role URLs are denied
+- licensee production UI logout succeeds
+- manufacturer login succeeds
+- manufacturer /api/auth/me returns MANUFACTURER state
+- manufacturer wrong-role URLs are denied
+- tested responses do not expose passwordHash, tokenHash, bearer tokens, JWT_SECRET, or DATABASE_URL
+
+Validation checks:
+- npm run test:p2:e2e-real-auth: passed
+- npm run typecheck: passed
+- git diff --check: passed
+- npm run check:branch-secret-diff: passed
+
+Secrets policy:
+- No passwords stored in this evidence file.
+- No cookies stored in this evidence file.
+- No tokens stored in this evidence file.
