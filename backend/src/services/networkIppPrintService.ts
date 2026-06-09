@@ -27,6 +27,7 @@ import {
 } from "./printConfirmationService";
 import { buildApprovedPrintContext } from "./printPayloadService";
 import { failStopPrintSession, getOrCreatePrintSession, OPEN_PRINT_STATES } from "./printLifecycleService";
+import { markBatchPrintAcknowledged } from "./batchStateMachineService";
 
 const activeDispatches = new Set<string>();
 const NETWORK_IPP_CHUNK_SIZE = Math.max(1, Math.min(100, Number(process.env.NETWORK_IPP_CHUNK_SIZE || 10) || 10));
@@ -107,7 +108,7 @@ const loadIppDispatchJob = async (jobId: string) =>
 
 const markJobSent = async (jobId: string) => {
   const now = new Date();
-  await prisma.printJob.updateMany({
+  const updated = await prisma.printJob.updateMany({
     where: { id: jobId, status: PrintJobStatus.PENDING },
     data: {
       status: PrintJobStatus.SENT,
@@ -115,6 +116,12 @@ const markJobSent = async (jobId: string) => {
       sentAt: now,
     },
   });
+  if (updated.count > 0) {
+    const job = await prisma.printJob.findUnique({ where: { id: jobId }, select: { batchId: true } });
+    if (job?.batchId) {
+      await markBatchPrintAcknowledged({ batchId: job.batchId, printJobId: jobId });
+    }
+  }
 };
 
 const ensureSafeResumeState = async (sessionId: string) =>
@@ -140,6 +147,7 @@ const reserveNextChunk = async (params: { sessionId: string; actorUserId: string
           select: {
             id: true,
             code: true,
+            displayCode: true,
             batchId: true,
             licenseeId: true,
             tokenNonce: true,

@@ -191,7 +191,7 @@ const ROUTES: AppRouteMeta[] = [
     section: "Advanced",
     roles: ["super_admin"],
     icon: Shield,
-    nav: false,
+    nav: true,
     matchMode: "prefix",
     helpRoute: "/help/governance",
   },

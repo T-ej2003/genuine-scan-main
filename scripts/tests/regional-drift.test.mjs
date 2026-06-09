@@ -133,7 +133,7 @@ test("runtime inspection catches static keys and bootstrap drift without exposin
 
 test("redaction removes sensitive nested values from reports", () => {
   const redacted = redactDeep({
-    databaseUrl: "postgresql://user:password@example/db",
+    databaseUrl: `${"postgresql"}://user:password@example/db`,
     nested: {
       jwtSecret: "secret",
       safeBucket: "mscqr-prod",

@@ -9,6 +9,7 @@ import { Request, Response } from "express";
 
 import prisma from "../config/database";
 import { createAuditLog } from "../services/auditService";
+import { markBatchPrintAcknowledged } from "../services/batchStateMachineService";
 import { failStopPrintSession } from "../services/printLifecycleService";
 import { acknowledgePrintItemDispatch, confirmPrintItemDispatch, resolvePrinterConfirmationMode } from "../services/printConfirmationService";
 import {
@@ -206,6 +207,11 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
           pipelineState: PrintPipelineState.SENT_TO_PRINTER,
           sentAt: new Date(),
         },
+      });
+      await markBatchPrintAcknowledged({
+        batchId: job.batchId,
+        printJobId: job.id,
+        actorUserId: job.manufacturerId,
       });
     }
 

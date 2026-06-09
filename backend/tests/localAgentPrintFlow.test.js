@@ -1,8 +1,10 @@
 const prisma = require("../dist/config/database").default;
 const {
+  BatchLifecycleState,
   PrintDispatchMode,
   PrintItemEventType,
   PrintItemState,
+  PrintJobStatus,
   PrintPipelineState,
   PrintPayloadType,
   QRStatus,
@@ -125,10 +127,15 @@ const runConfirmTest = async () => {
     backup(prisma.printItemEvent, "create"),
     backup(prisma.printItemEvent, "createMany"),
     backup(prisma.qRCode, "updateMany"),
+    backup(prisma.qRCode, "count"),
     backup(prisma.printSession, "update"),
+    backup(prisma.printJob, "findUnique"),
     backup(prisma.printJob, "update"),
     backup(prisma.printJob, "updateMany"),
+    backup(prisma.printAuditEvent, "groupBy"),
+    backup(prisma.batch, "findUnique"),
     backup(prisma.batch, "update"),
+    backup(prisma.batch, "updateMany"),
   ];
   const updates = [];
   const sessionUpdates = [];
@@ -156,16 +163,34 @@ const runConfirmTest = async () => {
   prisma.printItemEvent.create = async () => ({});
   prisma.printItemEvent.createMany = async () => ({ count: 1 });
   prisma.qRCode.updateMany = async () => ({ count: 1 });
+  prisma.qRCode.count = async () => 1;
   prisma.printSession.update = async (args) => {
     sessionUpdates.push(args);
     return {};
   };
+  prisma.printJob.findUnique = async () => ({
+    id: "job-1",
+    status: PrintJobStatus.CONFIRMED,
+    sentAt: new Date("2026-05-19T18:01:00.000Z"),
+    confirmedAt: new Date("2026-05-19T18:02:00.000Z"),
+    itemCount: 1,
+    quantity: 1,
+  });
   prisma.printJob.update = async (args) => {
     jobUpdates.push(args);
     return {};
   };
   prisma.printJob.updateMany = async () => ({ count: 1 });
+  prisma.printAuditEvent.groupBy = async () => [];
+  prisma.batch.findUnique = async () => ({
+    id: "batch-1",
+    lifecycleState: BatchLifecycleState.PRINT_ACKNOWLEDGED,
+    releasedAt: null,
+    totalCodes: 1,
+    sampleScanPolicy: null,
+  });
   prisma.batch.update = async () => ({});
+  prisma.batch.updateMany = async () => ({ count: 1 });
 
   try {
     const result = await confirmPrintItemDispatch({

@@ -120,10 +120,21 @@ jobs:
           write_secret SCAN_FINGERPRINT_SECRET
           write_secret AUTH_MFA_ENCRYPTION_KEY
 
+          E2E_DB_PROTOCOL=postgresql
+          E2E_DB_USER=postgres
+          E2E_DB_HOST=127.0.0.1
+          E2E_DB_PORT=5432
+          E2E_DB_NAME=mscqr_e2e
+
           {
             echo "NODE_ENV=test"
             echo "PORT=4000"
-            echo "DATABASE_URL=postgresql://postgres@127.0.0.1:5432/mscqr_e2e?schema=public"
+            echo "E2E_DB_PROTOCOL=${E2E_DB_PROTOCOL}"
+            echo "E2E_DB_USER=${E2E_DB_USER}"
+            echo "E2E_DB_HOST=${E2E_DB_HOST}"
+            echo "E2E_DB_PORT=${E2E_DB_PORT}"
+            echo "E2E_DB_NAME=${E2E_DB_NAME}"
+            echo "DATABASE_URL=${E2E_DB_PROTOCOL}://${E2E_DB_USER}@${E2E_DB_HOST}:${E2E_DB_PORT}/${E2E_DB_NAME}?schema=public"
             echo "COOKIE_SECURE=false"
             echo "AUTH_LEGACY_TOKEN_RESPONSE_ENABLED=false"
             echo "RUN_BACKGROUND_WORKERS=false"

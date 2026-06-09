@@ -2,6 +2,9 @@
 
 Production-grade, multi-tenant QR issuance, controlled-print, verification, anomaly-detection, and auditability platform.
 
+Zebra ZT410 raw TCP validation and DB-backed print lifecycle notes are documented in
+[`documents/ZEBRA_ZT410_DB_BACKED_PRINTING.md`](documents/ZEBRA_ZT410_DB_BACKED_PRINTING.md).
+
 ## Delivery Standards
 
 - Feature-first frontend domains now live under `src/features/` for `batches`, `printing`, `verify`, `incidents`, `dashboard`, and `layout`.

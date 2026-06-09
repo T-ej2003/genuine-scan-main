@@ -90,16 +90,18 @@ const isOpsRole = (role?: UserRole | null) =>
       ].includes(role)
   );
 
-const canManagePrinterProfiles = (role?: UserRole | null) =>
+export const canConfigurePrinterNetworkEndpoint = (role?: UserRole | null) =>
   Boolean(
     role &&
       ([
         UserRole.SUPER_ADMIN,
         UserRole.PLATFORM_SUPER_ADMIN,
-        UserRole.MANUFACTURER,
-        UserRole.MANUFACTURER_ADMIN,
+        UserRole.LICENSEE_ADMIN,
+        UserRole.ORG_ADMIN,
       ] as UserRole[]).includes(role)
   );
+
+const canManagePrinterProfiles = canConfigurePrinterNetworkEndpoint;
 
 const resolveScope = async (req: AuthRequest) => ({
   userId: req.user!.userId,

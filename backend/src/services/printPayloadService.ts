@@ -4,7 +4,8 @@ import { PrintPayloadType, PrinterCommandLanguage, PrinterConnectionType, Printe
 import { buildCanonicalQrLabel } from "../printing/canonicalLabel";
 import { resolvePrinterLanguageRenderer } from "../printing/renderers";
 import { getZebraQrConfig, mmToDots, resolveConfiguredZebraDpi, resolveConfiguredZebraQrTargetMm } from "../printing/zebraQrSizing";
-import { buildScanUrl, hashToken, signQrPayload } from "./qrTokenService";
+import { buildVerifyUrl } from "./qrService";
+import { hashToken, signQrPayload } from "./qrTokenService";
 
 export type PrinterPayloadProfile = {
   id: string;
@@ -23,6 +24,7 @@ export type PrinterPayloadProfile = {
 export type PrintPayloadQr = {
   id: string;
   code: string;
+  displayCode?: string | null;
   batchId: string | null;
   licenseeId: string;
   tokenNonce: string | null;
@@ -350,6 +352,7 @@ const toQrToken = (params: {
 
 const buildZplPayload = (params: {
   code: string;
+  displayCode?: string | null;
   scanUrl: string;
   printer: PrinterPayloadProfile;
   jobNumber?: string | null;
@@ -358,17 +361,27 @@ const buildZplPayload = (params: {
   const layout = getResolvedLayout(params.printer);
   const qrConfig = getZebraQrConfig({ targetMm: layout.qrTargetMm, dpi: layout.dpi, payload: params.scanUrl });
   const qrSizeDots = qrConfig.estimatedSizeDots;
-  const qrTop = Math.max(12, Math.round((layout.heightDots - qrSizeDots) / 2) + layout.offsetYDots);
+  const qrTop = Math.max(132, Math.round((layout.heightDots - qrSizeDots) / 2) + layout.offsetYDots);
   const qrLeft = Math.max(12, Math.round((layout.widthDots - qrSizeDots) / 2) + layout.offsetXDots);
+  const displayCode = escapeZplText(params.displayCode || "").slice(0, 48);
+  const jobNumber = escapeZplText(params.jobNumber || "").slice(0, 48);
+  const reprintLabel = escapeZplText(params.reprintLabel || "").slice(0, 48);
+  const safeScanUrl = escapeZplText(params.scanUrl);
+  const footerText = escapeZplText(displayCode || "MSCQR issued label").slice(0, 64);
   return [
     "^XA",
     `^PW${layout.widthDots}`,
     `^LL${layout.heightDots}`,
     "^LH0,0",
     "^CI28",
-    `^FO${qrLeft},${qrTop}^BQN,2,${qrConfig.magnification}^FDLA,${params.scanUrl}^FS`,
+    "^FO40,25^A0N,30,30^FDMSCQR AUTH LABEL^FS",
+    jobNumber ? `^FO40,65^A0N,22,22^FDJob: ${jobNumber}^FS` : "^FO40,65^A0N,22,22^FDJob: governed print^FS",
+    displayCode ? `^FO40,95^A0N,22,22^FDSerial: ${displayCode}^FS` : "^FO40,95^A0N,22,22^FDSerial: registry-issued^FS",
+    reprintLabel ? `^FO40,122^A0N,20,20^FD${reprintLabel}^FS` : "",
+    `^FO${qrLeft},${qrTop}^BQN,2,${qrConfig.magnification}^FDLA,${safeScanUrl}^FS`,
+    `^FO40,${Math.max(layout.heightDots - 48, qrTop + qrSizeDots + 20)}^A0N,18,18^FD${footerText}^FS`,
     "^XZ",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 };
 
 const buildTsplPayload = (params: {
@@ -549,7 +562,7 @@ export const buildApprovedPrintContext = (params: {
   reprintOfJobId?: string | null;
 }): ApprovedPrintContext => {
   const scanToken = toQrToken({ qr: params.qr, manufacturerId: params.manufacturerId });
-  const scanUrl = buildScanUrl(scanToken);
+  const scanUrl = buildVerifyUrl(params.qr.code);
   const reprintLabel = params.reprintOfJobId ? "REPRINT - SERVER AUTHORIZED" : null;
 
   return {
@@ -591,7 +604,19 @@ export const buildApprovedPrintPayload = (params: {
   });
   const resolvedLanguage = resolveLanguageKind(params.printer);
   const rendered =
-    preferredType === PrintPayloadType.JSON || preferredType === PrintPayloadType.PDF
+    preferredType === PrintPayloadType.ZPL
+      ? {
+          payloadType: PrintPayloadType.ZPL,
+          payloadContent: buildZplPayload({
+            code: params.qr.code,
+            displayCode: params.qr.displayCode || null,
+            scanUrl: context.scanUrl,
+            printer: params.printer,
+            jobNumber: params.jobNumber,
+            reprintLabel: context.reprintLabel,
+          }),
+        }
+      : preferredType === PrintPayloadType.JSON || preferredType === PrintPayloadType.PDF
       ? null
       : resolvePrinterLanguageRenderer(resolvedLanguage).render(canonicalDocument, { dpi: layout.dpi });
 

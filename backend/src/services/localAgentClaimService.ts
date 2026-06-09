@@ -33,6 +33,7 @@ export const reserveLocalAgentItem = async (params: { printSessionId: string; ac
           select: {
             id: true,
             code: true,
+            displayCode: true,
             batchId: true,
             licenseeId: true,
             tokenNonce: true,

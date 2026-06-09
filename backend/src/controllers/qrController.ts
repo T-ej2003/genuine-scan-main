@@ -20,6 +20,13 @@ import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 import { listLatestDecisionByQrCodeIds } from "../services/verificationDecisionReadService";
 import { recordBreakGlassIssuanceMetric } from "../observability/verificationTrustMetrics";
+import { getLegacyQrReport, rotateEligibleLegacyQrCodes, serializeLegacyQrReportCsv } from "../services/legacyQrRotationService";
+import { getBatchReleaseApprovalContext, releaseBatchForSupplyChain } from "../services/batchReleaseService";
+import { assertBatchTransitionAllowedFromDb } from "../services/batchStateMachineService";
+import {
+  formatPrintValidationEvidenceMarkdown,
+  generatePrintValidationEvidenceReport,
+} from "../services/printValidationEvidenceService";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -96,6 +103,12 @@ const bulkDeleteBatchesSchema = z.object({
 const generateQRCodesSchema = z.object({
   licenseeId: z.string().uuid(),
   quantity: z.number().int().positive().max(200000),
+}).strict();
+
+const rotateLegacyQrCodesSchema = z.object({
+  ids: z.array(z.string().uuid()).max(500).optional(),
+  limit: z.number().int().positive().max(500).optional(),
+  dryRun: z.boolean().optional(),
 }).strict();
 
 const generateSignedLinksSchema = z.object({
@@ -396,17 +409,17 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
     const batch = await prisma.$transaction(async (tx) => {
       const pool = await tx.qRCode.findMany({
         where: { licenseeId, batchId: null, status: QRStatus.DORMANT },
-        orderBy: { code: "asc" },
+        orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
         take: quantity,
-        select: { id: true, code: true },
+        select: { id: true, code: true, displayCode: true },
       });
 
       if (pool.length < quantity) {
         throw new Error(`Not enough available codes. Available: ${pool.length}, requested: ${quantity}.`);
       }
 
-      const startCode = pool[0].code;
-      const endCode = pool[pool.length - 1].code;
+      const startCode = pool[0].displayCode || pool[0].code;
+      const endCode = pool[pool.length - 1].displayCode || pool[pool.length - 1].code;
 
       const createdBatch = await tx.batch.create({
         data: {
@@ -416,6 +429,7 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
           endCode,
           totalCodes: pool.length,
           manufacturerId: mfgId,
+          lifecycleState: "CODES_GENERATED",
         },
       });
 
@@ -728,9 +742,9 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
           status: { in: [QRStatus.DORMANT, QRStatus.ACTIVE, QRStatus.ALLOCATED] },
           printJobId: null,
         },
-        orderBy: { code: "asc" },
+        orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
         take: quantity,
-        select: { id: true, code: true },
+        select: { id: true, code: true, displayCode: true },
       });
 
       if (eligible.length < quantity) {
@@ -739,8 +753,8 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
         );
       }
 
-      const startCode = eligible[0].code;
-      const endCode = eligible[eligible.length - 1].code;
+      const startCode = eligible[0].displayCode || eligible[0].code;
+      const endCode = eligible[eligible.length - 1].displayCode || eligible[eligible.length - 1].code;
       const totalCodes = eligible.length;
 
       const newName = (
@@ -760,6 +774,7 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
           startCode,
           endCode,
           totalCodes,
+          lifecycleState: "CODES_GENERATED",
         },
       });
 
@@ -785,8 +800,8 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
 
       const remaining = await tx.qRCode.findMany({
         where: { batchId: batch.id },
-        orderBy: { code: "asc" },
-        select: { code: true },
+        orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
+        select: { code: true, displayCode: true },
       });
 
       await tx.batch.update({
@@ -797,8 +812,8 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
                 totalCodes: 0,
               }
             : {
-                startCode: remaining[0].code,
-                endCode: remaining[remaining.length - 1].code,
+                startCode: remaining[0].displayCode || remaining[0].code,
+                endCode: remaining[remaining.length - 1].displayCode || remaining[remaining.length - 1].code,
                 totalCodes: remaining.length,
               },
       });
@@ -812,8 +827,9 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
         sourceBatchId: sourceBatch.id,
         sourceBatchName: sourceBatch.name,
         sourceRemainingCodes: remaining.length,
-        sourceRemainingStartCode: remaining[0]?.code || null,
-        sourceRemainingEndCode: remaining[remaining.length - 1]?.code || null,
+        sourceRemainingStartCode: remaining[0]?.displayCode || remaining[0]?.code || null,
+        sourceRemainingEndCode:
+          remaining[remaining.length - 1]?.displayCode || remaining[remaining.length - 1]?.code || null,
       };
     });
 
@@ -1030,7 +1046,7 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
     );
 
     const rows = await prisma.qRCode.findMany({
-      where: { licenseeId, code: { gte: result.allocation.startCode, lte: result.allocation.endCode } },
+      where: { licenseeId, displayCode: { gte: result.allocation.startCode, lte: result.allocation.endCode } },
       select: {
         id: true,
         licenseeId: true,
@@ -1040,7 +1056,7 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
         tokenIssuedAt: true,
         tokenExpiresAt: true,
       },
-      orderBy: { code: "asc" },
+      orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
     });
 
     const now = new Date();
@@ -1330,13 +1346,18 @@ export const getQRCodes = async (req: AuthRequest, res: Response) => {
       relationManufacturerField: "batch",
     })) as Prisma.QRCodeWhereInput;
     if (status) where.status = status;
-    if (q) where.code = { contains: q, mode: "insensitive" };
+    if (q) {
+      where.OR = [
+        { code: { contains: q, mode: "insensitive" } },
+        { displayCode: { contains: q, mode: "insensitive" } },
+      ];
+    }
 
     const [total, qrCodes] = await Promise.all([
       prisma.qRCode.count({ where }),
       prisma.qRCode.findMany({
         where,
-        orderBy: { code: "asc" },
+        orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
         take: limit,
         skip: offset,
         include: {
@@ -1423,6 +1444,235 @@ export const getStats = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getLegacyPublicCodeReport = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+
+    const report = await getLegacyQrReport();
+    if (String(req.query.format || "").trim().toLowerCase() === "csv") {
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", 'attachment; filename="mscqr-legacy-public-code-report.csv"');
+      return res.send(`${serializeLegacyQrReportCsv(report)}\n`);
+    }
+    return res.json({ success: true, data: report });
+  } catch (e) {
+    console.error("getLegacyPublicCodeReport error:", e);
+    return res.status(500).json({ success: false, error: "Legacy QR report is temporarily unavailable." });
+  }
+};
+
+export const getPrintValidationEvidence = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+
+    const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+    }
+
+    const report = await generatePrintValidationEvidenceReport({
+      batchId: paramsParsed.data.id,
+      actor: {
+        userId: req.user.userId,
+        role: req.user.role,
+        licenseeId: req.user.licenseeId || null,
+        linkedLicenseeIds: req.user.linkedLicenseeIds || null,
+      },
+      printJobId: String(req.query.printJobId || "").trim() || null,
+      includePublicCode: String(req.query.includePublicCode || "").trim().toLowerCase() === "true",
+    });
+
+    if (String(req.query.format || "").trim().toLowerCase() === "markdown") {
+      res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="mscqr-print-validation-${report.batch.id}.md"`);
+      return res.send(`${formatPrintValidationEvidenceMarkdown(report)}\n`);
+    }
+
+    return res.json({ success: true, data: report });
+  } catch (e) {
+    const statusCode = typeof (e as { statusCode?: unknown })?.statusCode === "number" ? Number((e as { statusCode: number }).statusCode) : 500;
+    if (statusCode === 404) return res.status(404).json({ success: false, error: "Validation evidence not found" });
+    console.error("getPrintValidationEvidence error:", e);
+    return res.status(500).json({ success: false, error: "Validation evidence is temporarily unavailable." });
+  }
+};
+
+export const releaseBatch = async (req: AuthRequest, res: Response) => {
+  try {
+    const auth = ensureAuth(req);
+    if (!auth || !req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
+
+    const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
+    if (!paramsParsed.success) {
+      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+    }
+
+    const batch = await findScopedBatch(req.user, paramsParsed.data.id, {
+      select: { id: true, manufacturerId: true },
+    });
+    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
+
+    const releaseContext = await getBatchReleaseApprovalContext({
+      batchId: batch.id,
+      actorUserId: auth.userId,
+      actorManufacturerId: isManufacturerRole(auth.role) ? auth.userId : null,
+    });
+
+    if (releaseContext.approvalPolicy.required) {
+      if (!releaseContext.readiness.releasable) {
+        throw Object.assign(
+          new Error(releaseContext.readiness.failures[0]?.message || "Batch is not ready for release."),
+          {
+            statusCode: 409,
+            readiness: releaseContext.readiness,
+          }
+        );
+      }
+      await assertBatchTransitionAllowedFromDb({
+        batchId: batch.id,
+        printJobId: releaseContext.readiness.printJobId,
+        toStatus: "APPROVAL_PENDING",
+        actor: { userId: auth.userId, role: auth.role },
+        approvalRequired: true,
+      });
+
+      const existingApproval = await prisma.sensitiveActionApproval.findFirst({
+        where: {
+          actionKey: SENSITIVE_ACTION_KEYS.BATCH_RELEASE,
+          entityType: "Batch",
+          entityId: batch.id,
+          status: "PENDING",
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      });
+      if (existingApproval) {
+        return res.status(202).json({
+          success: true,
+          data: {
+            approvalRequired: true,
+            approvalId: existingApproval.id,
+            status: existingApproval.status,
+            expiresAt: existingApproval.expiresAt,
+            readiness: releaseContext.readiness,
+            approvalPolicy: releaseContext.approvalPolicy,
+            idempotent: true,
+          },
+        });
+      }
+
+      const approval = await createSensitiveActionApproval({
+        actionKey: SENSITIVE_ACTION_KEYS.BATCH_RELEASE,
+        actor: {
+          userId: auth.userId,
+          role: auth.role,
+          orgId: req.user.orgId || null,
+          licenseeId: req.user.licenseeId || null,
+        },
+        orgId: req.user.orgId || null,
+        licenseeId: releaseContext.batch.licenseeId,
+        entityType: "Batch",
+        entityId: batch.id,
+        payload: {
+          batchId: batch.id,
+          printJobId: releaseContext.readiness.printJobId,
+          requestedByUserId: auth.userId,
+          releaseBoundary: "supply_chain",
+        },
+        summary: {
+          reason: releaseContext.approvalPolicy.reason,
+          threshold: releaseContext.approvalPolicy.threshold,
+          totalCodes: releaseContext.batch.totalCodes,
+          readiness: releaseContext.readiness,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || null,
+      });
+
+      return res.status(202).json({
+        success: true,
+        data: {
+          approvalRequired: true,
+          approvalId: approval.id,
+          status: approval.status,
+          expiresAt: approval.expiresAt,
+          readiness: releaseContext.readiness,
+          approvalPolicy: releaseContext.approvalPolicy,
+        },
+      });
+    }
+
+    const result = await releaseBatchForSupplyChain({
+      batchId: batch.id,
+      actorUserId: auth.userId,
+      actorManufacturerId: isManufacturerRole(auth.role) ? auth.userId : null,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
+    });
+
+    return res.json({ success: true, data: result });
+  } catch (e) {
+    const statusCode = typeof (e as { statusCode?: unknown })?.statusCode === "number" ? Number((e as { statusCode: number }).statusCode) : 500;
+    const readiness = (e as { readiness?: unknown })?.readiness || null;
+    if (statusCode === 409) {
+      return res.status(409).json({
+        success: false,
+        error: (e as Error)?.message || "Batch is not ready for release.",
+        code: typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : undefined,
+        data: readiness ? { readiness } : undefined,
+      });
+    }
+    if (statusCode === 404) {
+      return res.status(404).json({ success: false, error: "Batch not found" });
+    }
+    console.error("releaseBatch error:", e);
+    return res.status(500).json({ success: false, error: "Batch release failed safely." });
+  }
+};
+
+export const rotateLegacyPublicCodes = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+
+    const parsed = rotateLegacyQrCodesSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid rotation payload" });
+    }
+
+    const result = await rotateEligibleLegacyQrCodes({
+      actorId: req.user.userId,
+      ids: parsed.data.ids,
+      limit: parsed.data.limit,
+      dryRun: parsed.data.dryRun,
+    });
+
+    await createAuditLog({
+      userId: req.user.userId,
+      action: parsed.data.dryRun ? "QR_LEGACY_ROTATION_DRY_RUN" : "QR_LEGACY_ROTATION_EXECUTED",
+      entityType: "QRCode",
+      details: {
+        dryRun: result.dryRun,
+        scanned: result.scanned,
+        rotatedCount: result.rotated.length,
+        skippedCount: result.skipped.length,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+    });
+
+    return res.json({ success: true, data: result });
+  } catch (e) {
+    console.error("rotateLegacyPublicCodes error:", e);
+    return res.status(500).json({ success: false, error: "Legacy QR rotation failed safely. No unsafe rows were rotated." });
+  }
+};
+
 export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
   try {
     const role = req.user?.role;
@@ -1437,11 +1687,16 @@ export const exportQRCodesCsv = async (req: AuthRequest, res: Response) => {
       relationManufacturerField: "batch",
     })) as Prisma.QRCodeWhereInput;
     if (status) where.status = status;
-    if (q) where.code = { contains: q, mode: "insensitive" };
+    if (q) {
+      where.OR = [
+        { code: { contains: q, mode: "insensitive" } },
+        { displayCode: { contains: q, mode: "insensitive" } },
+      ];
+    }
 
     const rows = await prisma.qRCode.findMany({
       where,
-      orderBy: { code: "asc" },
+      orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
       include: {
         licensee: { select: { name: true, prefix: true } },
         batch: { select: { id: true, name: true, printedAt: true } },

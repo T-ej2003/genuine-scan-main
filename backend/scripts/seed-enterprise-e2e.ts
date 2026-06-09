@@ -8,6 +8,7 @@ import {
   PrinterTransportKind,
   PrinterTrustStatus,
   QRStatus,
+  BatchLifecycleState,
   UserRole,
   UserStatus,
 } from "@prisma/client";
@@ -424,6 +425,7 @@ const seed = async () => {
       startCode: sourceCodes[0],
       endCode: sourceCodes[sourceCodes.length - 1],
       totalCodes: sourceCodes.length,
+      lifecycleState: BatchLifecycleState.CODES_GENERATED,
     },
     update: {
       name: BATCH_NAMES.source,
@@ -434,6 +436,7 @@ const seed = async () => {
       startCode: sourceCodes[0],
       endCode: sourceCodes[sourceCodes.length - 1],
       totalCodes: sourceCodes.length,
+      lifecycleState: BatchLifecycleState.CODES_GENERATED,
       printedAt: null,
       suspendedAt: null,
       suspendedReason: null,
@@ -452,6 +455,7 @@ const seed = async () => {
       startCode: printCodes[0],
       endCode: printCodes[printCodes.length - 1],
       totalCodes: printCodes.length,
+      lifecycleState: BatchLifecycleState.CODES_GENERATED,
     },
     update: {
       name: BATCH_NAMES.print,
@@ -462,6 +466,7 @@ const seed = async () => {
       startCode: printCodes[0],
       endCode: printCodes[printCodes.length - 1],
       totalCodes: printCodes.length,
+      lifecycleState: BatchLifecycleState.CODES_GENERATED,
       printedAt: null,
       suspendedAt: null,
       suspendedReason: null,
@@ -479,6 +484,7 @@ const seed = async () => {
       endCode: VERIFY_CODE,
       totalCodes: 1,
       printedAt: now(),
+      lifecycleState: BatchLifecycleState.RELEASED,
     },
     update: {
       name: BATCH_NAMES.verify,
@@ -488,6 +494,7 @@ const seed = async () => {
       endCode: VERIFY_CODE,
       totalCodes: 1,
       printedAt: now(),
+      lifecycleState: BatchLifecycleState.RELEASED,
       suspendedAt: null,
       suspendedReason: null,
     },

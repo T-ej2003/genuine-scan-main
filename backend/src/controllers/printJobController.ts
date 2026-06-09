@@ -1,5 +1,6 @@
 export {
   abandonManufacturerPrintJob,
+  capturePrintJobSampleScan,
   confirmDirectPrintItem,
   confirmPrintJob,
   createPrintJob,

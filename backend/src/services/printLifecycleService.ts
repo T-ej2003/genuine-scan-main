@@ -1,4 +1,5 @@
 import {
+  BatchLifecycleState,
   IncidentActorType,
   IncidentEventType,
   IncidentPriority,
@@ -15,6 +16,7 @@ import {
 
 import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
+import { assertBatchTransitionAllowedFromDb } from "./batchStateMachineService";
 
 export const OPEN_PRINT_STATES: PrintItemState[] = [
   PrintItemState.RESERVED,
@@ -52,8 +54,8 @@ export const getOrCreatePrintSession = async (job: {
 
     const qrRows = await tx.qRCode.findMany({
       where: { printJobId: job.id },
-      orderBy: { code: "asc" },
-      select: { id: true, code: true, status: true },
+      orderBy: [{ displayCode: "asc" }, { createdAt: "asc" }],
+      select: { id: true, code: true, displayCode: true, status: true },
     });
 
     const totalItems = qrRows.length || job.quantity;
@@ -78,7 +80,7 @@ export const getOrCreatePrintSession = async (job: {
         data: qrRows.map((row) => ({
           printSessionId: created.id,
           qrCodeId: row.id,
-          code: row.code,
+          code: row.displayCode || row.code,
           state: mapLegacyPrintItemState(row.status),
           issuedAt: row.status === QRStatus.ACTIVATED ? null : new Date(),
           printConfirmedAt:
@@ -174,9 +176,24 @@ export const finalizePrintSessionIfReady = async (params: {
   });
 
   if (jobUpdate.count > 0) {
-    await params.tx.batch.update({
-      where: { id: params.batchId },
-      data: { printedAt: params.now },
+    await assertBatchTransitionAllowedFromDb({
+      batchId: params.batchId,
+      printJobId: params.printJobId,
+      toStatus: "PHYSICAL_PRINT_CONFIRMED",
+      actor: { userId: params.actorUserId },
+      tx: params.tx,
+    });
+    await params.tx.batch.updateMany({
+      where: {
+        id: params.batchId,
+        lifecycleState: {
+          in: [BatchLifecycleState.PRINT_ACKNOWLEDGED],
+        },
+      },
+      data: {
+        printedAt: params.now,
+        lifecycleState: BatchLifecycleState.PRINT_CONFIRMED,
+      },
     });
     confirmedAt = params.now;
   } else {

@@ -1,6 +1,16 @@
 import { sanitizePrinterActionError } from "../../utils/printerUserFacingErrors";
 
 type PrintJobErrorCode =
+  | "QR_CODES_REQUIRED"
+  | "PRINT_ACK_REQUIRED"
+  | "PHYSICAL_CONFIRMATION_REQUIRED"
+  | "SAMPLE_SCAN_REQUIRED"
+  | "APPROVAL_REQUIRED"
+  | "CHECKER_REQUIRED"
+  | "MAKER_CANNOT_APPROVE"
+  | "BATCH_ALREADY_RELEASED"
+  | "QR_NOT_IN_PRINT_JOB"
+  | "INVALID_STATE_TRANSITION"
   | "active_print_job_exists"
   | "batch_not_found"
   | "batch_not_printable"
@@ -95,6 +105,19 @@ const hasVirtualSelectedPrinter = (printerStatus: PrinterStatusLike | null | und
     VIRTUAL_PRINTER_TERMS
   );
 
+const batchStateErrorCodes = new Set<PrintJobErrorCode>([
+  "QR_CODES_REQUIRED",
+  "PRINT_ACK_REQUIRED",
+  "PHYSICAL_CONFIRMATION_REQUIRED",
+  "SAMPLE_SCAN_REQUIRED",
+  "APPROVAL_REQUIRED",
+  "CHECKER_REQUIRED",
+  "MAKER_CANNOT_APPROVE",
+  "BATCH_ALREADY_RELEASED",
+  "QR_NOT_IN_PRINT_JOB",
+  "INVALID_STATE_TRANSITION",
+]);
+
 const classifyPrinterReadinessError = (printerStatus: PrinterStatusLike | null | undefined): PrintJobErrorCode => {
   const missing = describeMissingPrinterReadinessFields(printerStatus);
   if (
@@ -141,6 +164,21 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
   logReason: string;
 } => {
   const msg = String(error?.message || "");
+  if (typeof error?.code === "string" && batchStateErrorCodes.has(error.code as PrintJobErrorCode)) {
+    const code = error.code as PrintJobErrorCode;
+    return {
+      status: Number(error?.statusCode || 409),
+      logReason: String(code).toLowerCase(),
+      payload: withFailureContext(
+        {
+          code,
+          message: msg || "Complete the previous batch step first.",
+          data: error.details ? { details: error.details } : undefined,
+        },
+        context
+      ),
+    };
+  }
   if (msg.includes("BATCH_BUSY")) {
     return {
       status: 409,

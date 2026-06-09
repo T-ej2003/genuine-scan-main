@@ -75,7 +75,12 @@ export const reissuePrintJobSchema = z.object({
 }).strict();
 
 export const confirmSchema = z.object({
-  printLockToken: z.string().min(10),
+  printLockToken: z.string().min(10).optional(),
+  operatorNote: z.string().trim().max(500).optional(),
+}).strict();
+
+export const sampleScanSchema = z.object({
+  publicCode: z.string().trim().min(2).max(1024),
 }).strict();
 
 export const issueDirectPrintTokensSchema = z.object({

@@ -69,6 +69,11 @@
     "nextStep": "Split platform-specific flows and operator guidance blocks into dedicated connector feature sections.",
     "targetMaxLines": 700
   },
+  "src/pages/Dashboard.tsx": {
+    "summary": "Dashboard still coordinates cross-role navigation, summaries, and launch-state routing while Zebra/QR hardening work remains focused on backend invariants and the batch wizard.",
+    "nextStep": "Move role-specific dashboard sections and launch-state cards into dedicated dashboard feature components after the print/release hardening lane is stable.",
+    "targetMaxLines": 700
+  },
   "src/pages/PrinterDiagnostics.tsx": {
     "summary": "Printer diagnostics combines status dashboards, troubleshooting workflows, and operational controls in one page.",
     "nextStep": "Break diagnostics widgets, troubleshooting actions, and historical views into focused printer-diagnostics feature modules.",

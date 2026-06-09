@@ -1,9 +1,9 @@
 import { Router, type RequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 
-import { authenticate, requireRecentAdminMfa } from "../../middleware/auth";
+import { authenticate, requireRecentAdminMfa, requireRecentSensitiveAuth } from "../../middleware/auth";
 import { requireCsrf } from "../../middleware/csrf";
-import { requirePlatformAdmin } from "../../middleware/rbac";
+import { requireOpsUser, requirePlatformAdmin } from "../../middleware/rbac";
 import {
   downloadCompliancePackJobController,
   exportIncidentEvidenceBundleController,
@@ -246,7 +246,7 @@ export const createGovernanceReadRoutes = () => {
     "/governance/approvals",
     governanceReadPreAuthRouteLimiter,
     authenticate,
-    requirePlatformAdmin,
+    requireOpsUser,
     governanceReadRouteLimiter,
     governanceReadIpLimiter,
     governanceReadActorLimiter,
@@ -311,8 +311,8 @@ export const createGovernanceMutationRoutes = () => {
     "/governance/approvals/:id/approve",
     governanceApprovalMutationPreAuthRouteLimiter,
     authenticate,
-    requirePlatformAdmin,
-    requireRecentAdminMfa,
+    requireOpsUser,
+    requireRecentSensitiveAuth,
     governanceApprovalMutationRouteLimiter,
     governanceApprovalMutationIpLimiter,
     governanceApprovalMutationActorLimiter,
@@ -323,8 +323,8 @@ export const createGovernanceMutationRoutes = () => {
     "/governance/approvals/:id/reject",
     governanceApprovalMutationPreAuthRouteLimiter,
     authenticate,
-    requirePlatformAdmin,
-    requireRecentAdminMfa,
+    requireOpsUser,
+    requireRecentSensitiveAuth,
     governanceApprovalMutationRouteLimiter,
     governanceApprovalMutationIpLimiter,
     governanceApprovalMutationActorLimiter,

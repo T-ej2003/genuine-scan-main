@@ -48,6 +48,14 @@ import type {
 
 type ToastLike = (options: { title?: string; description?: string; variant?: "default" | "destructive" }) => unknown;
 
+type ReleaseApprovalState = {
+  approvalRequired: boolean;
+  approvalId: string;
+  status: string;
+  expiresAt?: string | null;
+  threshold?: number | null;
+};
+
 type UseBatchPrintWorkflowParams = {
   isManufacturer: boolean;
   userId?: string | null;
@@ -74,6 +82,8 @@ export function useBatchPrintWorkflow({
   const [registeredPrinters, setRegisteredPrinters] = useState<RegisteredPrinterRow[]>([]);
   const [selectedPrinterProfileId, setSelectedPrinterProfileId] = useState("");
   const [recentPrintJobs, setRecentPrintJobs] = useState<PrintJobRow[]>([]);
+  const [sampleScanCodeByJobId, setSampleScanCodeByJobId] = useState<Record<string, string>>({});
+  const [releaseApprovalState, setReleaseApprovalState] = useState<ReleaseApprovalState | null>(null);
   const [switchingPrinter, setSwitchingPrinter] = useState(false);
   const [relinkingPrinter, setRelinkingPrinter] = useState(false);
   const [calibrationProfile, setCalibrationProfile] = useState<CalibrationProfileState>(defaultCalibrationProfileState);
@@ -392,6 +402,7 @@ export function useBatchPrintWorkflow({
     setPrintBatch(batch);
     setPrintQuantity("");
     setPrintJobId("");
+    setReleaseApprovalState(null);
     setDirectRemainingToPrint(null);
     setPrintProgressOpen(false);
     setPrintProgressPhase("Preparing print pipeline");
@@ -411,6 +422,7 @@ export function useBatchPrintWorkflow({
     setPrintOpen(open);
     if (!open) {
       setPrintBatch(null);
+      setReleaseApprovalState(null);
       setDirectRemainingToPrint(null);
       const keepNetworkDispatchProgress =
         !printing &&
@@ -477,6 +489,162 @@ export function useBatchPrintWorkflow({
       onBatchesChanged,
       toast,
     });
+  };
+
+  const confirmPrintedLabels = async (jobId: string) => {
+    const trimmedJobId = String(jobId || "").trim();
+    if (!trimmedJobId) return;
+    setPrinting(true);
+    try {
+      const response = await apiClient.confirmPrintJobPrinted(trimmedJobId, {
+        operatorNote: "Operator confirmed labels physically printed from the MSCQR admin workflow.",
+      });
+      if (!response.success) {
+        toast({
+          title: "Confirmation needs attention",
+          description: sanitizePrinterUiError(response.error || response.message, "MSCQR could not confirm this print run."),
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Labels confirmed",
+        description: "MSCQR marked the acknowledged labels as physically printed and updated the audit trail.",
+      });
+      await loadRecentPrintJobs();
+      await onBatchesChanged?.();
+      const status = await apiClient.getPrintJobStatus(trimmedJobId);
+      if (status.success && status.data) {
+        syncPrintJobProgress(status.data as PrintJobRow, {
+          setPrintProgressTotal,
+          setPrintProgressPrinted,
+          setPrintProgressRemaining,
+          setDirectRemainingToPrint,
+          setPrintProgressDispatchMode,
+          setPrintProgressPrinterName,
+          setPrintProgressPhase,
+          setPrintProgressError,
+          setPrintProgressOpen,
+          setPrintProgressCurrentCode,
+        });
+      }
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  const setSampleScanCode = (jobId: string, value: string) => {
+    const trimmedJobId = String(jobId || "").trim();
+    if (!trimmedJobId) return;
+    setSampleScanCodeByJobId((previous) => ({ ...previous, [trimmedJobId]: value }));
+  };
+
+  const verifySampleScan = async (jobId: string) => {
+    const trimmedJobId = String(jobId || "").trim();
+    if (!trimmedJobId) return;
+    const publicCode = String(sampleScanCodeByJobId[trimmedJobId] || "").trim();
+    if (!publicCode) {
+      toast({
+        title: "Scan one printed label",
+        description: "Scan or paste the exact MSCQR verify code from one physical label before verification.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPrinting(true);
+    try {
+      const response = await apiClient.capturePrintJobSampleScan(trimmedJobId, publicCode);
+      if (!response.success) {
+        toast({
+          title: "Sample scan rejected",
+          description: sanitizePrinterUiError(response.error || response.message, "That QR code is not part of this print run."),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Sample scan verified",
+        description: response.data?.sampleScanPolicy?.satisfied
+          ? "MSCQR recorded the scan and the print run has enough sample proof for release."
+          : "MSCQR recorded that the scanned label belongs to this confirmed print run.",
+      });
+      setSampleScanCodeByJobId((previous) => ({ ...previous, [trimmedJobId]: "" }));
+      await loadRecentPrintJobs();
+      await onBatchesChanged?.();
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  const releaseBatch = async () => {
+    const batchId = String(printBatch?.id || "").trim();
+    if (!batchId) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Release this batch? MSCQR will lock the completed print and sample-scan workflow for supply-chain release.")
+    ) {
+      return;
+    }
+
+    setPrinting(true);
+    try {
+      const response = await apiClient.releaseBatch(batchId);
+      if (!response.success) {
+        const readiness = response.data?.readiness;
+        const firstFailure =
+          Array.isArray(readiness?.failures) && readiness.failures.length > 0
+            ? String(readiness.failures[0]?.message || "")
+            : "";
+        toast({
+          title: "Batch not ready for release",
+          description: sanitizePrinterUiError(
+            firstFailure || response.error || response.message,
+            "Complete print acknowledgement, physical confirmation, and sample scan proof before release."
+          ),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (response.data?.approvalRequired && response.data.approvalId) {
+        setReleaseApprovalState({
+          approvalRequired: true,
+          approvalId: response.data.approvalId,
+          status: response.data.status || "PENDING",
+          expiresAt: response.data.expiresAt || null,
+          threshold: response.data.approvalPolicy?.threshold ?? null,
+        });
+        toast({
+          title: "Release approval requested",
+          description:
+            "A different authorized checker from the platform, brand, or assigned manufacturer must approve this high-value batch.",
+        });
+        await loadRecentPrintJobs();
+        await onBatchesChanged?.();
+        return;
+      }
+
+      setReleaseApprovalState(null);
+      toast({
+        title: "Batch released",
+        description: "MSCQR locked the batch for supply-chain release and recorded the audit evidence.",
+      });
+      await loadRecentPrintJobs();
+      await onBatchesChanged?.();
+      setPrintBatch((current) =>
+        current && current.id === batchId
+          ? {
+              ...current,
+              lifecycleState: "RELEASED",
+              releasedAt: response.data?.batch?.releasedAt || current.releasedAt || new Date().toISOString(),
+            }
+          : current
+      );
+    } finally {
+      setPrinting(false);
+    }
   };
 
   const progressStateSetters = useMemo(
@@ -636,7 +804,13 @@ export function useBatchPrintWorkflow({
     directRemainingToPrint,
     onRefreshPrintStatus: refreshPendingPrintStatus,
     recentPrintJobs,
+    releaseApprovalState,
+    sampleScanCodeByJobId,
+    onSampleScanCodeChange: setSampleScanCode,
     onAbandonPrintJob: abandonPrintJob,
+    onConfirmPrintedLabels: confirmPrintedLabels,
+    onVerifySampleScan: verifySampleScan,
+    onReleaseBatch: releaseBatch,
     onClose: () => setPrintOpen(false),
   };
 

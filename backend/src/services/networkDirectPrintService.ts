@@ -9,6 +9,7 @@ import {
   PrintPipelineState,
   PrintSessionStatus,
   PrinterConnectionType,
+  Prisma,
   QRStatus,
 } from "@prisma/client";
 import type { PrintJobDTO } from "../../../shared/contracts/printing.d.ts";
@@ -21,6 +22,8 @@ import { failStopPrintSession, getOrCreatePrintSession, OPEN_PRINT_STATES } from
 import { createAuditLog } from "./auditService";
 import { createRoleNotifications, createUserNotification } from "./notificationService";
 import { buildScopedPrintJobWhere, type PrintJobScope } from "./printJobScopeService";
+import { evaluateSampleScanPolicy } from "./sampleScanPolicyService";
+import { markBatchPrintAcknowledged } from "./batchStateMachineService";
 import {
   acknowledgePrintItemDispatch,
   confirmPrintItemDispatch,
@@ -184,7 +187,7 @@ const loadNetworkDispatchJob = async (jobId: string) =>
 
 const markJobSent = async (jobId: string) => {
   const now = new Date();
-  await prisma.printJob.updateMany({
+  const updated = await prisma.printJob.updateMany({
     where: { id: jobId, status: PrintJobStatus.PENDING },
     data: {
       status: PrintJobStatus.SENT,
@@ -192,6 +195,12 @@ const markJobSent = async (jobId: string) => {
       sentAt: now,
     },
   });
+  if (updated.count > 0) {
+    const job = await prisma.printJob.findUnique({ where: { id: jobId }, select: { batchId: true } });
+    if (job?.batchId) {
+      await markBatchPrintAcknowledged({ batchId: job.batchId, printJobId: jobId });
+    }
+  }
 };
 
 const ensureSafeResumeState = async (sessionId: string) =>
@@ -217,6 +226,7 @@ const reserveNextChunk = async (params: { sessionId: string; actorUserId: string
           select: {
             id: true,
             code: true,
+            displayCode: true,
             batchId: true,
             licenseeId: true,
             tokenNonce: true,
@@ -394,7 +404,17 @@ const buildPrintJobView = async (job: {
   sentAt: Date | null;
   confirmedAt: Date | null;
   completedAt: Date | null;
-  batch: { id: string; name: string | null; licenseeId?: string | null } | null;
+  batch:
+    | {
+        id: string;
+        name: string | null;
+        licenseeId?: string | null;
+        sampleScanPolicy?: Prisma.JsonValue | null;
+        totalCodes?: number | null;
+        lifecycleState?: string | null;
+        releasedAt?: Date | null;
+      }
+    | null;
   printer: any;
   printSession:
     | {
@@ -414,6 +434,16 @@ const buildPrintJobView = async (job: {
   const sessionStateCounts = await buildSessionStateCounts(sessionIds);
   const counts = job.printSession?.id ? sessionStateCounts[job.printSession.id] || {} : {};
   const awaitingConfirmationCount = counts[PrintItemState.AGENT_ACKED] || 0;
+  const sampleScanPolicy =
+    job.batch?.id && job.status === PrintJobStatus.CONFIRMED
+      ? await evaluateSampleScanPolicy({
+        batchId: job.batch.id,
+        printJobId: job.id,
+        policy: job.batch.sampleScanPolicy,
+        quantity: job.itemCount || job.quantity || job.batch.totalCodes || null,
+        tx: prisma,
+      })
+      : null;
 
   return {
     id: job.id,
@@ -441,6 +471,7 @@ const buildPrintJobView = async (job: {
     batch: job.batch,
     printer: job.printer,
     session: buildSessionSnapshot(job.printSession, counts),
+    sampleScanPolicy,
   };
 };
 
@@ -451,7 +482,17 @@ export const getPrintJobOperationalView = async (params: {
   const job = await prisma.printJob.findFirst({
     where: buildScopedPrintJobWhere(params.scope, { id: params.jobId }),
     include: {
-      batch: { select: { id: true, name: true, licenseeId: true } },
+      batch: {
+        select: {
+          id: true,
+          name: true,
+          licenseeId: true,
+          lifecycleState: true,
+          releasedAt: true,
+          sampleScanPolicy: true,
+          totalCodes: true,
+        },
+      },
       printer: {
         select: {
           id: true,
@@ -509,7 +550,17 @@ export const listPrintJobsForManufacturer = async (params: {
       ...(params.batchId ? { batchId: params.batchId } : {}),
     }),
     include: {
-      batch: { select: { id: true, name: true, licenseeId: true } },
+      batch: {
+        select: {
+          id: true,
+          name: true,
+          licenseeId: true,
+          lifecycleState: true,
+          releasedAt: true,
+          sampleScanPolicy: true,
+          totalCodes: true,
+        },
+      },
       printer: {
         select: {
           id: true,
@@ -619,28 +670,6 @@ const processAcknowledgedItems = async (params: {
       });
       return false;
     }
-
-    try {
-      await confirmAcknowledgedZebraItem({
-        job: params.job,
-        sessionId: params.sessionId,
-        actorUserId: params.actorUserId,
-        item,
-      });
-    } catch (error: any) {
-      await failDispatch({
-        job: params.job,
-        sessionId: params.sessionId,
-        actorUserId: params.actorUserId,
-        reason: error?.message || `Network printer confirmation failed for ${item.code}`,
-        printItemId: item.id,
-        metadata: {
-          printerId: params.job.printer?.id || null,
-          printerName: params.job.printer?.name || null,
-        },
-      });
-      return false;
-    }
   }
 
   return true;
@@ -657,7 +686,7 @@ const dispatchAndConfirmReservedItem = async (params: {
   }
 
   const confirmationMode = resolvePrinterConfirmationMode(params.job.printer);
-  if (confirmationMode !== "ZEBRA_ODOMETER") {
+  if (confirmationMode === "DIRECT_NOT_ALLOWED") {
     throw new Error("NETWORK_DIRECT_CONFIRMATION_UNSUPPORTED");
   }
 
@@ -671,10 +700,6 @@ const dispatchAndConfirmReservedItem = async (params: {
     reprintOfJobId: params.job.reprintOfJobId,
   });
 
-  const startingLabelCount = await getZebraTotalLabelCount({
-    ipAddress: params.job.printer.ipAddress,
-    port: params.job.printer.port,
-  });
   const socketResult = await sendRawPayloadToNetworkPrinter({
     ipAddress: params.job.printer.ipAddress,
     port: params.job.printer.port,
@@ -693,10 +718,11 @@ const dispatchAndConfirmReservedItem = async (params: {
     payloadType: payload.payloadType,
     payloadHash: payload.payloadHash,
     bytesWritten: socketResult.bytesWritten,
-    startingLabelCount,
     expectedIncrement: 1,
     printerIpAddress: params.job.printer.ipAddress,
     printerPort: params.job.printer.port,
+    socketAcceptedAt: new Date().toISOString(),
+    requiresOperatorConfirmation: true,
   };
 
   await acknowledgePrintItemDispatch({
@@ -706,27 +732,9 @@ const dispatchAndConfirmReservedItem = async (params: {
     payloadType: payload.payloadType,
     payloadHash: payload.payloadHash,
     bytesWritten: socketResult.bytesWritten,
-    deviceJobRef: `zebra-odometer:${startingLabelCount}`,
+    deviceJobRef: `raw-tcp:${params.job.printer.ipAddress}:${params.job.printer.port}:${Date.now()}`,
     dispatchMetadata,
     confirmationMode,
-  });
-
-  await confirmAcknowledgedZebraItem({
-    job: params.job,
-    sessionId: params.sessionId,
-    actorUserId: params.actorUserId,
-    item: {
-      id: params.item.id,
-      qrCodeId: params.item.qrCodeId,
-      code: params.item.code,
-      state: PrintItemState.AGENT_ACKED,
-      deviceJobRef: `zebra-odometer:${startingLabelCount}`,
-      dispatchMetadata,
-      confirmationDeadlineAt: null,
-      qrCode: {
-        status: params.item.qrCode.status,
-      },
-    },
   });
 };
 
@@ -750,7 +758,7 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
   if (!supportsNetworkDirectPayload(job.printer as any)) {
     throw new Error("NETWORK_DIRECT_LANGUAGE_NOT_SUPPORTED");
   }
-  if (resolvePrinterConfirmationMode(job.printer) !== "ZEBRA_ODOMETER") {
+  if (resolvePrinterConfirmationMode(job.printer) === "DIRECT_NOT_ALLOWED") {
     throw new Error("NETWORK_DIRECT_CONFIRMATION_UNSUPPORTED");
   }
 
@@ -797,6 +805,32 @@ const runNetworkDirectDispatch = async (jobId: string, actorUserId: string) => {
     });
 
     if (!reservedItems.length) {
+      const [reservedOrIssued, awaitingOperator] = await Promise.all([
+        prisma.printItem.count({
+          where: {
+            printSessionId: session.id,
+            state: { in: [PrintItemState.RESERVED, PrintItemState.ISSUED] },
+          },
+        }),
+        prisma.printItem.count({
+          where: {
+            printSessionId: session.id,
+            state: PrintItemState.AGENT_ACKED,
+          },
+        }),
+      ]);
+      if (reservedOrIssued === 0 && awaitingOperator > 0) {
+        await prisma.printJob.updateMany({
+          where: { id: job.id, status: PrintJobStatus.SENT },
+          data: { pipelineState: PrintPipelineState.NEEDS_OPERATOR_ACTION },
+        });
+        logger.info("Network-direct dispatch is awaiting operator print confirmation", {
+          jobId: job.id,
+          sessionId: session.id,
+          awaitingOperator,
+        });
+        break;
+      }
       const remaining = await prisma.printItem.count({
         where: {
           printSessionId: session.id,

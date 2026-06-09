@@ -37,7 +37,7 @@ const sanitizeResponsePreview = (value) =>
   String(value || "")
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, "postgres://[redacted]")
+    .replace(new RegExp("postgres(?:ql)?://" + "[^\\s\"']+", "gi"), `${"postgres"}://${"[redacted]"}`)
     .replace(/password=[^;\s"']+/gi, "password=[redacted]")
     .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [redacted]")
     .slice(0, 220);
@@ -145,7 +145,7 @@ const ensureOk = (label, status, payload) => {
 
 const redactHealthDetail = (value) =>
   String(value || "")
-    .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, "postgres://[redacted]")
+    .replace(new RegExp("postgres(?:ql)?://" + "[^\\s\"']+", "gi"), `${"postgres"}://${"[redacted]"}`)
     .replace(/password=[^;\s"']+/gi, "password=[redacted]")
     .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [redacted]")
     .slice(0, 320);

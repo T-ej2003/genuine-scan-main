@@ -12,6 +12,18 @@ export type BatchRow = {
   endCode: string;
   totalCodes: number;
   printedAt: string | null;
+  lifecycleState?:
+    | "DRAFT"
+    | "CODES_GENERATED"
+    | "PRINT_ACKNOWLEDGED"
+    | "PRINT_CONFIRMED"
+    | "SAMPLE_VERIFIED"
+    | "RELEASED"
+    | "FAILED"
+    | "VOIDED";
+  sampleScanPolicy?: Record<string, unknown> | null;
+  releasedAt?: string | null;
+  releasedByUserId?: string | null;
   createdAt: string;
   updatedAt?: string;
   licensee?: { id: string; name: string; prefix: string } | null;
@@ -225,4 +237,11 @@ export type PrintJobRow = {
     counts?: Record<string, number>;
   } | null;
   latestDecision?: LatestDecision | null;
+  sampleScanPolicy?: {
+    satisfied: boolean;
+    required: number;
+    passed: number;
+    missing: number;
+    policy: Record<string, unknown>;
+  } | null;
 };

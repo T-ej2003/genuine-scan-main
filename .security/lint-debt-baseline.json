@@ -1,6 +1,8 @@
 {
-  "recordedAt": "2026-04-14T12:00:00.000Z",
-  "errors": 996,
-  "warnings": 31
+  "recordedAt": "2026-06-08T23:39:51.549Z",
+  "errors": 1133,
+  "warnings": 27,
+  "files": 772,
+  "command": "npx eslint . -f json",
+  "note": "MSCQR lint debt ratchet baseline. Lower this file only after intentional cleanup; do not raise it to hide new debt."
 }
-

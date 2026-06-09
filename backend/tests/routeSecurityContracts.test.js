@@ -141,6 +141,7 @@ assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLim
   '"/incidents", incidentReadPreAuthRouteLimiter, authenticate, requireAnyAdmin,',
   '"/ir/incidents", irReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin,',
   '"/account/profile", accountMutationPreAuthRouteLimiter, authenticate, accountMutationRouteLimiter,',
+  '"/manufacturer/print-jobs/:id/sample-scan", printMutationPreAuthRouteLimiter, authenticate, requireManufacturer,',
 ].forEach((pattern) => {
   assert(routesSource.includes(pattern), `main route contract missing: ${pattern}`);
 });
