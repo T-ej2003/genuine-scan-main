@@ -104,9 +104,12 @@ export const registeredPrinterArraySchema = z.array(registeredPrinterSchema);
 export const printJobSessionSchema = z
   .object({
     id: z.string().optional(),
+    status: z.string().optional(),
     remainingToPrint: z.number().optional(),
     confirmedItems: z.number().optional(),
     frozenItems: z.number().optional(),
+    stoppedItems: z.number().optional(),
+    failedItems: z.number().optional(),
     awaitingConfirmationCount: z.number().optional(),
     counts: z.record(z.string(), z.number()).optional(),
   })
@@ -116,7 +119,7 @@ export const printJobSchema = z
   .object({
     id: z.string(),
     jobNumber: z.string().nullable().optional(),
-    status: z.enum(["PENDING", "SENT", "CONFIRMED", "FAILED", "CANCELLED"]),
+    status: z.enum(["PENDING", "SENT", "PAUSED", "CONFIRMED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED", "STOPPED"]),
     pipelineState: printPipelineStateSchema.optional(),
     printMode: z.enum(["LOCAL_AGENT", "NETWORK_DIRECT", "NETWORK_IPP"]),
     quantity: z.number(),

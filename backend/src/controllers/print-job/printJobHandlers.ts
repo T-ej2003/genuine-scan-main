@@ -9,8 +9,15 @@ export {
 } from "./directPrintHandlers";
 export {
   abandonManufacturerPrintJob,
+  approveManufacturerPrintReissueRequest,
+  createManufacturerPrintReissueRequest,
   downloadPrintJobPack,
   getManufacturerPrintJobStatus,
   listManufacturerPrintJobs,
+  listManufacturerPrintReissueRequests,
+  pauseManufacturerPrintJob,
+  rejectManufacturerPrintReissueRequest,
   reissueManufacturerPrintJob,
+  resumeManufacturerPrintJob,
+  stopManufacturerPrintJob,
 } from "./queryHandlers";

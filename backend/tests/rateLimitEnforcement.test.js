@@ -29,6 +29,7 @@ const {
   gatewayJobRouteLimiter,
   gatewayJobIpLimiter,
   gatewayJobActorLimiter,
+  printLifecycleRouteLimiter,
   printMutationRouteLimiter,
   printMutationIpLimiter,
   printMutationActorLimiter,
@@ -102,6 +103,34 @@ const assertRateLimitAfter = async ({
   }
 };
 
+const assertAllowedFor = async ({
+  app,
+  path,
+  method = "POST",
+  body,
+  headers,
+  count,
+  description,
+}) => {
+  const { server, baseUrl } = await startServer(app);
+  try {
+    for (let index = 0; index < count; index += 1) {
+      const response = await fetch(`${baseUrl}${path}`, {
+        method,
+        headers: {
+          ...(body ? { "content-type": "application/json" } : {}),
+          ...(headers || {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      assert.strictEqual(response.status, 200, `${description} should allow request ${index + 1}`);
+    }
+  } finally {
+    await stopServer(server);
+  }
+};
+
 const loginApp = express();
 loginApp.use(express.json());
 loginApp.post("/auth/login", loginIpLimiter, loginActorLimiter, (_req, res) => res.status(200).json({ success: true }));
@@ -126,6 +155,14 @@ gatewayJobApp.post(
   gatewayJobRouteLimiter,
   gatewayJobIpLimiter,
   gatewayJobActorLimiter,
+  (_req, res) => res.status(200).json({ success: true })
+);
+
+const printLifecycleApp = express();
+printLifecycleApp.use(express.json());
+printLifecycleApp.post(
+  "/printer-agent/local/confirm",
+  printLifecycleRouteLimiter,
   (_req, res) => res.status(200).json({ success: true })
 );
 
@@ -198,6 +235,15 @@ verifySessionMutationApp.post("/verify/session/abc/intake", verifySessionMutatio
     body: { gatewayId: "gateway-1" },
     allowed: 90,
     description: "gateway job claim",
+  });
+
+  await assertAllowedFor({
+    app: printLifecycleApp,
+    path: "/printer-agent/local/confirm",
+    headers: { "x-printer-gateway-id": "gateway-1" },
+    body: { gatewayId: "gateway-1" },
+    count: 300,
+    description: "normal bulk print lifecycle flow",
   });
 
   await assertRateLimitAfter({

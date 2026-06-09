@@ -230,6 +230,86 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     });
   },
 
+  async createPrintReissueRequest(
+    jobId: string,
+    payload: {
+      reason: string;
+      quantity?: number;
+      affectedRangeStart?: string;
+      affectedRangeEnd?: string;
+    }
+  ) {
+    const actionKey = buildPrinterActionKey("print-reissue-request", [
+      jobId,
+      payload.quantity,
+      payload.affectedRangeStart,
+      payload.affectedRangeEnd,
+      stablePrinterPayloadSignature(payload.reason),
+    ]);
+    return controlledPrinterMutation(actionKey, () =>
+      core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/reissue-request`, {
+        method: "POST",
+        headers: { "x-idempotency-key": actionKey },
+        body: JSON.stringify(payload),
+      })
+    );
+  },
+
+  async listPrintReissueRequests(options?: { status?: string; limit?: number }) {
+    const params = new URLSearchParams();
+    if (options?.status) params.append("status", options.status);
+    if (options?.limit) params.append("limit", String(options.limit));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return controlledPrinterGet<any[]>(
+      `print-reissue-requests:${query || "all"}`,
+      PRINTER_STATUS_MIN_REFRESH_MS,
+      () => core.request<any[]>(`/manufacturer/print-reissue-requests${query}`)
+    );
+  },
+
+  async decidePrintReissueRequest(requestId: string, decision: "approve" | "reject", decisionNote: string) {
+    const actionKey = buildPrinterActionKey("print-reissue-decision", [requestId, decision, stablePrinterPayloadSignature(decisionNote)]);
+    return controlledPrinterMutation(actionKey, () =>
+      core.request<any>(`/manufacturer/print-reissue-requests/${encodeURIComponent(requestId)}/${decision}`, {
+        method: "POST",
+        headers: { "x-idempotency-key": actionKey },
+        body: JSON.stringify({ decisionNote }),
+      })
+    );
+  },
+
+  async pausePrintJob(jobId: string, reason: string) {
+    const actionKey = buildPrinterActionKey("print-job-pause", [jobId, stablePrinterPayloadSignature(reason)]);
+    return controlledPrinterMutation(actionKey, () =>
+      core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/pause`, {
+        method: "POST",
+        headers: { "x-idempotency-key": actionKey },
+        body: JSON.stringify({ reason }),
+      })
+    );
+  },
+
+  async resumePrintJob(jobId: string) {
+    const actionKey = buildPrinterActionKey("print-job-resume", [jobId]);
+    return controlledPrinterMutation(actionKey, () =>
+      core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/resume`, {
+        method: "POST",
+        headers: { "x-idempotency-key": actionKey },
+      })
+    );
+  },
+
+  async stopPrintJob(jobId: string, reason: string) {
+    const actionKey = buildPrinterActionKey("print-job-stop", [jobId, stablePrinterPayloadSignature(reason)]);
+    return controlledPrinterMutation(actionKey, () =>
+      core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/stop`, {
+        method: "POST",
+        headers: { "x-idempotency-key": actionKey },
+        body: JSON.stringify({ reason }),
+      })
+    );
+  },
+
   async abandonPrintJob(jobId: string) {
     return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/abandon`, {
       method: "POST",

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { BatchAllocationMapDialog } from "@/components/batches/BatchAllocationMapDialog";
@@ -32,10 +32,14 @@ export default function BatchesPage() {
   const role = user?.role;
   const canDelete = role === "super_admin" || role === "licensee_admin";
   const canAssignManufacturer = role === "licensee_admin";
-  const canRequestReissue = role === "super_admin" || role === "licensee_admin";
+  const canRequestReissue = role === "super_admin" || role === "licensee_admin" || role === "manufacturer";
   const isManufacturer = role === "manufacturer";
   const [reissueReason, setReissueReason] = useState("");
   const [reissuingJobId, setReissuingJobId] = useState<string | null>(null);
+  const [reissueRequests, setReissueRequests] = useState<any[]>([]);
+  const [reissueRequestsLoading, setReissueRequestsLoading] = useState(false);
+  const [reissueDecisionNote, setReissueDecisionNote] = useState("");
+  const [decidingReissueRequestId, setDecidingReissueRequestId] = useState<string | null>(null);
 
   const operations = useBatchOperationsController({
     role,
@@ -69,6 +73,23 @@ export default function BatchesPage() {
     workspace.workspaceOpen && canRequestReissue
   );
 
+  const fetchReissueRequests = async () => {
+    if (!canRequestReissue) return;
+    setReissueRequestsLoading(true);
+    try {
+      const response = await apiClient.listPrintReissueRequests({ status: "PENDING", limit: 25 });
+      setReissueRequests(response.success && Array.isArray(response.data) ? response.data : []);
+    } finally {
+      setReissueRequestsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!workspace.workspaceOpen || !canRequestReissue) return;
+    void fetchReissueRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.workspaceOpen, canRequestReissue, role]);
+
   const requestPrintJobReissue = async (jobId: string) => {
     const reason = reissueReason.trim();
     if (!reason) {
@@ -82,11 +103,14 @@ export default function BatchesPage() {
 
     setReissuingJobId(jobId);
     try {
-      const response = await apiClient.requestPrintJobReissue(jobId, { reason });
+      const response =
+        role === "super_admin"
+          ? await apiClient.requestPrintJobReissue(jobId, { reason })
+          : await apiClient.createPrintReissueRequest(jobId, { reason });
       if (!response.success) {
         toast({
-          title: "Reissue not created",
-          description: response.error || "MSCQR could not authorize the replacement print job.",
+          title: "Reissue not submitted",
+          description: response.error || "MSCQR could not submit the replacement label request.",
           variant: "destructive",
         });
         return;
@@ -94,17 +118,56 @@ export default function BatchesPage() {
 
       setReissueReason("");
       toast({
-        title: "Reissue authorized",
-        description: "A controlled replacement print job was created and added to the audit trail.",
+        title: role === "super_admin" ? "Reissue authorized" : "Reissue request submitted",
+        description:
+          role === "super_admin"
+            ? "A controlled replacement print job was created and added to the audit trail."
+            : "The request is waiting for the required approval before replacement labels can be printed.",
       });
 
       await Promise.allSettled([
+        fetchReissueRequests(),
         workspacePrintJobsQuery.refetch(),
         operations.fetchBatches(),
         workspace.workspaceBatch ? workspace.fetchWorkspaceHistory(workspace.workspaceBatch) : Promise.resolve(),
       ]);
     } finally {
       setReissuingJobId(null);
+    }
+  };
+
+  const decideReissueRequest = async (requestId: string, decision: "approve" | "reject") => {
+    const decisionNote = reissueDecisionNote.trim();
+    if (decisionNote.length < 8) {
+      toast({
+        title: "Decision note required",
+        description: "Enter a clear approval or rejection note for the audit trail.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setDecidingReissueRequestId(requestId);
+    try {
+      const response = await apiClient.decidePrintReissueRequest(requestId, decision, decisionNote);
+      if (!response.success) {
+        toast({
+          title: "Review not saved",
+          description: response.error || "MSCQR could not update the reissue request.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setReissueDecisionNote("");
+      toast({
+        title: decision === "approve" ? "Reissue approved" : "Reissue rejected",
+        description:
+          decision === "approve"
+            ? "MSCQR queued the approved replacement workflow and updated the audit trail."
+            : "MSCQR recorded the rejection and notified the requester.",
+      });
+      await Promise.allSettled([fetchReissueRequests(), workspacePrintJobsQuery.refetch(), operations.fetchBatches()]);
+    } finally {
+      setDecidingReissueRequestId(null);
     }
   };
 
@@ -221,6 +284,17 @@ export default function BatchesPage() {
           void requestPrintJobReissue(jobId);
         }}
         reissuingJobId={reissuingJobId}
+        reissueRequests={reissueRequests}
+        reissueRequestsLoading={reissueRequestsLoading}
+        reissueDecisionNote={reissueDecisionNote}
+        decidingReissueRequestId={decidingReissueRequestId}
+        onReissueDecisionNoteChange={setReissueDecisionNote}
+        onRefreshReissueRequests={() => {
+          void fetchReissueRequests();
+        }}
+        onDecideReissueRequest={(requestId, decision) => {
+          void decideReissueRequest(requestId, decision);
+        }}
       />
 
       <RenameBatchDialog

@@ -102,7 +102,13 @@ export const getPlainPrintStatusLabel = (value?: string | null) => {
   const normalized = String(value || "").trim().toUpperCase();
   if (normalized === "PENDING") return "Queued";
   if (normalized === "SENT") return "Sent to printer";
+  if (normalized === "PAUSED") return "Paused";
+  if (normalized === "RESUME_PENDING") return "Resume pending";
+  if (normalized === "RETRY_WAITING") return "Waiting to retry";
   if (normalized === "PRINT_CONFIRMED") return "Printed";
+  if (normalized === "PARTIALLY_COMPLETED") return "Partially completed";
+  if (normalized === "STOPPING") return "Stopping";
+  if (normalized === "STOPPED") return "Stopped";
   if (normalized === "FAILED") return "Needs attention";
   if (normalized === "CANCELLED") return "Cancelled";
   return humanize(value) || "Status unknown";
