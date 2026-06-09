@@ -203,6 +203,7 @@ describe("Dashboard shell nav visibility", () => {
     renderShellForRole("manufacturer");
 
     expect(screen.getAllByText("Manufacturer Admin").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/printing ready/i).length).toBeGreaterThan(0);
     expect(screen.queryByText("Licensee Admin")).not.toBeInTheDocument();
     expectNavLabels(["Overview", "Batches", "Printing", "Scans", "History", "Settings"]);
     expectNavLabelsAbsent(["QR Requests", "Brands", "Manufacturers", "Issues", "Governance", "Release Readiness", "Printer Diagnostics", "Raw Evidence", "Technical Logs"]);

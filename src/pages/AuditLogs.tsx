@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { format } from "date-fns";
-import { Activity, AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronUp, Mail, RefreshCw, Search, ShieldAlert } from "lucide-react";
+import { Activity, AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronUp, Mail, PackageCheck, Printer, RefreshCw, Search, ShieldAlert, UserCheck, Wrench } from "lucide-react";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
@@ -18,6 +18,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { auditActionLabel, auditActorLabel, auditChangeSummary, auditEntityLabel, humanStatusLabel, maskEmail, supportReferenceLabel } from "@/lib/audit-display";
+import {
+  buildManufacturerActivitySearchText,
+  buildManufacturerPrintHistoryRow,
+  getManufacturerActivityDisplay,
+  getManufacturerActivityToneClass,
+  type ManufacturerActivityCategory,
+} from "@/lib/manufacturer-activity-display";
 
 type FraudStatus = "OPEN" | "REVIEWED" | "RESOLVED" | "DISMISSED";
 type FraudResponseStatus = Exclude<FraudStatus, "OPEN">;
@@ -91,6 +98,22 @@ const PRINTER_AUDIT_ACTION_LABELS: Record<string, string> = {
   PRINTER_CONNECTION_UNTRUSTED_OR_OFFLINE: "Printer connection needs attention",
 };
 
+const MANUFACTURER_ACTIVITY_FILTERS: Array<{ value: "all" | ManufacturerActivityCategory; label: string }> = [
+  { value: "all", label: "All activity" },
+  { value: "printing", label: "Printing" },
+  { value: "batches", label: "Batches" },
+  { value: "users", label: "Users" },
+  { value: "printer_setup", label: "Printer setup" },
+  { value: "issues", label: "Issues" },
+];
+
+const PRINT_STATUS_FILTERS = [
+  { value: "all", label: "All print runs" },
+  { value: "completed", label: "Completed" },
+  { value: "active", label: "In progress" },
+  { value: "issues", label: "Needs attention" },
+];
+
 const formatAuditActionLabel = (value?: string | null) =>
   auditActionLabel(PRINTER_AUDIT_ACTION_LABELS[String(value || "").trim().toUpperCase()] || value);
 
@@ -155,12 +178,20 @@ export default function AuditLogs() {
   const { toast } = useToast();
 
   const [logs, setLogs] = useState<any[]>([]);
+  const [printJobs, setPrintJobs] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [activityFilter, setActivityFilter] = useState("all");
+  const [printStatusFilter, setPrintStatusFilter] = useState("all");
   const [live, setLive] = useState(true);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [printHistoryLoading, setPrintHistoryLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [printHistoryError, setPrintHistoryError] = useState<string | null>(null);
   const [licensees, setLicensees] = useState<any[]>([]);
   const [licenseeFilter, setLicenseeFilter] = useState<string>("all");
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const refreshAllInFlightRef = useRef<Promise<void> | null>(null);
 
   const [fraudStatusFilter, setFraudStatusFilter] = useState<"ALL" | FraudStatus>("OPEN");
   const [fraudReports, setFraudReports] = useState<FraudReportQueueItem[]>([]);
@@ -174,6 +205,7 @@ export default function AuditLogs() {
   const [responding, setResponding] = useState(false);
 
   const isSuperAdmin = user?.role === "super_admin";
+  const isManufacturer = user?.role === "manufacturer";
 
   const summarizeDetails = (log: any) => {
     const d = asObject(log?.details);
@@ -243,26 +275,63 @@ export default function AuditLogs() {
     return auditActorLabel(log, { maskEmail: true });
   };
 
-  const load = async () => {
-    const res = await apiClient.getAuditLogs({
-      limit: 150,
-      licenseeId: isSuperAdmin && licenseeFilter !== "all" ? licenseeFilter : undefined,
-    });
-
-    if (!res.success) {
-      setLogs([]);
-      return;
+  const friendlyLoadError = (res: any, fallback: string) => {
+    if (res?.status === 429 || res?.code === "RATE_LIMITED") {
+      return "Too many refresh attempts. Waiting a few seconds before trying again.";
     }
+    return fallback;
+  };
 
-    const payload: any = res.data;
-    const list = Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload?.logs)
-      ? payload.logs
-      : Array.isArray(payload?.data)
-      ? payload.data
-      : [];
-    setLogs(list);
+  const load = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setActivityLoading(true);
+    setHistoryError(null);
+    try {
+      const res = await apiClient.getAuditLogs({
+        limit: 150,
+        licenseeId: isSuperAdmin && licenseeFilter !== "all" ? licenseeFilter : undefined,
+      });
+
+      if (!res.success) {
+        setLogs([]);
+        setHistoryError(friendlyLoadError(res, "History could not be loaded right now. Refresh when you are ready."));
+        return;
+      }
+
+      const payload: any = res.data;
+      const list = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.logs)
+        ? payload.logs
+        : Array.isArray(payload?.data)
+        ? payload.data
+        : [];
+      setLogs(list);
+    } catch {
+      setLogs([]);
+      setHistoryError("History could not be loaded right now. Refresh when you are ready.");
+    } finally {
+      if (!opts?.silent) setActivityLoading(false);
+    }
+  };
+
+  const loadPrintHistory = async (opts?: { silent?: boolean }) => {
+    if (!isManufacturer) return;
+    if (!opts?.silent) setPrintHistoryLoading(true);
+    setPrintHistoryError(null);
+    try {
+      const res = await apiClient.listPrintJobs({ limit: 100 });
+      if (!res.success) {
+        setPrintJobs([]);
+        setPrintHistoryError(friendlyLoadError(res, "Print history could not be loaded right now. Refresh when you are ready."));
+        return;
+      }
+      setPrintJobs(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setPrintJobs([]);
+      setPrintHistoryError("Print history could not be loaded right now. Refresh when you are ready.");
+    } finally {
+      if (!opts?.silent) setPrintHistoryLoading(false);
+    }
   };
 
   const loadFraudReports = async (opts?: { silent?: boolean }) => {
@@ -287,8 +356,16 @@ export default function AuditLogs() {
     }
   };
 
-  const refreshAll = async () => {
-    await Promise.all([load(), loadFraudReports()]);
+  const refreshAll = async (opts?: { silent?: boolean }) => {
+    if (refreshAllInFlightRef.current) return refreshAllInFlightRef.current;
+    if (!opts?.silent) setRefreshing(true);
+    refreshAllInFlightRef.current = Promise.all([load(opts), loadFraudReports(opts), loadPrintHistory(opts)])
+      .then(() => undefined)
+      .finally(() => {
+        refreshAllInFlightRef.current = null;
+        if (!opts?.silent) setRefreshing(false);
+      });
+    return refreshAllInFlightRef.current;
   };
 
   useEffect(() => {
@@ -320,6 +397,9 @@ export default function AuditLogs() {
         if (isSuperAdmin && (log.action === "CUSTOMER_FRAUD_REPORT" || log.action === "CUSTOMER_FRAUD_REPORT_RESPONSE")) {
           loadFraudReports({ silent: true });
         }
+        if (isManufacturer && String(log.action || "").toUpperCase().includes("PRINT")) {
+          loadPrintHistory({ silent: true });
+        }
       },
       () => {
         setLive(false);
@@ -334,7 +414,7 @@ export default function AuditLogs() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, licenseeFilter, isSuperAdmin, fraudStatusFilter]);
 
-  const activityCategories = [
+  const adminActivityCategories = [
     { value: "all", label: "All activity", test: () => true },
     { value: "security", label: "Sign-in and security", test: (value: string) => value.startsWith("AUTH_") || value.includes("LOGIN") || value.includes("MFA") },
     { value: "invites", label: "Invites", test: (value: string) => value.includes("INVITE") || value.includes("RESEND") },
@@ -344,11 +424,20 @@ export default function AuditLogs() {
     { value: "account", label: "Account changes", test: (value: string) => value.includes("LICENSEE") || value.includes("USER") || value.includes("INCIDENT") },
   ];
 
+  const activityCategories = isManufacturer ? MANUFACTURER_ACTIVITY_FILTERS : adminActivityCategories;
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return logs.filter((l) => {
       const actionCode = String(l.action || "").toUpperCase();
-      const category = activityCategories.find((entry) => entry.value === activityFilter);
+      if (isManufacturer) {
+        const display = getManufacturerActivityDisplay(l);
+        if (!display.visible) return false;
+        if (activityFilter !== "all" && display.category !== activityFilter) return false;
+        if (!q) return true;
+        return buildManufacturerActivitySearchText(l, display).includes(q);
+      }
+      const category = adminActivityCategories.find((entry) => entry.value === activityFilter);
       if (category && !category.test(actionCode)) return false;
       if (isSuperAdmin && licenseeFilter !== "all" && l.licenseeId !== licenseeFilter) return false;
       if (!q) return true;
@@ -359,7 +448,36 @@ export default function AuditLogs() {
         auditEntityLabel(l),
       ].join(" ").toLowerCase().includes(q);
     });
-  }, [logs, search, activityFilter, licenseeFilter, isSuperAdmin]);
+  }, [logs, search, activityFilter, licenseeFilter, isSuperAdmin, isManufacturer]);
+
+  const printHistoryRows = useMemo(() => printJobs.map((job) => buildManufacturerPrintHistoryRow(job)), [printJobs]);
+
+  const filteredPrintHistoryRows = useMemo(() => {
+    const q = search.toLowerCase();
+    return printHistoryRows.filter((row) => {
+      if (printStatusFilter === "completed" && row.statusLabel !== "Completed") return false;
+      if (printStatusFilter === "active" && !["Queued", "Sent to printer", "In progress", "Recovery needed"].includes(row.statusLabel)) return false;
+      if (printStatusFilter === "issues" && !["Failed", "Partially completed", "Recovery needed"].includes(row.statusLabel)) return false;
+      if (!q) return true;
+      return [
+        row.batchName,
+        row.runLabel,
+        row.printerName,
+        row.actorLabel,
+        row.statusLabel,
+        row.issue || "",
+      ].join(" ").toLowerCase().includes(q);
+    });
+  }, [printHistoryRows, printStatusFilter, search]);
+
+  const activityIcon = (category: ManufacturerActivityCategory) => {
+    if (category === "printing") return <Printer className="mr-1 h-3 w-3" />;
+    if (category === "batches") return <PackageCheck className="mr-1 h-3 w-3" />;
+    if (category === "users") return <UserCheck className="mr-1 h-3 w-3" />;
+    if (category === "printer_setup") return <Wrench className="mr-1 h-3 w-3" />;
+    if (category === "issues") return <AlertTriangle className="mr-1 h-3 w-3" />;
+    return <Activity className="mr-1 h-3 w-3" />;
+  };
 
   const openRespondDialog = (report: FraudReportQueueItem, status: FraudResponseStatus) => {
     setSelectedFraudReport(report);
@@ -412,15 +530,21 @@ export default function AuditLogs() {
             </Badge>
           </h1>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={refreshAll}>
-              <RefreshCw className="mr-1 h-4 w-4" />
-              Refresh
+            <Button variant="outline" onClick={() => void refreshAll()} disabled={refreshing}>
+              <RefreshCw className={`mr-1 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Refreshing..." : "Refresh"}
             </Button>
             <Button variant="outline" onClick={() => setLive((v) => !v)}>
               {live ? "Pause" : "Resume"}
             </Button>
           </div>
         </div>
+
+        {(historyError || printHistoryError) && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            {historyError || printHistoryError}
+          </div>
+        )}
 
         {isSuperAdmin && (
           <Card className="border-red-200">
@@ -506,12 +630,93 @@ export default function AuditLogs() {
           </Card>
         )}
 
+        {isManufacturer ? (
+          <Card className="border-slate-200">
+            <CardHeader className="flex flex-col gap-4 border-b bg-slate-50/70 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-lg font-semibold text-slate-900">Print history</div>
+                <p className="text-sm text-slate-600">
+                  Printed batches, printer runs, label counts, remaining work, and recovery status.
+                </p>
+              </div>
+              <Select value={printStatusFilter} onValueChange={setPrintStatusFilter}>
+                <SelectTrigger className="w-[220px] bg-white">
+                  <SelectValue placeholder="Print status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRINT_STATUS_FILTERS.map((filter) => (
+                    <SelectItem key={filter.value} value={filter.value}>
+                      {filter.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <div className="overflow-hidden rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50">
+                      <TableHead>Batch</TableHead>
+                      <TableHead>Print run</TableHead>
+                      <TableHead>Labels</TableHead>
+                      <TableHead>Printer</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Operator</TableHead>
+                      <TableHead>When</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {printHistoryLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-slate-500">
+                          Loading print history...
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredPrintHistoryRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-slate-500">
+                          No print runs found for current filters.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredPrintHistoryRows.map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="font-medium text-slate-900">{row.batchName}</TableCell>
+                          <TableCell className="text-sm text-slate-700">{row.runLabel}</TableCell>
+                          <TableCell className="text-sm text-slate-700">
+                            <div>{row.printedLabels.toLocaleString()} printed of {row.requestedLabels.toLocaleString()}</div>
+                            <div className="text-xs text-slate-500">
+                              {row.remainingLabels == null ? "Remaining not reported" : `${row.remainingLabels.toLocaleString()} remaining`}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-sm text-slate-700">{row.printerName}</TableCell>
+                          <TableCell>
+                            <Badge className={getManufacturerActivityToneClass(row.statusTone)}>
+                              {row.statusLabel}
+                            </Badge>
+                            {row.issue ? <div className="mt-1 max-w-[240px] text-xs text-slate-500">{row.issue}</div> : null}
+                          </TableCell>
+                          <TableCell className="text-sm text-slate-700">{row.actorLabel}</TableCell>
+                          <TableCell className="text-xs text-slate-600">
+                            {row.timestamp ? format(new Date(row.timestamp), "PPp") : "Not recorded"}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
         <Card className="border-slate-200">
           <CardHeader className="flex flex-col gap-4 border-b bg-slate-50/70 sm:flex-row">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
 	              <Input
-	                placeholder="Search activity..."
+	                placeholder={isManufacturer ? "Search batches, print runs, printers, people..." : "Search activity..."}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="border-slate-200 bg-white pl-9"
@@ -559,7 +764,13 @@ export default function AuditLogs() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.length === 0 ? (
+                  {activityLoading ? (
+                    <TableRow>
+	                    <TableCell colSpan={isSuperAdmin ? 5 : 4} className="text-slate-500">
+                        Loading activity...
+                      </TableCell>
+                    </TableRow>
+                  ) : filtered.length === 0 ? (
                     <TableRow>
 	                      <TableCell colSpan={isSuperAdmin ? 5 : 4} className="text-slate-500">
                         No history found for current filters.
@@ -567,23 +778,26 @@ export default function AuditLogs() {
                     </TableRow>
                   ) : (
                     filtered.map((l) => {
-                      const tone = actionTone(String(l.action || ""));
+                      const manufacturerDisplay = isManufacturer ? getManufacturerActivityDisplay(l) : null;
+                      const tone = manufacturerDisplay ? null : actionTone(String(l.action || ""));
                       const details = asObject(l.details);
 	                      const detailEntries = readableDetailEntries(l, details);
 	                      const expanded = Boolean(expandedRows[l.id]);
 	                      return (
                         <TableRow key={l.id} className={String(l.action || "").includes("FRAUD") ? "bg-red-50/30" : undefined}>
 	                          <TableCell>
-	                            <Badge className={tone.className}>
-	                              {tone.icon}
-	                              {formatAuditActionLabel(l.action)}
+	                            <Badge className={manufacturerDisplay ? getManufacturerActivityToneClass(manufacturerDisplay.tone) : tone!.className}>
+	                              {manufacturerDisplay ? activityIcon(manufacturerDisplay.category) : tone!.icon}
+	                              {manufacturerDisplay ? manufacturerDisplay.title : formatAuditActionLabel(l.action)}
 	                            </Badge>
 	                          </TableCell>
 	                          <TableCell className="text-sm text-slate-700">{userLabel(l)}</TableCell>
 	                          <TableCell className="max-w-[520px]">
 	                            <div className="space-y-1">
-	                              <div className="text-sm text-slate-800">{auditChangeSummary(l)}</div>
-		                              <div className="text-xs text-slate-500">{summarizeDetails(l)}</div>
+	                              <div className="text-sm text-slate-800">
+                                  {manufacturerDisplay ? manufacturerDisplay.description : auditChangeSummary(l)}
+                                </div>
+		                              {!manufacturerDisplay ? <div className="text-xs text-slate-500">{summarizeDetails(l)}</div> : null}
 		                            </div>
 			                            </TableCell>
 	                          <TableCell className="text-xs text-slate-600">
