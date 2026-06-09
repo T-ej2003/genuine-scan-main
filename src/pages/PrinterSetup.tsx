@@ -342,7 +342,8 @@ export default function PrinterSetupPage() {
   const runtimeQuery = useManufacturerPrinterRuntime(true, true);
   const inventoryQuery = useQuery({
     queryKey: ["printer-setup", "inventory"],
-    refetchInterval: 5000,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const response = await apiClient.getLocalPrintAgentStatus();
       if (!response.success) return [] as PrinterInventoryRow[];
@@ -364,6 +365,17 @@ export default function PrinterSetupPage() {
   const [saving, setSaving] = useState(false);
   const [testingPrinterId, setTestingPrinterId] = useState<string | null>(null);
   const lastRecommendedSignatureRef = useRef("");
+  const setupActionInFlightRef = useRef(new Map<string, Promise<void>>());
+
+  const runSingleFlightAction = (key: string, action: () => Promise<void>) => {
+    const current = setupActionInFlightRef.current.get(key);
+    if (current) return current;
+    const run = action().finally(() => {
+      setupActionInFlightRef.current.delete(key);
+    });
+    setupActionInFlightRef.current.set(key, run);
+    return run;
+  };
 
   const inventory = inventoryQuery.data || [];
   const registeredPrinters = (runtimeQuery.data?.registeredPrinters || []) as RegisteredPrinterDTO[];
@@ -451,6 +463,7 @@ export default function PrinterSetupPage() {
   }, [missingSetupDetails, saving, selectedPrinter, suggestion]);
 
   const saveRecommendedPrinter = async () => {
+    if (saving) return;
     if (!suggestion || suggestion.routeType === "LOCAL_ONLY") {
       toast({
         title: "This printer is already ready to use here",
@@ -459,6 +472,7 @@ export default function PrinterSetupPage() {
       return;
     }
 
+    return runSingleFlightAction(`save-recommended-printer:${recommendedSignature || form.name}`, async () => {
     setSaving(true);
     try {
       const payload =
@@ -536,9 +550,12 @@ export default function PrinterSetupPage() {
       setTestingPrinterId(null);
       setSaving(false);
     }
+    });
   };
 
   const testExistingPrinter = async (printerId: string) => {
+    if (testingPrinterId === printerId) return;
+    return runSingleFlightAction(`test-existing-printer:${printerId}`, async () => {
     setTestingPrinterId(printerId);
     try {
       const response = await apiClient.testPrinterLabel(printerId);
@@ -555,6 +572,7 @@ export default function PrinterSetupPage() {
     } finally {
       setTestingPrinterId(null);
     }
+    });
   };
 
   return (

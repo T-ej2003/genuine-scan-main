@@ -107,9 +107,20 @@ export function useBatchPrintWorkflow({
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>(defaultPrinterStatus);
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
+  const actionInFlightRef = useRef(new Map<string, Promise<void>>());
 
   const printJobsQuery = usePrintJobs(printBatch?.id, 8, false);
   const printerRuntimeQuery = useManufacturerPrinterRuntime(true, false);
+
+  const runSingleFlightAction = (key: string, action: () => Promise<void>) => {
+    const current = actionInFlightRef.current.get(key);
+    if (current) return current;
+    const run = action().finally(() => {
+      actionInFlightRef.current.delete(key);
+    });
+    actionInFlightRef.current.set(key, run);
+    return run;
+  };
 
   const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
   const printerHasInventory =
@@ -448,6 +459,7 @@ export function useBatchPrintWorkflow({
   }, [printProgressError, printProgressOpen, printProgressPhase, printing]);
 
   const switchSelectedPrinter = async () => {
+    if (switchingPrinter) return;
     if (!selectedPrinterId) return;
     setSwitchingPrinter(true);
     try {
@@ -469,17 +481,18 @@ export function useBatchPrintWorkflow({
   };
 
   const relinkSelectedPrinter = async () => {
-    await relinkSelectedPrinterAction({
+    if (relinkingPrinter) return;
+    await runSingleFlightAction(`relink-printer:${selectedPrinterProfile?.id || "none"}`, () => relinkSelectedPrinterAction({
       selectedPrinterProfile,
       setRelinkingPrinter,
       setSelectedPrinterProfileId,
       loadPrinterStatus,
       toast,
-    });
+    }));
   };
 
   const abandonPrintJob = async (jobId: string) => {
-    await abandonPrintJobAction({
+    await runSingleFlightAction(`abandon-print-job:${jobId}`, () => abandonPrintJobAction({
       jobId,
       currentPrintJobId: printJobId,
       setPrinting,
@@ -488,12 +501,14 @@ export function useBatchPrintWorkflow({
       loadRecentPrintJobs,
       onBatchesChanged,
       toast,
-    });
+    }));
   };
 
   const confirmPrintedLabels = async (jobId: string) => {
+    if (printing) return;
     const trimmedJobId = String(jobId || "").trim();
     if (!trimmedJobId) return;
+    return runSingleFlightAction(`confirm-print-job:${trimmedJobId}`, async () => {
     setPrinting(true);
     try {
       const response = await apiClient.confirmPrintJobPrinted(trimmedJobId, {
@@ -531,6 +546,7 @@ export function useBatchPrintWorkflow({
     } finally {
       setPrinting(false);
     }
+    });
   };
 
   const setSampleScanCode = (jobId: string, value: string) => {
@@ -540,6 +556,7 @@ export function useBatchPrintWorkflow({
   };
 
   const verifySampleScan = async (jobId: string) => {
+    if (printing) return;
     const trimmedJobId = String(jobId || "").trim();
     if (!trimmedJobId) return;
     const publicCode = String(sampleScanCodeByJobId[trimmedJobId] || "").trim();
@@ -552,6 +569,7 @@ export function useBatchPrintWorkflow({
       return;
     }
 
+    return runSingleFlightAction(`sample-scan:${trimmedJobId}:${publicCode}`, async () => {
     setPrinting(true);
     try {
       const response = await apiClient.capturePrintJobSampleScan(trimmedJobId, publicCode);
@@ -576,9 +594,11 @@ export function useBatchPrintWorkflow({
     } finally {
       setPrinting(false);
     }
+    });
   };
 
   const releaseBatch = async () => {
+    if (printing) return;
     const batchId = String(printBatch?.id || "").trim();
     if (!batchId) return;
     if (
@@ -588,6 +608,7 @@ export function useBatchPrintWorkflow({
       return;
     }
 
+    return runSingleFlightAction(`release-batch:${batchId}`, async () => {
     setPrinting(true);
     try {
       const response = await apiClient.releaseBatch(batchId);
@@ -645,6 +666,7 @@ export function useBatchPrintWorkflow({
     } finally {
       setPrinting(false);
     }
+    });
   };
 
   const progressStateSetters = useMemo(
@@ -709,6 +731,9 @@ export function useBatchPrintWorkflow({
     printing,
   ]);
   const createPrintJob = async () => {
+    if (printing) return;
+    const actionKey = `create-print-job:${printBatch?.id || "none"}:${selectedPrinterProfile?.id || "none"}:${printQuantity}`;
+    return runSingleFlightAction(actionKey, async () => {
     setPrinting(true);
     try {
       await executeCreatePrintJob({
@@ -735,11 +760,14 @@ export function useBatchPrintWorkflow({
     } finally {
       setPrinting(false);
     }
+    });
   };
 
   const refreshPendingPrintStatus = async () => {
+    if (printing) return;
     if (!printJobId) return;
 
+    return runSingleFlightAction(`refresh-print-job:${printJobId}`, async () => {
     setPrinting(true);
     try {
       await retryPendingDirectPrint({
@@ -766,6 +794,7 @@ export function useBatchPrintWorkflow({
     } finally {
       setPrinting(false);
     }
+    });
   };
 
   const dialogProps = {
@@ -792,7 +821,10 @@ export function useBatchPrintWorkflow({
     selectedLocalProfileRegistrationStale,
     onRelinkSelectedPrinter: relinkSelectedPrinter,
     onPrintDiagnosticTestLabel: () => {
-      void printDiagnosticTestLabelAction({ selectedPrinterProfile, setPrinting, toast });
+      if (printing) return;
+      void runSingleFlightAction(`diagnostic-test-label:${selectedPrinterProfile?.id || "none"}`, () =>
+        printDiagnosticTestLabelAction({ selectedPrinterProfile, setPrinting, toast })
+      );
     },
     printing,
     onStartPrint: createPrintJob,

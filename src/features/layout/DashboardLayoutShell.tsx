@@ -226,6 +226,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             localPrinterAgent={printerConnection.localPrinterAgent}
             printerHasInventory={printerConnection.printerHasInventory}
             selectedPrinterName={printerConnection.selectedPrinterName}
+            checking={printerConnection.printerStatusChecking}
             onInstallConnector={printerConnection.goToConnectorDownload}
             onCheckAgain={printerConnection.refreshPrinterConnectionStatus}
             onOpenHelp={printerConnection.goToHelp}
@@ -427,6 +428,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             selectedPrinterIsActive={printerConnection.selectedPrinterIsActive}
             printerDiscoveryCountLabel={printerConnection.printerDiscoveryCountLabel}
             printerSwitching={printerConnection.printerSwitching}
+            printerStatusChecking={printerConnection.printerStatusChecking}
             onSelectedLocalPrinterChange={printerConnection.setSelectedLocalPrinterId}
             onRefreshStatus={printerConnection.refreshPrinterConnectionStatus}
             onInstallConnector={printerConnection.goToConnectorDownload}

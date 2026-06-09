@@ -480,7 +480,7 @@ const auditPackageExportRouteLimiter = rateLimit({
 
 const printReadRouteLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 40,
+  max: 90,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "print.read", (currentReq: any) => currentReq.user?.userId || null),

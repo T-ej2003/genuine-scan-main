@@ -187,7 +187,7 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
         activePrintJobId: activeJob.id,
         activePrintSessionId: activeJob.printSession?.id || null,
       });
-      return res.status(409).json({
+      const responsePayload = {
         ...buildPrintJobErrorPayload({
           code: "active_print_job_exists",
           message: "An active print run already exists for this batch. Resume the current job instead of starting a duplicate run.",
@@ -208,7 +208,13 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
             session: activeJob.printSession,
           },
         },
+      };
+      await completeIdempotentAction({
+        keyHash: idempotency.keyHash,
+        statusCode: 409,
+        responsePayload,
       });
+      return res.status(409).json(responsePayload);
     }
 
     failureStage = "printer_readiness";

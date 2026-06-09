@@ -84,6 +84,59 @@ describe("printing api request control", () => {
     );
   });
 
+  it("collapses repeated print job creation clicks into one mutation with one idempotency key", async () => {
+    let resolveRequest: ((response: ApiResponse<{ printJobId: string }>) => void) | null = null;
+    const request = vi.fn(
+      () =>
+        new Promise<ApiResponse<{ printJobId: string }>>((resolve) => {
+          resolveRequest = resolve;
+        })
+    );
+    const api = createPrintingApi(createCore(request));
+    const payload = {
+      batchId: "c9dabd08-9393-4be3-bb33-0269b543285d",
+      printerId: "62eea666-5a7f-444a-94fb-8fa040396874",
+      quantity: 2,
+    };
+
+    const first = api.createPrintJob(payload);
+    const second = api.createPrintJob(payload);
+    const resolvePrintJob = resolveRequest as ((response: ApiResponse<{ printJobId: string }>) => void) | null;
+    expect(resolvePrintJob).not.toBeNull();
+    resolvePrintJob?.({ success: true, data: { printJobId: "job-1" } });
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(firstResult.data?.printJobId).toBe("job-1");
+    expect(secondResult.data?.printJobId).toBe("job-1");
+    const options = (request.mock.calls[0] as unknown as [string, RequestInit | undefined])[1];
+    expect((options?.headers as Record<string, string>)["x-idempotency-key"]).toContain("print-job-create");
+  });
+
+  it("collapses repeated diagnostic test-label clicks into one physical test mutation", async () => {
+    let resolveRequest: ((response: ApiResponse<{ outcome: string }>) => void) | null = null;
+    const request = vi.fn(
+      () =>
+        new Promise<ApiResponse<{ outcome: string }>>((resolve) => {
+          resolveRequest = resolve;
+        })
+    );
+    const api = createPrintingApi(createCore(request));
+
+    const first = api.testPrinterLabel("62eea666-5a7f-444a-94fb-8fa040396874");
+    const second = api.testPrinterLabel("62eea666-5a7f-444a-94fb-8fa040396874");
+    const resolveTestLabel = resolveRequest as ((response: ApiResponse<{ outcome: string }>) => void) | null;
+    expect(resolveTestLabel).not.toBeNull();
+    resolveTestLabel?.({ success: true, data: { outcome: "confirmed" } });
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(firstResult.data?.outcome).toBe("confirmed");
+    expect(secondResult.data?.outcome).toBe("confirmed");
+    const options = (request.mock.calls[0] as unknown as [string, RequestInit | undefined])[1];
+    expect((options?.headers as Record<string, string>)["x-idempotency-key"]).toContain("printer-test-label");
+  });
+
   it("deduplicates concurrent printer status requests", async () => {
     let resolveRequest: ((response: ApiResponse<RequestPayload>) => void) | null = null;
     const request = vi.fn(
@@ -152,11 +205,13 @@ describe("printing api request control", () => {
 
     await api.getPrinterConnectionStatus({ force: true });
     const rateLimited = await api.getPrinterConnectionStatus({ force: true });
+    const paused = await api.getPrinterConnectionStatus({ force: true });
 
     expect(request).toHaveBeenCalledTimes(2);
     expect(rateLimited.success).toBe(true);
     expect(rateLimited.data?.selectedPrinterName).toBe("ZDesigner ZT410-300dpi ZPL");
     expect(rateLimited.data?.refreshPaused).toBe(true);
     expect(rateLimited.data?.notice).toBe("Printer status refresh is temporarily paused. Printing can continue if the printer was already ready.");
+    expect(paused.data?.refreshPaused).toBe(true);
   });
 });

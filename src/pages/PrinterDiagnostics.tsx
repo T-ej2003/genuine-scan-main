@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { Activity, Copy, RefreshCw, ShieldAlert, Trash2, Wifi, Wrench } from "lucide-react";
@@ -34,6 +34,8 @@ const EMPTY_LOCAL_AGENT: LocalPrinterAgentSnapshot = {
   error: "Workstation connector has not been checked yet.",
   checkedAt: null,
 };
+
+const DIAGNOSTICS_BACKGROUND_REFRESH_MS = 30_000;
 
 type RegisteredPrinterRow = {
   id: string;
@@ -115,6 +117,7 @@ export default function PrinterDiagnostics() {
   const [gatewayProvisioningSecret, setGatewayProvisioningSecret] = useState<string | null>(null);
   const [setupFormOpen, setSetupFormOpen] = useState(false);
   const [managedProfilesDialogOpen, setManagedProfilesDialogOpen] = useState(false);
+  const diagnosticsInFlightRef = useRef<Promise<void> | null>(null);
 
   const networkPrinterLanguageSupported = isSupportedNetworkDirectLanguage(networkPrinterForm.commandLanguage);
 
@@ -128,7 +131,9 @@ export default function PrinterDiagnostics() {
     setRegisteredPrinters((Array.isArray(response.data) ? response.data : []) as RegisteredPrinterRow[]);
   };
 
-  const loadDiagnostics = async () => {
+  const loadDiagnostics = async (options?: { force?: boolean }) => {
+    if (diagnosticsInFlightRef.current) return diagnosticsInFlightRef.current;
+    const run = (async () => {
     setLoading(true);
     try {
       const local = await apiClient.getLocalPrintAgentStatus();
@@ -181,7 +186,7 @@ export default function PrinterDiagnostics() {
             };
 
         await apiClient.reportPrinterHeartbeat(heartbeatPayload);
-        const remote = await apiClient.getPrinterConnectionStatus();
+        const remote = await apiClient.getPrinterConnectionStatus(options?.force ? { force: true } : undefined);
         if (remote.success && remote.data) {
           const normalizedRemote = remote.data as PrinterConnectionStatusLike;
           const remotePrinters = normalizePrinterInventoryRows(normalizedRemote.printers || []);
@@ -217,7 +222,11 @@ export default function PrinterDiagnostics() {
       }
     } finally {
       setLoading(false);
+      diagnosticsInFlightRef.current = null;
     }
+    })();
+    diagnosticsInFlightRef.current = run;
+    return run;
   };
 
   const switchSelectedPrinter = async () => {
@@ -256,10 +265,10 @@ export default function PrinterDiagnostics() {
   };
 
   useEffect(() => {
-    loadDiagnostics();
+    void loadDiagnostics();
     const timer = window.setInterval(() => {
-      loadDiagnostics();
-    }, 6000);
+      void loadDiagnostics();
+    }, DIAGNOSTICS_BACKGROUND_REFRESH_MS);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.role]);
@@ -417,7 +426,7 @@ export default function PrinterDiagnostics() {
         title: "Refresh the printer list on this workstation",
         description: "Make sure the operating system already sees the printer, then refresh MSCQR.",
         label: "Refresh status",
-        run: () => void loadDiagnostics(),
+        run: () => void loadDiagnostics({ force: true }),
       };
     }
 
@@ -431,7 +440,7 @@ export default function PrinterDiagnostics() {
         title: "Re-check the connection",
         description: "MSCQR needs a fresh connector heartbeat before it can trust this printer again.",
         label: "Refresh status",
-        run: () => void loadDiagnostics(),
+        run: () => void loadDiagnostics({ force: true }),
       };
     }
 
@@ -577,7 +586,7 @@ export default function PrinterDiagnostics() {
         setNetworkPrinterForm(buildEmptyNetworkPrinterForm());
         setSetupFormOpen(false);
       }
-      await loadDiagnostics();
+      await loadDiagnostics({ force: true });
       return { savedPrinterId, validated };
     } finally {
       setTestingPrinterId(null);
@@ -701,7 +710,7 @@ export default function PrinterDiagnostics() {
         description: `${printer.name} was removed. Its saved endpoint can now be reused.`,
       });
       if (editingPrinterId === printer.id) resetNetworkPrinterForm();
-      await loadDiagnostics();
+      await loadDiagnostics({ force: true });
     } finally {
       setDeletingPrinterId(null);
     }
@@ -1015,9 +1024,9 @@ export default function PrinterDiagnostics() {
             <Button variant="outline" onClick={() => navigate("/connector-download")}>
               Install Connector
             </Button>
-            <Button variant="outline" onClick={() => void loadDiagnostics()} disabled={loading} className="gap-2">
-              <RefreshCw className="h-4 w-4" />
-              {loading ? "Refreshing..." : "Refresh status"}
+            <Button variant="outline" onClick={() => void loadDiagnostics({ force: true })} disabled={loading} className="gap-2">
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              {loading ? "Connector checking..." : "Refresh status"}
             </Button>
             <Button variant="outline" onClick={copySupportSummary} className="gap-2">
               <Copy className="h-4 w-4" />
@@ -1122,8 +1131,8 @@ export default function PrinterDiagnostics() {
               <div className="rounded-lg border bg-muted/40 px-3 py-3">
                 <div className="font-medium text-foreground">{recommendedAction.title}</div>
                 <div className="mt-1 text-muted-foreground">{recommendedAction.description}</div>
-                <Button variant="outline" size="sm" className="mt-3" onClick={recommendedAction.run}>
-                  {recommendedAction.label}
+                <Button variant="outline" size="sm" className="mt-3" onClick={recommendedAction.run} disabled={loading}>
+                  {loading && recommendedAction.label === "Refresh status" ? "Please wait..." : recommendedAction.label}
                 </Button>
               </div>
               {effectiveSummary.nextSteps.map((step) => (
