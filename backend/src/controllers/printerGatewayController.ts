@@ -12,6 +12,7 @@ import { Request, Response } from "express";
 import { z } from "zod";
 
 import prisma from "../config/database";
+import { markBatchPrintAcknowledged } from "../services/batchStateMachineService";
 import { buildApprovedPrintContext, buildApprovedPrintPayload } from "../services/printPayloadService";
 import { failStopPrintSession } from "../services/printLifecycleService";
 import { hashGatewaySecret } from "../services/printerRegistryService";
@@ -114,6 +115,7 @@ const reserveGatewayItem = async (params: {
           select: {
             id: true,
             code: true,
+            displayCode: true,
             batchId: true,
             licenseeId: true,
             tokenNonce: true,
@@ -358,6 +360,11 @@ export const claimGatewayIppJob = async (req: Request, res: Response) => {
           sentAt: new Date(),
         },
       });
+      await markBatchPrintAcknowledged({
+        batchId: job.batchId,
+        printJobId: job.id,
+        actorUserId: job.manufacturerId,
+      });
     }
 
     const item = await reserveGatewayItem({
@@ -478,6 +485,11 @@ export const claimGatewayDirectJob = async (req: Request, res: Response) => {
           pipelineState: PrintPipelineState.SENT_TO_PRINTER,
           sentAt: new Date(),
         },
+      });
+      await markBatchPrintAcknowledged({
+        batchId: job.batchId,
+        printJobId: job.id,
+        actorUserId: job.manufacturerId,
       });
     }
 

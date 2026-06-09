@@ -93,6 +93,10 @@ import {
   generateQRCodes,
   blockQRCode,
   blockBatch,
+  getLegacyPublicCodeReport,
+  getPrintValidationEvidence,
+  releaseBatch,
+  rotateLegacyPublicCodes,
 } from "../controllers/qrController";
 
 
@@ -156,6 +160,7 @@ import {
 import { scanToken } from "../controllers/scanController";
 import {
   abandonManufacturerPrintJob,
+  capturePrintJobSampleScan,
   confirmDirectPrintItem,
   createPrintJob,
   downloadPrintJobPack,
@@ -865,6 +870,16 @@ const qrMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.mutation:pre-auth", "Too many QR changes. Please wait before retrying."),
 });
 
+const printMutationPreAuthRouteLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    buildPublicActorRateLimitKey(req, "print.mutation:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "batchId", "printerId"))),
+  handler: createRateLimitJsonHandler("print.mutation:pre-auth", "Too many printing actions. Please wait before retrying."),
+});
+
 const qrRequestReadPreAuthRouteLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 36,
@@ -1030,7 +1045,7 @@ const gatewayActor = composeRequestResolvers(
   fromUserAgent
 );
 
-const verifyResourceResolver = (req: any) => String(req.params?.code || "").trim().toUpperCase() || null;
+const verifyResourceResolver = (req: any) => String(req.params?.code || "").trim() || null;
 const scanResourceResolver = (req: any) => {
   const token = Array.isArray(req.query?.t) ? req.query.t[0] : req.query?.t;
   return String(token || "").trim() || null;
@@ -1651,6 +1666,7 @@ protectedMutationRouter.post(
 protectedMutationRouter.post("/qr/batches", qrMutationPreAuthRouteLimiter, authenticate, requireLicenseeAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, createBatch);
 protectedReadRouter.get("/qr/batches", qrReadPreAuthRouteLimiter, authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatches);
 protectedReadRouter.get("/qr/batches/:id/allocation-map", qrReadPreAuthRouteLimiter, authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatchAllocationMap);
+protectedReadRouter.get("/qr/batches/:id/validation-evidence", qrReadPreAuthRouteLimiter, authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getPrintValidationEvidence);
 
 protectedMutationRouter.post(
   "/qr/batches/:id/assign-manufacturer",
@@ -1676,6 +1692,18 @@ protectedMutationRouter.patch(
   requireCsrf,
   renameBatch
 );
+protectedMutationRouter.post(
+  "/qr/batches/:id/release",
+  qrMutationPreAuthRouteLimiter,
+  authenticate,
+  requireOpsUser,
+  qrMutationRouteLimiter,
+  protectedMutationRouteLimiter,
+  requireRecentSensitiveAuth,
+  enforceTenantIsolation,
+  requireCsrf,
+  releaseBatch
+);
 
 // Super admin bulk allocation helper
 protectedMutationRouter.post("/qr/batches/admin-allocate", qrMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, adminAllocateBatch);
@@ -1685,6 +1713,8 @@ protectedMutationRouter.post("/qr/batches/admin-allocate", qrMutationPreAuthRout
 protectedReadRouter.get("/qr/codes/export", qrExportPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrExportRouteLimiter, protectedReadRouteLimiter, exportReadRouteLimiter, exportReadIpLimiter, exportReadActorLimiter, exportQRCodesCsv);
 protectedReadRouter.get("/qr/codes", qrReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrReadRouteLimiter, protectedReadRouteLimiter, getQRCodes);
 protectedMutationRouter.post("/qr/codes/signed-links", qrMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, generateSignedScanLinks);
+protectedReadRouter.get("/qr/codes/legacy-report", qrReadPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrReadRouteLimiter, protectedReadRouteLimiter, getLegacyPublicCodeReport);
+protectedMutationRouter.post("/qr/codes/legacy-rotate", qrMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, rotateLegacyPublicCodes);
 
 // Stats is still allowed (needed for dashboard chart)
 protectedReadRouter.get("/qr/stats", qrReadPreAuthRouteLimiter, authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getStats);
@@ -1928,6 +1958,19 @@ protectedMutationRouter.post(
   printMutationActorLimiter,
   requireCsrf,
   confirmPrintJob
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-jobs/:id/sample-scan",
+  printMutationPreAuthRouteLimiter,
+  authenticate,
+  requireManufacturer,
+  requireRecentSensitiveAuth,
+  enforceTenantIsolation,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
+  requireCsrf,
+  capturePrintJobSampleScan
 );
 
 // ==================== QR REQUESTS ====================

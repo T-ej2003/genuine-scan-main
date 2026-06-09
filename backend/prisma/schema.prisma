@@ -35,6 +35,17 @@ enum QRStatus {
   SCANNED
 }
 
+enum BatchLifecycleState {
+  DRAFT
+  CODES_GENERATED
+  PRINT_ACKNOWLEDGED
+  PRINT_CONFIRMED
+  SAMPLE_VERIFIED
+  RELEASED
+  FAILED
+  VOIDED
+}
+
 enum QrAllocationRequestStatus {
   PENDING
   APPROVED
@@ -675,6 +686,10 @@ model Batch {
   startCode  String
   endCode    String
   totalCodes Int
+  lifecycleState BatchLifecycleState @default(DRAFT)
+  sampleScanPolicy Json?
+  releasedAt DateTime?
+  releasedByUserId String?
   printedAt  DateTime?
   suspendedAt DateTime?
   suspendedReason String?
@@ -698,6 +713,8 @@ model Batch {
   @@index([manufacturerId])
   @@index([parentBatchId])
   @@index([rootBatchId])
+  @@index([lifecycleState])
+  @@index([releasedAt])
   @@index([printedAt])
   @@index([printPackDownloadedAt])
   @@index([suspendedAt])
@@ -784,6 +801,7 @@ model PrintJob {
 model QRCode {
   id         String   @id @default(uuid())
   code       String   @unique
+  displayCode String? @unique
   licenseeId String
   licensee   Licensee @relation(fields: [licenseeId], references: [id])
 
@@ -833,6 +851,7 @@ model QRCode {
   updatedAt DateTime @updatedAt
 
   @@index([licenseeId])
+  @@index([displayCode])
   @@index([batchId])
   @@index([status])
   @@index([printJobId])
@@ -964,6 +983,25 @@ model PrintItemEvent {
   @@index([printItemId, createdAt])
   @@index([eventType, createdAt])
   @@index([actorUserId, createdAt])
+}
+
+model PrintAuditEvent {
+  id String @id @default(uuid())
+
+  batchId String
+  printJobId String?
+  qrCodeId String?
+  eventType String
+  actorId String?
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([batchId, createdAt])
+  @@index([printJobId, createdAt])
+  @@index([qrCodeId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model PrinterRegistration {

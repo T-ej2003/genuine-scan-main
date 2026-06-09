@@ -1,5 +1,6 @@
 export { createPrintJob } from "./createPrintJobHandler";
 export {
+  capturePrintJobSampleScan,
   confirmDirectPrintItem,
   confirmPrintJob,
   issueDirectPrintTokens,

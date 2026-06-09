@@ -8,6 +8,10 @@ import { logger } from "./utils/logger";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
 import { startAuditLogOutboxWorker, stopAuditLogOutboxWorker } from "./services/auditLogOutboxService";
 import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
+import {
+  startLegacyQrRiskReportScheduler,
+  stopLegacyQrRiskReportScheduler,
+} from "./services/legacyQrRiskReportJobService";
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
 import { startPrintConfirmationReconciler } from "./services/printConfirmationReconciler";
@@ -326,6 +330,7 @@ const startServer = async () => {
       startAuditLogOutboxWorker();
       startSecurityEventOutboxWorker();
       startCompliancePackScheduler();
+      startLegacyQrRiskReportScheduler();
       void resumePendingNetworkDirectJobs().catch((error) => {
         logger.error("Failed to resume pending network-direct jobs", { error: error?.message || error });
       });
@@ -370,6 +375,7 @@ const shutdown = async (signal: string) => {
     stopSecurityEventOutboxWorker();
     stopAuditLogOutboxWorker();
     stopCompliancePackScheduler();
+    stopLegacyQrRiskReportScheduler();
     stopPrintConfirmationReconcilerWorker?.();
     stopPrintConfirmationReconcilerWorker = null;
     stopAnalyticsRollupWorker?.();

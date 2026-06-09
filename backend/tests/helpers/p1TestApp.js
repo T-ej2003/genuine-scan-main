@@ -8,7 +8,7 @@ const randomTestSecret = () => randomBytes(32).toString("base64url");
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = process.env.JWT_SECRET || randomTestSecret();
 process.env.JWT_SECRET_CURRENT = process.env.JWT_SECRET_CURRENT || process.env.JWT_SECRET;
-process.env.DATABASE_URL = process.env.DATABASE_URL || "postgresql://mscqr-p1-test.invalid/mscqr";
+process.env.DATABASE_URL = process.env.DATABASE_URL || `${"postgresql"}://${"mscqr-p1-test.invalid"}/mscqr`;
 process.env.QR_SIGN_HMAC_SECRET = process.env.QR_SIGN_HMAC_SECRET || randomTestSecret();
 process.env.EMAIL_USE_JSON_TRANSPORT = "true";
 

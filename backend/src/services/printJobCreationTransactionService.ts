@@ -11,6 +11,7 @@ import {
 import prisma from "../config/database";
 import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "./qrTokenService";
 import { generatePrintJobNumber, type ensureSelectedPrinterReady } from "../controllers/print-job/shared";
+import { assertBatchTransitionAllowedFromDb } from "./batchStateMachineService";
 import {
   buildReusablePrintItemResetData,
   countBlockedQrCodesForPrint,
@@ -51,6 +52,12 @@ export const createPrintJobRecords = async (params: {
         quantity,
         rangeStart: rangeStart || null,
         rangeEnd: rangeEnd || null,
+      });
+      await assertBatchTransitionAllowedFromDb({
+        batchId: batch.id,
+        toStatus: "PRINT_REQUESTED",
+        actor: { userId },
+        tx,
       });
       const reservedRows = await selectReservableQrCodesForPrint(tx, {
         batchId: batch.id,
@@ -193,7 +200,7 @@ export const createPrintJobRecords = async (params: {
           data: newPreparedItems.map((item) => ({
             printSessionId: session.id,
             qrCodeId: item.qr.id,
-            code: item.qr.code,
+            code: item.qr.displayCode || item.qr.code,
             state: "RESERVED",
             pipelineState: PrintPipelineState.QUEUED,
           })),

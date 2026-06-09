@@ -1,4 +1,12 @@
-import { Prisma, UserRole, QRStatus, PrinterCommandLanguage, PrinterConnectionType, PrinterDeliveryMode } from "@prisma/client";
+import {
+  Prisma,
+  UserRole,
+  QRStatus,
+  PrinterCommandLanguage,
+  PrinterConnectionType,
+  PrinterDeliveryMode,
+  SensitiveActionApproval,
+} from "@prisma/client";
 import { z } from "zod";
 
 import prisma from "../config/database";
@@ -6,6 +14,7 @@ import { createAuditLog } from "./auditService";
 import { hashIp, hashToken, normalizeUserAgent } from "../utils/security";
 import { runRetentionLifecycle, updateRetentionPolicy, upsertTenantFeatureFlag } from "./governanceService";
 import { upsertManagedNetworkPrinter } from "./printerRegistryService";
+import { releaseBatchForSupplyChain } from "./batchReleaseService";
 
 export const SENSITIVE_ACTION_KEYS = {
   FEATURE_FLAG_UPSERT: "FEATURE_FLAG_UPSERT",
@@ -13,6 +22,7 @@ export const SENSITIVE_ACTION_KEYS = {
   RETENTION_APPLY: "RETENTION_APPLY",
   QR_BLOCK: "QR_BLOCK",
   BATCH_BLOCK: "BATCH_BLOCK",
+  BATCH_RELEASE: "BATCH_RELEASE",
   PRINTER_GATEWAY_SECRET_ROTATION: "PRINTER_GATEWAY_SECRET_ROTATION",
 } as const;
 
@@ -62,6 +72,13 @@ const batchBlockPayloadSchema = z.object({
   reason: z.string().trim().max(500).optional().nullable(),
 }).strict();
 
+const batchReleasePayloadSchema = z.object({
+  batchId: z.string().uuid(),
+  printJobId: z.string().uuid().optional().nullable(),
+  requestedByUserId: z.string().uuid(),
+  releaseBoundary: z.string().trim().max(80).optional().nullable(),
+}).strict();
+
 const printerRotationPayloadSchema = z.object({
   printerId: z.string().uuid(),
   userId: z.string().uuid(),
@@ -92,6 +109,8 @@ type ApprovalActor = {
   licenseeId?: string | null;
 };
 
+type SensitiveApprovalRecord = SensitiveActionApproval & Record<string, unknown>;
+
 type CreateApprovalInput = {
   actionKey: SensitiveActionKey;
   actor: ApprovalActor;
@@ -114,7 +133,69 @@ const isPrinterApproverRole = (role?: UserRole | null) =>
   role === UserRole.MANUFACTURER ||
   role === UserRole.MANUFACTURER_ADMIN;
 
-const canReviewApproval = (actor: ApprovalActor, approval: any) => {
+const isLicenseeReleaseApproverRole = (role?: UserRole | null) =>
+  role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN;
+
+const isManufacturerReleaseApproverRole = (role?: UserRole | null) =>
+  role === UserRole.MANUFACTURER_ADMIN;
+
+const batchReleaseReviewBlocker = async (actor: ApprovalActor, approval: SensitiveApprovalRecord) => {
+  const payload = batchReleasePayloadSchema.safeParse(approval.payload);
+  if (!payload.success) return "invalid_batch_release_payload";
+
+  const batch = await prisma.batch.findUnique({
+    where: { id: payload.data.batchId },
+    select: { id: true, licenseeId: true, manufacturerId: true },
+  });
+  if (!batch) return "batch_not_found";
+
+  const printJobId = payload.data.printJobId || null;
+  const [sampleScanCount, printConfirmationCount] = await Promise.all([
+    prisma.printAuditEvent.count({
+      where: {
+        batchId: batch.id,
+        ...(printJobId ? { printJobId } : {}),
+        actorId: actor.userId,
+        eventType: "sample_scan_verified",
+      },
+    }),
+    printJobId
+      ? prisma.auditLog.count({
+          where: {
+            userId: actor.userId,
+            entityType: "PrintJob",
+            entityId: printJobId,
+            action: "PRINT_CONFIRMED",
+          },
+        })
+      : Promise.resolve(0),
+  ]);
+  if (sampleScanCount > 0 || printConfirmationCount > 0) return "actor_completed_release_prerequisite";
+
+  if (isPlatformApproverRole(actor.role)) return null;
+
+  if (isLicenseeReleaseApproverRole(actor.role)) {
+    return actor.licenseeId && actor.licenseeId === batch.licenseeId ? null : "licensee_scope_mismatch";
+  }
+
+  if (isManufacturerReleaseApproverRole(actor.role)) {
+    if (actor.userId === batch.manufacturerId) return null;
+    const link = await prisma.manufacturerLicenseeLink.findUnique({
+      where: {
+        manufacturerId_licenseeId: {
+          manufacturerId: actor.userId,
+          licenseeId: batch.licenseeId,
+        },
+      },
+      select: { manufacturerId: true },
+    });
+    return link ? null : "manufacturer_scope_mismatch";
+  }
+
+  return "role_not_authorized";
+};
+
+const canReviewApproval = async (actor: ApprovalActor, approval: SensitiveApprovalRecord) => {
   if (actor.userId === approval.requestedByUserId) return false;
   if (approval.status !== ACTION_STATUS.PENDING) return false;
   if (approval.expiresAt && new Date(approval.expiresAt).getTime() <= Date.now()) return false;
@@ -124,6 +205,8 @@ const canReviewApproval = (actor: ApprovalActor, approval: any) => {
       if (!isPrinterApproverRole(actor.role)) return false;
       if (isPlatformApproverRole(actor.role)) return true;
       return Boolean(actor.licenseeId && approval.licenseeId && actor.licenseeId === approval.licenseeId);
+    case SENSITIVE_ACTION_KEYS.BATCH_RELEASE:
+      return (await batchReleaseReviewBlocker(actor, approval)) === null;
     default:
       return isPlatformApproverRole(actor.role);
   }
@@ -134,7 +217,7 @@ const serializeUserAgentHash = (userAgent?: string | null) => {
   return normalized ? hashToken(normalized) : null;
 };
 
-const expireIfNeeded = async (approval: any) => {
+const expireIfNeeded = async (approval: SensitiveApprovalRecord) => {
   if (approval.status !== ACTION_STATUS.PENDING) return approval;
   if (!approval.expiresAt || new Date(approval.expiresAt).getTime() > Date.now()) return approval;
   return prisma.sensitiveActionApproval.update({
@@ -180,6 +263,25 @@ export const createSensitiveActionApproval = async (input: CreateApprovalInput) 
     userAgent: input.userAgent || undefined,
   });
 
+  if (row.actionKey === SENSITIVE_ACTION_KEYS.BATCH_RELEASE) {
+    const payload = batchReleasePayloadSchema.parse(row.payload);
+    await prisma.printAuditEvent.create({
+      data: {
+        batchId: payload.batchId,
+        printJobId: payload.printJobId || null,
+        actorId: input.actor.userId,
+        eventType: "batch_release_approval_requested",
+        metadata: {
+          approvalId: row.id,
+          approvalStatus: row.status,
+          requestedByUserId: row.requestedByUserId,
+          releaseBoundary: payload.releaseBoundary || "supply_chain",
+          summary: row.summary ?? null,
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
   return row;
 };
 
@@ -191,7 +293,7 @@ export const listSensitiveActionApprovals = async (input: {
 }) => {
   const limit = Math.min(Math.max(Number(input.limit || 50), 1), 200);
   const offset = Math.max(Number(input.offset || 0), 0);
-  const where: any = {};
+  const where: Prisma.SensitiveActionApprovalWhereInput = {};
   if (input.status) where.status = String(input.status).trim().toUpperCase();
 
   const rows = await prisma.sensitiveActionApproval.findMany({
@@ -207,10 +309,13 @@ export const listSensitiveActionApprovals = async (input: {
   });
 
   const normalized = await Promise.all(rows.map((row) => expireIfNeeded(row)));
-  return normalized.filter((row) => row.requestedByUserId === input.actor.userId || canReviewApproval(input.actor, row));
+  const visible = await Promise.all(
+    normalized.map(async (row) => row.requestedByUserId === input.actor.userId || (await canReviewApproval(input.actor, row)))
+  );
+  return normalized.filter((_, index) => visible[index]);
 };
 
-const executeFeatureFlagUpsert = async (approval: any, reviewer: ApprovalActor) => {
+const executeFeatureFlagUpsert = async (approval: SensitiveApprovalRecord, reviewer: ApprovalActor) => {
   const payload = featureFlagPayloadSchema.parse(approval.payload);
   const row = await upsertTenantFeatureFlag({
     licenseeId: payload.licenseeId,
@@ -237,7 +342,7 @@ const executeFeatureFlagUpsert = async (approval: any, reviewer: ApprovalActor) 
   return row;
 };
 
-const executeRetentionPolicyPatch = async (approval: any, reviewer: ApprovalActor) => {
+const executeRetentionPolicyPatch = async (approval: SensitiveApprovalRecord, reviewer: ApprovalActor) => {
   const payload = retentionPolicyPayloadSchema.parse(approval.payload);
   const policy = await updateRetentionPolicy({
     licenseeId: payload.licenseeId,
@@ -265,7 +370,7 @@ const executeRetentionPolicyPatch = async (approval: any, reviewer: ApprovalActo
   return policy;
 };
 
-const executeRetentionApply = async (approval: any, reviewer: ApprovalActor) => {
+const executeRetentionApply = async (approval: SensitiveApprovalRecord, reviewer: ApprovalActor) => {
   const payload = retentionApplyPayloadSchema.parse(approval.payload);
   const result = await runRetentionLifecycle({
     licenseeId: payload.licenseeId,
@@ -291,7 +396,7 @@ const executeRetentionApply = async (approval: any, reviewer: ApprovalActor) => 
   return result;
 };
 
-const executeQrBlock = async (approval: any, reviewer: ApprovalActor) => {
+const executeQrBlock = async (approval: SensitiveApprovalRecord, reviewer: ApprovalActor) => {
   const payload = qrBlockPayloadSchema.parse(approval.payload);
   const updated = await prisma.qRCode.update({
     where: { id: payload.qrId },
@@ -318,7 +423,7 @@ const executeQrBlock = async (approval: any, reviewer: ApprovalActor) => {
   return { id: updated.id };
 };
 
-const executeBatchBlock = async (approval: any, reviewer: ApprovalActor) => {
+const executeBatchBlock = async (approval: SensitiveApprovalRecord, reviewer: ApprovalActor) => {
   const payload = batchBlockPayloadSchema.parse(approval.payload);
   const batch = await prisma.batch.findUnique({
     where: { id: payload.batchId },
@@ -353,7 +458,7 @@ const executeBatchBlock = async (approval: any, reviewer: ApprovalActor) => {
   return { batchId: batch.id, blocked: updated.count };
 };
 
-const executePrinterGatewayRotation = async (approval: any, reviewer: ApprovalActor) => {
+const executePrinterGatewayRotation = async (approval: SensitiveApprovalRecord, reviewer: ApprovalActor) => {
   const payload = printerRotationPayloadSchema.parse(approval.payload);
   const result = await upsertManagedNetworkPrinter({
     printerId: payload.printerId,
@@ -399,7 +504,31 @@ const executePrinterGatewayRotation = async (approval: any, reviewer: ApprovalAc
   };
 };
 
-const executeApprovalAction = async (approval: any, reviewer: ApprovalActor) => {
+const executeBatchRelease = async (approval: SensitiveApprovalRecord, reviewer: ApprovalActor) => {
+  const payload = batchReleasePayloadSchema.parse(approval.payload);
+  await prisma.printAuditEvent.create({
+    data: {
+      batchId: payload.batchId,
+      printJobId: payload.printJobId || null,
+      actorId: reviewer.userId,
+      eventType: "batch_release_approval_granted",
+      metadata: {
+        approvalId: approval.id,
+        requestedByUserId: approval.requestedByUserId,
+        approvedByUserId: reviewer.userId,
+      } as Prisma.InputJsonValue,
+    },
+  });
+
+  return releaseBatchForSupplyChain({
+    batchId: payload.batchId,
+    actorUserId: reviewer.userId,
+    approvalSatisfied: true,
+    approvalId: approval.id,
+  });
+};
+
+const executeApprovalAction = async (approval: SensitiveApprovalRecord, reviewer: ApprovalActor) => {
   switch (approval.actionKey as SensitiveActionKey) {
     case SENSITIVE_ACTION_KEYS.FEATURE_FLAG_UPSERT:
       return executeFeatureFlagUpsert(approval, reviewer);
@@ -411,6 +540,8 @@ const executeApprovalAction = async (approval: any, reviewer: ApprovalActor) => 
       return executeQrBlock(approval, reviewer);
     case SENSITIVE_ACTION_KEYS.BATCH_BLOCK:
       return executeBatchBlock(approval, reviewer);
+    case SENSITIVE_ACTION_KEYS.BATCH_RELEASE:
+      return executeBatchRelease(approval, reviewer);
     case SENSITIVE_ACTION_KEYS.PRINTER_GATEWAY_SECRET_ROTATION:
       return executePrinterGatewayRotation(approval, reviewer);
     default:
@@ -433,11 +564,21 @@ export const approveSensitiveActionApproval = async (input: {
   }
 
   const approval = await expireIfNeeded(current);
+  if (approval.status === ACTION_STATUS.EXECUTED) {
+    return { approval, result: null, idempotent: true };
+  }
   if (approval.status !== ACTION_STATUS.PENDING) {
     throw new Error("Approval request is no longer pending");
   }
-  if (!canReviewApproval(input.actor, approval)) {
+  if (!(await canReviewApproval(input.actor, approval))) {
     throw new Error("You cannot approve this request");
+  }
+  if (
+    approval.actionKey === SENSITIVE_ACTION_KEYS.BATCH_RELEASE &&
+    isPlatformApproverRole(input.actor.role) &&
+    !String(input.reviewNote || "").trim()
+  ) {
+    throw new Error("Platform batch release approval requires an explicit audit reason.");
   }
 
   await prisma.sensitiveActionApproval.update({
@@ -512,7 +653,7 @@ export const rejectSensitiveActionApproval = async (input: {
   if (approval.status !== ACTION_STATUS.PENDING) {
     throw new Error("Approval request is no longer pending");
   }
-  if (!canReviewApproval(input.actor, approval)) {
+  if (!(await canReviewApproval(input.actor, approval))) {
     throw new Error("You cannot reject this request");
   }
 
@@ -541,6 +682,24 @@ export const rejectSensitiveActionApproval = async (input: {
     ipAddress: input.ipAddress || undefined,
     userAgent: input.userAgent || undefined,
   });
+
+  if (approval.actionKey === SENSITIVE_ACTION_KEYS.BATCH_RELEASE) {
+    const payload = batchReleasePayloadSchema.parse(approval.payload);
+    await prisma.printAuditEvent.create({
+      data: {
+        batchId: payload.batchId,
+        printJobId: payload.printJobId || null,
+        actorId: input.actor.userId,
+        eventType: "batch_release_approval_rejected",
+        metadata: {
+          approvalId: approval.id,
+          requestedByUserId: approval.requestedByUserId,
+          rejectedByUserId: input.actor.userId,
+          reviewNote: input.reviewNote || null,
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
 
   return rejected;
 };

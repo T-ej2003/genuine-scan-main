@@ -883,6 +883,40 @@
       "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
     },
     {
+      "path": "backend/src/services/batchReleaseService.ts",
+      "model": "batch",
+      "methods": [
+        "findFirst",
+        "findUnique",
+        "update"
+      ],
+      "reason": "Batch release service is reached through scoped release and maker-checker workflows.",
+      "cannotWidenAccess": "Batch release service is reached through scoped release and maker-checker workflows. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
+      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
+    },
+    {
+      "path": "backend/src/services/batchReleaseService.ts",
+      "model": "qRCode",
+      "methods": [
+        "count",
+        "findUnique"
+      ],
+      "reason": "Batch release readiness reads QR evidence only for the scoped release batch.",
+      "cannotWidenAccess": "Batch release readiness reads QR evidence only for the scoped release batch. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
+      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
+    },
+    {
+      "path": "backend/src/services/legacyQrRotationService.ts",
+      "model": "qRCode",
+      "methods": [
+        "findMany",
+        "updateMany"
+      ],
+      "reason": "Legacy QR rotation is platform-admin governed and refuses printed or exposed public codes.",
+      "cannotWidenAccess": "Legacy QR rotation is platform-admin governed and refuses printed or exposed public codes. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
+      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
+    },
+    {
       "path": "backend/src/services/printLifecycleService.ts",
       "model": "qRCode",
       "methods": [
@@ -897,10 +931,51 @@
       "path": "backend/src/services/printLifecycleService.ts",
       "model": "batch",
       "methods": [
-        "update"
+        "updateMany"
       ],
-      "reason": "Print lifecycle mutations are reached through scoped print job flows.",
-      "cannotWidenAccess": "Print lifecycle mutations are reached through scoped print job flows. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
+      "reason": "Print lifecycle batch promotion is gated by scoped print confirmation and the state machine.",
+      "cannotWidenAccess": "Print lifecycle batch promotion is gated by scoped print confirmation and the state machine. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
+      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
+    },
+    {
+      "path": "backend/src/services/printSampleScanService.ts",
+      "model": "qRCode",
+      "methods": [
+        "findUnique"
+      ],
+      "reason": "Sample scan service verifies exact scanned public code membership in the scoped print job.",
+      "cannotWidenAccess": "Sample scan service verifies exact scanned public code membership in the scoped print job. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
+      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
+    },
+    {
+      "path": "backend/src/services/printValidationEvidenceService.ts",
+      "model": "batch",
+      "methods": [
+        "findUnique"
+      ],
+      "reason": "Validation evidence reads are scoped by platform, licensee, or manufacturer authorization.",
+      "cannotWidenAccess": "Validation evidence reads are scoped by platform, licensee, or manufacturer authorization. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
+      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
+    },
+    {
+      "path": "backend/src/services/printValidationEvidenceService.ts",
+      "model": "qRCode",
+      "methods": [
+        "count",
+        "findFirst"
+      ],
+      "reason": "Validation evidence QR reads are constrained to the authorized batch report context.",
+      "cannotWidenAccess": "Validation evidence QR reads are constrained to the authorized batch report context. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
+      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
+    },
+    {
+      "path": "backend/src/services/printValidationEvidenceService.ts",
+      "model": "user",
+      "methods": [
+        "findUnique"
+      ],
+      "reason": "Validation evidence resolves released-by display data after batch report authorization succeeds.",
+      "cannotWidenAccess": "Validation evidence resolves released-by display data after batch report authorization succeeds. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
       "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
     },
     {
@@ -1000,6 +1075,16 @@
       ],
       "reason": "Replacement-chain mutation is reached through scoped sensitive action paths.",
       "cannotWidenAccess": "Replacement-chain mutation is reached through scoped sensitive action paths. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
+      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
+    },
+    {
+      "path": "backend/src/services/sensitiveActionApprovalService.ts",
+      "model": "auditLog",
+      "methods": [
+        "count"
+      ],
+      "reason": "Batch release approval checks audit evidence to enforce maker-checker separation.",
+      "cannotWidenAccess": "Batch release approval checks audit evidence to enforce maker-checker separation. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
       "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
     },
     {

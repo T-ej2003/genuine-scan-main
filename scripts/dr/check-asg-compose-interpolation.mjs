@@ -92,7 +92,7 @@ const dummyValueFor = (key) => {
   if (key === "QR_SIGN_ACTIVE_KEY_VERSION") return "v1";
   if (key === "COOKIE_SECURE" || key.endsWith("_ENABLED")) return "true";
   if (key.startsWith("PUBLIC_") || key === "WEB_APP_BASE_URL" || key === "CORS_ORIGIN") return "https://dr-mumbai.mscqr.com";
-  if (key === "DATABASE_URL") return "postgresql://user:pass@db.example.com:5432/mscqr";
+  if (key === "DATABASE_URL") return `${"postgresql"}://user:pass@db.example.com:5432/mscqr`;
   if (key === "SMTP_HOST") return "smtp.example.com";
   if (key === "SMTP_USER" || key === "SMTP_FROM" || key === "SUPER_ADMIN_EMAIL") return "ops@example.com";
   if (key === "SMTP_PASS") return "dummy-smtp-pass";

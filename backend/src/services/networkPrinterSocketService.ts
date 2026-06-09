@@ -2,14 +2,16 @@ import net from "net";
 
 import { logger } from "../utils/logger";
 
-const parsePositiveIntEnv = (name: string, fallback: number, min: number, max: number) => {
-  const raw = Number(String(process.env[name] || "").trim());
+const parsePositiveIntEnv = (names: string | string[], fallback: number, min: number, max: number) => {
+  const keys = Array.isArray(names) ? names : [names];
+  const found = keys.map((name) => String(process.env[name] || "").trim()).find(Boolean);
+  const raw = Number(found || "");
   if (!Number.isFinite(raw) || raw <= 0) return fallback;
   return Math.max(min, Math.min(max, Math.floor(raw)));
 };
 
-const CONNECT_TIMEOUT_MS = parsePositiveIntEnv("NETWORK_DIRECT_CONNECT_TIMEOUT_MS", 4000, 500, 30000);
-const WRITE_TIMEOUT_MS = parsePositiveIntEnv("NETWORK_DIRECT_WRITE_TIMEOUT_MS", 8000, 1000, 60000);
+const CONNECT_TIMEOUT_MS = parsePositiveIntEnv(["NETWORK_DIRECT_CONNECT_TIMEOUT_MS", "ZEBRA_PRINTER_TIMEOUT_MS"], 4000, 500, 30000);
+const WRITE_TIMEOUT_MS = parsePositiveIntEnv(["NETWORK_DIRECT_WRITE_TIMEOUT_MS", "ZEBRA_PRINTER_TIMEOUT_MS"], 8000, 1000, 60000);
 
 const createTimeoutError = (message: string) => Object.assign(new Error(message), { code: "NETWORK_PRINTER_TIMEOUT" });
 

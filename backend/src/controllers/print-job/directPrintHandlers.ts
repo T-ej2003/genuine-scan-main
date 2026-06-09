@@ -1,3 +1,3 @@
 export { issueDirectPrintTokens, resolveDirectPrintToken } from "./directPrintTokenHandlers";
-export { confirmDirectPrintItem, confirmPrintJob } from "./directPrintConfirmationHandlers";
+export { capturePrintJobSampleScan, confirmDirectPrintItem, confirmPrintJob } from "./directPrintConfirmationHandlers";
 export { reportDirectPrintFailure } from "./directPrintFailureHandlers";

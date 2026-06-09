@@ -109,6 +109,13 @@ export type PrintJobDTO = {
     connectionType?: string | null;
   } | null;
   session?: PrintJobSessionDTO | null;
+  sampleScanPolicy?: {
+    satisfied: boolean;
+    required: number;
+    passed: number;
+    missing: number;
+    policy: Record<string, unknown>;
+  } | null;
   [key: string]: unknown;
 };
 

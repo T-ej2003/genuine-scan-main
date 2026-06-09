@@ -84,6 +84,11 @@ const requirements = [
   },
   {
     file: "indexRoutes",
+    description: "print sample scan must keep a pre-auth print mutation limiter before authenticate",
+    pattern: '"/manufacturer/print-jobs/:id/sample-scan", printMutationPreAuthRouteLimiter, authenticate, requireManufacturer,',
+  },
+  {
+    file: "indexRoutes",
     description: "verify intake must keep a pre-auth verify-session mutation limiter before auth",
     pattern: '"/verify/session/:id/intake", verifySessionMutationPreAuthRouteLimiter, requireCustomerVerifyAuth, verifyCustomerCookieRouteLimiter,',
   },

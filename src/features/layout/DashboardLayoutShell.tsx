@@ -359,7 +359,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="gap-2">
+                <Button
+                  variant="ghost"
+                  className="gap-2"
+                  data-testid="authenticated-user-menu"
+                  aria-label={`${user?.name || "User"} account menu`}
+                >
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
                     <span className="text-sm font-semibold text-primary">{user?.name?.charAt(0) || "U"}</span>
                   </div>

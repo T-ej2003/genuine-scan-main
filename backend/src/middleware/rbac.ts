@@ -6,7 +6,8 @@ export type Permission =
   | "platform:admin"
   | "org:admin"
   | "manufacturer:access"
-  | "ir:admin";
+  | "ir:admin"
+  | "batch.release.approve";
 
 const roleHasPermission = (role: UserRole, perm: Permission) => {
   const r = String(role || "").toUpperCase();
@@ -22,6 +23,7 @@ const roleHasPermission = (role: UserRole, perm: Permission) => {
   if (perm === "org:admin") return isPlatform || isOrgAdmin;
   if (perm === "manufacturer:access") return isManufacturer;
   if (perm === "ir:admin") return isPlatform;
+  if (perm === "batch.release.approve") return isPlatform || isOrgAdmin || r === "MANUFACTURER_ADMIN";
   return false;
 };
 

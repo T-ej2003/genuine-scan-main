@@ -52,7 +52,12 @@ const assertSafeTestDatabaseUrl = (databaseUrl) => {
   if (productionMarkers.some((marker) => urlLower.includes(marker))) {
     throw new Error("Refusing to use a production-looking database URL for P2 tests.");
   }
-  if (host && !["localhost", "127.0.0.1", "::1"].includes(host) && !host.endsWith(".local") && !isTruthy(process.env.P2_TEST_DATABASE_ALLOW_REMOTE)) {
+  if (
+    host &&
+    !["localhost", "127.0.0.1", "::1", "postgres"].includes(host) &&
+    !host.endsWith(".local") &&
+    !isTruthy(process.env.P2_TEST_DATABASE_ALLOW_REMOTE)
+  ) {
     throw new Error("Refusing non-local P2 database host without P2_TEST_DATABASE_ALLOW_REMOTE=true.");
   }
 };
@@ -71,16 +76,34 @@ const buildUrlForDatabase = (adminUrl, databaseName) => {
   return parsed.toString();
 };
 
+const buildP2DatabaseUrlFromParts = () => {
+  const protocol = String(process.env.P2_TEST_DB_PROTOCOL || "postgresql").trim();
+  const user = String(process.env.P2_TEST_DB_USER || "").trim();
+  const password = String(process.env.P2_TEST_DB_PASSWORD || "").trim();
+  const host = String(process.env.P2_TEST_DB_HOST || "").trim();
+  const port = String(process.env.P2_TEST_DB_PORT || "5432").trim();
+  const name = String(process.env.P2_TEST_DB_NAME || "").trim();
+
+  if (!user || !host || !name) return "";
+
+  const auth = password
+    ? `${encodeURIComponent(user)}:${encodeURIComponent(password)}`
+    : encodeURIComponent(user);
+
+  return `${protocol}://${auth}@${host}:${port}/${name}`;
+};
+
 const resolveDatabase = () => {
+  const builtUrl = buildP2DatabaseUrlFromParts();
   const directUrl = String(process.env.P2_TEST_DATABASE_URL || "").trim();
   if (directUrl) {
     assertSafeTestDatabaseUrl(directUrl);
     return { databaseUrl: directUrl, createdDatabaseName: null, adminUrl: null };
   }
 
-  const adminUrl = String(process.env.P2_TEST_DATABASE_ADMIN_URL || "").trim();
+  const adminUrl = String(process.env.P2_TEST_DATABASE_ADMIN_URL || builtUrl).trim();
   if (!adminUrl) {
-    throw new P2TestDbSkip("Set P2_TEST_DATABASE_URL or P2_TEST_DATABASE_ADMIN_URL to run real DB-backed P2 tests.");
+    throw new P2TestDbSkip("Set P2_TEST_DATABASE_URL/P2_TEST_DATABASE_ADMIN_URL or P2_TEST_DB_* parts to run real DB-backed P2 tests.");
   }
 
   const databaseName = `mscqr_p2_test_${process.pid}_${Date.now()}`.toLowerCase();

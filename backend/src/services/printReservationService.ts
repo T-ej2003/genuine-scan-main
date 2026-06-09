@@ -39,6 +39,7 @@ export type ReusablePrintItemCandidate = EvidenceFields & {
 export type ReservableQrCodeRow = {
   id: string;
   code: string;
+  displayCode: string | null;
   licenseeId: string;
   batchId: string | null;
   replayEpoch: number | null;
@@ -122,7 +123,7 @@ const reservableQrWhereSql = (params: {
 }) => {
   const rangeFilter =
     params.rangeStart && params.rangeEnd
-      ? Prisma.sql`AND q."code" >= ${params.rangeStart} AND q."code" <= ${params.rangeEnd}`
+      ? Prisma.sql`AND COALESCE(q."displayCode", q."code") >= ${params.rangeStart} AND COALESCE(q."displayCode", q."code") <= ${params.rangeEnd}`
       : Prisma.empty;
 
   return Prisma.sql`
@@ -145,6 +146,7 @@ export const selectReservableQrCodesForPrint = async (
     SELECT
       q."id",
       q."code",
+      q."displayCode",
       q."licenseeId",
       q."batchId",
       q."replayEpoch",
@@ -162,7 +164,7 @@ export const selectReservableQrCodesForPrint = async (
       rangeStart: params.rangeStart,
       rangeEnd: params.rangeEnd,
     })}
-    ORDER BY q."code" ASC
+    ORDER BY COALESCE(q."displayCode", q."code") ASC, q."createdAt" ASC
     FOR UPDATE OF q SKIP LOCKED
     LIMIT ${params.quantity};
   `);
@@ -192,7 +194,7 @@ export const countBlockedQrCodesForPrint = async (
 ) => {
   const rangeFilter =
     params.rangeStart && params.rangeEnd
-      ? Prisma.sql`AND q."code" >= ${params.rangeStart} AND q."code" <= ${params.rangeEnd}`
+      ? Prisma.sql`AND COALESCE(q."displayCode", q."code") >= ${params.rangeStart} AND COALESCE(q."displayCode", q."code") <= ${params.rangeEnd}`
       : Prisma.empty;
   const rows = await client.$queryRaw<Array<{ count: bigint | number }>>(Prisma.sql`
     SELECT COUNT(*)::int AS "count"
@@ -221,8 +223,8 @@ export const listReservableQrCodeSummaries = async (
     SELECT
       q."batchId" AS "batchId",
       COUNT(*)::int AS "count",
-      MIN(q."code") AS "startCode",
-      MAX(q."code") AS "endCode"
+      MIN(COALESCE(q."displayCode", q."code")) AS "startCode",
+      MAX(COALESCE(q."displayCode", q."code")) AS "endCode"
     FROM "QRCode" q
     LEFT JOIN "PrintItem" pi ON pi."qrCodeId" = q."id"
     LEFT JOIN "PrintSession" ps ON ps."id" = pi."printSessionId"

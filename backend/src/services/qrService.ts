@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import { QRStatus, Prisma } from "@prisma/client";
 import prisma from "../config/database";
 import { randomNonce } from "./qrTokenService";
@@ -79,6 +80,10 @@ export const generateQRCode = (prefix: string, number: number): string => {
   return `${prefix}${number.toString().padStart(10, "0")}`;
 };
 
+export const generatePublicQRCode = (): string => {
+  return `c_${randomBytes(24).toString("base64url")}`;
+};
+
 export const parseQRCode = (code: string): { prefix: string; number: number } | null => {
   const match = code.match(/^([A-Z0-9]+)(\d{10})$/);
   if (!match) return null;
@@ -115,7 +120,8 @@ export const generateQRCodesForRange = async (
 
   for (let i = startNumber; i <= endNumber; i++) {
     codes.push({
-      code: generateQRCode(prefix, i),
+      code: generatePublicQRCode(),
+      displayCode: generateQRCode(prefix, i),
       licenseeId,
       status: QRStatus.DORMANT,
       tokenNonce: randomNonce(),
@@ -155,7 +161,7 @@ export const allocateQRCodesToBatch = async (
   const result = await prisma.qRCode.updateMany({
     where: {
       licenseeId,
-      code: { gte: startCode, lte: endCode },
+      displayCode: { gte: startCode, lte: endCode },
       status: { in: [QRStatus.DORMANT, QRStatus.ACTIVE] },
       batchId: null,
     },

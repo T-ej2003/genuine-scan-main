@@ -172,8 +172,93 @@ type PrintJobDialogProps = {
   directRemainingToPrint: number | null;
   onRefreshPrintStatus: () => void;
   recentPrintJobs: PrintJobRow[];
+  releaseApprovalState?: {
+    approvalRequired: boolean;
+    approvalId: string;
+    status: string;
+    expiresAt?: string | null;
+    threshold?: number | null;
+  } | null;
   onAbandonPrintJob: (jobId: string) => void;
+  sampleScanCodeByJobId?: Record<string, string>;
+  onSampleScanCodeChange?: (jobId: string, value: string) => void;
+  onConfirmPrintedLabels?: (jobId: string) => void;
+  onVerifySampleScan?: (jobId: string) => void;
+  onReleaseBatch?: () => void;
   onClose: () => void;
+};
+
+type WorkflowStepState = "done" | "current" | "blocked";
+
+const completedLifecycleStates = new Set(["CODES_GENERATED", "PRINT_ACKNOWLEDGED", "PRINT_CONFIRMED", "SAMPLE_VERIFIED", "RELEASED"]);
+
+const buildPrintReleaseChecklist = (params: {
+  batch: BatchRow;
+  readyToPrintCount: number;
+  recentPrintJobs: PrintJobRow[];
+  releaseApprovalState: PrintJobDialogProps["releaseApprovalState"];
+}) => {
+  const latestJob = params.recentPrintJobs[0] || null;
+  const lifecycleState = params.batch.lifecycleState || "DRAFT";
+  const labelsGenerated =
+    completedLifecycleStates.has(lifecycleState) || params.readyToPrintCount > 0 || params.recentPrintJobs.length > 0;
+  const sentToPrinter =
+    lifecycleState === "PRINT_ACKNOWLEDGED" ||
+    lifecycleState === "PRINT_CONFIRMED" ||
+    lifecycleState === "SAMPLE_VERIFIED" ||
+    lifecycleState === "RELEASED" ||
+    Boolean(latestJob?.sentAt) ||
+    latestJob?.status === "SENT" ||
+    latestJob?.status === "CONFIRMED";
+  const printConfirmed =
+    lifecycleState === "PRINT_CONFIRMED" ||
+    lifecycleState === "SAMPLE_VERIFIED" ||
+    lifecycleState === "RELEASED" ||
+    latestJob?.status === "CONFIRMED";
+  const sampleVerified =
+    lifecycleState === "SAMPLE_VERIFIED" ||
+    lifecycleState === "RELEASED" ||
+    Boolean(latestJob?.sampleScanPolicy?.satisfied);
+  const released = lifecycleState === "RELEASED";
+  const waitingApproval = Boolean(params.releaseApprovalState?.approvalRequired);
+  const releaseLabel = released ? "Released" : waitingApproval ? "Waiting for checker approval" : "Ready to release";
+  const releaseDetail = released
+    ? "Batch is locked for supply-chain release."
+    : waitingApproval
+      ? "A second authorized checker must approve this high-value release."
+      : sampleVerified
+        ? "Release is available after the sample scan proof."
+        : "Sample scan proof is required before release.";
+
+  const steps: Array<{ label: string; detail: string; state: WorkflowStepState }> = [
+    {
+      label: "Labels generated",
+      detail: labelsGenerated ? `${params.batch.totalCodes.toLocaleString()} labels are database-backed.` : "Generate labels before printing.",
+      state: labelsGenerated ? "done" : "current",
+    },
+    {
+      label: "Sent to printer",
+      detail: sentToPrinter ? "Printer acknowledgement recorded." : "Choose the printer and send the print run.",
+      state: sentToPrinter ? "done" : labelsGenerated ? "current" : "blocked",
+    },
+    {
+      label: "Printed confirmed",
+      detail: printConfirmed ? "An operator confirmed the physical labels." : "Confirm only after labels physically print.",
+      state: printConfirmed ? "done" : sentToPrinter ? "current" : "blocked",
+    },
+    {
+      label: "Sample verified",
+      detail: sampleVerified ? "One printed label from this run verified." : "Scan one printed QR from this exact run.",
+      state: sampleVerified ? "done" : printConfirmed ? "current" : "blocked",
+    },
+    {
+      label: releaseLabel,
+      detail: releaseDetail,
+      state: released ? "done" : sampleVerified ? "current" : "blocked",
+    },
+  ];
+
+  return { latestJob, steps };
 };
 
 export function BatchPrintJobDialog({
@@ -208,9 +293,24 @@ export function BatchPrintJobDialog({
   directRemainingToPrint,
   onRefreshPrintStatus,
   recentPrintJobs,
+  releaseApprovalState = null,
   onAbandonPrintJob,
+  sampleScanCodeByJobId = {},
+  onSampleScanCodeChange = () => undefined,
+  onConfirmPrintedLabels = () => undefined,
+  onVerifySampleScan = () => undefined,
+  onReleaseBatch = () => undefined,
   onClose,
 }: PrintJobDialogProps) {
+  const workflow = printBatch
+    ? buildPrintReleaseChecklist({
+        batch: printBatch,
+        readyToPrintCount,
+        recentPrintJobs,
+        releaseApprovalState,
+      })
+    : null;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="create-print-job-dialog" className="max-h-[85vh] overflow-y-auto sm:max-w-[640px]">
@@ -229,6 +329,33 @@ export function BatchPrintJobDialog({
           />
         ) : (
           <div className="mt-2 space-y-4">
+            {workflow ? (
+              <div className="rounded-md border bg-background p-3 text-sm">
+                <div className="font-medium">Batch release checklist</div>
+                <div className="mt-3 grid gap-2">
+                  {workflow.steps.map((step, index) => (
+                    <div key={step.label} className="flex items-start gap-3">
+                      <div
+                        className={
+                          step.state === "done"
+                            ? "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-800"
+                            : step.state === "current"
+                              ? "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
+                              : "flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
+                        }
+                      >
+                        {step.state === "done" ? "OK" : index + 1}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-medium">{step.label}</div>
+                        <div className="text-xs text-muted-foreground">{step.detail}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div
               className={
                 selectedPrinterNotice.tone === "success"
@@ -530,6 +657,91 @@ export function BatchPrintJobDialog({
                             pendingLabel="Closing..."
                             showReasonBelow={false}
                           />
+                        </div>
+                      ) : null}
+                      {job.status === "SENT" && job.awaitingConfirmation ? (
+                        <div className="mt-2 flex flex-wrap justify-end gap-2">
+                          <ActionButton
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onConfirmPrintedLabels(job.id)}
+                            state={
+                              printing
+                                ? createUiActionState("pending", "Confirming the physical print run.")
+                                : createUiActionState("enabled")
+                            }
+                            idleLabel="Labels physically printed"
+                            pendingLabel="Confirming..."
+                            showReasonBelow={false}
+                          />
+                        </div>
+                      ) : null}
+                      {job.status === "CONFIRMED" ? (
+                        <div className="mt-3 rounded-md border bg-background p-3">
+                          <div className="text-xs font-medium">Sample scan proof</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {job.sampleScanPolicy
+                              ? `${job.sampleScanPolicy.passed}/${job.sampleScanPolicy.required} sample scans verified for this print run.`
+                              : "Scan one printed label from this run to prove the QR resolves to this job."}
+                          </div>
+                          {releaseApprovalState?.approvalRequired ? (
+                            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                              Release is waiting for a different authorized checker from the platform, brand, or assigned manufacturer.
+                              {releaseApprovalState.threshold
+                                ? ` Policy threshold: ${releaseApprovalState.threshold.toLocaleString()} labels.`
+                                : ""}
+                            </div>
+                          ) : null}
+                          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                            <Input
+                              value={sampleScanCodeByJobId[job.id] || ""}
+                              onChange={(event) => onSampleScanCodeChange(job.id, event.target.value)}
+                              placeholder="Scan MSCQR code or verify URL"
+                              maxLength={1024}
+                            />
+                            <ActionButton
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onVerifySampleScan(job.id)}
+                              state={
+                                printing
+                                  ? createUiActionState("pending", "Verifying the sample scan.")
+                                  : !String(sampleScanCodeByJobId[job.id] || "").trim()
+                                    ? createUiActionState("disabled", "Scan one printed QR before verifying.")
+                                    : createUiActionState("enabled")
+                              }
+                              idleLabel="Verify sample"
+                              pendingLabel="Verifying..."
+                              showReasonBelow
+                            />
+                          </div>
+                          <div className="mt-3 flex justify-end">
+                            <ActionButton
+                              variant={printBatch?.lifecycleState === "RELEASED" ? "outline" : "default"}
+                              size="sm"
+                              onClick={onReleaseBatch}
+                              state={
+                                printing
+                                  ? createUiActionState("pending", "Releasing the batch.")
+                                  : printBatch?.lifecycleState === "RELEASED"
+                                    ? createUiActionState("disabled", "Batch has already been released.")
+                                    : releaseApprovalState?.approvalRequired
+                                      ? createUiActionState("disabled", "A different authorized checker must approve this release.")
+                                    : job.sampleScanPolicy?.satisfied
+                                      ? createUiActionState("enabled")
+                                      : createUiActionState("disabled", "Complete required sample scan proof before release.")
+                              }
+                              idleLabel={
+                                printBatch?.lifecycleState === "RELEASED"
+                                  ? "Batch released"
+                                  : releaseApprovalState?.approvalRequired
+                                    ? "Approval pending"
+                                    : "Release batch"
+                              }
+                              pendingLabel="Releasing..."
+                              showReasonBelow
+                            />
+                          </div>
                         </div>
                       ) : null}
                     </div>

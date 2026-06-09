@@ -58,7 +58,7 @@ export const mapBatch = (batch: any) =>
       }
     : null;
 
-export const normalizeCode = (value: string) => String(value || "").trim().toUpperCase();
+export const normalizeCode = (value: string) => String(value || "").trim();
 
 export const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

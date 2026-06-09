@@ -58,6 +58,7 @@ const run = async () => {
   const backupFindFirst = prisma.printJob.findFirst;
   const backupFindMany = prisma.printJob.findMany;
   const backupGroupBy = prisma.printItem.groupBy;
+  const backupPrintAuditFindMany = prisma.printAuditEvent.findMany;
   let lastFindFirstArgs = null;
   let lastFindManyArgs = null;
 
@@ -76,6 +77,9 @@ const run = async () => {
       _count: { _all: 1 },
     },
   ];
+  prisma.printAuditEvent.findMany = async () => [
+    { batchId: "batch-1", printJobId: "job-1", eventType: "sample_scan_verified", qrCodeId: "qr-1" },
+  ];
 
   try {
     const view = await getPrintJobOperationalView({
@@ -91,6 +95,7 @@ const run = async () => {
     assert(view.session.remainingToPrint === 0, "Operational view should derive remainingToPrint from print item state");
     assert(view.reprintOfJobId === "job-root-1", "Operational view should expose the original job link");
     assert(view.reprintReason === "Damaged labels on first pass", "Operational view should expose the reissue reason");
+    assert(view.sampleScanPolicy.satisfied === true, "Operational view should expose satisfied sample scan policy");
     assert(
       lastFindFirstArgs.where.batch.is.licenseeId === "lic-1",
       "Licensee-admin reads should be scoped to the effective licensee"
@@ -109,6 +114,7 @@ const run = async () => {
     assert(rows[0].session.remainingToPrint === 0, "List should derive remainingToPrint from print item state");
     assert(rows[0].reprintOfJobId === "job-root-1", "List rows should expose the original job link");
     assert(rows[0].reprintReason === "Damaged labels on first pass", "List rows should expose the reissue reason");
+    assert(rows[0].sampleScanPolicy.satisfied === true, "List rows should expose satisfied sample scan policy");
     assert(
       lastFindManyArgs.where.manufacturerId === "user-1",
       "Manufacturer reads should stay scoped to the manufacturer owner"
@@ -119,6 +125,7 @@ const run = async () => {
     prisma.printJob.findFirst = backupFindFirst;
     prisma.printJob.findMany = backupFindMany;
     prisma.printItem.groupBy = backupGroupBy;
+    prisma.printAuditEvent.findMany = backupPrintAuditFindMany;
   }
 };
 

@@ -1,6 +1,6 @@
 import { Prisma, QRStatus } from "@prisma/client";
 import prisma from "../config/database";
-import { generateQRCode, parseQRCode } from "./qrService";
+import { generatePublicQRCode, generateQRCode, parseQRCode } from "./qrService";
 import { randomNonce } from "./qrTokenService";
 
 type DbClient = Prisma.TransactionClient;
@@ -12,13 +12,13 @@ export const lockLicenseeAllocation = async (tx: DbClient, licenseeId: string) =
 
 export const getNextLicenseeQrNumber = async (tx: DbClient, licenseeId: string) => {
   const last = await tx.qRCode.findFirst({
-    where: { licenseeId },
-    orderBy: { code: "desc" },
-    select: { code: true },
+    where: { licenseeId, displayCode: { not: null } },
+    orderBy: { displayCode: "desc" },
+    select: { displayCode: true },
   });
-  if (!last?.code) return 1;
+  if (!last?.displayCode) return 1;
 
-  const parsed = parseQRCode(last.code);
+  const parsed = parseQRCode(last.displayCode);
   return (parsed?.number ?? 0) + 1;
 };
 
@@ -61,7 +61,7 @@ export const allocateQrRange = async (params: AllocateQrRangeParams) => {
 
   // ensure no overlap with existing codes
   const existing = await db.qRCode.count({
-    where: { licenseeId, code: { gte: startCode, lte: endCode } },
+    where: { licenseeId, displayCode: { gte: startCode, lte: endCode } },
   });
   if (existing > 0) {
     throw new Error(`Range overlaps existing QR codes (${existing} found in the range).`);
@@ -83,7 +83,8 @@ export const allocateQrRange = async (params: AllocateQrRangeParams) => {
     const chunk: Prisma.QRCodeCreateManyInput[] = [];
     for (let i = cursor; i <= chunkEnd; i += 1) {
       chunk.push({
-        code: generateQRCode(licensee.prefix, i),
+        code: generatePublicQRCode(),
+        displayCode: generateQRCode(licensee.prefix, i),
         licenseeId,
         status: QRStatus.DORMANT,
         tokenNonce: randomNonce(),
@@ -111,7 +112,7 @@ export const allocateQrRange = async (params: AllocateQrRangeParams) => {
     });
 
     const updated = await db.qRCode.updateMany({
-      where: { licenseeId, code: { gte: startCode, lte: endCode } },
+      where: { licenseeId, displayCode: { gte: startCode, lte: endCode } },
       data: {
         batchId: batch.id,
         status: QRStatus.DORMANT,

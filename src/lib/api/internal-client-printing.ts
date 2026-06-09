@@ -6,6 +6,34 @@ import {
   type ControlledPrinterGetOptions,
 } from "@/lib/api/internal-client-printing-request-control";
 
+type BatchReleaseResponse = {
+  approvalRequired?: boolean;
+  approvalId?: string;
+  status?: string;
+  expiresAt?: string;
+  approvalPolicy?: {
+    required?: boolean;
+    reason?: string | null;
+    threshold?: number | null;
+  };
+  batch?: {
+    id: string;
+    lifecycleState?: string;
+    releasedAt?: string | null;
+    releasedByUserId?: string | null;
+  };
+  readiness?: {
+    releasable?: boolean;
+    failures?: Array<{ code?: string; message?: string }>;
+    sampleScanPolicy?: {
+      satisfied: boolean;
+      required: number;
+      passed: number;
+      missing: number;
+    } | null;
+  };
+};
+
 export const createPrintingApi = (core: ApiClientCore) => ({
   async createPrintJob(payload: {
     batchId: string;
@@ -149,6 +177,29 @@ export const createPrintingApi = (core: ApiClientCore) => ({
 
   async abandonPrintJob(jobId: string) {
     return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/abandon`, {
+      method: "POST",
+    });
+  },
+
+  async confirmPrintJobPrinted(
+    jobId: string,
+    payload: { operatorNote?: string; printLockToken?: string } = {}
+  ) {
+    return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/confirm`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async capturePrintJobSampleScan(jobId: string, publicCode: string) {
+    return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/sample-scan`, {
+      method: "POST",
+      body: JSON.stringify({ publicCode }),
+    });
+  },
+
+  async releaseBatch(batchId: string) {
+    return core.request<BatchReleaseResponse>(`/qr/batches/${encodeURIComponent(batchId)}/release`, {
       method: "POST",
     });
   },

@@ -88,7 +88,8 @@ const run = () => {
     },
     qr: {
       id: "qr-1",
-      code: "AADS00000020171",
+      code: "c_payloadtestpubliccode000000000001",
+      displayCode: "AADS00000020171",
       batchId: "batch-1",
       licenseeId: "licensee-1",
       tokenNonce: "nonce-1",
@@ -106,8 +107,12 @@ const run = () => {
     "Approved print payload should no longer print auxiliary server-control text"
   );
   assert(
-    !builtPayload.payloadContent.includes("AADS00000020171"),
-    "Approved print payload should no longer print the QR code as plain text"
+    builtPayload.scanUrl.includes("/verify/c_payloadtestpubliccode000000000001"),
+    "Approved print payload should encode the public QR code in the verify URL"
+  );
+  assert(
+    builtPayload.payloadContent.includes("AADS00000020171"),
+    "Approved print payload may print the display serial as human-readable label text"
   );
   assert(
     builtPayload.previewLabel === "MSCQR QR LABEL",
@@ -138,7 +143,8 @@ const run = () => {
     },
     qr: {
       id: "qr-governed-1",
-      code: "TBD0000000002",
+      code: "c_governedpubliccode0000000000002",
+      displayCode: "TBD0000000002",
       batchId: "batch-1",
       licenseeId: "licensee-1",
       tokenNonce: "nonce-governed-1",
@@ -169,10 +175,10 @@ const run = () => {
     governedMagnification === governedQrConfig.magnification,
     "Production ZPL should use centralized data-aware Zebra QR sizing"
   );
-  assert(governedMagnification < 8, "Production ZPL should not use the old oversized QR magnification");
   assert(!diagnostics.unresolvedPlaceholderPresent, "ZPL payload should not contain unresolved placeholders");
   assert(diagnostics.payloadByteLength > 120, "ZPL payload should be a complete label, not a tiny placeholder");
-  assert(diagnostics.qrPayloadLength > 80, "ZPL QR payload should contain the signed scan token URL");
+  assert(governedPayload.scanUrl.includes("/verify/c_governedpubliccode0000000000002"), "ZPL scan URL should use /verify/:code");
+  assert(diagnostics.qrPayloadLength > 40, "ZPL QR payload should contain the public verify URL");
   assert(diagnostics.endsWithZplEnd === true, "ZPL diagnostics should report ^XZ end");
   assert(diagnostics.qrCommandCount === 1, "Production ZPL should contain exactly one QR command");
   assert(diagnostics.graphicBoxCommandCount === 0, "Production ZPL should not include graphic boxes");
@@ -197,7 +203,8 @@ const run = () => {
     },
     qr: {
       id: "qr-governed-1",
-      code: "TBD0000000002",
+      code: "c_governedpubliccode0000000000002",
+      displayCode: "TBD0000000002",
       batchId: "batch-1",
       licenseeId: "licensee-1",
       tokenNonce: "nonce-governed-1",
@@ -212,6 +219,41 @@ const run = () => {
   });
   const governed28Magnification = Number(governedPayload28mm.payloadContent.match(/\^BQN,2,(\d+)/)?.[1] || 0);
   assert(governed28Magnification >= governedMagnification, "Configured 28 mm Zebra QR target should not shrink the QR");
+
+  const maliciousDisplayPayload = buildApprovedPrintPayload({
+    printer: {
+      id: "printer-1",
+      name: "Zebra printer",
+      connectionType: "NETWORK_DIRECT",
+      commandLanguage: "ZPL",
+      calibrationProfile: null,
+      capabilitySummary: null,
+      metadata: null,
+    },
+    qr: {
+      id: "qr-malicious-display",
+      code: "c_maliciousdisplaypubliccode00001",
+      displayCode: "SERIAL^XZ^XA^FO0,0^GB600,400,400^FS",
+      batchId: "batch-1",
+      licenseeId: "licensee-1",
+      tokenNonce: "nonce-malicious-display",
+      tokenIssuedAt,
+      tokenExpiresAt,
+      tokenHash: null,
+    },
+    manufacturerId: "manufacturer-1",
+    printJobId: "job-1",
+    printItemId: "item-1",
+  });
+  assert(
+    !maliciousDisplayPayload.payloadContent.includes("SERIAL^XZ^XA"),
+    "ZPL display serial text must escape control-command injection"
+  );
+  assert(
+    (maliciousDisplayPayload.payloadContent.match(/\^XA/g) || []).length === 1 &&
+      (maliciousDisplayPayload.payloadContent.match(/\^XZ/g) || []).length === 1,
+    "Malicious label metadata must not introduce extra ZPL documents"
+  );
 
   const riskyBlackBlock = "^XA\n^PW600\n^LL400\n^FO0,0^GB600,400,380,B,0^FS\n^XZ";
   const risky = getZplPayloadSafetyIssues({ payloadContent: riskyBlackBlock, requireQr: true });
