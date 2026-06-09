@@ -1889,100 +1889,100 @@ protectedReadRouter.get(
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/pause",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
   authenticate,
   requireOpsUser,
   enforceTenantIsolation,
-  printMutationRouteLimiter,
-  printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
   pauseManufacturerPrintJob
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/resume",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
   authenticate,
   requireOpsUser,
   enforceTenantIsolation,
-  printMutationRouteLimiter,
-  printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
   resumeManufacturerPrintJob
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/stop",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
   authenticate,
   requireOpsUser,
   enforceTenantIsolation,
-  printMutationRouteLimiter,
-  printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
   stopManufacturerPrintJob
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/abandon",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
   authenticate,
   requireOpsUser,
   enforceTenantIsolation,
-  printMutationRouteLimiter,
-  printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
   abandonManufacturerPrintJob
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/reissue",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
   authenticate,
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  printMutationRouteLimiter,
-  printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
   reissueManufacturerPrintJob
 );
 protectedReadRouter.get(
   "/manufacturer/print-reissue-requests",
+  printReadRouteLimiter,
   authenticate,
   requireOpsUser,
-  printReadRouteLimiter,
   protectedReadRouteLimiter,
   enforceTenantIsolation,
   listManufacturerPrintReissueRequests
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/reissue-request",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
   authenticate,
   requireOpsUser,
   enforceTenantIsolation,
-  printMutationRouteLimiter,
-  printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
   createManufacturerPrintReissueRequest
 );
 protectedMutationRouter.post(
   "/manufacturer/print-reissue-requests/:id/approve",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
   authenticate,
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  printMutationRouteLimiter,
-  printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
   approveManufacturerPrintReissueRequest
 );
 protectedMutationRouter.post(
   "/manufacturer/print-reissue-requests/:id/reject",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
   authenticate,
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  printMutationRouteLimiter,
-  printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
   rejectManufacturerPrintReissueRequest
