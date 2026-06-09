@@ -295,10 +295,12 @@ export const stopPrintJob = async (params: {
           },
         })),
       });
+      // scope-guardrail-ignore: job was loaded through buildScopedPrintJobWhere; this release is further bounded to QR ids from that scoped print session, printJobId, batchId, and unconfirmed statuses.
       await tx.qRCode.updateMany({
         where: {
           id: { in: cancellableQrIds },
           printJobId: job.id,
+          batchId: job.batchId,
           status: { in: [QRStatus.ACTIVATED, QRStatus.ALLOCATED] },
         },
         data: {

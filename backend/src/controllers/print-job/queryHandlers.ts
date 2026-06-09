@@ -13,16 +13,18 @@ import {
   listScopedPrintReissueRequests,
 } from "../../services/printReissueRequestWorkflowService";
 import {
-  createReissueRequestSchema,
   ensurePrintOperationsUser,
-  listReissueRequestsQuerySchema,
   listPrintJobsQuerySchema,
-  printOperationReasonSchema,
   printJobIdParamSchema,
-  reissueRequestDecisionSchema,
-  reissueRequestIdParamSchema,
   reissuePrintJobSchema,
 } from "./shared";
+import {
+  createReissueRequestSchema,
+  listReissueRequestsQuerySchema,
+  printOperationReasonSchema,
+  reissueRequestDecisionSchema,
+  reissueRequestIdParamSchema,
+} from "./operationSchemas";
 
 const isPlatformAdmin = (role: UserRole) =>
   role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
