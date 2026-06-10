@@ -81,6 +81,32 @@ describe("dialog recovery states", () => {
     expect(screen.getByTestId("print-job-start-button")).toBeEnabled();
   });
 
+  it("keeps print start disabled when backend lifecycle readiness blocks the batch", () => {
+    renderPrintDialog({
+      printBatch: {
+        ...readyBatch,
+        lifecycleState: "DRAFT",
+        printReadiness: {
+          printable: false,
+          batchId: "batch-1",
+          currentLifecycleState: "DRAFT",
+          requiredPreviousStep: "Allocate QR labels to this manufacturer before printing.",
+          userMessage: "This batch needs to be allocated before printing.",
+          recoveryAction: "complete_previous_batch_step",
+          canRetry: false,
+          canRepairAutomatically: false,
+          reasonCode: "batch_lifecycle_blocked",
+          availableToPrint: 10,
+        },
+      } as any,
+      readyToPrintCount: 10,
+    });
+
+    expect(screen.getByText("QR labels ready to print: 10")).toBeInTheDocument();
+    expect(screen.getAllByText("This batch needs to be allocated before printing.").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("print-job-start-button")).toBeDisabled();
+  });
+
   it("keeps print start disabled when the local helper is unavailable", () => {
     renderPrintDialog({
       selectedPrinterCanPrint: false,

@@ -50,6 +50,13 @@ export type PrintJobErrorPayload = {
   message: string;
   code: PrintJobErrorCode;
   errorCode: PrintJobErrorCode;
+  batchId?: string;
+  currentLifecycleState?: string;
+  requiredPreviousStep?: string | null;
+  userMessage?: string;
+  recoveryAction?: string;
+  canRetry?: boolean;
+  canRepairAutomatically?: boolean;
   requestId?: string | null;
   failureStage?: string | null;
   details?: {
@@ -166,17 +173,37 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
   const msg = String(error?.message || "");
   if (typeof error?.code === "string" && batchStateErrorCodes.has(error.code as PrintJobErrorCode)) {
     const code = error.code as PrintJobErrorCode;
+    const stateDetails =
+      error.details && typeof error.details === "object" && !Array.isArray(error.details)
+        ? (error.details as Record<string, unknown>)
+        : {};
+    const userSafeMessage = String(stateDetails.userMessage || msg || "Complete the previous batch step first.");
     return {
       status: Number(error?.statusCode || 409),
       logReason: String(code).toLowerCase(),
-      payload: withFailureContext(
+      payload: {
+        ...withFailureContext(
         {
           code,
-          message: msg || "Complete the previous batch step first.",
+          message: userSafeMessage,
           data: error.details ? { details: error.details } : undefined,
         },
         context
-      ),
+        ),
+        ...(stateDetails.batchId ? { batchId: String(stateDetails.batchId) } : {}),
+        ...(stateDetails.currentLifecycleState
+          ? { currentLifecycleState: String(stateDetails.currentLifecycleState) }
+          : {}),
+        ...(stateDetails.requiredPreviousStep !== undefined
+          ? { requiredPreviousStep: stateDetails.requiredPreviousStep ? String(stateDetails.requiredPreviousStep) : null }
+          : {}),
+        ...(stateDetails.userMessage ? { userMessage: String(stateDetails.userMessage) } : {}),
+        ...(stateDetails.recoveryAction ? { recoveryAction: String(stateDetails.recoveryAction) } : {}),
+        ...(typeof stateDetails.canRetry === "boolean" ? { canRetry: stateDetails.canRetry } : {}),
+        ...(typeof stateDetails.canRepairAutomatically === "boolean"
+          ? { canRepairAutomatically: stateDetails.canRepairAutomatically }
+          : {}),
+      },
     };
   }
   if (msg.includes("BATCH_BUSY")) {

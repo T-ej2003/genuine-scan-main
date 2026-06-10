@@ -129,18 +129,26 @@ const runConfirmTest = async () => {
     backup(prisma.qRCode, "updateMany"),
     backup(prisma.qRCode, "count"),
     backup(prisma.printSession, "update"),
+    backup(prisma.printSession, "count"),
     backup(prisma.printJob, "findUnique"),
+    backup(prisma.printJob, "findFirst"),
+    backup(prisma.printJob, "count"),
     backup(prisma.printJob, "update"),
     backup(prisma.printJob, "updateMany"),
     backup(prisma.printAuditEvent, "groupBy"),
+    backup(prisma.printAuditEvent, "create"),
+    backup(prisma.auditLog, "create"),
     backup(prisma.batch, "findUnique"),
     backup(prisma.batch, "update"),
     backup(prisma.batch, "updateMany"),
+    backup(prisma, "$queryRaw"),
   ];
   const updates = [];
   const sessionUpdates = [];
   const jobUpdates = [];
+  const batchUpdates = [];
   let findUniqueCalls = 0;
+  let batchLifecycleState = BatchLifecycleState.DRAFT;
 
   prisma.printItem.findUnique = async () => {
     findUniqueCalls += 1;
@@ -168,6 +176,7 @@ const runConfirmTest = async () => {
     sessionUpdates.push(args);
     return {};
   };
+  prisma.printSession.count = async () => 1;
   prisma.printJob.findUnique = async () => ({
     id: "job-1",
     status: PrintJobStatus.CONFIRMED,
@@ -176,21 +185,35 @@ const runConfirmTest = async () => {
     itemCount: 1,
     quantity: 1,
   });
+  prisma.printJob.findFirst = async () => ({ id: "job-1" });
+  prisma.printJob.count = async () => 1;
   prisma.printJob.update = async (args) => {
     jobUpdates.push(args);
     return {};
   };
   prisma.printJob.updateMany = async () => ({ count: 1 });
   prisma.printAuditEvent.groupBy = async () => [];
+  prisma.printAuditEvent.create = async () => ({});
+  prisma.auditLog.create = async () => ({});
   prisma.batch.findUnique = async () => ({
     id: "batch-1",
-    lifecycleState: BatchLifecycleState.PRINT_ACKNOWLEDGED,
+    lifecycleState: batchLifecycleState,
     releasedAt: null,
     totalCodes: 1,
     sampleScanPolicy: null,
+    licenseeId: "licensee-1",
+    manufacturerId: "manufacturer-1",
+    parentBatchId: "source-batch-1",
+    rootBatchId: "source-batch-1",
+    printedAt: null,
   });
   prisma.batch.update = async () => ({});
-  prisma.batch.updateMany = async () => ({ count: 1 });
+  prisma.batch.updateMany = async (args) => {
+    batchUpdates.push(args);
+    if (args.data?.lifecycleState) batchLifecycleState = args.data.lifecycleState;
+    return { count: 1 };
+  };
+  prisma.$queryRaw = async () => [{ count: 1 }];
 
   try {
     const result = await confirmPrintItemDispatch({
@@ -218,6 +241,10 @@ const runConfirmTest = async () => {
     assert(
       jobUpdates.some((entry) => entry.data.pipelineState === PrintPipelineState.PRINT_CONFIRMED),
       "Confirm should mark the job pipeline print-confirmed before finalization"
+    );
+    assert(
+      batchUpdates.some((entry) => entry.data.lifecycleState === BatchLifecycleState.PRINT_CONFIRMED),
+      "Confirm should repair a stale DRAFT batch to PRINT_CONFIRMED from print evidence"
     );
   } finally {
     restore.reverse().forEach((fn) => fn());

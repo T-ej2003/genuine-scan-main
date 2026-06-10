@@ -228,6 +228,14 @@ export function BatchesWorkspaceTable({
                     ) : (
                       filteredRows.map((batch) => {
                         const printed = !!batch.printedAt;
+                        const availableInventory = getAvailableInventory(batch);
+                        const printReadiness = batch.printReadiness;
+                        const lifecycleBlocked =
+                          printReadiness && printReadiness.printable === false && availableInventory > 0;
+                        const printActionReason =
+                          lifecycleBlocked
+                            ? printReadiness.userMessage || printReadiness.requiredPreviousStep || "Complete the previous batch step first."
+                            : "Nothing is waiting to print in this batch right now.";
 
                         return (
                           <TableRow key={batch.id}>
@@ -264,6 +272,11 @@ export function BatchesWorkspaceTable({
                                 <Badge variant={getAvailabilityTone(getAvailableInventory(batch))}>
                                   {getAvailabilityTitle(batch)}: {getAvailableInventory(batch).toLocaleString()}
                                 </Badge>
+                                {lifecycleBlocked ? (
+                                  <div className="text-[11px] text-amber-700">
+                                    {printActionReason}
+                                  </div>
+                                ) : null}
                                 <div className="text-[11px] text-muted-foreground">
                                   Printed {Number(batch.printedCodes || 0).toLocaleString()} · Scanned {Number(batch.redeemedCodes || 0).toLocaleString()}
                                 </div>
@@ -310,8 +323,8 @@ export function BatchesWorkspaceTable({
                                 state={
                                   loading
                                     ? createUiActionState("pending", "Checking whether this batch is ready to print.")
-                                    : getAvailableInventory(batch) <= 0
-                                      ? createUiActionState("disabled", "Nothing is waiting to print in this batch right now.")
+                                    : availableInventory <= 0 || lifecycleBlocked
+                                      ? createUiActionState("disabled", printActionReason)
                                       : createUiActionState("enabled")
                                 }
                                 idleLabel={

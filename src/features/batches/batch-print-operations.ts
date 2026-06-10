@@ -200,6 +200,7 @@ export const printJobCreateFailureMessage = (response: {
   error?: string;
   message?: string;
   requestId?: string | null;
+  data?: unknown;
   details?: {
     missingFields?: string[];
     validationIssuePaths?: string[];
@@ -222,6 +223,19 @@ export const printJobCreateFailureMessage = (response: {
   }
   if (errorCode === "batch_not_printable") {
     return "There are no labels ready to print in this batch.";
+  }
+  if (errorCode === "invalid_state_transition") {
+    const responseData =
+      response.data && typeof response.data === "object" && !Array.isArray(response.data)
+        ? (response.data as { details?: Record<string, unknown> })
+        : {};
+    const details = responseData.details || {};
+    const message = String(details.userMessage || response.message || response.error || "").trim();
+    if (message) return message;
+    if (details.canRepairAutomatically) {
+      return "Batch state is being repaired from previous print evidence. Refresh and try again.";
+    }
+    return "This batch needs to be allocated before printing.";
   }
   if (errorCode === "printer_selection_mismatch") {
     const message = String(response.message || response.error || "").trim();
@@ -545,11 +559,12 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
 
     const raw = String(response.errorCode || response.code || response.error || "Error").toLowerCase();
     const isBusy =
-      raw.includes("conflict") ||
-      raw.includes("busy") ||
-      raw.includes("retry") ||
-      raw.includes("active_print_job_exists") ||
-      raw.includes("print_job_conflict");
+      (raw.includes("conflict") ||
+        raw.includes("busy") ||
+        raw.includes("retry") ||
+        raw.includes("active_print_job_exists") ||
+        raw.includes("print_job_conflict")) &&
+      !raw.includes("invalid_state_transition");
     const responseMessage = String(response.message || response.error || "").trim();
     const safeError = printJobCreateFailureMessage(response);
     toast({

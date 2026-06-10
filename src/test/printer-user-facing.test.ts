@@ -49,6 +49,18 @@ describe("printer user-facing helpers", () => {
     expect(printJobCreateFailureMessage({ errorCode: "batch_not_printable" })).toBe(
       "There are no labels ready to print in this batch."
     );
+    expect(
+      printJobCreateFailureMessage({
+        errorCode: "INVALID_STATE_TRANSITION",
+        message: "This batch needs to be allocated before printing.",
+        data: {
+          details: {
+            requiredPreviousStep: "Allocate QR labels to this manufacturer before printing.",
+            userMessage: "This batch needs to be allocated before printing.",
+          },
+        },
+      })
+    ).toBe("This batch needs to be allocated before printing.");
     expect(printJobCreateFailureMessage({ errorCode: "invalid_printer" })).toBe(
       "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup."
     );
