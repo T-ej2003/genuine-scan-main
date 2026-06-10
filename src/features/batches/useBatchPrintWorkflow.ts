@@ -27,6 +27,7 @@ import {
 } from "./print-workflow-utils";
 import {
   createPrintJob as executeCreatePrintJob,
+  formatActionablePrintWorkflowError,
   retryPendingDirectPrint,
   syncProgressFromPrintJob as syncPrintJobProgress,
 } from "./batch-print-operations";
@@ -673,7 +674,7 @@ export function useBatchPrintWorkflow({
       if (!response.success) {
         toast({
           title: "Confirmation needs attention",
-          description: sanitizePrinterUiError(response.error || response.message, "MSCQR could not confirm this print run."),
+          description: formatActionablePrintWorkflowError(response, "MSCQR could not confirm this print run."),
           variant: "destructive",
         });
         return;
@@ -729,7 +730,7 @@ export function useBatchPrintWorkflow({
       if (!response.success) {
         toast({
           title: "Sample scan rejected",
-          description: sanitizePrinterUiError(response.error || response.message, "That QR code is not part of this print run."),
+          description: formatActionablePrintWorkflowError(response, "That QR code is not part of this print run."),
           variant: "destructive",
         });
         return;
@@ -764,14 +765,15 @@ export function useBatchPrintWorkflow({
       const response = await apiClient.releaseBatch(batchId);
       if (!response.success) {
         const readiness = response.data?.readiness;
+        const actionableResponse = response as any;
         const firstFailure =
           Array.isArray(readiness?.failures) && readiness.failures.length > 0
             ? String(readiness.failures[0]?.message || "")
             : "";
         toast({
           title: "Batch not ready for release",
-          description: sanitizePrinterUiError(
-            firstFailure || response.error || response.message,
+          description: formatActionablePrintWorkflowError(
+            { ...actionableResponse, userMessage: actionableResponse.userMessage || firstFailure || response.error || response.message },
             "Complete print acknowledgement, physical confirmation, and sample scan proof before release."
           ),
           variant: "destructive",

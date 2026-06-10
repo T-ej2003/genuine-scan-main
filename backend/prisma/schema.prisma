@@ -492,6 +492,7 @@ model User {
   role         UserRole
   location     String?
   website      String?
+  metadata     Json?
 
   orgId        String?
   organization Organization? @relation(fields: [orgId], references: [id])
@@ -613,6 +614,7 @@ model Licensee {
   website     String?
   supportEmail String?
   supportPhone String?
+  metadata Json?
   isActive    Boolean @default(true)
   suspendedAt DateTime?
   suspendedReason String?
@@ -705,6 +707,7 @@ model Batch {
   totalCodes Int
   lifecycleState BatchLifecycleState @default(DRAFT)
   sampleScanPolicy Json?
+  metadata Json?
   releasedAt DateTime?
   releasedByUserId String?
   printedAt  DateTime?

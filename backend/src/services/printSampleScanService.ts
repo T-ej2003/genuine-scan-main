@@ -39,7 +39,10 @@ export const recordPrintJobSampleScan = async (params: {
 }) => {
   const publicCode = extractPublicCodeFromSampleScan(params.scannedValue);
   if (!publicCode) {
-    throw Object.assign(new Error("Sample scan code is required."), { statusCode: 400 });
+    throw Object.assign(new Error("Scan the printed MSCQR code or enter its verify URL before continuing."), {
+      statusCode: 400,
+      code: "QR_VERIFY_TOKEN_REQUIRED",
+    });
   }
 
   return prisma.$transaction(async (tx) => {

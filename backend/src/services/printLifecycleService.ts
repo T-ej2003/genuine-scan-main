@@ -81,7 +81,7 @@ export const getOrCreatePrintSession = async (job: {
         data: qrRows.map((row) => ({
           printSessionId: created.id,
           qrCodeId: row.id,
-          code: row.displayCode || row.code,
+          code: row.code,
           state: mapLegacyPrintItemState(row.status),
           issuedAt: row.status === QRStatus.ACTIVATED ? null : new Date(),
           printConfirmedAt:

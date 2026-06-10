@@ -171,7 +171,16 @@ const loadNetworkDispatchJob = async (jobId: string) =>
   prisma.printJob.findUnique({
     where: { id: jobId },
     include: {
-      batch: { select: { id: true, name: true, licenseeId: true } },
+      batch: {
+        select: {
+          id: true,
+          name: true,
+          licenseeId: true,
+          metadata: true,
+          licensee: { select: { id: true, name: true, prefix: true, location: true, metadata: true } },
+        },
+      },
+      manufacturer: { select: { id: true, name: true, location: true, metadata: true } },
       printer: {
         include: {
           profile: {
@@ -244,7 +253,8 @@ const reserveNextChunk = async (params: { sessionId: string; actorUserId: string
     const session = await tx.printSession.findUnique({ where: { id: params.sessionId }, select: { issuedItems: true } });
     const startingSequence = Number(session?.issuedItems || 0);
 
-    for (const [index, row] of rows.entries()) {
+    const issuedRows = rows.map((row, index) => ({ ...row, issuedAt: now, issueSequence: startingSequence + index + 1 }));
+    for (const row of issuedRows) {
       const updated = await tx.printItem.updateMany({
         where: {
           id: row.id,
@@ -254,7 +264,7 @@ const reserveNextChunk = async (params: { sessionId: string; actorUserId: string
           state: PrintItemState.ISSUED,
           pipelineState: PrintPipelineState.SENT_TO_PRINTER,
           issuedAt: now,
-          issueSequence: startingSequence + index + 1,
+          issueSequence: row.issueSequence,
         },
       });
       if (updated.count === 0) {
@@ -283,7 +293,7 @@ const reserveNextChunk = async (params: { sessionId: string; actorUserId: string
       },
     });
 
-    return rows;
+    return issuedRows;
   });
 };
 
@@ -698,6 +708,14 @@ const dispatchAndConfirmReservedItem = async (params: {
     printItemId: params.item.id,
     jobNumber: params.job.jobNumber,
     reprintOfJobId: params.job.reprintOfJobId,
+    serialContext: {
+      sequence: params.item.issueSequence,
+      issuedAt: params.item.issuedAt,
+      batch: params.job.batch || null,
+      licensee: params.job.batch?.licensee || null,
+      manufacturer: params.job.manufacturer || null,
+      printer: params.job.printer || null,
+    },
   });
 
   const socketResult = await sendRawPayloadToNetworkPrinter({

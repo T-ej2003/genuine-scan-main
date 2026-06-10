@@ -383,12 +383,12 @@ export const rotateEligibleLegacyQrCodes = async (params: {
         }
 
         if (params.dryRun) {
-          rotated.push({ id: qr.id, previousPublicCode: qr.code, displayCode: qr.displayCode || qr.code });
+          rotated.push({ id: qr.id, previousPublicCode: qr.code, displayCode: qr.displayCode || null });
           continue;
         }
 
         const newCode = await generateUniquePublicCode(tx);
-        const displayCode = qr.displayCode || qr.code;
+        const displayCode = qr.displayCode || null;
         const updated = await tx.qRCode.updateMany({
           where: {
             id: qr.id,

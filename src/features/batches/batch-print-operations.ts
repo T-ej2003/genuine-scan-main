@@ -39,6 +39,29 @@ type AutoReportPrinterFailure = (params: {
   diagnostics?: Record<string, unknown>;
 }) => Promise<boolean> | boolean;
 
+export const formatActionablePrintWorkflowError = (
+  response: any,
+  fallback = "Complete the previous step before continuing."
+) => {
+  const code = String(response?.errorCode || response?.code || "").trim();
+  const requiredPreviousStep = String(response?.requiredPreviousStep || "").trim();
+  const userMessage = String(response?.userMessage || response?.message || response?.error || "").trim();
+  const mapped: Record<string, string> = {
+    PHYSICAL_CONFIRMATION_REQUIRED: "Confirm physical printing before scanning or releasing.",
+    SAMPLE_SCAN_REQUIRED: "Scan one printed label before release.",
+    APPROVAL_REQUIRED: "A different authorized checker must approve this high-value release.",
+    CHECKER_REQUIRED: "A different authorized checker must approve this release.",
+    MAKER_CANNOT_APPROVE: "The release checker must be a different user.",
+    QR_NOT_IN_PRINT_JOB: "Scan a label from this print job.",
+    QR_VERIFY_TOKEN_REQUIRED: "Scan the exact MSCQR verify QR or paste its verify URL.",
+    PRINT_JOB_NOT_CONFIRMED: "Confirm physical printing before release.",
+    BATCH_ALREADY_RELEASED: "This batch has already been released.",
+    INVALID_STATE_TRANSITION: userMessage || "Complete the previous batch step first.",
+  };
+  const base = mapped[code] || userMessage || fallback;
+  return requiredPreviousStep && !base.includes(requiredPreviousStep) ? `${base} Next step: ${requiredPreviousStep}.` : base;
+};
+
 type BatchPrintOperationContext = PrintProgressSetters & {
   toast: ToastLike;
   printBatch: BatchRow | null;

@@ -119,7 +119,16 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
         },
       },
       include: {
-        batch: { select: { id: true, name: true, licenseeId: true } },
+        batch: {
+          select: {
+            id: true,
+            name: true,
+            licenseeId: true,
+            metadata: true,
+            licensee: { select: { id: true, name: true, prefix: true, location: true, metadata: true } },
+          },
+        },
+        manufacturer: { select: { id: true, name: true, location: true, metadata: true } },
         printer: true,
         printSession: true,
       },

@@ -60,6 +60,41 @@ const errorStatusCode = (error: unknown, fallback = 400) => {
   return fallback;
 };
 
+const actionableTransitionPayload = (error: unknown, fallback: string) => {
+  const code = typeof (error as { code?: unknown })?.code === "string" ? String((error as { code: string }).code) : undefined;
+  const message = errorMessage(error, fallback);
+  const recoveryByCode: Record<string, string> = {
+    PHYSICAL_CONFIRMATION_REQUIRED: "confirm_physical_print",
+    SAMPLE_SCAN_REQUIRED: "scan_sample_label",
+    APPROVAL_REQUIRED: "request_checker_approval",
+    CHECKER_REQUIRED: "use_different_checker",
+    MAKER_CANNOT_APPROVE: "use_different_checker",
+    QR_NOT_IN_PRINT_JOB: "scan_label_from_this_print_job",
+    QR_VERIFY_TOKEN_REQUIRED: "scan_printed_verify_qr",
+    PRINT_JOB_NOT_CONFIRMED: "confirm_physical_print",
+    INVALID_STATE_TRANSITION: "complete_previous_step",
+  };
+  const requiredStepByCode: Record<string, string> = {
+    PHYSICAL_CONFIRMATION_REQUIRED: "Confirm physical printing",
+    SAMPLE_SCAN_REQUIRED: "Scan one printed label",
+    APPROVAL_REQUIRED: "Get checker approval",
+    CHECKER_REQUIRED: "Use a different authorized checker",
+    MAKER_CANNOT_APPROVE: "Use a different authorized checker",
+    QR_NOT_IN_PRINT_JOB: "Scan a label from this print job",
+    QR_VERIFY_TOKEN_REQUIRED: "Scan the printed verify QR",
+    PRINT_JOB_NOT_CONFIRMED: "Confirm physical printing",
+    INVALID_STATE_TRANSITION: "Complete the previous batch step",
+  };
+  return {
+    success: false,
+    error: message,
+    message,
+    ...(code ? { code, errorCode: code } : {}),
+    ...(code ? { userMessage: message, requiredPreviousStep: requiredStepByCode[code] || null, recoveryAction: recoveryByCode[code] || "refresh_and_retry" } : {}),
+    canRetry: code ? !["MAKER_CANNOT_APPROVE", "CHECKER_REQUIRED"].includes(code) : undefined,
+  };
+};
+
 export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
   try {
     const user = ensureManufacturerUser(req, res);
@@ -208,11 +243,7 @@ export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
     });
   } catch (e: unknown) {
     console.error("confirmPrintJob error:", e);
-    return res.status(errorStatusCode(e)).json({
-      success: false,
-      error: errorMessage(e, "Bad request"),
-      code: typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : undefined,
-    });
+    return res.status(errorStatusCode(e)).json(actionableTransitionPayload(e, "Bad request"));
   }
 };
 
@@ -243,10 +274,6 @@ export const capturePrintJobSampleScan = async (req: AuthRequest, res: Response)
     return res.json({ success: true, data: result });
   } catch (error: unknown) {
     const statusCode = errorStatusCode(error);
-    return res.status(statusCode).json({
-      success: false,
-      error: errorMessage(error, "Sample scan could not be verified."),
-      code: typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : undefined,
-    });
+    return res.status(statusCode).json(actionableTransitionPayload(error, "Sample scan could not be verified."));
   }
 };

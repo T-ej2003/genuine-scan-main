@@ -1,17 +1,18 @@
-import path from "path";
-import dotenv from "dotenv";
+#!/usr/bin/env node
+const path = require("path");
+const dotenv = require("dotenv");
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
-import prisma from "../src/config/database";
-import { ensureSelectedPrinterReady } from "../src/controllers/print-job/shared";
-import { generateHumanLabelSerial } from "../src/services/labelSerialService";
-import { createPrintJobRecords } from "../src/services/printJobCreationTransactionService";
-import { buildApprovedPrintPayload, type PrinterPayloadProfile } from "../src/services/printPayloadService";
-import { startNetworkDirectDispatch } from "../src/services/networkDirectPrintService";
+const prisma = require("../dist/config/database").default;
+const { ensureSelectedPrinterReady } = require("../dist/controllers/print-job/shared");
+const { generateHumanLabelSerial } = require("../dist/services/labelSerialService");
+const { createPrintJobRecords } = require("../dist/services/printJobCreationTransactionService");
+const { buildApprovedPrintPayload } = require("../dist/services/printPayloadService");
+const { startNetworkDirectDispatch } = require("../dist/services/networkDirectPrintService");
 
-const args = new Map<string, string | boolean>();
+const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
   const arg = process.argv[i];
   if (!arg.startsWith("--")) continue;
@@ -25,11 +26,9 @@ for (let i = 2; i < process.argv.length; i += 1) {
   }
 }
 
-const required = (key: string) => {
+const required = (key) => {
   const value = args.get(key);
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`Missing required --${key}`);
-  }
+  if (typeof value !== "string" || !value.trim()) throw new Error(`Missing required --${key}`);
   return value.trim();
 };
 
@@ -42,7 +41,6 @@ const main = async () => {
   const printerId = required("printer");
   const count = Math.max(1, Math.min(250, Number(args.get("count") || 10) || 10));
   const shouldSend = args.has("send");
-
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },
     select: {
@@ -55,23 +53,12 @@ const main = async () => {
       manufacturer: { select: { id: true, name: true, location: true, metadata: true } },
     },
   });
-  if (!batch?.manufacturerId) {
-    throw new Error("Batch must exist and be assigned to a manufacturer before manual print validation.");
-  }
+  if (!batch?.manufacturerId) throw new Error("Batch must exist and be assigned to a manufacturer before manual print validation.");
 
-  const available = await prisma.qRCode.count({
-    where: { batchId, status: "ALLOCATED", printJobId: null },
-  });
-  if (available < count) {
-    throw new Error(`Refusing to print: only ${available} DB-issued allocated labels are available for this batch.`);
-  }
+  const available = await prisma.qRCode.count({ where: { batchId, status: "ALLOCATED", printJobId: null } });
+  if (available < count) throw new Error(`Refusing to print: only ${available} DB-issued allocated labels are available for this batch.`);
 
-  const printerSelection = await ensureSelectedPrinterReady({
-    printerId,
-    userId: batch.manufacturerId,
-    licenseeId: batch.licenseeId,
-  });
-
+  const printerSelection = await ensureSelectedPrinterReady({ printerId, userId: batch.manufacturerId, licenseeId: batch.licenseeId });
   const created = await createPrintJobRecords({
     batch,
     userId: batch.manufacturerId,
@@ -104,15 +91,8 @@ const main = async () => {
   });
   if (!firstItem) throw new Error("Print job was created without print items.");
 
-  const printerProfile = printerSelection.printer as unknown as PrinterPayloadProfile;
-  const printerNetwork = printerSelection.printer as unknown as {
-    ipAddress?: string | null;
-    host?: string | null;
-    port?: number | null;
-  };
-
   const samplePayload = buildApprovedPrintPayload({
-    printer: printerProfile,
+    printer: printerSelection.printer,
     qr: firstItem.qrCode,
     manufacturerId: batch.manufacturerId,
     printJobId: created.job.id,
@@ -124,13 +104,11 @@ const main = async () => {
       batch,
       licensee: batch.licensee,
       manufacturer: batch.manufacturer,
-      printer: printerSelection.printer as any,
+      printer: printerSelection.printer,
     },
   });
 
-  if (shouldSend) {
-    await startNetworkDirectDispatch({ jobId: created.job.id, actorUserId: batch.manufacturerId });
-  }
+  if (shouldSend) await startNetworkDirectDispatch({ jobId: created.job.id, actorUserId: batch.manufacturerId });
 
   const sampleLabels = await prisma.printItem.findMany({
     where: { printSessionId: created.session.id },
@@ -147,8 +125,8 @@ const main = async () => {
         count,
         printer: {
           id: printerSelection.printer.id,
-          host: printerNetwork.ipAddress || printerNetwork.host || null,
-          port: printerNetwork.port || null,
+          host: printerSelection.printer.ipAddress || printerSelection.printer.host || null,
+          port: printerSelection.printer.port || null,
           mode: printerSelection.printMode,
         },
         printJobId: created.job.id,
@@ -163,7 +141,7 @@ const main = async () => {
             batch,
             licensee: batch.licensee,
             manufacturer: batch.manufacturer,
-            printer: printerSelection.printer as any,
+            printer: printerSelection.printer,
           }).humanSerial,
           verifyUrl: `${String(process.env.PUBLIC_VERIFY_WEB_BASE_URL || process.env.CORS_ORIGIN || "http://localhost:8080").replace(/\/+$/, "")}/verify/${encodeURIComponent(item.qrCode.code)}`,
         })),

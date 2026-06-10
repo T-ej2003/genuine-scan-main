@@ -221,7 +221,7 @@ export const createPrintJobRecords = async (params: {
           data: newPreparedItems.map((item) => ({
             printSessionId: session.id,
             qrCodeId: item.qr.id,
-            code: item.qr.displayCode || item.qr.code,
+            code: item.qr.code,
             state: "RESERVED",
             pipelineState: PrintPipelineState.QUEUED,
           })),

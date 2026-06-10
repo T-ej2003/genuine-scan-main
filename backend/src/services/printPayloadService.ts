@@ -4,6 +4,7 @@ import { PrintPayloadType, PrinterCommandLanguage, PrinterConnectionType, Printe
 import { buildCanonicalQrLabel } from "../printing/canonicalLabel";
 import { resolvePrinterLanguageRenderer } from "../printing/renderers";
 import { getZebraQrConfig, mmToDots, resolveConfiguredZebraDpi, resolveConfiguredZebraQrTargetMm } from "../printing/zebraQrSizing";
+import { generateHumanLabelSerial, type LabelSerialContext } from "./labelSerialService";
 import { buildVerifyUrl } from "./qrService";
 import { hashToken, signQrPayload } from "./qrTokenService";
 
@@ -40,6 +41,8 @@ export type BuiltPrintPayload = {
   payloadHash: string;
   scanToken: string;
   scanUrl: string;
+  publicVerifyCode: string;
+  humanSerial: string;
   commandLanguage: PrinterCommandLanguage;
   previewLabel: string;
 };
@@ -82,6 +85,8 @@ type ResolvedLayout = {
 export type ApprovedPrintContext = {
   scanToken: string;
   scanUrl: string;
+  publicVerifyCode: string;
+  humanSerial: string;
   previewLabel: string;
   reprintLabel: string | null;
 };
@@ -351,35 +356,33 @@ const toQrToken = (params: {
 };
 
 const buildZplPayload = (params: {
-  code: string;
-  displayCode?: string | null;
+  humanSerial: string;
   scanUrl: string;
   printer: PrinterPayloadProfile;
-  jobNumber?: string | null;
   reprintLabel?: string | null;
 }) => {
   const layout = getResolvedLayout(params.printer);
   const qrConfig = getZebraQrConfig({ targetMm: layout.qrTargetMm, dpi: layout.dpi, payload: params.scanUrl });
   const qrSizeDots = qrConfig.estimatedSizeDots;
-  const qrTop = Math.max(132, Math.round((layout.heightDots - qrSizeDots) / 2) + layout.offsetYDots);
+  const qrTop = Math.max(118, Math.round((layout.heightDots - qrSizeDots) / 2) + layout.offsetYDots);
   const qrLeft = Math.max(12, Math.round((layout.widthDots - qrSizeDots) / 2) + layout.offsetXDots);
-  const displayCode = escapeZplText(params.displayCode || "").slice(0, 48);
-  const jobNumber = escapeZplText(params.jobNumber || "").slice(0, 48);
+  const humanSerial = escapeZplText(params.humanSerial).slice(0, 48);
   const reprintLabel = escapeZplText(params.reprintLabel || "").slice(0, 48);
   const safeScanUrl = escapeZplText(params.scanUrl);
-  const footerText = escapeZplText(displayCode || "MSCQR issued label").slice(0, 64);
+  const footerTop = Math.max(layout.heightDots - 88, qrTop + qrSizeDots + 22);
   return [
     "^XA",
     `^PW${layout.widthDots}`,
     `^LL${layout.heightDots}`,
     "^LH0,0",
     "^CI28",
-    "^FO40,25^A0N,30,30^FDMSCQR AUTH LABEL^FS",
-    jobNumber ? `^FO40,65^A0N,22,22^FDJob: ${jobNumber}^FS` : "^FO40,65^A0N,22,22^FDJob: governed print^FS",
-    displayCode ? `^FO40,95^A0N,22,22^FDSerial: ${displayCode}^FS` : "^FO40,95^A0N,22,22^FDSerial: registry-issued^FS",
-    reprintLabel ? `^FO40,122^A0N,20,20^FD${reprintLabel}^FS` : "",
+    "^FO0,18^FB600,1,0,C,0^A0N,34,34^FDMSCQR^FS",
+    "^FO0,58^FB600,1,0,C,0^A0N,22,22^FDAUTHENTICITY CHECK^FS",
+    "^FO72,88^GB456,2,2,B,0^FS",
+    reprintLabel ? `^FO0,100^FB600,1,0,C,0^A0N,18,18^FD${reprintLabel}^FS` : "",
     `^FO${qrLeft},${qrTop}^BQN,2,${qrConfig.magnification}^FDLA,${safeScanUrl}^FS`,
-    `^FO40,${Math.max(layout.heightDots - 48, qrTop + qrSizeDots + 20)}^A0N,18,18^FD${footerText}^FS`,
+    `^FO0,${footerTop}^FB600,1,0,C,0^A0N,20,20^FDscan.mscqr.com^FS`,
+    `^FO0,${footerTop + 28}^FB600,1,0,C,0^A0N,18,18^FDSerial: ${humanSerial}^FS`,
     "^XZ",
   ].filter(Boolean).join("\n");
 };
@@ -459,7 +462,8 @@ const buildCpclPayload = (params: {
 };
 
 const buildAgentJsonPayload = (params: {
-  code: string;
+  publicVerifyCode: string;
+  humanSerial: string;
   scanUrl: string;
   scanToken: string;
   printer: PrinterPayloadProfile;
@@ -475,7 +479,8 @@ const buildAgentJsonPayload = (params: {
       printJobId: params.printJobId || null,
       printItemId: params.printItemId || null,
       jobNumber: params.jobNumber || null,
-      code: params.code,
+      publicVerifyCode: params.publicVerifyCode,
+      humanSerial: params.humanSerial,
       scanToken: params.scanToken,
       scanUrl: params.scanUrl,
       reprintLabel: params.reprintLabel || null,
@@ -560,14 +565,21 @@ export const buildApprovedPrintContext = (params: {
   qr: PrintPayloadQr;
   manufacturerId: string;
   reprintOfJobId?: string | null;
+  serialContext?: Omit<LabelSerialContext, "qrId"> | null;
 }): ApprovedPrintContext => {
   const scanToken = toQrToken({ qr: params.qr, manufacturerId: params.manufacturerId });
   const scanUrl = buildVerifyUrl(params.qr.code);
+  const serial = generateHumanLabelSerial({
+    ...(params.serialContext || {}),
+    qrId: params.qr.id,
+  });
   const reprintLabel = params.reprintOfJobId ? "REPRINT - SERVER AUTHORIZED" : null;
 
   return {
     scanToken,
     scanUrl,
+    publicVerifyCode: params.qr.code,
+    humanSerial: serial.humanSerial,
     previewLabel: reprintLabel || "MSCQR QR LABEL",
     reprintLabel,
   };
@@ -581,11 +593,13 @@ export const buildApprovedPrintPayload = (params: {
   printItemId?: string | null;
   jobNumber?: string | null;
   reprintOfJobId?: string | null;
+  serialContext?: Omit<LabelSerialContext, "qrId"> | null;
 }): BuiltPrintPayload => {
   const context = buildApprovedPrintContext({
     qr: params.qr,
     manufacturerId: params.manufacturerId,
     reprintOfJobId: params.reprintOfJobId,
+    serialContext: params.serialContext,
   });
   const preferredType = resolvePayloadType(params.printer);
   const layout = getResolvedLayout(params.printer);
@@ -605,14 +619,12 @@ export const buildApprovedPrintPayload = (params: {
   const resolvedLanguage = resolveLanguageKind(params.printer);
   const rendered =
     preferredType === PrintPayloadType.ZPL
-      ? {
+        ? {
           payloadType: PrintPayloadType.ZPL,
           payloadContent: buildZplPayload({
-            code: params.qr.code,
-            displayCode: params.qr.displayCode || null,
+            humanSerial: context.humanSerial,
             scanUrl: context.scanUrl,
             printer: params.printer,
-            jobNumber: params.jobNumber,
             reprintLabel: context.reprintLabel,
           }),
         }
@@ -623,7 +635,8 @@ export const buildApprovedPrintPayload = (params: {
   const payloadContent =
     rendered?.payloadContent ||
     buildAgentJsonPayload({
-      code: params.qr.code,
+      publicVerifyCode: params.qr.code,
+      humanSerial: context.humanSerial,
       scanUrl: context.scanUrl,
       scanToken: context.scanToken,
       printer: params.printer,
@@ -643,6 +656,8 @@ export const buildApprovedPrintPayload = (params: {
     payloadHash: createHash("sha256").update(payloadContent).digest("hex"),
     scanToken: context.scanToken,
     scanUrl: context.scanUrl,
+    publicVerifyCode: context.publicVerifyCode,
+    humanSerial: context.humanSerial,
     commandLanguage:
       params.printer.commandLanguage === PrinterCommandLanguage.AUTO
         ? toPrinterCommandLanguage(resolvedLanguage)

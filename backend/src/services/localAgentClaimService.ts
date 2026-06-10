@@ -49,6 +49,7 @@ export const reserveLocalAgentItem = async (params: { printSessionId: string; ac
     if (!row) return null;
 
     const session = await tx.printSession.findUnique({ where: { id: params.printSessionId }, select: { issuedItems: true } });
+    const issueSequence = Number(session?.issuedItems || 0) + 1;
     const updated = await tx.printItem.updateMany({
       where: { id: row.id, state: PrintItemState.RESERVED },
       data: {
@@ -56,7 +57,7 @@ export const reserveLocalAgentItem = async (params: { printSessionId: string; ac
         pipelineState: PrintPipelineState.SENT_TO_PRINTER,
         issuedAt: now,
         confirmationDeadlineAt,
-        issueSequence: Number(session?.issuedItems || 0) + 1,
+        issueSequence,
       },
     });
     if (updated.count === 0) return null;
@@ -81,7 +82,7 @@ export const reserveLocalAgentItem = async (params: { printSessionId: string; ac
       data: { issuedItems: { increment: 1 } },
     });
 
-    return row;
+    return { ...row, issuedAt: now, issueSequence };
   });
 };
 
@@ -146,6 +147,14 @@ export const buildClaimApprovedPayloadOrFail = async (params: {
         printItemId: item.id,
         jobNumber: job.jobNumber,
         reprintOfJobId: job.reprintOfJobId,
+        serialContext: {
+          sequence: item.issueSequence,
+          issuedAt: item.issuedAt,
+          batch: job.batch || null,
+          licensee: job.batch?.licensee || null,
+          manufacturer: job.manufacturer || null,
+          printer: job.printer || null,
+        },
       }),
     };
   } catch (payloadError: any) {
