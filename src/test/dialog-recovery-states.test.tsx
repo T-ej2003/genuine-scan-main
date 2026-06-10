@@ -141,6 +141,97 @@ describe("dialog recovery states", () => {
     expect(onAbandon).toHaveBeenCalledWith("job-failed");
   });
 
+  it("shows pause, resume, stop, cooldown, and reissue controls for print operations", () => {
+    const onOpenControl = vi.fn();
+    const onResume = vi.fn();
+    const onOpenReissue = vi.fn();
+    renderPrintDialog({
+      printCooldownRemainingSeconds: 90,
+      recentPrintJobs: [
+        {
+          id: "job-active",
+          jobNumber: "PJ-ACTIVE",
+          status: "SENT",
+          printMode: "LOCAL_AGENT",
+          quantity: 12,
+          itemCount: 12,
+          createdAt: new Date().toISOString(),
+          printer: { name: "E2E Local Agent Printer" },
+          session: { status: "ACTIVE", confirmedItems: 4, remainingToPrint: 8, failedItems: 1 },
+        } as any,
+        {
+          id: "job-paused",
+          jobNumber: "PJ-PAUSED",
+          status: "PAUSED",
+          printMode: "LOCAL_AGENT",
+          quantity: 10,
+          itemCount: 10,
+          createdAt: new Date().toISOString(),
+          printer: { name: "E2E Local Agent Printer" },
+          session: { status: "PAUSED", confirmedItems: 5, remainingToPrint: 5 },
+        } as any,
+        {
+          id: "job-confirmed",
+          jobNumber: "PJ-CONFIRMED",
+          status: "CONFIRMED",
+          pipelineState: "LOCKED",
+          printMode: "LOCAL_AGENT",
+          quantity: 10,
+          itemCount: 10,
+          createdAt: new Date().toISOString(),
+          printer: { name: "E2E Local Agent Printer" },
+          session: { confirmedItems: 10, remainingToPrint: 0 },
+        } as any,
+      ],
+      onOpenPrintControlDialog: onOpenControl,
+      onResumePrintJob: onResume,
+      onOpenPrintReissueDialog: onOpenReissue,
+    });
+
+    expect(screen.getByText(/Printing is cooling down/i)).toBeInTheDocument();
+    expect(screen.getByText(/Try again after 90 seconds/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pause printing" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Stop printing" })[0]);
+    expect(onOpenControl).toHaveBeenCalledWith("pause", expect.objectContaining({ id: "job-active" }));
+    expect(onOpenControl).toHaveBeenCalledWith("stop", expect.objectContaining({ id: "job-active" }));
+    expect(screen.getByRole("button", { name: "Resume printing" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Request reissue" }));
+    expect(onOpenReissue).toHaveBeenCalledWith(expect.objectContaining({ id: "job-confirmed" }));
+  });
+
+  it("requires audit reasons before submitting pause and reissue dialogs", () => {
+    renderPrintDialog({
+      printControlDialog: {
+        action: "pause",
+        job: {
+          id: "job-active",
+          status: "SENT",
+          printMode: "LOCAL_AGENT",
+          quantity: 3,
+          createdAt: new Date().toISOString(),
+          session: { confirmedItems: 1, remainingToPrint: 2 },
+        } as any,
+        reason: "",
+        submitting: false,
+      },
+      printReissueDialog: {
+        job: {
+          id: "job-confirmed",
+          status: "CONFIRMED",
+          printMode: "LOCAL_AGENT",
+          quantity: 3,
+          createdAt: new Date().toISOString(),
+        } as any,
+        reason: "",
+        submitting: false,
+      },
+    });
+
+    expect(screen.getByRole("button", { name: "Pause print run", hidden: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Submit request", hidden: true })).toBeDisabled();
+    expect(screen.getAllByText(/reason is required|enter a clear/i).length).toBeGreaterThan(0);
+  });
+
   it("shows queue confirmation unavailable without stale compatible-setup copy", () => {
     renderPrintDialog({
       recentPrintJobs: [

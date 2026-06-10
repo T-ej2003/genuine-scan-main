@@ -18,6 +18,12 @@ import { resolvePrinterConfirmationMode } from "../services/printConfirmationSer
 import { printTestLabelForRegisteredPrinter } from "../services/printerTestLabelService";
 import { sanitizePrinterActionError } from "../utils/printerUserFacingErrors";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
+import {
+  beginIdempotentAction,
+  completeIdempotentAction,
+  extractIdempotencyKey,
+} from "../services/idempotencyService";
+import { mapPrinterIdempotencyError } from "./printerIdempotencyResponse";
 
 const NETWORK_DIRECT_LANGUAGE_OPTIONS = [
   PrinterCommandLanguage.ZPL,
@@ -398,6 +404,26 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
     const printerId = paramsParsed.data.id;
 
     const scope = await resolveScope(req);
+    let idempotency;
+    try {
+      idempotency = await beginIdempotentAction({
+        action: "printer_test_label",
+        scope: `tenant:${scope.licenseeId || scope.orgId || "none"}:user:${scope.userId}:printer:${printerId}`,
+        idempotencyKey: extractIdempotencyKey(req.headers as any, req.body as any),
+        requestPayload: { printerId },
+        required: true,
+        ttlSeconds: 300,
+      });
+    } catch (error) {
+      const mapped = mapPrinterIdempotencyError(error);
+      if (mapped) return res.status(mapped.status).json(mapped.payload);
+      throw error;
+    }
+
+    if (idempotency.replayed) {
+      return res.status(idempotency.statusCode || 200).json(idempotency.responsePayload || { success: true });
+    }
+
     const printer = await getRegisteredPrinterForManufacturer({
       printerId,
       userId: scope.userId,
@@ -444,7 +470,9 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
         userAgent: req.get("user-agent") || undefined,
       });
 
-      return res.json({ success: true, data });
+      const responsePayload = { success: true, data };
+      await completeIdempotentAction({ keyHash: idempotency.keyHash, statusCode: 200, responsePayload });
+      return res.json(responsePayload);
     }
 
     try {
@@ -469,7 +497,9 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
         userAgent: req.get("user-agent") || undefined,
       });
 
-      return res.json({ success: true, data: result });
+      const responsePayload = { success: true, data: result };
+      await completeIdempotentAction({ keyHash: idempotency.keyHash, statusCode: 200, responsePayload });
+      return res.json(responsePayload);
     } catch (error: any) {
       const data = {
         outcome: "needs_attention" as const,
@@ -501,7 +531,9 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
         userAgent: req.get("user-agent") || undefined,
       });
 
-      return res.json({ success: true, data });
+      const responsePayload = { success: true, data };
+      await completeIdempotentAction({ keyHash: idempotency.keyHash, statusCode: 200, responsePayload });
+      return res.json(responsePayload);
     }
   } catch (error: any) {
     console.error("testPrinterLabel error:", error);

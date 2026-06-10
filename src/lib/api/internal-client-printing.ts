@@ -1,6 +1,9 @@
 import { type ApiClientCore } from "@/lib/api/internal-client-core";
+import { createPrintingOperationsApi } from "@/lib/api/internal-client-printing-operations";
 import {
+  controlledPrinterMutation,
   controlledPrinterGet,
+  PRINTER_HEARTBEAT_MIN_REFRESH_MS,
   PRINTER_LIST_MIN_REFRESH_MS,
   PRINTER_STATUS_MIN_REFRESH_MS,
   type ControlledPrinterGetOptions,
@@ -34,6 +37,26 @@ type BatchReleaseResponse = {
   };
 };
 
+const normalizeIdempotencyPart = (value: unknown) =>
+  String(value ?? "")
+    .trim()
+    .replace(/[^a-zA-Z0-9._:-]+/g, "_")
+    .slice(0, 96);
+
+const buildPrinterActionKey = (action: string, parts: unknown[]) =>
+  [action, ...parts.map(normalizeIdempotencyPart)].join(":");
+
+const stablePrinterPayloadSignature = (value: unknown): string => {
+  if (value === null || value === undefined) return "null";
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stablePrinterPayloadSignature).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stablePrinterPayloadSignature(record[key])}`)
+    .join(",")}}`;
+};
+
 export const createPrintingApi = (core: ApiClientCore) => ({
   async createPrintJob(payload: {
     batchId: string;
@@ -44,7 +67,28 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     reprintOfJobId?: string;
     reprintReason?: string;
   }) {
-    return core.request("/manufacturer/print-jobs", { method: "POST", body: JSON.stringify(payload) });
+    const actionKey = buildPrinterActionKey("print-job-create", [
+      payload.batchId,
+      payload.printerId,
+      payload.quantity,
+      payload.rangeStart,
+      payload.rangeEnd,
+      payload.reprintOfJobId,
+    ]);
+    return controlledPrinterMutation(actionKey, () =>
+      core.request<{
+        printJobId?: string;
+        printSessionId?: string;
+        tokenCount?: number;
+        mode?: string;
+        pipelineState?: string;
+        printer?: { id?: string; name?: string };
+      }>("/manufacturer/print-jobs", {
+        method: "POST",
+        headers: { "x-idempotency-key": actionKey },
+        body: JSON.stringify(payload),
+      })
+    );
   },
 
   async listRegisteredPrinters(includeInactive = false, options?: ControlledPrinterGetOptions) {
@@ -129,11 +173,23 @@ export const createPrintingApi = (core: ApiClientCore) => ({
   },
 
   async testRegisteredPrinter(printerId: string) {
-    return core.request(`/manufacturer/printers/${encodeURIComponent(printerId)}/test`, { method: "POST" });
+    const actionKey = buildPrinterActionKey("printer-test", [printerId]);
+    return controlledPrinterMutation(actionKey, () =>
+      core.request(`/manufacturer/printers/${encodeURIComponent(printerId)}/test`, {
+        method: "POST",
+        headers: { "x-idempotency-key": actionKey },
+      })
+    );
   },
 
   async testPrinterLabel(printerId: string) {
-    return core.request<any>(`/manufacturer/printers/${encodeURIComponent(printerId)}/test-label`, { method: "POST" });
+    const actionKey = buildPrinterActionKey("printer-test-label", [printerId]);
+    return controlledPrinterMutation(actionKey, () =>
+      core.request<any>(`/manufacturer/printers/${encodeURIComponent(printerId)}/test-label`, {
+        method: "POST",
+        headers: { "x-idempotency-key": actionKey },
+      })
+    );
   },
 
   async relinkLocalAgentPrinter(printerId: string) {
@@ -162,18 +218,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`);
   },
 
-  async requestPrintJobReissue(
-    jobId: string,
-    payload: {
-      reason: string;
-      quantity?: number;
-    }
-  ) {
-    return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/reissue`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-  },
+  ...createPrintingOperationsApi(core),
 
   async abandonPrintJob(jobId: string) {
     return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/abandon`, {
@@ -245,7 +290,14 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     }>;
     calibrationProfile?: Record<string, unknown> | null;
   }) {
-    return core.request<{
+    const heartbeatKey = `printer-agent-heartbeat:${stablePrinterPayloadSignature({
+      connected: payload.connected,
+      printerId: payload.printerId,
+      selectedPrinterId: payload.selectedPrinterId,
+      deviceFingerprint: payload.deviceFingerprint,
+      error: payload.error,
+    })}`;
+    return controlledPrinterGet<{
       connected: boolean;
       trusted: boolean;
       compatibilityMode: boolean;
@@ -295,11 +347,16 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       }>;
       calibrationProfile?: Record<string, unknown> | null;
       error?: string | null;
-    }>(`/manufacturer/printer-agent/heartbeat`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      suppressMutationEvent: true,
-    });
+    }>(
+      heartbeatKey,
+      PRINTER_HEARTBEAT_MIN_REFRESH_MS,
+      () =>
+        core.request(`/manufacturer/printer-agent/heartbeat`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+          suppressMutationEvent: true,
+        })
+    );
   },
 
   async getPrinterConnectionStatus(options?: ControlledPrinterGetOptions) {

@@ -34,6 +34,11 @@ export const printPipelineStateSchema = z.enum([
   "PRINTER_ACKNOWLEDGED",
   "PRINT_CONFIRMED",
   "LOCKED",
+  "PAUSED",
+  "RESUME_PENDING",
+  "RETRY_WAITING",
+  "STOPPING",
+  "STOPPED",
   "FAILED",
   "NEEDS_OPERATOR_ACTION",
 ]);

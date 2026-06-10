@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ErrorState, LoadingState } from "@/components/mscqr/feedback-state";
 import { MotionPanel } from "@/components/mscqr/motion";
-import { PrintStateIndicator, StatusBadge } from "@/components/mscqr/status";
+import { PrintStateIndicator } from "@/components/mscqr/status";
 import { DashboardPagePattern } from "@/components/page-patterns/PagePatterns";
 import { QRStatusChart } from "@/components/dashboard/QRStatusChart";
 import { RecentActivityCard } from "@/components/dashboard/RecentActivityCard";
@@ -475,19 +475,23 @@ export default function Dashboard() {
         description={`A simple view of QR labels, batches, printing, scans, and next actions for your ${roleLabel.toLowerCase()} workspace.`}
         actions={
           <>
-            <StatusBadge tone={liveUpdates && sseConnected ? "verified" : liveUpdates ? "degraded" : "neutral"}>
-              {liveUpdates && sseConnected ? "Updated just now" : liveUpdates ? "Refreshes automatically" : "Auto-refresh paused"}
-            </StatusBadge>
-            <StatusBadge tone="audit">
+            <span className="text-xs text-mscqr-secondary">
               {lastUpdated ? `Updated ${formatDistanceToNow(lastUpdated, { addSuffix: true })}` : "Not updated yet"}
-            </StatusBadge>
+              {liveUpdates ? (sseConnected ? " · live" : " · auto-refresh on") : " · auto-refresh paused"}
+            </span>
             <div className="flex items-center gap-2 rounded-2xl border border-mscqr-border bg-mscqr-surface px-3 py-1.5">
               <span className="text-xs text-mscqr-secondary">Live</span>
               <Switch checked={liveUpdates} onCheckedChange={setLiveUpdates} />
             </div>
-            <Button variant="outline" size="sm" onClick={() => void refreshDashboard({ bypassCache: true })} className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void refreshDashboard({ bypassCache: true })}
+              className="gap-2"
+              disabled={dashboardQuery.isFetching || auditLogsQuery.isFetching}
+            >
               <RefreshCw className={cn("h-4 w-4", dashboardQuery.isFetching ? "animate-spin" : "")} />
-              Refresh
+              {dashboardQuery.isFetching || auditLogsQuery.isFetching ? "Refreshing..." : "Refresh"}
             </Button>
           </>
         }

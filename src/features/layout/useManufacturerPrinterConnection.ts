@@ -64,11 +64,13 @@ export function useManufacturerPrinterConnection({
   const printerFailureInFlightRef = useRef(false);
   const configuredBackendUrlRef = useRef("");
   const printerStatusRef = useRef<PrinterConnectionStatusDTO>(defaultPrinterStatus);
+  const syncInFlightRef = useRef<Promise<void> | null>(null);
 
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatusDTO>(defaultPrinterStatus);
   const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
   const [printerOnboardingOpen, setPrinterOnboardingOpen] = useState(false);
   const [printerSwitching, setPrinterSwitching] = useState(false);
+  const [printerStatusChecking, setPrinterStatusChecking] = useState(false);
   const [printerStatusLive, setPrinterStatusLive] = useState(false);
   const [printerStatusUpdatedAt, setPrinterStatusUpdatedAt] = useState<string | null>(null);
   const [localPrinterAgent, setLocalPrinterAgent] = useState<LocalPrinterAgentSnapshot>({
@@ -250,7 +252,11 @@ export function useManufacturerPrinterConnection({
 
   const syncManufacturerPrinterStatus = async (options?: { silent?: boolean; force?: boolean }) => {
     if (!user || user.role !== "manufacturer") return;
-    if (DISABLE_E2E_PRINTER_AGENT_POLLING) {
+    if (syncInFlightRef.current) return syncInFlightRef.current;
+    const run = (async () => {
+      setPrinterStatusChecking(true);
+      try {
+        if (DISABLE_E2E_PRINTER_AGENT_POLLING) {
       applyPrinterStatusSnapshot(
         {
           ...defaultPrinterStatus,
@@ -267,7 +273,7 @@ export function useManufacturerPrinterConnection({
       });
       setManagedPrinterProfilesLoaded(true);
       return;
-    }
+        }
 
     await loadManagedPrinterProfiles({ force: Boolean(options?.force) });
 
@@ -403,6 +409,13 @@ export function useManufacturerPrinterConnection({
         printers: localPrinters.map((item) => ({ printerId: item.printerId, printerName: item.printerName })),
       });
     }
+      } finally {
+        setPrinterStatusChecking(false);
+        syncInFlightRef.current = null;
+      }
+    })();
+    syncInFlightRef.current = run;
+    return run;
   };
 
   const switchLocalPrinter = async (targetOverride?: string) => {
@@ -675,6 +688,7 @@ export function useManufacturerPrinterConnection({
     printerOnboardingOpen,
     setPrinterOnboardingOpen: setPrinterOnboardingOpenFromUi,
     printerSwitching,
+    printerStatusChecking,
     printerStatusLive,
     localPrinterAgent,
     printerHasInventory,

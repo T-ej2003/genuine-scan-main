@@ -85,6 +85,13 @@ type LicenseeBatchWorkspaceDialogProps = {
   onReissueReasonChange: (value: string) => void;
   onRequestReissue: (jobId: string) => void;
   reissuingJobId: string | null;
+  reissueRequests?: any[];
+  reissueRequestsLoading?: boolean;
+  reissueDecisionNote?: string;
+  decidingReissueRequestId?: string | null;
+  onReissueDecisionNoteChange?: (value: string) => void;
+  onRefreshReissueRequests?: () => void;
+  onDecideReissueRequest?: (requestId: string, decision: "approve" | "reject") => void;
 };
 
 const eventBadgeClass = (eventType?: string) => {
@@ -216,6 +223,13 @@ export function LicenseeBatchWorkspaceDialog({
   onReissueReasonChange,
   onRequestReissue,
   reissuingJobId,
+  reissueRequests = [],
+  reissueRequestsLoading = false,
+  reissueDecisionNote = "",
+  decidingReissueRequestId = null,
+  onReissueDecisionNoteChange = () => undefined,
+  onRefreshReissueRequests = () => undefined,
+  onDecideReissueRequest = () => undefined,
 }: LicenseeBatchWorkspaceDialogProps) {
   const remaining = Number(workspace?.remainingUnassignedCodes || 0);
   const assignQuantityValue = Number(assignQuantity || 0);
@@ -471,7 +485,7 @@ export function LicenseeBatchWorkspaceDialog({
                         <div>
                           <div className="text-base font-semibold">Controlled reissue</div>
                           <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-                            Reissue is an authorized exception path only. Once a print job is confirmed and locked, a replacement job can be created only with a clear reason. Manufacturers cannot trigger this directly.
+                            Reissue is an exception path only. Manufacturers request replacement labels for brand-admin approval; brand admins request source-batch reissue for super-admin approval.
                           </p>
                         </div>
                         <Badge variant="secondary">{recentPrintJobs.length} recent job{recentPrintJobs.length === 1 ? "" : "s"}</Badge>
@@ -479,21 +493,88 @@ export function LicenseeBatchWorkspaceDialog({
 
                       {!canRequestReissue ? (
                         <div className="mt-4 rounded-xl border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">
-                          Reissue authorization is limited to super-admin and licensee-admin roles.
+                          Reissue requests are only available to users with batch print responsibility.
                         </div>
                       ) : (
                         <div className="mt-5 space-y-4">
                           <div className="space-y-2">
-                            <Label htmlFor="batch-reissue-reason">Authorization reason</Label>
+                            <Label htmlFor="batch-reissue-reason">Request reason</Label>
                             <Input
                               id="batch-reissue-reason"
                               value={reissueReason}
                               onChange={(event) => onReissueReasonChange(event.target.value)}
-                              placeholder="Explain why a controlled reissue is required"
+                              placeholder="Explain why replacement labels are required"
                             />
                             <div className="text-xs text-muted-foreground">
-                              This reason is written to the immutable audit trail and linked to the replacement print job.
+                              This reason is written to the audit trail and reviewed before replacement labels can be printed.
                             </div>
+                          </div>
+
+                          <div className="rounded-xl border bg-muted/10 p-4">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <div className="font-medium">Pending reissue reviews</div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  Only requests in your approval scope are shown here.
+                                </div>
+                              </div>
+                              <Button variant="outline" size="sm" onClick={onRefreshReissueRequests} disabled={reissueRequestsLoading}>
+                                {reissueRequestsLoading ? "Refreshing..." : "Refresh"}
+                              </Button>
+                            </div>
+                            <div className="mt-3 space-y-2">
+                              <Label htmlFor="batch-reissue-decision-note">Decision note</Label>
+                              <Input
+                                id="batch-reissue-decision-note"
+                                value={reissueDecisionNote}
+                                onChange={(event) => onReissueDecisionNoteChange(event.target.value)}
+                                placeholder="Explain the approval or rejection"
+                              />
+                            </div>
+                            {reissueRequestsLoading ? (
+                              <div className="mt-3 rounded-lg border border-dashed bg-background p-3 text-sm text-muted-foreground">
+                                Loading requests...
+                              </div>
+                            ) : reissueRequests.length === 0 ? (
+                              <div className="mt-3 rounded-lg border border-dashed bg-background p-3 text-sm text-muted-foreground">
+                                No pending reissue requests in this scope.
+                              </div>
+                            ) : (
+                              <div className="mt-3 space-y-2">
+                                {reissueRequests.map((request) => (
+                                  <div key={request.id} className="rounded-lg border bg-background p-3 text-sm">
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                      <div>
+                                        <div className="font-medium">{request.batch?.name || "Batch reissue request"}</div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                          Requested by {request.requestedBy?.name || "User"} · {request.quantity ? `${Number(request.quantity).toLocaleString()} labels · ` : ""}
+                                          {request.requestedAt ? format(new Date(request.requestedAt), "PPp") : "Pending"}
+                                        </div>
+                                        <div className="mt-2 text-xs text-muted-foreground">{request.reason}</div>
+                                      </div>
+                                      <Badge variant="secondary">{request.targetApproverRole === "SUPER_ADMIN" ? "Super admin review" : "Brand admin review"}</Badge>
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={decidingReissueRequestId === request.id || reissueDecisionNote.trim().length < 8}
+                                        onClick={() => onDecideReissueRequest(request.id, "reject")}
+                                      >
+                                        Reject
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        disabled={decidingReissueRequestId === request.id || reissueDecisionNote.trim().length < 8}
+                                        onClick={() => onDecideReissueRequest(request.id, "approve")}
+                                      >
+                                        {decidingReissueRequestId === request.id ? "Saving..." : "Approve"}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
 
                           {printJobsLoading ? (
@@ -556,7 +637,7 @@ export function LicenseeBatchWorkspaceDialog({
                                         disabled={!isEligibleForReissue(job) || !reissueReason.trim() || reissuingJobId === job.id}
                                         onClick={() => onRequestReissue(job.id)}
                                       >
-                                        {reissuingJobId === job.id ? "Authorizing..." : "Authorize reissue"}
+                                        {reissuingJobId === job.id ? "Submitting..." : "Request reissue"}
                                       </Button>
                                     </div>
                                   </div>

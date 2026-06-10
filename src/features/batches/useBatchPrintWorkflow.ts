@@ -31,6 +31,7 @@ import {
   syncProgressFromPrintJob as syncPrintJobProgress,
 } from "./batch-print-operations";
 import { abandonPrintJobAction, printDiagnosticTestLabelAction, relinkSelectedPrinterAction } from "./print-workflow-recovery-actions";
+import { runSingleFlightAction } from "./singleFlightAction";
 import {
   buildCalibrationPayload as buildBatchCalibrationPayload,
   defaultCalibrationProfileState,
@@ -55,6 +56,8 @@ type ReleaseApprovalState = {
   expiresAt?: string | null;
   threshold?: number | null;
 };
+
+type PrintControlAction = "pause" | "stop";
 
 type UseBatchPrintWorkflowParams = {
   isManufacturer: boolean;
@@ -84,6 +87,20 @@ export function useBatchPrintWorkflow({
   const [recentPrintJobs, setRecentPrintJobs] = useState<PrintJobRow[]>([]);
   const [sampleScanCodeByJobId, setSampleScanCodeByJobId] = useState<Record<string, string>>({});
   const [releaseApprovalState, setReleaseApprovalState] = useState<ReleaseApprovalState | null>(null);
+  const [printControlDialog, setPrintControlDialog] = useState<{
+    action: PrintControlAction | null;
+    job: PrintJobRow | null;
+    reason: string;
+    submitting: boolean;
+  }>({ action: null, job: null, reason: "", submitting: false });
+  const [printReissueDialog, setPrintReissueDialog] = useState<{
+    job: PrintJobRow | null;
+    reason: string;
+    submitting: boolean;
+  }>({ job: null, reason: "", submitting: false });
+  const [printControlBusyJobId, setPrintControlBusyJobId] = useState<string | null>(null);
+  const [printCooldownUntil, setPrintCooldownUntil] = useState<number>(0);
+  const [printCooldownNow, setPrintCooldownNow] = useState<number>(() => Date.now());
   const [switchingPrinter, setSwitchingPrinter] = useState(false);
   const [relinkingPrinter, setRelinkingPrinter] = useState(false);
   const [calibrationProfile, setCalibrationProfile] = useState<CalibrationProfileState>(defaultCalibrationProfileState);
@@ -107,6 +124,7 @@ export function useBatchPrintWorkflow({
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>(defaultPrinterStatus);
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
+  const actionInFlightRef = useRef(new Map<string, Promise<void>>());
 
   const printJobsQuery = usePrintJobs(printBatch?.id, 8, false);
   const printerRuntimeQuery = useManufacturerPrinterRuntime(true, false);
@@ -264,6 +282,39 @@ export function useBatchPrintWorkflow({
       snapshot.registeredPrinters as RegisteredPrinterRow[],
       nextPreferredPrinterId || snapshot.preferredPrinterId
     );
+  };
+
+  useEffect(() => {
+    if (!printCooldownUntil || printCooldownUntil <= Date.now()) return;
+    const timer = window.setInterval(() => setPrintCooldownNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [printCooldownUntil]);
+
+  const cooldownRemainingSeconds = Math.max(0, Math.ceil((printCooldownUntil - printCooldownNow) / 1000));
+
+  const recordPrintCooldown = (response: any) => {
+    const retryAfter = Number(response?.retryAfterSeconds ?? response?.retryAfterSec ?? 90);
+    const seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.max(90, Math.ceil(retryAfter)) : 90;
+    setPrintCooldownNow(Date.now());
+    setPrintCooldownUntil(Date.now() + seconds * 1000);
+    setPrintProgressError(`Printing is cooling down. You can try again after ${seconds} seconds.`);
+  };
+
+  const handlePrintControlFailure = (response: any, fallback: string) => {
+    if (response?.code === "RATE_LIMITED" || response?.errorCode === "rate_limited") {
+      recordPrintCooldown(response);
+      toast({
+        title: "Printing is cooling down",
+        description: "Printed labels are preserved. Try again after 90 seconds and MSCQR will continue from the last safe point.",
+        variant: "destructive",
+      });
+      return;
+    }
+    toast({
+      title: "Print run needs attention",
+      description: sanitizePrinterUiError(response?.error || response?.message, fallback),
+      variant: "destructive",
+    });
   };
 
   const autoReportPrinterFailure = async (params: {
@@ -435,19 +486,16 @@ export function useBatchPrintWorkflow({
       }
     }
   };
-
   useEffect(() => {
     if (!printProgressOpen || printing || printProgressError) return;
     if (!isCompletedPrintProgressPhase(printProgressPhase)) return;
-
     const timer = window.setTimeout(() => {
       setPrintProgressOpen(false);
     }, 900);
-
     return () => window.clearTimeout(timer);
   }, [printProgressError, printProgressOpen, printProgressPhase, printing]);
-
   const switchSelectedPrinter = async () => {
+    if (switchingPrinter) return;
     if (!selectedPrinterId) return;
     setSwitchingPrinter(true);
     try {
@@ -460,26 +508,24 @@ export function useBatchPrintWorkflow({
         });
         return;
       }
-
       toast({ title: "Printer updated", description: "The printer on this computer has been updated." });
       await loadPrinterStatus({ force: true });
     } finally {
       setSwitchingPrinter(false);
     }
   };
-
   const relinkSelectedPrinter = async () => {
-    await relinkSelectedPrinterAction({
+    if (relinkingPrinter) return;
+    await runSingleFlightAction(actionInFlightRef, `relink-printer:${selectedPrinterProfile?.id || "none"}`, () => relinkSelectedPrinterAction({
       selectedPrinterProfile,
       setRelinkingPrinter,
       setSelectedPrinterProfileId,
       loadPrinterStatus,
       toast,
-    });
+    }));
   };
-
   const abandonPrintJob = async (jobId: string) => {
-    await abandonPrintJobAction({
+    await runSingleFlightAction(actionInFlightRef, `abandon-print-job:${jobId}`, () => abandonPrintJobAction({
       jobId,
       currentPrintJobId: printJobId,
       setPrinting,
@@ -488,12 +534,137 @@ export function useBatchPrintWorkflow({
       loadRecentPrintJobs,
       onBatchesChanged,
       toast,
+    }));
+  };
+
+  const openPrintControlDialog = (action: PrintControlAction, job: PrintJobRow) => {
+    setPrintControlDialog({ action, job, reason: "", submitting: false });
+  };
+
+  const closePrintControlDialog = () => {
+    if (printControlDialog.submitting) return;
+    setPrintControlDialog({ action: null, job: null, reason: "", submitting: false });
+  };
+
+  const replaceRecentPrintJob = (nextJob: PrintJobRow) => {
+    setRecentPrintJobs((previous) => {
+      const found = previous.some((row) => row.id === nextJob.id);
+      return found ? previous.map((row) => (row.id === nextJob.id ? nextJob : row)) : [nextJob, ...previous].slice(0, 8);
+    });
+    syncPrintJobProgress(nextJob, progressStateSetters);
+  };
+
+  const submitPrintControlDialog = async () => {
+    const { action, job } = printControlDialog;
+    const reason = printControlDialog.reason.trim();
+    if (!action || !job) return;
+    if (reason.length < 8) {
+      toast({
+        title: "Reason required",
+        description: action === "stop" ? "Enter why this print run should be stopped." : "Enter why this print run is being paused.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    return runSingleFlightAction(actionInFlightRef, `${action}-print-job:${job.id}:${reason}`, async () => {
+      setPrintControlDialog((current) => ({ ...current, submitting: true }));
+      setPrintControlBusyJobId(job.id);
+      try {
+        const response = action === "pause" ? await apiClient.pausePrintJob(job.id, reason) : await apiClient.stopPrintJob(job.id, reason);
+        if (!response.success) {
+          handlePrintControlFailure(response, action === "pause" ? "Print run could not be paused." : "Print run could not be stopped.");
+          return;
+        }
+        if (response.data) replaceRecentPrintJob(response.data as PrintJobRow);
+        await Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
+        setPrintControlDialog({ action: null, job: null, reason: "", submitting: false });
+        toast({
+          title: action === "pause" ? "Print run paused" : "Print run stopped",
+          description:
+            action === "pause"
+              ? "MSCQR stopped new label dispatch. Already confirmed labels remain recorded."
+              : "MSCQR stopped new label dispatch and preserved confirmed labels.",
+        });
+      } finally {
+        setPrintControlBusyJobId(null);
+        setPrintControlDialog((current) => ({ ...current, submitting: false }));
+      }
     });
   };
 
-  const confirmPrintedLabels = async (jobId: string) => {
+  const resumePrintJob = async (jobId: string) => {
     const trimmedJobId = String(jobId || "").trim();
     if (!trimmedJobId) return;
+    if (cooldownRemainingSeconds > 0) return;
+
+    return runSingleFlightAction(actionInFlightRef, `resume-print-job:${trimmedJobId}`, async () => {
+      setPrintControlBusyJobId(trimmedJobId);
+      try {
+        const response = await apiClient.resumePrintJob(trimmedJobId);
+        if (!response.success) {
+          handlePrintControlFailure(response, "Print run could not be resumed.");
+          return;
+        }
+        if (response.data) replaceRecentPrintJob(response.data as PrintJobRow);
+        setPrintProgressError(null);
+        setPrintCooldownUntil(0);
+        await Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
+        toast({
+          title: "Print run resumed",
+          description: "MSCQR will continue from labels that are still pending. Confirmed labels will not be duplicated.",
+        });
+      } finally {
+        setPrintControlBusyJobId(null);
+      }
+    });
+  };
+
+  const openPrintReissueDialog = (job: PrintJobRow) => {
+    setPrintReissueDialog({ job, reason: "", submitting: false });
+  };
+
+  const closePrintReissueDialog = () => {
+    if (printReissueDialog.submitting) return;
+    setPrintReissueDialog({ job: null, reason: "", submitting: false });
+  };
+
+  const submitPrintReissueRequest = async () => {
+    const job = printReissueDialog.job;
+    const reason = printReissueDialog.reason.trim();
+    if (!job) return;
+    if (reason.length < 8) {
+      toast({
+        title: "Reason required",
+        description: "Enter why replacement labels are required before submitting the request.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    return runSingleFlightAction(actionInFlightRef, `request-print-reissue:${job.id}:${reason}`, async () => {
+      setPrintReissueDialog((current) => ({ ...current, submitting: true }));
+      try {
+        const response = await apiClient.createPrintReissueRequest(job.id, { reason });
+        if (!response.success) {
+          handlePrintControlFailure(response, "Reissue request could not be submitted.");
+          return;
+        }
+        setPrintReissueDialog({ job: null, reason: "", submitting: false });
+        toast({
+          title: "Reissue request submitted",
+          description: "An admin must approve replacement labels before MSCQR creates a new print run.",
+        });
+      } finally {
+        setPrintReissueDialog((current) => ({ ...current, submitting: false }));
+      }
+    });
+  };
+  const confirmPrintedLabels = async (jobId: string) => {
+    if (printing) return;
+    const trimmedJobId = String(jobId || "").trim();
+    if (!trimmedJobId) return;
+    return runSingleFlightAction(actionInFlightRef, `confirm-print-job:${trimmedJobId}`, async () => {
     setPrinting(true);
     try {
       const response = await apiClient.confirmPrintJobPrinted(trimmedJobId, {
@@ -531,15 +702,15 @@ export function useBatchPrintWorkflow({
     } finally {
       setPrinting(false);
     }
+    });
   };
-
   const setSampleScanCode = (jobId: string, value: string) => {
     const trimmedJobId = String(jobId || "").trim();
     if (!trimmedJobId) return;
     setSampleScanCodeByJobId((previous) => ({ ...previous, [trimmedJobId]: value }));
   };
-
   const verifySampleScan = async (jobId: string) => {
+    if (printing) return;
     const trimmedJobId = String(jobId || "").trim();
     if (!trimmedJobId) return;
     const publicCode = String(sampleScanCodeByJobId[trimmedJobId] || "").trim();
@@ -551,7 +722,7 @@ export function useBatchPrintWorkflow({
       });
       return;
     }
-
+    return runSingleFlightAction(actionInFlightRef, `sample-scan:${trimmedJobId}:${publicCode}`, async () => {
     setPrinting(true);
     try {
       const response = await apiClient.capturePrintJobSampleScan(trimmedJobId, publicCode);
@@ -563,7 +734,6 @@ export function useBatchPrintWorkflow({
         });
         return;
       }
-
       toast({
         title: "Sample scan verified",
         description: response.data?.sampleScanPolicy?.satisfied
@@ -576,9 +746,10 @@ export function useBatchPrintWorkflow({
     } finally {
       setPrinting(false);
     }
+    });
   };
-
   const releaseBatch = async () => {
+    if (printing) return;
     const batchId = String(printBatch?.id || "").trim();
     if (!batchId) return;
     if (
@@ -587,7 +758,7 @@ export function useBatchPrintWorkflow({
     ) {
       return;
     }
-
+    return runSingleFlightAction(actionInFlightRef, `release-batch:${batchId}`, async () => {
     setPrinting(true);
     try {
       const response = await apiClient.releaseBatch(batchId);
@@ -607,7 +778,6 @@ export function useBatchPrintWorkflow({
         });
         return;
       }
-
       if (response.data?.approvalRequired && response.data.approvalId) {
         setReleaseApprovalState({
           approvalRequired: true,
@@ -625,7 +795,6 @@ export function useBatchPrintWorkflow({
         await onBatchesChanged?.();
         return;
       }
-
       setReleaseApprovalState(null);
       toast({
         title: "Batch released",
@@ -645,8 +814,8 @@ export function useBatchPrintWorkflow({
     } finally {
       setPrinting(false);
     }
+    });
   };
-
   const progressStateSetters = useMemo(
     () => ({
       setPrintProgressOpen,
@@ -662,7 +831,6 @@ export function useBatchPrintWorkflow({
     }),
     []
   );
-
   useEffect(() => {
     if (printing) return;
     if (!printJobId || (printProgressDispatchMode !== "NETWORK_DIRECT" && printProgressDispatchMode !== "NETWORK_IPP")) {
@@ -709,6 +877,9 @@ export function useBatchPrintWorkflow({
     printing,
   ]);
   const createPrintJob = async () => {
+    if (printing) return;
+    const actionKey = `create-print-job:${printBatch?.id || "none"}:${selectedPrinterProfile?.id || "none"}:${printQuantity}`;
+    return runSingleFlightAction(actionInFlightRef, actionKey, async () => {
     setPrinting(true);
     try {
       await executeCreatePrintJob({
@@ -735,11 +906,14 @@ export function useBatchPrintWorkflow({
     } finally {
       setPrinting(false);
     }
+    });
   };
 
   const refreshPendingPrintStatus = async () => {
+    if (printing) return;
     if (!printJobId) return;
 
+    return runSingleFlightAction(actionInFlightRef, `refresh-print-job:${printJobId}`, async () => {
     setPrinting(true);
     try {
       await retryPendingDirectPrint({
@@ -766,6 +940,7 @@ export function useBatchPrintWorkflow({
     } finally {
       setPrinting(false);
     }
+    });
   };
 
   const dialogProps = {
@@ -792,7 +967,10 @@ export function useBatchPrintWorkflow({
     selectedLocalProfileRegistrationStale,
     onRelinkSelectedPrinter: relinkSelectedPrinter,
     onPrintDiagnosticTestLabel: () => {
-      void printDiagnosticTestLabelAction({ selectedPrinterProfile, setPrinting, toast });
+      if (printing) return;
+      void runSingleFlightAction(actionInFlightRef, `diagnostic-test-label:${selectedPrinterProfile?.id || "none"}`, () =>
+        printDiagnosticTestLabelAction({ selectedPrinterProfile, setPrinting, toast })
+      );
     },
     printing,
     onStartPrint: createPrintJob,
@@ -802,6 +980,19 @@ export function useBatchPrintWorkflow({
     printProgressDispatchMode,
     formatDispatchModeLabel,
     directRemainingToPrint,
+    printControlDialog,
+    printReissueDialog,
+    printControlBusyJobId,
+    printCooldownRemainingSeconds: cooldownRemainingSeconds,
+    onOpenPrintControlDialog: openPrintControlDialog,
+    onClosePrintControlDialog: closePrintControlDialog,
+    onPrintControlReasonChange: (reason: string) => setPrintControlDialog((current) => ({ ...current, reason })),
+    onSubmitPrintControlDialog: submitPrintControlDialog,
+    onResumePrintJob: resumePrintJob,
+    onOpenPrintReissueDialog: openPrintReissueDialog,
+    onClosePrintReissueDialog: closePrintReissueDialog,
+    onPrintReissueReasonChange: (reason: string) => setPrintReissueDialog((current) => ({ ...current, reason })),
+    onSubmitPrintReissueRequest: submitPrintReissueRequest,
     onRefreshPrintStatus: refreshPendingPrintStatus,
     recentPrintJobs,
     releaseApprovalState,

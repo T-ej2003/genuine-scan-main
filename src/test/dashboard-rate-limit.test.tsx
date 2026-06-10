@@ -83,6 +83,9 @@ describe("Dashboard rate-limit partial state", () => {
       expect(card).toHaveClass("w-full");
       expect(card).toHaveClass("min-h-[15.5rem]");
     }
+    expect(screen.queryByText("Updated just now")).not.toBeInTheDocument();
+    expect(screen.queryByText("Refreshes automatically")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /refresh/i })).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText(/Recent activity is temporarily unavailable/i)).toBeInTheDocument();

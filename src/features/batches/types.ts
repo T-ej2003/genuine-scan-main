@@ -191,13 +191,18 @@ export type PrinterSelectionNotice = {
 export type PrintJobRow = {
   id: string;
   jobNumber?: string | null;
-  status: "PENDING" | "SENT" | "CONFIRMED" | "FAILED" | "CANCELLED";
+  status: "PENDING" | "SENT" | "PAUSED" | "CONFIRMED" | "PARTIALLY_COMPLETED" | "FAILED" | "STOPPED" | "CANCELLED";
   pipelineState?:
     | "QUEUED"
     | "PREFLIGHT_OK"
     | "SENT_TO_PRINTER"
     | "PRINTER_ACKNOWLEDGED"
     | "PRINT_CONFIRMED"
+    | "PAUSED"
+    | "RESUME_PENDING"
+    | "RETRY_WAITING"
+    | "STOPPING"
+    | "STOPPED"
     | "LOCKED"
     | "FAILED"
     | "NEEDS_OPERATOR_ACTION";
@@ -231,6 +236,8 @@ export type PrintJobRow = {
     totalItems?: number;
     confirmedItems?: number;
     frozenItems?: number;
+    stoppedItems?: number;
+    failedItems?: number;
     failedReason?: string | null;
     remainingToPrint?: number;
     awaitingConfirmationCount?: number;

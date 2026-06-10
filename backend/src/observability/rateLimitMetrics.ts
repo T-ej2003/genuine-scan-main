@@ -195,7 +195,10 @@ export const createRateLimitJsonHandler =
   (req: Request, res: Response) => {
     const retryAfterSec = recordRateLimitMetric(req, scope);
     res.setHeader("Retry-After", String(retryAfterSec));
-    const isPrinterScope = scope.startsWith("printer-agent") || scope.startsWith("print.read");
+    const isPrinterScope =
+      scope.startsWith("printer-agent") ||
+      scope.startsWith("print.read") ||
+      scope.startsWith("print.lifecycle");
 
     return res.status(429).json({
       success: false,

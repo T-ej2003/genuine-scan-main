@@ -109,6 +109,7 @@ type PrinterOnboardingDialogProps = {
   localPrinterAgent: LocalPrinterAgentSnapshot;
   printerHasInventory: boolean;
   selectedPrinterName?: string | null;
+  checking?: boolean;
   onInstallConnector: () => void;
   onCheckAgain: () => void;
   onOpenHelp: () => void;
@@ -121,6 +122,7 @@ export function PrinterOnboardingDialog({
   localPrinterAgent,
   printerHasInventory,
   selectedPrinterName,
+  checking = false,
   onInstallConnector,
   onCheckAgain,
   onOpenHelp,
@@ -170,7 +172,9 @@ export function PrinterOnboardingDialog({
             <Button variant="outline" onClick={onInstallConnector}>
               Install printer helper
             </Button>
-            <Button onClick={onCheckAgain}>Check again</Button>
+            <Button onClick={onCheckAgain} disabled={checking}>
+              {checking ? "Connector checking..." : "Check again"}
+            </Button>
             <Button variant="ghost" onClick={onOpenHelp}>
               Open help
             </Button>
@@ -212,6 +216,7 @@ type PrinterStatusDialogProps = {
   selectedPrinterIsActive: boolean;
   printerDiscoveryCountLabel: string;
   printerSwitching: boolean;
+  printerStatusChecking?: boolean;
   onSelectedLocalPrinterChange: (printerId: string) => void;
   onRefreshStatus: () => void;
   onInstallConnector: () => void;
@@ -251,6 +256,7 @@ export function PrinterStatusDialog({
   selectedPrinterIsActive,
   printerDiscoveryCountLabel,
   printerSwitching,
+  printerStatusChecking = false,
   onSelectedLocalPrinterChange,
   onRefreshStatus,
   onInstallConnector,
@@ -487,9 +493,9 @@ export function PrinterStatusDialog({
                   Review the printers available on this computer and choose the one you want MSCQR to use.
                 </p>
               </div>
-              <Button variant="outline" className="gap-2" onClick={onRefreshStatus} disabled={printerSwitching}>
-                <RefreshCw className="h-4 w-4" />
-                Refresh status
+              <Button variant="outline" className="gap-2" onClick={onRefreshStatus} disabled={printerSwitching || printerStatusChecking}>
+                <RefreshCw className={`h-4 w-4 ${printerStatusChecking ? "animate-spin" : ""}`} />
+                {printerStatusChecking ? "Connector checking..." : "Refresh status"}
               </Button>
             </div>
 
@@ -504,8 +510,8 @@ export function PrinterStatusDialog({
                     : "MSCQR could not find a ready printer on this computer. Make sure the printer is available in the operating system, then refresh the status."}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-3">
-                  <Button onClick={onRefreshStatus} disabled={printerSwitching}>
-                    Refresh status
+                  <Button onClick={onRefreshStatus} disabled={printerSwitching || printerStatusChecking}>
+                    {printerStatusChecking ? "Please wait..." : "Refresh status"}
                   </Button>
                   <Button variant="outline" onClick={onOpenBatches}>
                     Go to batches
@@ -653,9 +659,9 @@ export function PrinterStatusDialog({
             <Button variant="outline" onClick={onClose}>
               Close
             </Button>
-            <Button variant="outline" className="gap-2" onClick={onRefreshStatus} disabled={printerSwitching}>
-              <RefreshCw className="h-4 w-4" />
-              Refresh status
+            <Button variant="outline" className="gap-2" onClick={onRefreshStatus} disabled={printerSwitching || printerStatusChecking}>
+              <RefreshCw className={`h-4 w-4 ${printerStatusChecking ? "animate-spin" : ""}`} />
+              {printerStatusChecking ? "Connector checking..." : "Refresh status"}
             </Button>
           </div>
         </div>

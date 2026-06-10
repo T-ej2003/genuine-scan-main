@@ -170,6 +170,28 @@ type PrintJobDialogProps = {
   printProgressDispatchMode: string | null;
   formatDispatchModeLabel: (mode?: string | null) => string;
   directRemainingToPrint: number | null;
+  printControlDialog?: {
+    action: "pause" | "stop" | null;
+    job: PrintJobRow | null;
+    reason: string;
+    submitting: boolean;
+  };
+  printReissueDialog?: {
+    job: PrintJobRow | null;
+    reason: string;
+    submitting: boolean;
+  };
+  printControlBusyJobId?: string | null;
+  printCooldownRemainingSeconds?: number;
+  onOpenPrintControlDialog?: (action: "pause" | "stop", job: PrintJobRow) => void;
+  onClosePrintControlDialog?: () => void;
+  onPrintControlReasonChange?: (reason: string) => void;
+  onSubmitPrintControlDialog?: () => void;
+  onResumePrintJob?: (jobId: string) => void;
+  onOpenPrintReissueDialog?: (job: PrintJobRow) => void;
+  onClosePrintReissueDialog?: () => void;
+  onPrintReissueReasonChange?: (reason: string) => void;
+  onSubmitPrintReissueRequest?: () => void;
   onRefreshPrintStatus: () => void;
   recentPrintJobs: PrintJobRow[];
   releaseApprovalState?: {
@@ -291,6 +313,19 @@ export function BatchPrintJobDialog({
   printProgressDispatchMode,
   formatDispatchModeLabel,
   directRemainingToPrint,
+  printControlDialog = { action: null, job: null, reason: "", submitting: false },
+  printReissueDialog = { job: null, reason: "", submitting: false },
+  printControlBusyJobId = null,
+  printCooldownRemainingSeconds = 0,
+  onOpenPrintControlDialog = () => undefined,
+  onClosePrintControlDialog = () => undefined,
+  onPrintControlReasonChange = () => undefined,
+  onSubmitPrintControlDialog = () => undefined,
+  onResumePrintJob = () => undefined,
+  onOpenPrintReissueDialog = () => undefined,
+  onClosePrintReissueDialog = () => undefined,
+  onPrintReissueReasonChange = () => undefined,
+  onSubmitPrintReissueRequest = () => undefined,
   onRefreshPrintStatus,
   recentPrintJobs,
   releaseApprovalState = null,
@@ -310,8 +345,24 @@ export function BatchPrintJobDialog({
         releaseApprovalState,
       })
     : null;
+  const isJobActive = (job: PrintJobRow) =>
+    ["PENDING", "SENT"].includes(job.status) ||
+    ["ACTIVE", "RESUME_PENDING", "RETRY_WAITING"].includes(String(job.session?.status || ""));
+  const isJobPaused = (job: PrintJobRow) =>
+    job.status === "PAUSED" || String(job.session?.status || "") === "PAUSED";
+  const canStopJob = (job: PrintJobRow) =>
+    isJobActive(job) || isJobPaused(job);
+  const canRequestReissue = (job: PrintJobRow) =>
+    job.status === "CONFIRMED" || job.pipelineState === "LOCKED" || job.pipelineState === "PRINT_CONFIRMED";
+  const printControlTitle =
+    printControlDialog.action === "stop" ? "Stop print run" : "Pause print run";
+  const printControlDescription =
+    printControlDialog.action === "stop"
+      ? "Stopping prevents any new label dispatch. Already confirmed labels stay printed and the remaining labels stay visible for controlled recovery."
+      : "Pausing stops new label dispatch while preserving labels already confirmed by MSCQR.";
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="create-print-job-dialog" className="max-h-[85vh] overflow-y-auto sm:max-w-[640px]">
         <DialogHeader>
@@ -608,6 +659,15 @@ export function BatchPrintJobDialog({
               </div>
             ) : null}
 
+            {printCooldownRemainingSeconds > 0 ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                <div className="font-medium">Printing is cooling down</div>
+                <div className="mt-1 text-xs">
+                  Try again after {printCooldownRemainingSeconds} seconds. Printed labels are preserved; MSCQR will continue from the last safe point.
+                </div>
+              </div>
+            ) : null}
+
             {recentPrintJobs.length > 0 ? (
               <div className="space-y-3 rounded-md border p-3 text-sm">
                 <div className="font-medium">Recent print runs</div>
@@ -642,6 +702,80 @@ export function BatchPrintJobDialog({
                           ? ` · ${sanitizePrinterUiError(job.failureReason, "This print job needs attention.")}`
                           : ""}
                       </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                        <div>Requested {Number(job.itemCount || job.quantity || 0).toLocaleString()}</div>
+                        <div>Printed {Number(job.session?.confirmedItems || 0).toLocaleString()}</div>
+                        <div>Pending {Number(job.session?.remainingToPrint || 0).toLocaleString()}</div>
+                        <div>Failed {Number(job.session?.failedItems || job.session?.counts?.FAILED || 0).toLocaleString()}</div>
+                      </div>
+                      {isJobActive(job) || isJobPaused(job) ? (
+                        <div className="mt-3 flex flex-wrap justify-end gap-2">
+                          {isJobActive(job) ? (
+                            <ActionButton
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onOpenPrintControlDialog("pause", job)}
+                              state={
+                                printControlBusyJobId === job.id || printControlDialog.submitting
+                                  ? createUiActionState("pending", "Pausing the print run.")
+                                  : createUiActionState("enabled")
+                              }
+                              idleLabel="Pause printing"
+                              pendingLabel="Pausing..."
+                              showReasonBelow={false}
+                            />
+                          ) : null}
+                          {isJobPaused(job) || String(job.session?.status || "") === "RETRY_WAITING" ? (
+                            <ActionButton
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onResumePrintJob(job.id)}
+                              state={
+                                printCooldownRemainingSeconds > 0
+                                  ? createUiActionState("disabled", `Try again after ${printCooldownRemainingSeconds} seconds.`)
+                                  : printControlBusyJobId === job.id
+                                    ? createUiActionState("pending", "Resuming the print run.")
+                                    : createUiActionState("enabled")
+                              }
+                              idleLabel="Resume printing"
+                              pendingLabel="Resuming..."
+                              showReasonBelow={false}
+                            />
+                          ) : null}
+                          {canStopJob(job) ? (
+                            <ActionButton
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onOpenPrintControlDialog("stop", job)}
+                              state={
+                                printControlBusyJobId === job.id || printControlDialog.submitting
+                                  ? createUiActionState("pending", "Stopping the print run.")
+                                  : createUiActionState("enabled")
+                              }
+                              idleLabel="Stop printing"
+                              pendingLabel="Stopping..."
+                              showReasonBelow={false}
+                            />
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {canRequestReissue(job) ? (
+                        <div className="mt-3 flex justify-end">
+                          <ActionButton
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onOpenPrintReissueDialog(job)}
+                            state={
+                              printReissueDialog.submitting
+                                ? createUiActionState("pending", "Submitting the reissue request.")
+                                : createUiActionState("enabled")
+                            }
+                            idleLabel="Request reissue"
+                            pendingLabel="Submitting..."
+                            showReasonBelow={false}
+                          />
+                        </div>
+                      ) : null}
                       {job.status === "FAILED" && (job.session?.confirmedItems || 0) === 0 ? (
                         <div className="mt-2 flex justify-end">
                           <ActionButton
@@ -759,5 +893,112 @@ export function BatchPrintJobDialog({
         )}
       </DialogContent>
     </Dialog>
+    <Dialog open={Boolean(printControlDialog.action && printControlDialog.job)} onOpenChange={(nextOpen) => {
+      if (!nextOpen) onClosePrintControlDialog();
+    }}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>{printControlTitle}</DialogTitle>
+          <DialogDescription>{printControlDescription}</DialogDescription>
+        </DialogHeader>
+        <div className="mt-2 space-y-4">
+          {printControlDialog.job ? (
+            <div className="rounded-md border bg-muted/20 p-3 text-sm">
+              <div className="font-medium">{printControlDialog.job.jobNumber || "Print run"}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {Number(printControlDialog.job.session?.confirmedItems || 0).toLocaleString()} printed ·{" "}
+                {Number(printControlDialog.job.session?.remainingToPrint || 0).toLocaleString()} remaining
+              </div>
+            </div>
+          ) : null}
+          <div className="space-y-2">
+            <Label>{printControlDialog.action === "stop" ? "Stop reason" : "Pause reason"}</Label>
+            <Input
+              value={printControlDialog.reason}
+              onChange={(event) => onPrintControlReasonChange(event.target.value)}
+              placeholder={printControlDialog.action === "stop" ? "Example: media jam after confirmed labels" : "Example: operator checking label alignment"}
+              maxLength={500}
+            />
+            <div className="text-xs text-muted-foreground">A reason is required for the audit trail.</div>
+          </div>
+          {printControlDialog.action === "stop" ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              Stopping does not mark unconfirmed labels as printed. Remaining labels stay recoverable through controlled reissue or a new approved run.
+            </div>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClosePrintControlDialog} disabled={printControlDialog.submitting}>
+              Cancel
+            </Button>
+            <ActionButton
+              variant={printControlDialog.action === "stop" ? "destructive" : "default"}
+              onClick={onSubmitPrintControlDialog}
+              state={
+                printControlDialog.submitting
+                  ? createUiActionState("pending", "Saving the print run control action.")
+                  : printControlDialog.reason.trim().length < 8
+                    ? createUiActionState("disabled", "Enter a clear audit reason.")
+                    : createUiActionState("enabled")
+              }
+              idleLabel={printControlDialog.action === "stop" ? "Stop print run" : "Pause print run"}
+              pendingLabel={printControlDialog.action === "stop" ? "Stopping..." : "Pausing..."}
+              showReasonBelow
+            />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={Boolean(printReissueDialog.job)} onOpenChange={(nextOpen) => {
+      if (!nextOpen) onClosePrintReissueDialog();
+    }}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>Request reissue</DialogTitle>
+          <DialogDescription>
+            Ask an admin to approve replacement labels. MSCQR will not create another print run until the request is approved.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-2 space-y-4">
+          {printReissueDialog.job ? (
+            <div className="rounded-md border bg-muted/20 p-3 text-sm">
+              <div className="font-medium">{printReissueDialog.job.jobNumber || "Print run"}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {Number(printReissueDialog.job.itemCount || printReissueDialog.job.quantity || 0).toLocaleString()} labels ·{" "}
+                {printReissueDialog.job.printer?.name || "Saved printer"}
+              </div>
+            </div>
+          ) : null}
+          <div className="space-y-2">
+            <Label>Reason</Label>
+            <Input
+              value={printReissueDialog.reason}
+              onChange={(event) => onPrintReissueReasonChange(event.target.value)}
+              placeholder="Example: confirmed labels damaged during packaging"
+              maxLength={500}
+            />
+            <div className="text-xs text-muted-foreground">This request is scoped to your batch and reviewed by the correct admin.</div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClosePrintReissueDialog} disabled={printReissueDialog.submitting}>
+              Cancel
+            </Button>
+            <ActionButton
+              onClick={onSubmitPrintReissueRequest}
+              state={
+                printReissueDialog.submitting
+                  ? createUiActionState("pending", "Submitting the reissue request.")
+                  : printReissueDialog.reason.trim().length < 8
+                    ? createUiActionState("disabled", "Enter a clear request reason.")
+                    : createUiActionState("enabled")
+              }
+              idleLabel="Submit request"
+              pendingLabel="Submitting..."
+              showReasonBelow
+            />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

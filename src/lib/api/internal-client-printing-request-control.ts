@@ -20,14 +20,20 @@ type PrinterGetCacheState = {
   rateLimitHits: number;
 };
 
+type PrinterMutationState = {
+  inFlight: Promise<ApiResponse<unknown>> | null;
+};
+
 export const PRINTER_STATUS_MIN_REFRESH_MS = 15_000;
 export const PRINTER_LIST_MIN_REFRESH_MS = 30_000;
+export const PRINTER_HEARTBEAT_MIN_REFRESH_MS = 8_000;
 
 const PRINTER_RATE_LIMIT_FALLBACK_MS = 60_000;
 const PRINTER_RATE_LIMIT_NOTICE =
   "Printer status refresh is temporarily paused. Printing can continue if the printer was already ready.";
 
 const printerGetCache = new Map<string, PrinterGetCacheState>();
+const printerMutationCache = new Map<string, PrinterMutationState>();
 
 const isRateLimitedResponse = (response: ApiResponse<unknown>) =>
   response.status === 429 ||
@@ -117,6 +123,27 @@ export const controlledPrinterGet = async <T>(
     })
     .finally(() => {
       state.inFlight = null;
+    }) as Promise<ApiResponse<unknown>>;
+
+  return state.inFlight as Promise<ApiResponse<T>>;
+};
+
+export const controlledPrinterMutation = async <T>(
+  actionKey: string,
+  request: () => Promise<ApiResponse<T>>
+): Promise<ApiResponse<T>> => {
+  const cacheKey = String(actionKey || "").trim();
+  if (!cacheKey) return request();
+
+  const state = printerMutationCache.get(cacheKey) || { inFlight: null };
+  printerMutationCache.set(cacheKey, state);
+
+  if (state.inFlight) return state.inFlight as Promise<ApiResponse<T>>;
+
+  state.inFlight = request()
+    .finally(() => {
+      state.inFlight = null;
+      printerMutationCache.delete(cacheKey);
     }) as Promise<ApiResponse<unknown>>;
 
   return state.inFlight as Promise<ApiResponse<T>>;

@@ -55,9 +55,12 @@ enum QrAllocationRequestStatus {
 enum PrintJobStatus {
   PENDING
   SENT
+  PAUSED
   CONFIRMED
+  PARTIALLY_COMPLETED
   FAILED
   CANCELLED
+  STOPPED
 }
 
 enum PrinterConnectionType {
@@ -149,6 +152,11 @@ enum PrinterDeliveryMode {
 
 enum PrintSessionStatus {
   ACTIVE
+  PAUSED
+  RESUME_PENDING
+  RETRY_WAITING
+  STOPPING
+  STOPPED
   FAILED
   COMPLETED
   CANCELLED
@@ -162,6 +170,7 @@ enum PrintItemState {
   CLOSED
   FROZEN
   FAILED
+  CANCELLED
 }
 
 enum PrintPipelineState {
@@ -171,6 +180,11 @@ enum PrintPipelineState {
   PRINTER_ACKNOWLEDGED
   PRINT_CONFIRMED
   LOCKED
+  PAUSED
+  RESUME_PENDING
+  RETRY_WAITING
+  STOPPING
+  STOPPED
   FAILED
   NEEDS_OPERATOR_ACTION
 }
@@ -183,6 +197,9 @@ enum PrintItemEventType {
   CLOSED
   FROZEN
   FAILED
+  CANCELLED
+  PAUSED
+  RESUMED
   INCIDENT_RAISED
 }
 
@@ -1193,6 +1210,16 @@ model PrintReissueRequest {
   approvedByUserId String?
   approvedByUser User? @relation("PrintReissueApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
 
+  licenseeId String?
+  manufacturerId String?
+  batchId String?
+  requestedByRole String?
+  targetApproverRole String?
+  quantity Int?
+  affectedRangeStart String?
+  affectedRangeEnd String?
+  decisionNote String?
+  approvalReferenceId String?
   status ReissueRequestStatus @default(PENDING)
   reason String
   rejectionReason String?
@@ -1204,6 +1231,10 @@ model PrintReissueRequest {
 
   @@index([originalPrintJobId, status, createdAt])
   @@index([requestedByUserId, createdAt])
+  @@index([licenseeId, status, createdAt])
+  @@index([manufacturerId, status, createdAt])
+  @@index([batchId, status, createdAt])
+  @@index([targetApproverRole, status, createdAt])
 }
 
 model PrinterAttestation {

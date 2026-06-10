@@ -70,19 +70,23 @@ export const LEGACY_FILE_BUDGETS = {
   "src/features/layout/useManufacturerPrinterConnection.ts": { label: "Legacy feature hook", maxLines: 740 },
   "src/features/batches/useBatchPrintWorkflow.ts": {
     label: "Legacy feature hook",
-    maxLines: 850,
-    reason: "Batch print workflow coordinates the hardened print-confirm-sample-release sequence; extract per-step hooks after backend invariants settle.",
+    maxLines: 1040,
+    reason: "Batch print workflow now also coordinates pause/resume/stop and reissue request launch controls; extract operation-control hooks after printer launch invariants settle.",
   },
   "src/lib/api/internal-client-verify-support.ts": {
     label: "Legacy transport module",
     maxLines: 800,
     reason: "Verify support transport still consolidates customer auth, session, and ownership endpoints pending module split.",
   },
-  "src/pages/AuditLogs.tsx": { label: "Legacy page", maxLines: 740 },
+  "src/pages/AuditLogs.tsx": {
+    label: "Legacy page",
+    maxLines: 960,
+    reason: "Audit logs still consolidate role-safe event presentation and manufacturer activity filters; split renderer/filter sections in a focused UX module pass.",
+  },
   "src/pages/ConnectorDownload.tsx": { label: "Legacy page", maxLines: 880 },
   "src/pages/Dashboard.tsx": {
     label: "Legacy page",
-    maxLines: 820,
+    maxLines: 830,
     reason: "Dashboard still owns cross-role launch-state routing; architecture notes track extraction into role-specific dashboard modules.",
   },
   "src/pages/PrinterDiagnostics.tsx": { label: "Legacy page", maxLines: 1620 },

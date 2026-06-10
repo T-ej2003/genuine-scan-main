@@ -1,17 +1,33 @@
 import { Response } from "express";
+import { UserRole } from "@prisma/client";
 
 import { AuthRequest } from "../../middleware/auth";
 import { getEffectiveLicenseeId } from "../../middleware/tenantIsolation";
 import { getPrintJobOperationalView, listPrintJobsForManufacturer } from "../../services/networkDirectPrintService";
 import { createAuthorizedPrintReissue } from "../../services/printReissueService";
 import { abandonUnconfirmedPrintJob } from "../../services/printLifecycleService";
+import { pausePrintJob, resumePrintJob, stopPrintJob } from "../../services/printOperationControlService";
+import {
+  createScopedPrintReissueRequest,
+  decideScopedPrintReissueRequest,
+  listScopedPrintReissueRequests,
+} from "../../services/printReissueRequestWorkflowService";
 import {
   ensurePrintOperationsUser,
-  ensurePrintReissueApprover,
   listPrintJobsQuerySchema,
   printJobIdParamSchema,
   reissuePrintJobSchema,
 } from "./shared";
+import {
+  createReissueRequestSchema,
+  listReissueRequestsQuerySchema,
+  printOperationReasonSchema,
+  reissueRequestDecisionSchema,
+  reissueRequestIdParamSchema,
+} from "./operationSchemas";
+
+const isPlatformAdmin = (role: UserRole) =>
+  role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
 
 export const downloadPrintJobPack = async (_req: AuthRequest, res: Response) => {
   return res.status(410).json({
@@ -77,10 +93,101 @@ export const getManufacturerPrintJobStatus = async (req: AuthRequest, res: Respo
   }
 };
 
+const printControlScope = (req: AuthRequest, user: NonNullable<AuthRequest["user"]>) => ({
+  role: user.role,
+  userId: user.userId,
+  licenseeId: getEffectiveLicenseeId(req),
+});
+
+const handleUserSafeError = (res: Response, error: any, fallback: string) => {
+  const statusCode = typeof error?.statusCode === "number" ? error.statusCode : 500;
+  const message = String(error?.message || fallback);
+  return res.status(statusCode).json({ success: false, error: statusCode >= 500 ? fallback : message });
+};
+
+export const pauseManufacturerPrintJob = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintOperationsUser(req, res);
+    if (!user) return;
+
+    const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
+    if (!parsedParams.success) {
+      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+    }
+    const parsedBody = printOperationReasonSchema.safeParse(req.body || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "A clear reason is required." });
+    }
+
+    const result = await pausePrintJob({
+      printJobId: parsedParams.data.id,
+      scope: printControlScope(req, user),
+      reason: parsedBody.data.reason,
+    });
+    return res.json({ success: true, data: result.view, meta: { idempotent: result.idempotent } });
+  } catch (error: any) {
+    console.error("pauseManufacturerPrintJob error:", error);
+    return handleUserSafeError(res, error, "Print run could not be paused.");
+  }
+};
+
+export const resumeManufacturerPrintJob = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintOperationsUser(req, res);
+    if (!user) return;
+
+    const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
+    if (!parsedParams.success) {
+      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+    }
+
+    const result = await resumePrintJob({
+      printJobId: parsedParams.data.id,
+      scope: printControlScope(req, user),
+    });
+    return res.json({ success: true, data: result.view, meta: { idempotent: result.idempotent } });
+  } catch (error: any) {
+    console.error("resumeManufacturerPrintJob error:", error);
+    return handleUserSafeError(res, error, "Print run could not be resumed.");
+  }
+};
+
+export const stopManufacturerPrintJob = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintOperationsUser(req, res);
+    if (!user) return;
+
+    const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
+    if (!parsedParams.success) {
+      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+    }
+    const parsedBody = printOperationReasonSchema.safeParse(req.body || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "A clear reason is required." });
+    }
+
+    const result = await stopPrintJob({
+      printJobId: parsedParams.data.id,
+      scope: printControlScope(req, user),
+      reason: parsedBody.data.reason,
+    });
+    return res.json({ success: true, data: result.view, meta: { idempotent: result.idempotent } });
+  } catch (error: any) {
+    console.error("stopManufacturerPrintJob error:", error);
+    return handleUserSafeError(res, error, "Print run could not be stopped.");
+  }
+};
+
 export const reissueManufacturerPrintJob = async (req: AuthRequest, res: Response) => {
   try {
-    const user = ensurePrintReissueApprover(req, res);
+    const user = ensurePrintOperationsUser(req, res);
     if (!user) return;
+    if (!isPlatformAdmin(user.role)) {
+      return res.status(403).json({
+        success: false,
+        error: "Create a reissue request for approval before replacement labels can be generated.",
+      });
+    }
 
     const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
@@ -125,6 +232,115 @@ export const reissueManufacturerPrintJob = async (req: AuthRequest, res: Respons
       });
     }
     return res.status(500).json({ success: false, error: message || "Internal server error" });
+  }
+};
+
+export const createManufacturerPrintReissueRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintOperationsUser(req, res);
+    if (!user) return;
+
+    const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
+    if (!parsedParams.success) {
+      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+    }
+    const parsedBody = createReissueRequestSchema.safeParse(req.body || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "Invalid reissue request" });
+    }
+
+    const result = await createScopedPrintReissueRequest({
+      scope: printControlScope(req, user),
+      originalPrintJobId: parsedParams.data.id,
+      reason: parsedBody.data.reason,
+      quantity: parsedBody.data.quantity ?? null,
+      affectedRangeStart: parsedBody.data.affectedRangeStart || null,
+      affectedRangeEnd: parsedBody.data.affectedRangeEnd || null,
+    });
+    return res.status(result.idempotent ? 200 : 201).json({ success: true, data: result.request, meta: { idempotent: result.idempotent } });
+  } catch (error: any) {
+    console.error("createManufacturerPrintReissueRequest error:", error);
+    return handleUserSafeError(res, error, "Print reissue request could not be created.");
+  }
+};
+
+export const listManufacturerPrintReissueRequests = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintOperationsUser(req, res);
+    if (!user) return;
+
+    const parsedQuery = listReissueRequestsQuerySchema.safeParse(req.query || {});
+    if (!parsedQuery.success) {
+      return res.status(400).json({ success: false, error: parsedQuery.error.errors[0]?.message || "Invalid query" });
+    }
+
+    const rows = await listScopedPrintReissueRequests({
+      scope: printControlScope(req, user),
+      status: parsedQuery.data.status as any,
+      limit: parsedQuery.data.limit,
+    });
+    return res.json({ success: true, data: rows });
+  } catch (error: any) {
+    console.error("listManufacturerPrintReissueRequests error:", error);
+    return handleUserSafeError(res, error, "Print reissue requests could not be loaded.");
+  }
+};
+
+export const approveManufacturerPrintReissueRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintOperationsUser(req, res);
+    if (!user) return;
+
+    const parsedParams = reissueRequestIdParamSchema.safeParse(req.params || {});
+    if (!parsedParams.success) {
+      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid reissue request id" });
+    }
+    const parsedBody = reissueRequestDecisionSchema.safeParse(req.body || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "A clear decision note is required." });
+    }
+
+    const result = await decideScopedPrintReissueRequest({
+      scope: printControlScope(req, user),
+      requestId: parsedParams.data.id,
+      decision: "approve",
+      decisionNote: parsedBody.data.decisionNote,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
+    });
+    return res.json({ success: true, data: result });
+  } catch (error: any) {
+    console.error("approveManufacturerPrintReissueRequest error:", error);
+    return handleUserSafeError(res, error, "Print reissue request could not be approved.");
+  }
+};
+
+export const rejectManufacturerPrintReissueRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintOperationsUser(req, res);
+    if (!user) return;
+
+    const parsedParams = reissueRequestIdParamSchema.safeParse(req.params || {});
+    if (!parsedParams.success) {
+      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid reissue request id" });
+    }
+    const parsedBody = reissueRequestDecisionSchema.safeParse(req.body || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "A clear decision note is required." });
+    }
+
+    const result = await decideScopedPrintReissueRequest({
+      scope: printControlScope(req, user),
+      requestId: parsedParams.data.id,
+      decision: "reject",
+      decisionNote: parsedBody.data.decisionNote,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
+    });
+    return res.json({ success: true, data: result });
+  } catch (error: any) {
+    console.error("rejectManufacturerPrintReissueRequest error:", error);
+    return handleUserSafeError(res, error, "Print reissue request could not be rejected.");
   }
 };
 

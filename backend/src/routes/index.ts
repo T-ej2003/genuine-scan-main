@@ -160,17 +160,24 @@ import {
 import { scanToken } from "../controllers/scanController";
 import {
   abandonManufacturerPrintJob,
+  approveManufacturerPrintReissueRequest,
   capturePrintJobSampleScan,
   confirmDirectPrintItem,
+  createManufacturerPrintReissueRequest,
   createPrintJob,
   downloadPrintJobPack,
   confirmPrintJob,
   getManufacturerPrintJobStatus,
   issueDirectPrintTokens,
   listManufacturerPrintJobs,
+  listManufacturerPrintReissueRequests,
+  pauseManufacturerPrintJob,
+  rejectManufacturerPrintReissueRequest,
   reissueManufacturerPrintJob,
   reportDirectPrintFailure,
   resolveDirectPrintToken,
+  resumeManufacturerPrintJob,
+  stopManufacturerPrintJob,
 } from "../controllers/printJobController";
 import {
   getPrinterConnectionStatus,
@@ -451,6 +458,18 @@ const gatewayJobRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("gateway.jobs", "Too many gateway job requests. Please wait before retrying."),
 });
 
+const printLifecycleRouteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: parsePositiveIntEnv("PRINT_LIFECYCLE_RATE_LIMIT_PER_MIN", 1800, 300, 10000),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "print.lifecycle", gatewayActor),
+  handler: createRateLimitJsonHandler(
+    "print.lifecycle",
+    "Printing is cooling down. You can try again after 90 seconds."
+  ),
+});
+
 const printMutationRouteLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 40,
@@ -480,7 +499,7 @@ const auditPackageExportRouteLimiter = rateLimit({
 
 const printReadRouteLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 40,
+  max: 90,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "print.read", (currentReq: any) => currentReq.user?.userId || null),
@@ -1726,25 +1745,25 @@ protectedMutationRouter.delete("/qr/codes", qrMutationPreAuthRouteLimiter, authe
 
 // ==================== MANUFACTURER PRINT JOBS ====================
 router.post("/print-gateway/heartbeat", gatewayHeartbeatRouteLimiter, gatewayHeartbeatIpLimiter, gatewayHeartbeatActorLimiter, gatewayHeartbeat);
-router.post("/print-gateway/direct/claim", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, claimGatewayDirectJob);
-router.post("/print-gateway/direct/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackGatewayDirectJob);
-router.post("/print-gateway/direct/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmGatewayDirectJob);
-router.post("/print-gateway/direct/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failGatewayDirectJob);
-router.post("/print-gateway/ipp/claim", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, claimGatewayIppJob);
-router.post("/print-gateway/ipp/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackGatewayIppJob);
-router.post("/print-gateway/test/claim", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, claimGatewayTestJob);
-router.post("/print-gateway/test/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackGatewayTestJob);
-router.post("/print-gateway/test/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmGatewayTestJob);
-router.post("/print-gateway/test/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failGatewayTestJob);
-router.post("/printer-agent/local/claim", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, claimLocalAgentPrintJob);
-router.post("/printer-agent/local/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackLocalAgentPrintJob);
-router.post("/printer-agent/local/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmLocalAgentPrintJob);
-router.post("/printer-agent/local/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failLocalAgentPrintJob);
-router.post("/printer-agent/local/test/ack", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, ackLocalAgentPrinterTestJob);
-router.post("/printer-agent/local/test/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmLocalAgentPrinterTestJob);
-router.post("/printer-agent/local/test/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failLocalAgentPrinterTestJob);
-router.post("/print-gateway/ipp/confirm", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, confirmGatewayIppJob);
-router.post("/print-gateway/ipp/fail", gatewayJobRouteLimiter, gatewayJobIpLimiter, gatewayJobActorLimiter, failGatewayIppJob);
+router.post("/print-gateway/direct/claim", printLifecycleRouteLimiter, claimGatewayDirectJob);
+router.post("/print-gateway/direct/ack", printLifecycleRouteLimiter, ackGatewayDirectJob);
+router.post("/print-gateway/direct/confirm", printLifecycleRouteLimiter, confirmGatewayDirectJob);
+router.post("/print-gateway/direct/fail", printLifecycleRouteLimiter, failGatewayDirectJob);
+router.post("/print-gateway/ipp/claim", printLifecycleRouteLimiter, claimGatewayIppJob);
+router.post("/print-gateway/ipp/ack", printLifecycleRouteLimiter, ackGatewayIppJob);
+router.post("/print-gateway/test/claim", printLifecycleRouteLimiter, claimGatewayTestJob);
+router.post("/print-gateway/test/ack", printLifecycleRouteLimiter, ackGatewayTestJob);
+router.post("/print-gateway/test/confirm", printLifecycleRouteLimiter, confirmGatewayTestJob);
+router.post("/print-gateway/test/fail", printLifecycleRouteLimiter, failGatewayTestJob);
+router.post("/printer-agent/local/claim", printLifecycleRouteLimiter, claimLocalAgentPrintJob);
+router.post("/printer-agent/local/ack", printLifecycleRouteLimiter, ackLocalAgentPrintJob);
+router.post("/printer-agent/local/confirm", printLifecycleRouteLimiter, confirmLocalAgentPrintJob);
+router.post("/printer-agent/local/fail", printLifecycleRouteLimiter, failLocalAgentPrintJob);
+router.post("/printer-agent/local/test/ack", printLifecycleRouteLimiter, ackLocalAgentPrinterTestJob);
+router.post("/printer-agent/local/test/confirm", printLifecycleRouteLimiter, confirmLocalAgentPrinterTestJob);
+router.post("/printer-agent/local/test/fail", printLifecycleRouteLimiter, failLocalAgentPrinterTestJob);
+router.post("/print-gateway/ipp/confirm", printLifecycleRouteLimiter, confirmGatewayIppJob);
+router.post("/print-gateway/ipp/fail", printLifecycleRouteLimiter, failGatewayIppJob);
 
 protectedMutationRouter.post(
   "/manufacturer/print-jobs",
@@ -1869,27 +1888,104 @@ protectedReadRouter.get(
   getManufacturerPrintJobStatus
 );
 protectedMutationRouter.post(
-  "/manufacturer/print-jobs/:id/abandon",
+  "/manufacturer/print-jobs/:id/pause",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
   authenticate,
   requireOpsUser,
   enforceTenantIsolation,
+  printMutationActorLimiter,
+  requireCsrf,
+  pauseManufacturerPrintJob
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-jobs/:id/resume",
   printMutationRouteLimiter,
   printMutationIpLimiter,
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  printMutationActorLimiter,
+  requireCsrf,
+  resumeManufacturerPrintJob
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-jobs/:id/stop",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  printMutationActorLimiter,
+  requireCsrf,
+  stopManufacturerPrintJob
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-jobs/:id/abandon",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
   printMutationActorLimiter,
   requireCsrf,
   abandonManufacturerPrintJob
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/reissue",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
   authenticate,
   requireOpsUser,
   requireRecentSensitiveAuth,
   enforceTenantIsolation,
-  printMutationRouteLimiter,
-  printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
   reissueManufacturerPrintJob
+);
+protectedReadRouter.get(
+  "/manufacturer/print-reissue-requests",
+  printReadRouteLimiter,
+  authenticate,
+  requireOpsUser,
+  protectedReadRouteLimiter,
+  enforceTenantIsolation,
+  listManufacturerPrintReissueRequests
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-jobs/:id/reissue-request",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  authenticate,
+  requireOpsUser,
+  enforceTenantIsolation,
+  printMutationActorLimiter,
+  requireCsrf,
+  createManufacturerPrintReissueRequest
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-reissue-requests/:id/approve",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  authenticate,
+  requireOpsUser,
+  requireRecentSensitiveAuth,
+  enforceTenantIsolation,
+  printMutationActorLimiter,
+  requireCsrf,
+  approveManufacturerPrintReissueRequest
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-reissue-requests/:id/reject",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  authenticate,
+  requireOpsUser,
+  requireRecentSensitiveAuth,
+  enforceTenantIsolation,
+  printMutationActorLimiter,
+  requireCsrf,
+  rejectManufacturerPrintReissueRequest
 );
 protectedReadRouter.get(
   "/manufacturer/print-jobs/:id/pack",
@@ -2281,6 +2377,7 @@ export {
   verifyClaimIpLimiter,
   verifyClaimActorLimiter,
   gatewayJobRouteLimiter,
+  printLifecycleRouteLimiter,
   gatewayJobIpLimiter,
   gatewayJobActorLimiter,
   printMutationRouteLimiter,
