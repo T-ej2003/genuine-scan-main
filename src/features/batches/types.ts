@@ -38,6 +38,18 @@ export type BatchRow = {
   blockedCodes?: number;
   remainingStartCode?: string | null;
   remainingEndCode?: string | null;
+  printReadiness?: {
+    printable: boolean;
+    batchId: string;
+    currentLifecycleState: string;
+    requiredPreviousStep?: string | null;
+    userMessage: string;
+    recoveryAction: string;
+    canRetry: boolean;
+    canRepairAutomatically: boolean;
+    reasonCode: string;
+    availableToPrint: number;
+  };
 };
 
 export type ManufacturerRow = { id: string; name: string; email: string; isActive: boolean };

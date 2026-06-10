@@ -345,6 +345,13 @@ export function BatchPrintJobDialog({
         releaseApprovalState,
       })
     : null;
+  const batchPrintReadiness = printBatch?.printReadiness || null;
+  const batchLifecycleBlocked =
+    Boolean(batchPrintReadiness && batchPrintReadiness.printable === false && readyToPrintCount > 0);
+  const batchLifecycleBlockReason =
+    batchPrintReadiness?.userMessage ||
+    batchPrintReadiness?.requiredPreviousStep ||
+    "Complete the previous batch step first.";
   const isJobActive = (job: PrintJobRow) =>
     ["PENDING", "SENT"].includes(job.status) ||
     ["ACTIVE", "RESUME_PENDING", "RETRY_WAITING"].includes(String(job.session?.status || ""));
@@ -446,6 +453,11 @@ export function BatchPrintJobDialog({
                 placeholder="Enter quantity"
               />
               <div className="text-xs text-muted-foreground">QR labels ready to print: {readyToPrintCount}</div>
+              {batchLifecycleBlocked ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                  {batchLifecycleBlockReason}
+                </div>
+              ) : null}
             </div>
 
             <div className="space-y-3 rounded-md border p-3">
@@ -610,6 +622,8 @@ export function BatchPrintJobDialog({
                     ? createUiActionState("pending", "Starting the print run now.")
                     : !selectedPrinterProfile
                       ? createUiActionState("disabled", "Choose a saved printer before you start this run.")
+                      : batchLifecycleBlocked
+                        ? createUiActionState("disabled", batchLifecycleBlockReason)
                       : !selectedPrinterCanPrint
                         ? createUiActionState("disabled", selectedPrinterNotice.detail || "This printer needs attention before it can print.")
                         : createUiActionState("enabled")

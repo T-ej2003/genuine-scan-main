@@ -393,7 +393,7 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
 
 export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || !canManagePrinterProfiles(req.user.role)) {
+    if (!req.user || !isOpsRole(req.user.role)) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 

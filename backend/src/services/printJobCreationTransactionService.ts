@@ -11,7 +11,8 @@ import {
 import prisma from "../config/database";
 import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "./qrTokenService";
 import { generatePrintJobNumber, type ensureSelectedPrinterReady } from "../controllers/print-job/shared";
-import { assertBatchTransitionAllowedFromDb } from "./batchStateMachineService";
+import { assertBatchTransitionAllowedFromDb, BatchStateTransitionError } from "./batchStateMachineService";
+import { reconcileBatchPrintLifecycle } from "./batchPrintLifecycleReconciliationService";
 import {
   buildReusablePrintItemResetData,
   countBlockedQrCodesForPrint,
@@ -53,6 +54,26 @@ export const createPrintJobRecords = async (params: {
         rangeStart: rangeStart || null,
         rangeEnd: rangeEnd || null,
       });
+      const reconciliation = await reconcileBatchPrintLifecycle({
+        batchId: batch.id,
+        actorUserId: userId,
+        apply: true,
+        reason: "print_job_creation",
+        tx,
+      });
+      if (!reconciliation.readiness.printable && reconciliation.readiness.reasonCode !== "no_printable_inventory") {
+        throw new BatchStateTransitionError("INVALID_STATE_TRANSITION", reconciliation.readiness.userMessage, {
+          batchId: batch.id,
+          currentLifecycleState: reconciliation.readiness.currentLifecycleState,
+          requiredPreviousStep: reconciliation.readiness.requiredPreviousStep,
+          userMessage: reconciliation.readiness.userMessage,
+          recoveryAction: reconciliation.readiness.recoveryAction,
+          canRetry: reconciliation.readiness.canRetry,
+          canRepairAutomatically: reconciliation.readiness.canRepairAutomatically,
+          availableToPrint: reconciliation.readiness.availableToPrint,
+          reasonCode: reconciliation.readiness.reasonCode,
+        });
+      }
       await assertBatchTransitionAllowedFromDb({
         batchId: batch.id,
         toStatus: "PRINT_REQUESTED",

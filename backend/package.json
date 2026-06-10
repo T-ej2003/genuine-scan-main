@@ -11,6 +11,7 @@
     "check:email:dns": "node scripts/check-email-dns.js",
     "analytics:refresh-rollups": "tsx scripts/refresh-analytics-rollups.ts",
     "data:backfill-batch-lineage": "tsx scripts/backfill-batch-lineage.ts",
+    "data:reconcile-batch-print-lifecycle": "tsx scripts/reconcile-batch-print-lifecycle.ts",
     "data:backfill-qr-provenance": "tsx scripts/backfill-qr-provenance.ts",
     "data:backfill-trace-events": "tsx scripts/backfill-trace-events.ts",
     "db:partitions:cutover": "tsx scripts/partition-hot-event-tables.ts",

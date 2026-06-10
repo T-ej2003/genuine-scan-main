@@ -1,7 +1,11 @@
-import { QRStatus } from "@prisma/client";
+import { BatchLifecycleState, QRStatus } from "@prisma/client";
 
 import prisma from "../config/database";
 import { listReservableQrCodeSummaries } from "./printReservationService";
+import {
+  buildBatchPrintReadinessFromSummary,
+  type BatchPrintReadiness,
+} from "./batchPrintLifecycleReconciliationService";
 
 const LINEAGE_BACKFILL_COOLDOWN_MS = 5 * 60_000;
 const lineageBackfillState = new Map<string, number>();
@@ -34,6 +38,9 @@ type BatchWithScope = {
   endCode: string;
   totalCodes: number;
   printedAt: Date | null;
+  lifecycleState?: BatchLifecycleState | null;
+  releasedAt?: Date | null;
+  releasedByUserId?: string | null;
   createdAt: Date;
   updatedAt: Date;
   licensee?: { id: string; name: string; prefix: string } | null;
@@ -50,6 +57,7 @@ export type BatchOperationalSummary = BatchWithScope & {
   remainingStartCode: string | null;
   remainingEndCode: string | null;
   inventoryCounts: BatchInventoryCounts;
+  printReadiness: BatchPrintReadiness;
   printedCodes: number;
   redeemedCodes: number;
   blockedCodes: number;
@@ -246,6 +254,18 @@ export const enrichBatchSummaries = async (batches: BatchWithScope[]): Promise<B
     const printableCodes = batchKind === "MANUFACTURER_CHILD" ? reservableCountMap.get(batch.id) || 0 : 0;
     const assignedCodes = batchKind === "MANUFACTURER_CHILD" ? batch.totalCodes : 0;
     const activeRange = batchKind === "MANUFACTURER_CHILD" ? printableRangeMap.get(batch.id) : unassignedRangeMap.get(batch.id);
+    const printReadiness = buildBatchPrintReadinessFromSummary({
+      batchId: batch.id,
+      lifecycleState: batch.lifecycleState || BatchLifecycleState.DRAFT,
+      releasedAt: batch.releasedAt || null,
+      availableToPrint: batchKind === "MANUFACTURER_CHILD" ? printableCodes : 0,
+      printedAt: batch.printedAt,
+      printedCodes: counts.printed + counts.redeemed + counts.scanned,
+      allocatedCodes: counts.allocated,
+      manufacturerId: batch.manufacturerId,
+      parentBatchId: batch.parentBatchId,
+      rootBatchId: batch.rootBatchId,
+    });
 
     return {
       ...batch,
@@ -257,6 +277,7 @@ export const enrichBatchSummaries = async (batches: BatchWithScope[]): Promise<B
       remainingStartCode: activeRange?.start || null,
       remainingEndCode: activeRange?.end || null,
       inventoryCounts: counts,
+      printReadiness,
       printedCodes: counts.printed,
       redeemedCodes: counts.redeemed + counts.scanned,
       blockedCodes: counts.blocked,

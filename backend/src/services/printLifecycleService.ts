@@ -17,6 +17,7 @@ import {
 import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
 import { assertBatchTransitionAllowedFromDb } from "./batchStateMachineService";
+import { reconcileBatchPrintLifecycle } from "./batchPrintLifecycleReconciliationService";
 
 export const OPEN_PRINT_STATES: PrintItemState[] = [
   PrintItemState.RESERVED,
@@ -176,6 +177,13 @@ export const finalizePrintSessionIfReady = async (params: {
   });
 
   if (jobUpdate.count > 0) {
+    await reconcileBatchPrintLifecycle({
+      batchId: params.batchId,
+      actorUserId: params.actorUserId,
+      apply: true,
+      reason: "print_confirmation",
+      tx: params.tx,
+    });
     await assertBatchTransitionAllowedFromDb({
       batchId: params.batchId,
       printJobId: params.printJobId,
@@ -187,7 +195,12 @@ export const finalizePrintSessionIfReady = async (params: {
       where: {
         id: params.batchId,
         lifecycleState: {
-          in: [BatchLifecycleState.PRINT_ACKNOWLEDGED],
+          in: [
+            BatchLifecycleState.DRAFT,
+            BatchLifecycleState.CODES_GENERATED,
+            BatchLifecycleState.PRINT_ACKNOWLEDGED,
+            BatchLifecycleState.PRINT_CONFIRMED,
+          ],
         },
       },
       data: {
