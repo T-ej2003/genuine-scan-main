@@ -36,8 +36,8 @@ export const DEFAULT_BUDGETS = [
 export const LEGACY_FILE_BUDGETS = {
   "backend/src/controllers/qrController.ts": {
     label: "Legacy controller",
-    maxLines: 1775,
-    reason: "QR controller remains above the default while batch-release hardening is stabilized; keep this ratchet tight until route groups are extracted.",
+    maxLines: 1809,
+    reason: "QR controller remains above the default after print-release safety wiring; keep this ratchet tight until QR route groups are extracted.",
   },
   "backend/src/controllers/incidentController.ts": { label: "Legacy controller", maxLines: 900 },
   "backend/src/controllers/userController.ts": { label: "Legacy controller", maxLines: 820 },
@@ -46,8 +46,8 @@ export const LEGACY_FILE_BUDGETS = {
   "backend/src/controllers/irIncidentController.ts": { label: "Legacy controller", maxLines: 760 },
   "backend/src/controllers/printerAgentJobController.ts": {
     label: "Legacy controller",
-    maxLines: 690,
-    reason: "Printer agent job endpoints are intentionally unchanged during CI repair; split agent registration and polling handlers in a focused follow-up.",
+    maxLines: 694,
+    reason: "Printer agent job endpoints remain legacy-sized after connector capability gating; split agent registration and polling handlers in a focused follow-up.",
   },
   "backend/src/controllers/printerController.ts": { label: "Legacy controller", maxLines: 680 },
   "backend/src/controllers/printerGatewayController.ts": { label: "Legacy controller", maxLines: 1080 },

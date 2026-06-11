@@ -123,10 +123,27 @@ mockModule("config/database.js", {
 });
 
 const { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } = require("../dist/services/printerAgentSigningService");
-const { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } = require("../dist/services/localAgentProtocol");
-const { upsertPrinterConnectionHeartbeat } = require("../dist/services/printerConnectionService");
+const {
+  LOCAL_AGENT_CAPABILITIES,
+  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_MIN_VERSION_HINT,
+  LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+} = require("../dist/services/localAgentProtocol");
+const { getPrinterConnectionStatusForUser, upsertPrinterConnectionHeartbeat } = require("../dist/services/printerConnectionService");
 
 (async () => {
+  const staleStatus = await getPrinterConnectionStatusForUser("manufacturer-1");
+  assert.strictEqual(
+    staleStatus.trusted,
+    false,
+    "old heartbeat missing current connector capabilities must not be trusted"
+  );
+  assert.strictEqual(
+    staleStatus.connectorUpdateRequired,
+    true,
+    "old heartbeat missing transport diagnostics should require connector update"
+  );
+
   const heartbeatIssuedAt = new Date().toISOString();
   const heartbeatPayload = buildPrinterAgentHeartbeatPayload({
     userId: "manufacturer-browser-heartbeat",
@@ -154,9 +171,11 @@ const { upsertPrinterConnectionHeartbeat } = require("../dist/services/printerCo
     selectedPrinterId: "zebra-zd421",
     selectedPrinterName: "Zebra ZD421",
     deviceName: "Factory Mac",
-    agentVersion: "2.0.0",
+    agentVersion: LOCAL_AGENT_MIN_VERSION_HINT,
     protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-    buildVersion: "2.0.0",
+    buildVersion: LOCAL_AGENT_MIN_VERSION_HINT,
+    transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+    capabilities: LOCAL_AGENT_CAPABILITIES,
     sourceIp: "198.51.100.10",
     userAgent: "Mozilla/5.0",
     agentId: registration.agentId,
