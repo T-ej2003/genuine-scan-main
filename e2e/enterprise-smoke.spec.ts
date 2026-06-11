@@ -292,6 +292,8 @@ test.describe.serial("Enterprise smoke flows", () => {
     await page.getByTestId("print-job-quantity-input").fill(env.printQuantity);
     await expect(page.getByTestId("print-job-printer-profile")).toBeVisible({ timeout: 30_000 });
     await selectRadixOption(page, "print-job-printer-profile", env.printerProfileName);
+    await refreshE2EPrinterHeartbeat(page);
+    await expect(page.getByTestId("create-print-job-dialog")).toContainText(/Printer ready/, { timeout: 30_000 });
     await expect(page.getByTestId("print-job-start-button")).toBeEnabled({ timeout: 30_000 });
     await page.getByTestId("print-job-start-button").click();
 

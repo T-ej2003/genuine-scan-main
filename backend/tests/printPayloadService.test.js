@@ -221,7 +221,15 @@ const run = () => {
   assert(!governedPayload.scanUrl.includes("TBD0000000002"), "ZPL scan URL must not use displayCode");
   assert(!governedPayload.payloadContent.includes("TBD0000000002"), "ZPL label must never print TBD placeholder serials");
   assert(governedPayload.payloadContent.includes("AUTHENTICITY CHECK"), "ZPL label should carry production authenticity copy");
-  assert(governedPayload.payloadContent.includes("scan.mscqr.com"), "ZPL label should show the short scan domain");
+  const governedScanUrl = new URL(governedPayload.scanUrl);
+  assert(governedScanUrl.protocol === "https:", "ZPL scan URL should use HTTPS");
+  assert(governedScanUrl.pathname === "/verify/c_governedpubliccode0000000000002", "ZPL scan URL should use the exact verify route");
+  const governedZplTextFields = Array.from(governedPayload.payloadContent.matchAll(/\^FD([^^]*)\^FS/g), (match) => match[1]);
+  const governedShortScanHost = "scan.mscqr.com";
+  assert(
+    governedZplTextFields.find((field) => field === governedShortScanHost) === governedShortScanHost,
+    "ZPL label should show the short scan domain",
+  );
   assert(diagnostics.qrPayloadLength > 40, "ZPL QR payload should contain the public verify URL");
   assert(diagnostics.endsWithZplEnd === true, "ZPL diagnostics should report ^XZ end");
   assert(diagnostics.qrCommandCount === 1, "Production ZPL should contain exactly one QR command");

@@ -10,6 +10,8 @@ export type LocalPrinterStatusPayload = {
   agentVersion?: string | null;
   protocolVersion?: string | null;
   buildVersion?: string | null;
+  transportDiagnosticsVersion?: string | null;
+  capabilities?: Record<string, unknown> | null;
   error?: string | null;
   agentId?: string | null;
   deviceFingerprint?: string | null;
@@ -52,6 +54,8 @@ export const buildHeartbeatPayloadFromLocalStatus = (
     agentVersion: localData?.agentVersion || undefined,
     protocolVersion: localData?.protocolVersion || undefined,
     buildVersion: localData?.buildVersion || undefined,
+    transportDiagnosticsVersion: localData?.transportDiagnosticsVersion || undefined,
+    capabilities: localData?.capabilities || undefined,
     error: localData?.error || undefined,
     agentId: localData?.agentId || undefined,
     deviceFingerprint: localData?.deviceFingerprint || undefined,
