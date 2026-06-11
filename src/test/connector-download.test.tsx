@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import ConnectorDownload from "@/pages/ConnectorDownload";
@@ -68,10 +68,16 @@ describe("ConnectorDownload", () => {
               platform: "windows",
               label: "Windows installer",
               installerKind: "exe",
-              trustLevel: "trusted",
+              artifactType: "windows-signed-installer",
+              trustLevel: "production",
               signatureStatus: "signed",
+              smartAppControlSafe: true,
               publisherName: "L&D Health Ltd",
               signedAt: "2026-05-19T00:00:00.000Z",
+              signatureSubject: "CN=L&D Health Ltd",
+              signatureIssuer: "CN=Microsoft Trusted Signing",
+              certificateThumbprint: "thumbprint",
+              timestamped: true,
               windowsTrustMode: "trusted",
               filename: "MSCQR-Connector-Windows-2026.5.19.exe",
               architecture: "x64",
@@ -79,6 +85,8 @@ describe("ConnectorDownload", () => {
               sha256: "0305cc85fe1af4ff65f87d584028d03745b6b70a227100d2f13f9ebe234e2d41",
               protocolVersion: "local-agent-direct-v2",
               buildVersion: "2026.5.19",
+              legalDocumentsIncluded: ["legal/EULA.txt", "legal/PRIVACY_POLICY.txt"],
+              releaseNotesIncluded: true,
               notes: ["Run the signed Windows installer once."],
               contentType: "application/vnd.microsoft.portable-executable",
               downloadPath: "/api/public/connector/download/2026.5.19/windows",
@@ -121,7 +129,8 @@ describe("ConnectorDownload", () => {
     expect(screen.getByText(/Run the installer once/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Signed Windows installer/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/L&D Health Ltd/i)).toBeInTheDocument();
-    expect(screen.getByText(/Azure Artifact Signing \/ signed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Azure Trusted Signing \/ signed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Legal documents included/i)).toBeInTheDocument();
     expect(screen.getAllByText(/local-agent-direct-v2/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Update required/i)).toBeInTheDocument();
     expect(screen.getByText(/^No$/i)).toBeInTheDocument();
@@ -163,19 +172,19 @@ describe("ConnectorDownload", () => {
             },
             windows: {
               platform: "windows",
-              label: "Windows test package",
-              installerKind: "zip",
-              trustLevel: "unsigned",
-              signatureStatus: "unsigned",
-              publisherName: null,
-              signedAt: null,
-              windowsTrustMode: "unsigned-test",
-              filename: "MSCQR-Connector-Windows-2026.3.12.zip",
+              label: "Windows installer",
+              installerKind: "exe",
+              trustLevel: "production",
+              signatureStatus: "signed",
+              publisherName: "L&D Health Ltd",
+              signedAt: "2026-03-12T20:00:00.000Z",
+              windowsTrustMode: "trusted",
+              filename: "MSCQR-Connector-Windows-2026.3.12.exe",
               architecture: "x64",
-              bytes: 2048,
+              bytes: 2048000,
               sha256: "b".repeat(64),
-              notes: ["Run Install Connector.cmd once."],
-              contentType: "application/zip",
+              notes: ["Run the signed Windows installer once."],
+              contentType: "application/vnd.microsoft.portable-executable",
               downloadPath: "/public/connector/download/2026.3.12/windows",
               downloadUrl: "https://example.test/public/connector/download/2026.3.12/windows",
             },
@@ -195,7 +204,7 @@ describe("ConnectorDownload", () => {
       "https://example.test/api/public/connector/download/2026.3.12/macos",
     );
     expectAllLinksToMatch(
-      await screen.findAllByRole("link", { name: /download windows test package/i }),
+      await screen.findAllByRole("link", { name: /download windows installer/i }),
       "https://example.test/api/public/connector/download/2026.3.12/windows",
     );
   });
@@ -315,7 +324,7 @@ describe("ConnectorDownload", () => {
     platformSpy.mockRestore();
   });
 
-  it("labels an unsigned Windows installer honestly for internal validation", async () => {
+  it("keeps unsigned Windows ZIPs in the internal validation panel", async () => {
     vi.mocked(apiClient.getInvitePreview).mockResolvedValue({ success: false, error: "No invite" } as any);
     vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
       success: true,
@@ -332,23 +341,27 @@ describe("ConnectorDownload", () => {
           notes: [],
           platforms: {
             macos: null,
-            windows: {
-              platform: "windows",
-              label: "Windows test installer",
-              installerKind: "exe",
-              trustLevel: "unsigned",
+            windows: null,
+            windowsUnsignedTest: {
+              platform: "windowsUnsignedTest",
+              label: "Windows test package",
+              installerKind: "zip",
+              artifactType: "windows-unsigned-test-zip",
+              trustLevel: "internal-test",
               signatureStatus: "unsigned",
+              smartAppControlSafe: false,
               publisherName: null,
               signedAt: null,
               windowsTrustMode: "unsigned-test",
-              filename: "MSCQR-Connector-Windows-2026.3.12-unsigned.exe",
+              internalOnly: true,
+              filename: "MSCQR-Connector-Windows-2026.3.12.zip",
               architecture: "x64",
-              bytes: 4096,
+              bytes: 4096000,
               sha256: "c".repeat(64),
-              notes: ["Run this Windows test installer only for internal verification."],
-              contentType: "application/vnd.microsoft.portable-executable",
-              downloadPath: "/api/public/connector/download/2026.3.12/windows",
-              downloadUrl: "https://example.test/api/public/connector/download/2026.3.12/windows",
+              notes: ["Run this Windows test package only for internal verification."],
+              contentType: "application/zip",
+              downloadPath: "/api/public/connector/download/2026.3.12/windowsUnsignedTest",
+              downloadUrl: "https://example.test/api/public/connector/download/2026.3.12/windowsUnsignedTest",
             },
           },
         },
@@ -361,11 +374,14 @@ describe("ConnectorDownload", () => {
       </MemoryRouter>,
     );
 
+    expect(await screen.findByText(/Signed connector release is not available yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /download windows test package/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(/Internal validation package/i));
     expectAllLinksToMatch(
-      await screen.findAllByRole("link", { name: /download windows test installer/i }),
-      "https://example.test/api/public/connector/download/2026.3.12/windows",
+      await screen.findAllByRole("link", { name: /download internal zip/i }),
+      "https://example.test/api/public/connector/download/2026.3.12/windowsUnsignedTest",
     );
-    expect(screen.getAllByText(/Windows can still warn on this unsigned test installer/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Do not use it for production factory rollout/i)).toBeInTheDocument();
   });
 
   it("shows update required when an installed connector reports a stale protocol", async () => {

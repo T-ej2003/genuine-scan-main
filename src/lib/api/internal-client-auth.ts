@@ -171,15 +171,25 @@ export const createAuthApi = (core: ApiClientCore) => ({
             platform: "macos";
             label: string;
             installerKind: "pkg" | "zip" | "exe" | "msi";
-            trustLevel: "trusted" | "unsigned";
+            artifactType?: string | null;
+            trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
             signatureStatus?: "signed" | "unsigned" | "unknown";
+            smartAppControlSafe?: boolean;
             publisherName?: string | null;
             signedAt?: string | null;
+            signatureSubject?: string | null;
+            signatureIssuer?: string | null;
+            certificateThumbprint?: string | null;
+            timestamped?: boolean;
+            timestampAuthority?: string | null;
             windowsTrustMode?: "trusted" | "unsigned-test";
+            internalOnly?: boolean;
             filename: string;
             architecture: string;
             bytes: number;
             sha256: string;
+            legalDocumentsIncluded?: string[];
+            releaseNotesIncluded?: boolean;
             notes: string[];
             contentType: string;
             downloadPath: string;
@@ -189,15 +199,25 @@ export const createAuthApi = (core: ApiClientCore) => ({
             platform: "windows";
             label: string;
             installerKind: "pkg" | "zip" | "exe" | "msi";
-            trustLevel: "trusted" | "unsigned";
+            artifactType?: string | null;
+            trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
             signatureStatus?: "signed" | "unsigned" | "unknown";
+            smartAppControlSafe?: boolean;
             publisherName?: string | null;
             signedAt?: string | null;
+            signatureSubject?: string | null;
+            signatureIssuer?: string | null;
+            certificateThumbprint?: string | null;
+            timestamped?: boolean;
+            timestampAuthority?: string | null;
             windowsTrustMode?: "trusted" | "unsigned-test";
+            internalOnly?: boolean;
             filename: string;
             architecture: string;
             bytes: number;
             sha256: string;
+            legalDocumentsIncluded?: string[];
+            releaseNotesIncluded?: boolean;
             notes: string[];
             contentType: string;
             downloadPath: string;
@@ -208,7 +228,10 @@ export const createAuthApi = (core: ApiClientCore) => ({
     }>("/public/connector/releases");
   },
 
-  async getLatestConnectorRelease() {
+  async getLatestConnectorRelease(options?: { includeInternal?: boolean }) {
+    const path = options?.includeInternal
+      ? "/public/connector/releases/latest?internal=1"
+      : "/public/connector/releases/latest";
     return core.request<{
       productName: string;
       latestVersion: string;
@@ -225,10 +248,17 @@ export const createAuthApi = (core: ApiClientCore) => ({
             platform: "macos";
             label: string;
             installerKind: "pkg" | "zip" | "exe" | "msi";
-            trustLevel: "trusted" | "unsigned";
+            artifactType?: string | null;
+            trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
             signatureStatus?: "signed" | "unsigned" | "unknown";
+            smartAppControlSafe?: boolean;
             publisherName?: string | null;
             signedAt?: string | null;
+            signatureSubject?: string | null;
+            signatureIssuer?: string | null;
+            certificateThumbprint?: string | null;
+            timestamped?: boolean;
+            timestampAuthority?: string | null;
             windowsTrustMode?: "trusted" | "unsigned-test";
             filename: string;
             architecture: string;
@@ -243,15 +273,53 @@ export const createAuthApi = (core: ApiClientCore) => ({
             platform: "windows";
             label: string;
             installerKind: "pkg" | "zip" | "exe" | "msi";
-            trustLevel: "trusted" | "unsigned";
+            artifactType?: string | null;
+            trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
             signatureStatus?: "signed" | "unsigned" | "unknown";
+            smartAppControlSafe?: boolean;
             publisherName?: string | null;
             signedAt?: string | null;
+            signatureSubject?: string | null;
+            signatureIssuer?: string | null;
+            certificateThumbprint?: string | null;
+            timestamped?: boolean;
+            timestampAuthority?: string | null;
             windowsTrustMode?: "trusted" | "unsigned-test";
+            internalOnly?: boolean;
             filename: string;
             architecture: string;
             bytes: number;
             sha256: string;
+            legalDocumentsIncluded?: string[];
+            releaseNotesIncluded?: boolean;
+            notes: string[];
+            contentType: string;
+            downloadPath: string;
+            downloadUrl: string;
+          };
+          windowsUnsignedTest?: null | {
+            platform: "windowsUnsignedTest";
+            label: string;
+            installerKind: "pkg" | "zip" | "exe" | "msi";
+            artifactType?: string | null;
+            trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
+            signatureStatus?: "signed" | "unsigned" | "unknown";
+            smartAppControlSafe?: boolean;
+            publisherName?: string | null;
+            signedAt?: string | null;
+            signatureSubject?: string | null;
+            signatureIssuer?: string | null;
+            certificateThumbprint?: string | null;
+            timestamped?: boolean;
+            timestampAuthority?: string | null;
+            windowsTrustMode?: "trusted" | "unsigned-test";
+            internalOnly?: boolean;
+            filename: string;
+            architecture: string;
+            bytes: number;
+            sha256: string;
+            legalDocumentsIncluded?: string[];
+            releaseNotesIncluded?: boolean;
             notes: string[];
             contentType: string;
             downloadPath: string;
@@ -259,7 +327,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
           };
         };
       };
-    }>("/public/connector/releases/latest");
+    }>(path);
   },
 
   async inviteUser(payload: {

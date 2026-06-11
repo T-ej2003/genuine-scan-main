@@ -36,7 +36,7 @@
         "supportsTransportDiagnostics": true,
         "supportsTestLabel": true
       },
-      "summary": "Install this complete Windows connector package on the printing computer, then MSCQR verifies local printer readiness.",
+      "summary": "The 2026.6.11 connector is ready for signing; publish the signed Windows installer before production factory rollout.",
       "notes": [
         "Use this unsigned Windows package only for internal validation until the signed Windows installer is published.",
         "Extract the ZIP fully on the Windows computer that will print, then run Install Connector.cmd.",
@@ -44,20 +44,23 @@
         "Windows Smart App Control can block unsigned packages; use the signed installer for production operator rollout."
       ],
       "platforms": {
-        "windows": {
+        "windowsUnsignedTest": {
           "label": "Windows test package",
           "installerKind": "zip",
-          "trustLevel": "unsigned",
+          "artifactType": "windows-unsigned-test-zip",
+          "trustLevel": "internal-test",
           "signatureStatus": "unsigned",
+          "smartAppControlSafe": false,
           "publisherName": null,
           "signedAt": null,
           "windowsTrustMode": "unsigned-test",
+          "internalOnly": true,
           "filename": "MSCQR-Connector-Windows-2026.6.11.zip",
           "relativePath": "2026.6.11/windows/MSCQR-Connector-Windows-2026.6.11.zip",
           "contentType": "application/zip",
           "architecture": "x64",
-          "bytes": 66843464,
-          "sha256": "f0fe703940ce6774a57d28827cf9a47b4bbe34444999de4c63c6461bf592d2e0",
+          "bytes": 66847059,
+          "sha256": "990559bc4127127b8dac66d755c0d8e50e9fbc7abadf6414f8a158f28d1df8ca",
           "protocolVersion": "local-agent-direct-v2",
           "buildVersion": "2026.6.11",
           "transportDiagnosticsVersion": "transport-diagnostics-v1",
@@ -72,6 +75,15 @@
             "supportsTransportDiagnostics": true,
             "supportsTestLabel": true
           },
+          "legalDocumentsIncluded": [
+            "legal/TERMS_AND_CONDITIONS.txt",
+            "legal/PRIVACY_POLICY.txt",
+            "legal/EULA.txt",
+            "legal/SECURITY_NOTICE.txt",
+            "legal/INSTALLATION_GUIDE.txt",
+            "legal/THIRD_PARTY_NOTICES.txt"
+          ],
+          "releaseNotesIncluded": true,
           "notes": [
             "Extract the ZIP fully before running Install Connector.cmd.",
             "Run Install Connector.cmd once on the Windows computer that will print.",

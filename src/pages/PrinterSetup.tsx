@@ -51,6 +51,7 @@ type PrinterTestLabelResponse = {
 type LatestConnectorReleaseInfo = {
   latestVersion?: string;
   release?: {
+    productionSignedAvailable?: boolean;
     platforms?: {
       macos?: unknown;
       windows?: unknown;
@@ -393,6 +394,10 @@ export default function PrinterSetupPage() {
     detectedPlatform === "unknown"
       ? null
       : connectorReleaseQuery.data?.release?.platforms?.[detectedPlatform] || null;
+  const signedConnectorUnavailable =
+    detectedPlatform === "windows" &&
+    connectorReleaseQuery.data?.release?.productionSignedAvailable === false &&
+    !detectedPlatformRelease;
   const helperNeedsUpdate = Boolean(remoteStatus?.connectorUpdateRequired || (helperVersion && latestHelperVersion && helperVersion !== latestHelperVersion));
 
   useEffect(() => {
@@ -682,11 +687,13 @@ export default function PrinterSetupPage() {
                   <div className="font-medium">Connector update required</div>
                   <div className="mt-1">
                     Detected: {helperVersion || "unknown"}. Required: {latestHelperVersion || REQUIRED_CONNECTOR_VERSION} or newer.
-                    Printing is blocked until this workstation connector is updated.
+                    {signedConnectorUnavailable
+                      ? " Signed connector release is not available yet. Production printing cannot continue."
+                      : " Printing is blocked until this workstation connector is updated."}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button size="sm" onClick={() => navigate(APP_PATHS.connectorDownload)}>
-                      {detectedPlatform === "macos" ? "Download latest Mac connector" : "Download latest Windows connector"}
+                      {detectedPlatform === "macos" ? "Download latest Mac connector" : "Download signed connector"}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => runtimeQuery.refetch()}>
                       Re-check connector

@@ -115,6 +115,11 @@ const updateManifest = (artifactPath) => {
   const filteredReleases = Array.isArray(existing.releases)
     ? existing.releases.filter((release) => release.version !== version)
     : [];
+  const existingRelease = Array.isArray(existing.releases)
+    ? existing.releases.find((release) => release.version === version)
+    : null;
+  const existingSignedWindows =
+    existingRelease?.platforms?.windows?.signatureStatus === "signed" ? existingRelease.platforms.windows : undefined;
   const relativePath = path.relative(releaseRoot, artifactPath).replace(/\\/g, "/");
   const bytes = fs.statSync(artifactPath).size;
 
@@ -137,14 +142,18 @@ const updateManifest = (artifactPath) => {
       "Windows Smart App Control can block unsigned packages; use the signed installer for production operator rollout.",
     ],
     platforms: {
-      windows: {
+      ...(existingSignedWindows ? { windows: existingSignedWindows } : {}),
+      windowsUnsignedTest: {
         label: "Windows test package",
         installerKind: "zip",
-        trustLevel: "unsigned",
+        artifactType: "windows-unsigned-test-zip",
+        trustLevel: "internal-test",
         signatureStatus: "unsigned",
+        smartAppControlSafe: false,
         publisherName: null,
         signedAt: null,
         windowsTrustMode: "unsigned-test",
+        internalOnly: true,
         filename: path.basename(artifactPath),
         relativePath,
         contentType: "application/zip",
@@ -155,6 +164,15 @@ const updateManifest = (artifactPath) => {
         buildVersion: version,
         transportDiagnosticsVersion,
         capabilities: connectorCapabilities,
+        legalDocumentsIncluded: [
+          "legal/TERMS_AND_CONDITIONS.txt",
+          "legal/PRIVACY_POLICY.txt",
+          "legal/EULA.txt",
+          "legal/SECURITY_NOTICE.txt",
+          "legal/INSTALLATION_GUIDE.txt",
+          "legal/THIRD_PARTY_NOTICES.txt",
+        ],
+        releaseNotesIncluded: true,
         notes: [
           "Extract the ZIP fully before running Install Connector.cmd.",
           "Run Install Connector.cmd once on the Windows computer that will print.",

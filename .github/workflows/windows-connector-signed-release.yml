@@ -235,7 +235,12 @@ jobs:
 
       - name: Normalize signed installer name and verify signatures
         shell: pwsh
+        env:
+          WINDOWS_CONNECTOR_PUBLISHER_NAME: ${{ vars.WINDOWS_CONNECTOR_PUBLISHER_NAME }}
         run: |
+          if (-not "$env:WINDOWS_CONNECTOR_PUBLISHER_NAME".Trim()) {
+            $env:WINDOWS_CONNECTOR_PUBLISHER_NAME = "L&D Health Ltd"
+          }
           $unsignedInstaller = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "MSCQR-Connector-Windows-${env:CONNECTOR_RELEASE_VERSION}-unsigned.exe"
           $signedInstaller = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "MSCQR-Connector-Windows-${env:CONNECTOR_RELEASE_VERSION}.exe"
           if (Test-Path $unsignedInstaller) {
@@ -257,6 +262,35 @@ jobs:
             }
           }
 
+          $mainInstaller = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "MSCQR-Connector-Windows-${env:CONNECTOR_RELEASE_VERSION}.exe"
+          if (-not (Test-Path $mainInstaller)) {
+            throw "Normalized signed Windows installer was not found: $mainInstaller"
+          }
+          $mainSignature = Get-AuthenticodeSignature -FilePath $mainInstaller
+          if ($mainSignature.Status -ne "Valid" -or -not $mainSignature.SignerCertificate) {
+            throw "Signed Windows installer does not have a valid signer certificate."
+          }
+          $reportPath = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "signature-report.json"
+          [ordered]@{
+            artifactFilename = Split-Path -Leaf $mainInstaller
+            status = [string]$mainSignature.Status
+            statusMessage = [string]$mainSignature.StatusMessage
+            signerSubject = [string]$mainSignature.SignerCertificate.Subject
+            issuer = [string]$mainSignature.SignerCertificate.Issuer
+            thumbprint = [string]$mainSignature.SignerCertificate.Thumbprint
+            notBefore = $mainSignature.SignerCertificate.NotBefore.ToUniversalTime().ToString("o")
+            notAfter = $mainSignature.SignerCertificate.NotAfter.ToUniversalTime().ToString("o")
+            timestamped = $true
+            timestampAuthority = "http://timestamp.acs.microsoft.com"
+            signedAt = (Get-Date).ToUniversalTime().ToString("o")
+            publisherName = "$env:WINDOWS_CONNECTOR_PUBLISHER_NAME"
+            azureSigningEndpoint = "$env:AZURE_ARTIFACT_SIGNING_ENDPOINT"
+            azureSigningAccount = "$env:AZURE_ARTIFACT_SIGNING_ACCOUNT"
+            azureSigningProfile = "$env:AZURE_ARTIFACT_SIGNING_PROFILE"
+            verificationSummary = "Get-AuthenticodeSignature returned Valid for the normalized Windows connector installer."
+          } | ConvertTo-Json -Depth 5 | Set-Content -Path $reportPath -Encoding utf8
+          "WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH=$reportPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Publish signed Windows connector manifest
         shell: pwsh
         env:
@@ -275,6 +309,7 @@ jobs:
           $env:WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH = $signedInstaller
           $env:WINDOWS_CONNECTOR_PUBLISHER_NAME = $publisherName
           $env:WINDOWS_CONNECTOR_SIGNED_AT = (Get-Date).ToUniversalTime().ToString("o")
+          $env:WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "signature-report.json"
           npm --prefix backend run connector:windows:publish-signed
 
       - name: Smoke-check published connector metadata

@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 const backendRoot = path.resolve(__dirname, "../..");
 const buildRoot = path.join(backendRoot, ".connector-build", "windows-installer");
 const windowsInstallRoot = path.join(backendRoot, "local-print-agent", "install", "windows");
+const legalRoot = path.join(backendRoot, "local-print-agent", "legal");
 const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const defaultVersion = readConnectorSourceVersion(backendRoot);
 const version = String(process.env.CONNECTOR_RELEASE_VERSION || defaultVersion).trim();
@@ -39,6 +40,34 @@ const removeDir = (dirPath) => {
 
 const writeAsciiFile = (filePath, contents) => {
   fs.writeFileSync(filePath, String(contents), "utf8");
+};
+
+const legalDocumentFiles = [
+  "TERMS_AND_CONDITIONS",
+  "PRIVACY_POLICY",
+  "EULA",
+  "SECURITY_NOTICE",
+  "INSTALLATION_GUIDE",
+  "THIRD_PARTY_NOTICES",
+];
+
+const copyLegalDocuments = (stageDir) => {
+  const legalStageDir = path.join(stageDir, "legal");
+  ensureDir(legalStageDir);
+
+  for (const name of legalDocumentFiles) {
+    const source = path.join(legalRoot, `${name}.md`);
+    if (!fs.existsSync(source)) {
+      throw new Error(`Missing connector legal document: ${source}`);
+    }
+    fs.copyFileSync(source, path.join(legalStageDir, `${name}.txt`));
+  }
+
+  const releaseNotesSource = path.join(legalRoot, "RELEASE_NOTES.md");
+  if (!fs.existsSync(releaseNotesSource)) {
+    throw new Error(`Missing connector release notes: ${releaseNotesSource}`);
+  }
+  fs.copyFileSync(releaseNotesSource, path.join(stageDir, "RELEASE_NOTES.txt"));
 };
 
 const shouldUseShell = (command) =>
@@ -169,6 +198,7 @@ const main = () => {
   writeAsciiFile(path.join(stageDir, "Install Connector.cmd"), readWindowsAssetTemplate("Install Connector.cmd"));
   writeAsciiFile(path.join(stageDir, "Uninstall Connector.cmd"), readWindowsAssetTemplate("Uninstall Connector.cmd"));
   writeAsciiFile(path.join(stageDir, "README.txt"), readWindowsAssetTemplate("README.txt"));
+  copyLegalDocuments(stageDir);
   writeAsciiFile(issOutputPath, renderInstallerScript(issTemplatePath, stageDir, outputDir));
 
   const compilerPath = resolveInnoSetupCompiler();

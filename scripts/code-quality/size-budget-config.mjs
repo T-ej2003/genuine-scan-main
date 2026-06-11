@@ -83,7 +83,11 @@ export const LEGACY_FILE_BUDGETS = {
     maxLines: 960,
     reason: "Audit logs still consolidate role-safe event presentation and manufacturer activity filters; split renderer/filter sections in a focused UX module pass.",
   },
-  "src/pages/ConnectorDownload.tsx": { label: "Legacy page", maxLines: 880 },
+  "src/pages/ConnectorDownload.tsx": {
+    label: "Legacy page",
+    maxLines: 900,
+    reason: "Connector download now separates signed production installers from internal validation artifacts; split platform cards and internal release panels next.",
+  },
   "src/pages/Dashboard.tsx": {
     label: "Legacy page",
     maxLines: 830,
@@ -92,7 +96,7 @@ export const LEGACY_FILE_BUDGETS = {
   "src/pages/PrinterDiagnostics.tsx": { label: "Legacy page", maxLines: 1620 },
   "src/pages/PrinterSetup.tsx": {
     label: "Legacy page",
-    maxLines: 1048,
-    reason: "Printer setup now carries factory remediation guidance for connector upgrades, stale WiFi queues, and USB Zebra route selection; split remediation panels into printer feature components next.",
+    maxLines: 1055,
+    reason: "Printer setup now carries factory remediation guidance plus signed-connector availability blockers; split remediation panels into printer feature components next.",
   },
 };

@@ -25,9 +25,16 @@ const requiredZipEntries = [
   "Install Connector.cmd",
   "Uninstall Connector.cmd",
   "README.txt",
+  "RELEASE_NOTES.txt",
   "install-startup-task.ps1",
   "uninstall-startup-task.ps1",
   "bin/mscqr-local-print-agent.exe",
+  "legal/TERMS_AND_CONDITIONS.txt",
+  "legal/PRIVACY_POLICY.txt",
+  "legal/EULA.txt",
+  "legal/SECURITY_NOTICE.txt",
+  "legal/INSTALLATION_GUIDE.txt",
+  "legal/THIRD_PARTY_NOTICES.txt",
 ];
 
 const readExportedString = (name) => {
@@ -57,6 +64,15 @@ const assertReadableFile = (filePath) => {
   return stat;
 };
 
+const isSignedProductionWindows = (windows) =>
+  Boolean(
+    windows &&
+      ["exe", "msi"].includes(windows.installerKind) &&
+      windows.signatureStatus === "signed" &&
+      ["production", "trusted"].includes(windows.trustLevel) &&
+      windows.windowsTrustMode === "trusted"
+  );
+
 const assertLatestContract = (manifest, latestRelease, windows, sourceVersion) => {
   const requiredProtocolVersion = readExportedString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION");
   const transportDiagnosticsVersion = readExportedString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION");
@@ -65,7 +81,7 @@ const assertLatestContract = (manifest, latestRelease, windows, sourceVersion) =
     throw new Error(`Connector manifest latestVersion ${manifest.latestVersion} does not match source version ${sourceVersion}.`);
   }
   if (!latestRelease) throw new Error("Connector manifest latestVersion does not reference a release.");
-  if (!windows) throw new Error("Latest connector release is missing a Windows artifact.");
+  if (!windows) throw new Error("Latest connector release is missing both signed Windows and internal Windows test artifacts.");
   if (manifest.minimumBuildVersion !== sourceVersion) {
     throw new Error(`Connector manifest minimumBuildVersion ${manifest.minimumBuildVersion} does not match source version ${sourceVersion}.`);
   }
@@ -136,8 +152,11 @@ const assertZipStructure = async (artifactPath) => {
 
 const assertTrustMetadata = (windows) => {
   if (windows.installerKind === "zip") {
-    if (windows.trustLevel !== "unsigned" || windows.signatureStatus !== "unsigned" || windows.windowsTrustMode !== "unsigned-test") {
-      throw new Error("Unsigned Windows ZIP metadata must be explicitly marked unsigned-test.");
+    if (windows.trustLevel !== "internal-test" || windows.signatureStatus !== "unsigned" || windows.windowsTrustMode !== "unsigned-test") {
+      throw new Error("Unsigned Windows ZIP metadata must be explicitly marked internal-test and unsigned-test.");
+    }
+    if (windows.internalOnly !== true || windows.smartAppControlSafe !== false) {
+      throw new Error("Unsigned Windows ZIP metadata must be internal-only and not Smart App Control safe.");
     }
     const allNotes = [windows.summary, ...(windows.notes || [])].join(" ");
     if (/metadata only/i.test(allNotes)) {
@@ -147,11 +166,17 @@ const assertTrustMetadata = (windows) => {
   }
 
   if (windows.installerKind === "exe" || windows.installerKind === "msi") {
-    if (windows.trustLevel !== "trusted" || windows.signatureStatus !== "signed" || windows.windowsTrustMode !== "trusted") {
-      throw new Error("Windows EXE/MSI releases must be signed and trusted in manifest metadata.");
+    if (!["production", "trusted"].includes(windows.trustLevel) || windows.signatureStatus !== "signed" || windows.windowsTrustMode !== "trusted") {
+      throw new Error("Windows EXE/MSI releases must be signed and production-trusted in manifest metadata.");
     }
-    if (!windows.publisherName || !windows.signedAt) {
-      throw new Error("Signed Windows releases must include publisherName and signedAt.");
+    if (!windows.publisherName || !windows.signedAt || !windows.signatureSubject || !windows.signatureIssuer || !windows.certificateThumbprint) {
+      throw new Error("Signed Windows releases must include publisher, signedAt, and signature certificate metadata.");
+    }
+    if (windows.smartAppControlSafe !== true || windows.artifactType !== "windows-signed-installer") {
+      throw new Error("Signed Windows releases must be marked as Smart App Control safe production installers.");
+    }
+    if (!Array.isArray(windows.legalDocumentsIncluded) || windows.legalDocumentsIncluded.length < 6 || windows.releaseNotesIncluded !== true) {
+      throw new Error("Signed Windows releases must include legal documents and release notes metadata.");
     }
     return;
   }
@@ -164,7 +189,9 @@ const sourceVersion = readConnectorSourceVersion(backendRoot);
 const latestRelease = Array.isArray(manifest.releases)
   ? manifest.releases.find((release) => release.version === manifest.latestVersion)
   : null;
-const windows = latestRelease?.platforms?.windows || null;
+const signedWindows = latestRelease?.platforms?.windows || null;
+const internalWindows = latestRelease?.platforms?.windowsUnsignedTest || null;
+const windows = isSignedProductionWindows(signedWindows) ? signedWindows : internalWindows;
 const artifactPath = windows?.relativePath ? path.join(releaseRoot, windows.relativePath) : null;
 const stat = artifactPath ? assertReadableFile(artifactPath) : null;
 
@@ -174,6 +201,7 @@ console.log(
     `connector source version: ${sourceVersion}`,
     `published connector metadata version: ${manifest.latestVersion || "(missing)"}`,
     `published installer filename: ${windows?.filename || "(missing)"}`,
+    `signed production available: ${isSignedProductionWindows(signedWindows) ? "yes" : "no"}`,
     `installer exists/readable: ${stat ? "yes" : "no"}`,
     `installer bytes: ${stat?.size ?? "(missing)"}`,
   ].join("\n")

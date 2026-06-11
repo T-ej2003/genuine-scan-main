@@ -65,8 +65,8 @@
     "targetMaxLines": 700
   },
   "src/pages/ConnectorDownload.tsx": {
-    "summary": "Connector download guidance, platform branching, and operator actions still live in one large page.",
-    "nextStep": "Split platform-specific flows and operator guidance blocks into dedicated connector feature sections.",
+    "summary": "Connector download guidance, platform branching, signed production availability, and internal validation artifact handling still live in one large page.",
+    "nextStep": "Split platform cards, signed-release unavailable state, and internal validation panel into dedicated connector feature sections.",
     "targetMaxLines": 700
   },
   "src/pages/Dashboard.tsx": {
@@ -80,7 +80,7 @@
     "targetMaxLines": 700
   },
   "src/pages/PrinterSetup.tsx": {
-    "summary": "Printer setup still bundles onboarding, connection state, stale WiFi remediation, USB Zebra selection, and troubleshooting logic in a single page.",
+    "summary": "Printer setup still bundles onboarding, connection state, signed connector blockers, stale WiFi remediation, USB Zebra selection, and troubleshooting logic in a single page.",
     "nextStep": "Split setup wizard, connection health, and factory remediation panels into feature components and hooks.",
     "targetMaxLines": 700
   }
