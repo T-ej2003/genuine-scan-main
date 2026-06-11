@@ -29,6 +29,7 @@ vi.mock("@/lib/api-client", () => ({
     createNetworkPrinter: vi.fn(),
     discoverRegisteredPrinter: vi.fn(),
     testPrinterLabel: vi.fn(),
+    selectLocalPrinter: vi.fn(),
   },
 }));
 
@@ -78,6 +79,7 @@ describe("PrinterSetupPage", () => {
         ],
       },
     } as any);
+    vi.mocked(apiClient.selectLocalPrinter).mockResolvedValue({ success: true, data: {} } as any);
   });
 
   it("lets the user finish the missing printer address without the form resetting", async () => {
@@ -113,5 +115,75 @@ describe("PrinterSetupPage", () => {
     expect(
       screen.getByText(/replace it with the real printer ip or host name/i),
     ).toBeInTheDocument();
+  });
+
+  it("shows connector update and USB Zebra alternative for a stale WiFi queue", async () => {
+    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({
+      data: {
+        registeredPrinters: [],
+        remoteStatus: {
+          connected: false,
+          eligibleForPrinting: false,
+          connectorUpdateRequired: true,
+          agentVersion: "2026.5.23",
+          buildVersion: "2026.5.23",
+        },
+      },
+      refetch: vi.fn().mockResolvedValue(undefined),
+    } as any);
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
+      success: true,
+      data: {
+        latestVersion: "2026.6.11",
+        release: { platforms: { windows: { version: "2026.6.11" } } },
+      },
+    } as any);
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
+      success: true,
+      data: {
+        printers: [
+          {
+            printerId: "MSCQR Zebra ZT410 WiFi",
+            printerName: "MSCQR Zebra ZT410 WiFi",
+            model: "ZDesigner ZT410-300dpi ZPL",
+            connection: "network",
+            online: false,
+            isDefault: true,
+            languages: ["ZPL"],
+            windowsPortName: "MSCQR-ZT410-WIFI-9100",
+            windowsPortHost: "10.45.144.9",
+            windowsPortNumber: 9100,
+            queueStatus: "Error",
+            queueHasErrors: true,
+            stuckJobCount: 1,
+          },
+          {
+            printerId: "ZDesigner ZT410-300dpi ZPL",
+            printerName: "ZDesigner ZT410-300dpi ZPL",
+            model: "ZDesigner ZT410-300dpi ZPL",
+            connection: "usb",
+            online: true,
+            portName: "USB001",
+            languages: ["ZPL"],
+            usbAvailable: true,
+          },
+        ],
+      },
+    } as any);
+
+    renderWithQueryClient(
+      <MemoryRouter>
+        <PrinterSetupPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("Connector update required")).toBeInTheDocument();
+    expect(screen.getByText(/Detected: 2026.5.23/i)).toBeInTheDocument();
+    expect(await screen.findByText("Network Zebra queue is broken")).toBeInTheDocument();
+    expect(screen.getByText(/10.45.144.9:9100/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use USB Zebra" }));
+    await waitFor(() => {
+      expect(apiClient.selectLocalPrinter).toHaveBeenCalledWith("ZDesigner ZT410-300dpi ZPL");
+    });
   });
 });

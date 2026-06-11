@@ -46,8 +46,8 @@ export const LEGACY_FILE_BUDGETS = {
   "backend/src/controllers/irIncidentController.ts": { label: "Legacy controller", maxLines: 760 },
   "backend/src/controllers/printerAgentJobController.ts": {
     label: "Legacy controller",
-    maxLines: 694,
-    reason: "Printer agent job endpoints remain legacy-sized after connector capability gating; split agent registration and polling handlers in a focused follow-up.",
+    maxLines: 717,
+    reason: "Printer agent job endpoints remain legacy-sized after full connector capability gating and upgrade backoff; split agent registration and polling handlers in a focused follow-up.",
   },
   "backend/src/controllers/printerController.ts": { label: "Legacy controller", maxLines: 680 },
   "backend/src/controllers/printerGatewayController.ts": { label: "Legacy controller", maxLines: 1080 },
@@ -90,5 +90,9 @@ export const LEGACY_FILE_BUDGETS = {
     reason: "Dashboard still owns cross-role launch-state routing; architecture notes track extraction into role-specific dashboard modules.",
   },
   "src/pages/PrinterDiagnostics.tsx": { label: "Legacy page", maxLines: 1620 },
-  "src/pages/PrinterSetup.tsx": { label: "Legacy page", maxLines: 980 },
+  "src/pages/PrinterSetup.tsx": {
+    label: "Legacy page",
+    maxLines: 1048,
+    reason: "Printer setup now carries factory remediation guidance for connector upgrades, stale WiFi queues, and USB Zebra route selection; split remediation panels into printer feature components next.",
+  },
 };

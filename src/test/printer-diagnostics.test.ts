@@ -7,6 +7,82 @@ import {
 } from "@/lib/printer-diagnostics";
 
 describe("printer diagnostics summary", () => {
+  it("blocks old connectors even when a printer is visible", () => {
+    const summary = getPrinterDiagnosticSummary({
+      localAgent: { reachable: true, connected: true, error: null },
+      remoteStatus: {
+        connected: false,
+        trusted: false,
+        compatibilityMode: false,
+        eligibleForPrinting: false,
+        connectionClass: "BLOCKED",
+        stale: false,
+        lastHeartbeatAt: new Date().toISOString(),
+        ageSeconds: 2,
+        agentVersion: "2026.5.23",
+        buildVersion: "2026.5.23",
+        connectorUpdateRequired: true,
+        printers: [{ printerId: "zebra-wifi", printerName: "MSCQR Zebra ZT410 WiFi", online: true }],
+      },
+      printers: [{ printerId: "zebra-wifi", printerName: "MSCQR Zebra ZT410 WiFi", online: true }],
+      selectedPrinterId: "zebra-wifi",
+    });
+
+    expect(summary.state).toBe("connector_update_required");
+    expect(summary.title).toBe("Connector update required");
+    expect(summary.detail).toContain("Detected: 2026.5.23");
+  });
+
+  it("recommends the USB Zebra when the saved WiFi queue is blocked", () => {
+    const summary = getPrinterDiagnosticSummary({
+      localAgent: { reachable: true, connected: true, error: null },
+      remoteStatus: {
+        connected: false,
+        trusted: false,
+        compatibilityMode: false,
+        eligibleForPrinting: false,
+        connectionClass: "BLOCKED",
+        stale: false,
+        lastHeartbeatAt: new Date().toISOString(),
+        ageSeconds: 2,
+        printers: [],
+      },
+      printers: [
+        {
+          printerId: "MSCQR Zebra ZT410 WiFi",
+          printerName: "MSCQR Zebra ZT410 WiFi",
+          model: "ZDesigner ZT410-300dpi ZPL",
+          connection: "network",
+          languages: ["ZPL"],
+          online: false,
+          windowsPortName: "MSCQR-ZT410-WIFI-9100",
+          windowsPortHost: "10.45.144.9",
+          windowsPortNumber: 9100,
+          queueStatus: "Error",
+          queueHasErrors: true,
+          stuckJobCount: 1,
+        },
+        {
+          printerId: "ZDesigner ZT410-300dpi ZPL",
+          printerName: "ZDesigner ZT410-300dpi ZPL",
+          model: "ZDesigner ZT410-300dpi ZPL",
+          connection: "usb",
+          portName: "USB001",
+          languages: ["ZPL"],
+          online: true,
+          usbAvailable: true,
+        },
+      ],
+      selectedPrinterId: "MSCQR Zebra ZT410 WiFi",
+    });
+
+    expect(summary.state).toBe("blocked_with_alternative");
+    expect(summary.title).toBe("Network Zebra queue is broken");
+    expect(summary.summary).toContain("10.45.144.9:9100");
+    expect(summary.detail).toContain("USB001");
+    expect(summary.recommendedPrinter?.printerId).toBe("ZDesigner ZT410-300dpi ZPL");
+  });
+
   it("flags agent unreachable when local agent cannot be reached", () => {
     const summary = getPrinterDiagnosticSummary({
       localAgent: {

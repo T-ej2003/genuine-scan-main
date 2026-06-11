@@ -20,6 +20,16 @@ export type LocalPrinterDTO = {
   languages?: string[];
   mediaSizes?: string[];
   dpi?: number | null;
+  deviceUri?: string | null;
+  portName?: string | null;
+  windowsPortName?: string | null;
+  windowsPortHost?: string | null;
+  windowsPortNumber?: number | null;
+  queueStatus?: string | null;
+  queueHasErrors?: boolean;
+  stuckJobCount?: number;
+  retainedJobCount?: number;
+  usbAvailable?: boolean;
   [key: string]: unknown;
 };
 

@@ -29,6 +29,24 @@ const clampRetryAfterMs = (value: unknown) => {
   return Math.max(DIRECT_PRINT_POLL_MS, Math.min(DIRECT_PRINT_MAX_BACKOFF_MS, Math.floor(parsed)));
 };
 
+export const isCloudConnectivityError = (error: any) => {
+  const code = String(error?.code || error?.cause?.code || error?.errno || "").toUpperCase();
+  const message = String(error?.message || error || "").toLowerCase();
+  return (
+    ["ENOTFOUND", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH"].includes(code) ||
+    message.includes("fetch failed") ||
+    message.includes("network") ||
+    message.includes("timed out")
+  );
+};
+
+export const resolveConnectivityRetryAfterMs = (failureCount: number) => {
+  const exponent = Math.min(5, Math.max(0, failureCount - 1));
+  const base = Math.min(DIRECT_PRINT_MAX_BACKOFF_MS, DIRECT_PRINT_POLL_MS * 2 ** exponent);
+  const jitter = Math.floor(Math.random() * Math.min(2_500, Math.max(500, Math.floor(base * 0.2))));
+  return clampRetryAfterMs(base + jitter);
+};
+
 const resolveBackendUrl = async () => {
   const state = await loadAgentState();
   const configured = String(
@@ -693,18 +711,29 @@ const runOnce = async () => {
 
 export const startDirectPrintWorker = () => {
   let stopped = false;
+  let connectivityFailureCount = 0;
 
   const loop = async () => {
     while (!stopped) {
       try {
         if (await resolveBackendUrl()) {
           const retryAfterMs = await runOnce();
+          connectivityFailureCount = 0;
           await new Promise((resolve) => setTimeout(resolve, clampRetryAfterMs(retryAfterMs)));
           continue;
         }
       } catch (error) {
-        console.error("local direct-print worker cycle failed:", error);
-        const retryAfterMs = clampRetryAfterMs((error as any)?.retryAfterMs);
+        const cloudConnectivityIssue = isCloudConnectivityError(error);
+        connectivityFailureCount = cloudConnectivityIssue ? connectivityFailureCount + 1 : 0;
+        const retryAfterMs = cloudConnectivityIssue
+          ? resolveConnectivityRetryAfterMs(connectivityFailureCount)
+          : clampRetryAfterMs((error as any)?.retryAfterMs);
+        console.error("local direct-print worker cycle failed:", {
+          error: (error as any)?.message || error,
+          errorCode: (error as any)?.errorCode || null,
+          cloudConnectivityIssue,
+          retryAfterMs,
+        });
         if ((error as any)?.serverTime || (error as any)?.timestampSkewSeconds != null) {
           console.error("local direct-print backend time check failed", {
             errorCode: (error as any)?.errorCode || null,

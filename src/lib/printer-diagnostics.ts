@@ -13,6 +13,14 @@ export type PrinterInventoryRow = {
   dpi?: number | null;
   deviceUri?: string | null;
   portName?: string | null;
+  windowsPortName?: string | null;
+  windowsPortHost?: string | null;
+  windowsPortNumber?: number | null;
+  queueStatus?: string | null;
+  queueHasErrors?: boolean;
+  stuckJobCount?: number;
+  retainedJobCount?: number;
+  usbAvailable?: boolean;
 };
 
 export type ManagedPrinterAutoDetectSuggestion = {
@@ -73,7 +81,9 @@ export type PrinterDiagnosticState =
   | "selection_required"
   | "heartbeat_stale"
   | "server_sync_pending"
-  | "trust_blocked";
+  | "trust_blocked"
+  | "connector_update_required"
+  | "blocked_with_alternative";
 
 export type PrinterDiagnosticSummary = {
   state: PrinterDiagnosticState;
@@ -84,6 +94,7 @@ export type PrinterDiagnosticSummary = {
   tone: "success" | "warning" | "neutral" | "danger";
   nextSteps: string[];
   selectedPrinter: PrinterInventoryRow | null;
+  recommendedPrinter?: PrinterInventoryRow | null;
 };
 
 export type NetworkDirectPrinterSummaryLike = {
@@ -124,6 +135,10 @@ const printerSearchText = (printer: PrinterInventoryRow) =>
     printer.printerName,
     printer.model,
     printer.connection,
+    printer.portName,
+    printer.windowsPortName,
+    printer.windowsPortHost,
+    printer.queueStatus,
     ...(printer.languages || []),
     ...(printer.protocols || []),
     ...(printer.mediaSizes || []),
@@ -136,6 +151,25 @@ export const isPreferredLabelPrinter = (printer?: PrinterInventoryRow | null) =>
 
 export const isLowerPriorityPrinter = (printer?: PrinterInventoryRow | null) =>
   Boolean(printer && hasAny(printerSearchText(printer), NON_LABEL_PRINTER_TERMS));
+
+const isUsbZebraPrinter = (printer?: PrinterInventoryRow | null) =>
+  Boolean(
+    printer &&
+      isPreferredLabelPrinter(printer) &&
+      (String(printer.connection || "").toLowerCase() === "usb" ||
+        String(printer.portName || printer.windowsPortName || "").toUpperCase().startsWith("USB") ||
+        printer.usbAvailable)
+  );
+
+export const findRecommendedUsbZebraAlternative = (
+  printers: PrinterInventoryRow[],
+  selectedPrinter?: PrinterInventoryRow | null
+) => {
+  if (!selectedPrinter || !isPreferredLabelPrinter(selectedPrinter)) return null;
+  const selectedBlocked = selectedPrinter.online === false || selectedPrinter.queueHasErrors;
+  if (!selectedBlocked) return null;
+  return printers.find((printer) => printer.printerId !== selectedPrinter.printerId && printer.online !== false && isUsbZebraPrinter(printer)) || null;
+};
 
 export const getPrinterSelectionRank = (printer: PrinterInventoryRow) => {
   const text = printerSearchText(printer);
@@ -282,6 +316,14 @@ export const normalizePrinterInventoryRows = (rows: unknown): PrinterInventoryRo
       dpi: Number.isFinite(Number((row as any).dpi)) ? Number((row as any).dpi) : null,
       deviceUri: toCleanString((row as any).deviceUri, 512) || null,
       portName: toCleanString((row as any).portName, 180) || null,
+      windowsPortName: toCleanString((row as any).windowsPortName, 180) || null,
+      windowsPortHost: toCleanString((row as any).windowsPortHost, 180) || null,
+      windowsPortNumber: Number.isFinite(Number((row as any).windowsPortNumber)) ? Number((row as any).windowsPortNumber) : null,
+      queueStatus: toCleanString((row as any).queueStatus, 120) || null,
+      queueHasErrors: Boolean((row as any).queueHasErrors),
+      stuckJobCount: Number.isFinite(Number((row as any).stuckJobCount)) ? Number((row as any).stuckJobCount) : 0,
+      retainedJobCount: Number.isFinite(Number((row as any).retainedJobCount)) ? Number((row as any).retainedJobCount) : 0,
+      usbAvailable: Boolean((row as any).usbAvailable),
     });
     if (result.length >= 40) break;
   }
@@ -371,12 +413,78 @@ export const getPrinterDiagnosticSummary = (params: {
 }): PrinterDiagnosticSummary => {
   const remote = params.remoteStatus || null;
   const printers = Array.isArray(params.printers) ? params.printers : [];
+  const explicitSelectedPrinter = printers.find((row) => row.printerId === params.selectedPrinterId) || null;
+  const stableSelectedPrinter = chooseStablePrinterSelection(printers, params.selectedPrinterId, remote?.selectedPrinterId, remote?.printerId);
   const selectedPrinter =
-    chooseStablePrinterSelection(printers, params.selectedPrinterId, remote?.selectedPrinterId, remote?.printerId) ||
+    (explicitSelectedPrinter && (explicitSelectedPrinter.online === false || !isLowerPriorityPrinter(explicitSelectedPrinter))
+      ? explicitSelectedPrinter
+      : stableSelectedPrinter) ||
     printers.find((row) => row.isDefault) ||
     printers[0] ||
     null;
   const selectedPrinterId = String(selectedPrinter?.printerId || "").trim();
+  const recommendedUsbPrinter = findRecommendedUsbZebraAlternative(printers, selectedPrinter);
+  const selectedPortHost = selectedPrinter?.windowsPortHost || null;
+  const selectedPortNumber = selectedPrinter?.windowsPortNumber || (selectedPortHost ? 9100 : null);
+
+  if (remote?.connectorUpdateRequired) {
+    const detected = remote.buildVersion || remote.agentVersion || "unknown";
+    return {
+      state: "connector_update_required",
+      badgeLabel: "Update connector",
+      title: "Connector update required",
+      summary: "Printing is blocked until this workstation connector is updated.",
+      detail: `Detected: ${detected}. Required: 2026.6.11 or newer with transport diagnostics.`,
+      tone: "danger",
+      nextSteps: [
+        "Update MSCQR Connector on this workstation.",
+        "Restart the connector, then re-check the printer connection.",
+        "Print a setup test label before starting production labels.",
+      ],
+      selectedPrinter,
+      recommendedPrinter: recommendedUsbPrinter,
+    };
+  }
+
+  if (recommendedUsbPrinter) {
+    const endpoint = selectedPortHost ? `${selectedPortHost}:${selectedPortNumber || 9100}` : "its saved Windows TCP/IP port";
+    const stuckCount = Number(selectedPrinter?.stuckJobCount || 0);
+    return {
+      state: "blocked_with_alternative",
+      badgeLabel: "Use USB Zebra",
+      title: "Network Zebra queue is broken",
+      summary: `Saved WiFi queue points to ${endpoint}, which is unreachable from this workstation.`,
+      detail: `${recommendedUsbPrinter.printerName} is available on ${recommendedUsbPrinter.portName || recommendedUsbPrinter.windowsPortName || "USB"}.${stuckCount > 0 ? ` Windows queue has ${stuckCount} stuck MSCQR job${stuckCount === 1 ? "" : "s"}.` : ""}`,
+      tone: "danger",
+      nextSteps: [
+        "Choose USB Zebra instead.",
+        "Print a setup test label on the USB route.",
+        "Update the WiFi printer IP before using the network queue again.",
+      ],
+      selectedPrinter,
+      recommendedPrinter: recommendedUsbPrinter,
+    };
+  }
+
+  if (selectedPrinter?.queueHasErrors) {
+    const hostCopy = selectedPortHost ? ` Saved Zebra IP is stale or unreachable: ${selectedPortHost}:${selectedPortNumber || 9100}.` : "";
+    const stuckCopy = Number(selectedPrinter.stuckJobCount || 0) > 0 ? " Windows queue has stuck jobs." : "";
+    return {
+      state: "printer_offline",
+      badgeLabel: "Queue error",
+      title: "Windows queue has an error",
+      summary: `${selectedPrinter.printerName} is blocked by Windows queue status.`,
+      detail: sanitizePrinterUiError(`${selectedPrinter.queueStatus || ""}${hostCopy}${stuckCopy}`, "Clear the Windows queue before printing."),
+      tone: "danger",
+      nextSteps: [
+        "Clear stuck MSCQR print jobs from this printer queue.",
+        "Use a healthy USB Zebra route if one is available.",
+        "Update the saved WiFi printer IP before using this network queue again.",
+      ],
+      selectedPrinter,
+      recommendedPrinter: null,
+    };
+  }
 
   if (remote?.connected && remote?.eligibleForPrinting) {
     const pendingSecureVerification =
@@ -454,12 +562,17 @@ export const getPrinterDiagnosticSummary = (params: {
   }
 
   if (selectedPrinter?.online === false) {
+    const hostCopy = selectedPortHost ? ` Saved Zebra IP is stale or unreachable: ${selectedPortHost}:${selectedPortNumber || 9100}.` : "";
+    const stuckCopy = Number(selectedPrinter.stuckJobCount || 0) > 0 ? " Windows queue has stuck jobs." : "";
     return {
       state: "printer_offline",
       badgeLabel: "Printer offline",
       title: "Selected printer is offline",
       summary: `${selectedPrinter.printerName} is known to the local agent but is currently offline.`,
-      detail: sanitizePrinterUiError(remote?.error || remote?.trustReason, "The printer is configured but is not ready for active jobs."),
+      detail: sanitizePrinterUiError(
+        `${remote?.error || remote?.trustReason || ""}${hostCopy}${stuckCopy}`,
+        "The printer is configured but is not ready for active jobs."
+      ),
       tone: "danger",
       nextSteps: [
         "Power on the printer and clear any paper, toner, label, or queue issue.",

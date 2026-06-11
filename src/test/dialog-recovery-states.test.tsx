@@ -79,6 +79,7 @@ describe("dialog recovery states", () => {
     renderPrintDialog();
 
     expect(screen.getByTestId("print-job-start-button")).toBeEnabled();
+    expect(screen.getByText("Pause, resume, and stop appear after a print run starts.")).toBeInTheDocument();
   });
 
   it("keeps print start disabled when backend lifecycle readiness blocks the batch", () => {

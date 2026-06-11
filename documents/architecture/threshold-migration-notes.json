@@ -20,7 +20,7 @@
     "targetMaxLines": 500
   },
   "backend/src/controllers/printerAgentJobController.ts": {
-    "summary": "Printer agent job scheduling, retries, and status reconciliation are still controller-led.",
+    "summary": "Printer agent job scheduling, retries, upgrade-required backoff, and status reconciliation are still controller-led.",
     "nextStep": "Move job orchestration and reconciliation into printer-agent services and keep controllers request-focused.",
     "targetMaxLines": 500
   },
@@ -80,8 +80,8 @@
     "targetMaxLines": 700
   },
   "src/pages/PrinterSetup.tsx": {
-    "summary": "Printer setup still bundles onboarding, connection state, and troubleshooting logic in a single page.",
-    "nextStep": "Split setup wizard, connection health, and remediation flows into feature components and hooks.",
+    "summary": "Printer setup still bundles onboarding, connection state, stale WiFi remediation, USB Zebra selection, and troubleshooting logic in a single page.",
+    "nextStep": "Split setup wizard, connection health, and factory remediation panels into feature components and hooks.",
     "targetMaxLines": 700
   }
 }

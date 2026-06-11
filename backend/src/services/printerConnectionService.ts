@@ -10,9 +10,8 @@ import prisma from "../config/database";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
 import {
   CONNECTOR_UPDATE_REQUIRED_MESSAGE,
-  hasRequiredTransportDiagnosticsCapabilities,
-  isLocalAgentBuildAtLeast,
-  isLocalAgentProtocolCompatible,
+  getMissingTransportDiagnosticsCapabilities,
+  isLocalAgentTransportDiagnosticsCurrent,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
   LOCAL_AGENT_MIN_VERSION_HINT,
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
@@ -244,6 +243,18 @@ const normalizePrinterInventory = (value: unknown): PrinterInventoryDevice[] => 
       languages: toCleanStringArray((raw as any).languages, 12, 60),
       mediaSizes: toCleanStringArray((raw as any).mediaSizes, 12, 60),
       dpi: Number.isFinite(Number((raw as any).dpi)) ? Number((raw as any).dpi) : null,
+      deviceUri: toCleanString((raw as any).deviceUri, 512) || null,
+      portName: toCleanString((raw as any).portName, 180) || null,
+      windowsPortName: toCleanString((raw as any).windowsPortName, 180) || null,
+      windowsPortHost: toCleanString((raw as any).windowsPortHost, 180) || null,
+      windowsPortNumber: Number.isFinite(Number((raw as any).windowsPortNumber))
+        ? Number((raw as any).windowsPortNumber)
+        : null,
+      queueStatus: toCleanString((raw as any).queueStatus, 120) || null,
+      queueHasErrors: Boolean((raw as any).queueHasErrors),
+      stuckJobCount: Number.isFinite(Number((raw as any).stuckJobCount)) ? Number((raw as any).stuckJobCount) : 0,
+      retainedJobCount: Number.isFinite(Number((raw as any).retainedJobCount)) ? Number((raw as any).retainedJobCount) : 0,
+      usbAvailable: Boolean((raw as any).usbAvailable),
     });
     if (rows.length >= 40) break;
   }
@@ -314,12 +325,15 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
 
   const latestAttestation = registration.attestations[0] || null;
   const payload = normalizeStatusPayload(latestAttestation?.metadata || {});
+  const missingCapabilities = getMissingTransportDiagnosticsCapabilities(payload.capabilities);
   const connectorUpdateRequired = Boolean(
     payload.connected &&
-      (!isLocalAgentProtocolCompatible(payload.protocolVersion) ||
-        !isLocalAgentBuildAtLeast(payload.buildVersion, LOCAL_AGENT_MIN_VERSION_HINT) ||
-        payload.transportDiagnosticsVersion !== LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION ||
-        !hasRequiredTransportDiagnosticsCapabilities(payload.capabilities))
+      !isLocalAgentTransportDiagnosticsCurrent({
+        protocolVersion: payload.protocolVersion,
+        buildVersion: payload.buildVersion,
+        transportDiagnosticsVersion: payload.transportDiagnosticsVersion,
+        capabilities: payload.capabilities,
+      })
   );
   const nowMs = Date.now();
   const attestedMs = latestAttestation?.attestedAt ? new Date(latestAttestation.attestedAt).getTime() : NaN;
@@ -397,6 +411,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     buildVersion: payload.buildVersion,
     transportDiagnosticsVersion: payload.transportDiagnosticsVersion,
     capabilities: payload.capabilities,
+    missingCapabilities,
     connectorUpdateRequired,
     selectedPrinterId: payload.selectedPrinterId || payload.printerId || null,
     selectedPrinterName: payload.selectedPrinterName || payload.printerName || null,

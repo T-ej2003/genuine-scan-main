@@ -633,6 +633,12 @@ export function BatchPrintJobDialog({
               />
             </div>
 
+            {!printJobId ? (
+              <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+                Pause, resume, and stop appear after a print run starts.
+              </div>
+            ) : null}
+
             {printJobId ? (
               <div className="space-y-2 rounded-md border p-3 text-sm">
                 <div className="text-xs text-muted-foreground">Current print run</div>

@@ -16,33 +16,46 @@ const assert = (condition, message) => {
 
 const run = async () => {
   const printers = parseWindowsPrinters(
-    JSON.stringify([
-      {
-        Name: "Zebra ZD421",
-        DriverName: "ZDesigner ZD421-203dpi ZPL",
-        PortName: "USB001",
-        WorkOffline: false,
-        Default: true,
-        PrinterStatus: 3,
-        ExtendedPrinterStatus: 2,
-      },
-      {
-        Name: "Canon Office Printer",
-        DriverName: "Canon Generic Plus UFR II",
-        PortName: "WSD-12345",
-        WorkOffline: true,
-        Default: false,
-        PrinterStatus: 7,
-        ExtendedPrinterStatus: 7,
-      },
-    ])
+    JSON.stringify({
+      printers: [
+        {
+          Name: "Zebra ZD421",
+          DriverName: "ZDesigner ZD421-203dpi ZPL",
+          PortName: "USB001",
+          WorkOffline: false,
+          Default: true,
+          PrinterStatus: 3,
+          ExtendedPrinterStatus: 2,
+        },
+        {
+          Name: "MSCQR Zebra ZT410 WiFi",
+          DriverName: "ZDesigner ZT410-300dpi ZPL",
+          PortName: "MSCQR-ZT410-WIFI-9100",
+          WorkOffline: false,
+          Default: false,
+          PrinterStatus: "Error",
+          ExtendedPrinterStatus: 2,
+        },
+      ],
+      ports: [
+        { Name: "MSCQR-ZT410-WIFI-9100", PrinterHostAddress: "10.45.144.9", PortNumber: 9100 },
+        { Name: "USB001", PrinterHostAddress: null, PortNumber: null },
+      ],
+      jobs: [
+        { PrinterName: "MSCQR Zebra ZT410 WiFi", ID: 43, Name: "MSCQR label", JobStatus: "Error, Printing, Retained" },
+        { PrinterName: "MSCQR Zebra ZT410 WiFi", ID: 44, Name: "MSCQR label", JobStatus: "Normal" },
+      ],
+    })
   );
 
   assert(printers.length === 2, "Expected two parsed Windows printers");
   assert(printers[0].name === "Zebra ZD421", "Expected printer name");
   assert(printers[0].online === true, "Online Windows printer should be marked online");
   assert(printers[0].isDefault === true, "Default Windows printer should be preserved");
-  assert(printers[1].online === false, "Offline Windows printer should be marked offline");
+  assert(printers[1].online === false, "Windows queue errors should be marked offline");
+  assert(printers[1].portHost === "10.45.144.9", "TCP/IP port host should be preserved");
+  assert(printers[1].portNumber === 9100, "TCP/IP port number should be preserved");
+  assert(printers[1].stuckJobCount === 1, "Stuck retained MSCQR jobs should be counted");
 
   const localPrinters = printers.map((printer) => ({
     printerId: printer.name,
@@ -55,6 +68,15 @@ const run = async () => {
     languages: [],
     mediaSizes: [],
     dpi: null,
+    portName: printer.portName,
+    windowsPortName: printer.portName,
+    windowsPortHost: printer.portHost,
+    windowsPortNumber: printer.portNumber,
+    queueStatus: printer.queueStatus,
+    queueHasErrors: printer.queueHasErrors,
+    stuckJobCount: printer.stuckJobCount,
+    retainedJobCount: printer.retainedJobCount,
+    usbAvailable: printer.portName === "USB001" && printer.online,
   }));
 
   const noPrintersSelection = resolveSelectedPrinter([], null);
@@ -75,7 +97,7 @@ const run = async () => {
   assert(defaultReadySelection.selectionSource === "default", "Default online printer should win selection");
   assert(defaultReadyVerification.state === "READY", "Online default printer should verify as READY");
 
-  const offlinePersistedSelection = resolveSelectedPrinter(localPrinters, "Canon Office Printer");
+  const offlinePersistedSelection = resolveSelectedPrinter(localPrinters, "MSCQR Zebra ZT410 WiFi");
   const offlinePersistedVerification = buildSetupVerification({
     printers: localPrinters,
     selection: offlinePersistedSelection,
@@ -92,7 +114,7 @@ const run = async () => {
 
   const nonDefaultPrinters = [
     { ...localPrinters[0], isDefault: false, online: false, printerName: "Offline Defaultless", printerId: "Offline Defaultless" },
-    { ...localPrinters[1], printerName: "Brother Ready", printerId: "Brother Ready", online: true, isDefault: false },
+    { ...localPrinters[1], printerName: "Brother Ready", printerId: "Brother Ready", online: true, isDefault: false, queueHasErrors: false },
   ];
   const firstOnlineSelection = resolveSelectedPrinter(nonDefaultPrinters, null);
   const firstOnlineVerification = buildSetupVerification({

@@ -19,6 +19,10 @@ export const LOCAL_AGENT_CAPABILITIES = {
   supportsTestLabel: true,
 } as const;
 
+export const REQUIRED_LOCAL_AGENT_CAPABILITY_FLAGS = Object.keys(LOCAL_AGENT_CAPABILITIES) as Array<
+  keyof typeof LOCAL_AGENT_CAPABILITIES
+>;
+
 export const isLocalAgentProtocolCompatible = (protocolVersion?: string | null) =>
   String(protocolVersion || "").trim() === LOCAL_AGENT_DIRECT_PROTOCOL_VERSION;
 
@@ -43,13 +47,19 @@ export const compareLocalAgentVersions = (left?: string | null, right?: string |
 export const isLocalAgentBuildAtLeast = (buildVersion?: string | null, minimum = LOCAL_AGENT_MIN_VERSION_HINT) =>
   compareLocalAgentVersions(buildVersion, minimum) >= 0;
 
+export const getMissingTransportDiagnosticsCapabilities = (capabilities?: Record<string, unknown> | null) =>
+  REQUIRED_LOCAL_AGENT_CAPABILITY_FLAGS.filter((flag) => capabilities?.[flag] !== true);
+
 export const hasRequiredTransportDiagnosticsCapabilities = (capabilities?: Record<string, unknown> | null) =>
-  Boolean(
-    capabilities &&
-      capabilities.supportsPrinterQueueSnapshot === true &&
-      capabilities.supportsWindowsTcpPortInspection === true &&
-      capabilities.supportsRawTcpConnectTest === true &&
-      capabilities.supportsSpoolJobStatus === true &&
-      capabilities.supportsTransportDiagnostics === true &&
-      capabilities.supportsTestLabel === true
-  );
+  Boolean(capabilities && getMissingTransportDiagnosticsCapabilities(capabilities).length === 0);
+
+export const isLocalAgentTransportDiagnosticsCurrent = (input: {
+  protocolVersion?: string | null;
+  buildVersion?: string | null;
+  transportDiagnosticsVersion?: string | null;
+  capabilities?: Record<string, unknown> | null;
+}) =>
+  isLocalAgentProtocolCompatible(input.protocolVersion) &&
+  isLocalAgentBuildAtLeast(input.buildVersion, LOCAL_AGENT_MIN_VERSION_HINT) &&
+  input.transportDiagnosticsVersion === LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION &&
+  hasRequiredTransportDiagnosticsCapabilities(input.capabilities);

@@ -16,7 +16,12 @@ import { Switch } from "@/components/ui/switch";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
-import { deriveManagedPrinterAutoDetect, normalizePrinterInventoryRows, type PrinterInventoryRow } from "@/lib/printer-diagnostics";
+import {
+  deriveManagedPrinterAutoDetect,
+  findRecommendedUsbZebraAlternative,
+  normalizePrinterInventoryRows,
+  type PrinterInventoryRow,
+} from "@/lib/printer-diagnostics";
 import { getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { createUiActionState } from "@/lib/ui-actions";
 import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
@@ -65,6 +70,7 @@ const NETWORK_DIRECT_LANGUAGES: ManagedRouteForm["commandLanguage"][] = [
   "ZSIM",
   "CPCL",
 ];
+const REQUIRED_CONNECTOR_VERSION = "2026.6.11";
 
 type ManualFieldHelpKey = "vendor" | "model" | "host" | "port" | "resourcePath" | "printerUri";
 
@@ -387,7 +393,7 @@ export default function PrinterSetupPage() {
     detectedPlatform === "unknown"
       ? null
       : connectorReleaseQuery.data?.release?.platforms?.[detectedPlatform] || null;
-  const helperNeedsUpdate = Boolean(helperVersion && latestHelperVersion && helperVersion !== latestHelperVersion);
+  const helperNeedsUpdate = Boolean(remoteStatus?.connectorUpdateRequired || (helperVersion && latestHelperVersion && helperVersion !== latestHelperVersion));
 
   useEffect(() => {
     if (selectedPrinterId) return;
@@ -406,6 +412,10 @@ export default function PrinterSetupPage() {
   const suggestion = useMemo(
     () => (selectedPrinter ? deriveManagedPrinterAutoDetect(selectedPrinter) : null),
     [selectedPrinter]
+  );
+  const recommendedUsbPrinter = useMemo(
+    () => findRecommendedUsbZebraAlternative(inventory, selectedPrinter),
+    [inventory, selectedPrinter]
   );
   const recommendedSignature = useMemo(
     () => (selectedPrinter && suggestion ? buildRecommendedPrinterSignature(selectedPrinter, suggestion) : ""),
@@ -575,6 +585,32 @@ export default function PrinterSetupPage() {
     });
   };
 
+  const useRecommendedUsbPrinter = async () => {
+    if (!recommendedUsbPrinter) return;
+    return runSingleFlightAction(`use-usb-printer:${recommendedUsbPrinter.printerId}`, async () => {
+      setSaving(true);
+      try {
+        const response = await apiClient.selectLocalPrinter(recommendedUsbPrinter.printerId);
+        if (!response.success) {
+          toast({
+            title: "USB Zebra was not selected",
+            description: sanitizePrinterUiError(response.error, "MSCQR could not switch the local printer selection."),
+            variant: "destructive",
+          });
+          return;
+        }
+        setSelectedPrinterId(recommendedUsbPrinter.printerId);
+        await Promise.allSettled([inventoryQuery.refetch(), runtimeQuery.refetch()]);
+        toast({
+          title: "USB Zebra selected",
+          description: "Print a setup test label on this USB route before starting production labels.",
+        });
+      } finally {
+        setSaving(false);
+      }
+    });
+  };
+
   return (
     <DashboardLayout>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6">
@@ -643,10 +679,17 @@ export default function PrinterSetupPage() {
               </div>
               {helperNeedsUpdate && detectedPlatformRelease ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
-                  A newer printer helper is published for this {detectedPlatform === "macos" ? "Mac" : "Windows"} device.
-                  <div className="mt-2">
-                    <Button size="sm" variant="outline" onClick={() => navigate(APP_PATHS.connectorDownload)}>
-                      Open helper download
+                  <div className="font-medium">Connector update required</div>
+                  <div className="mt-1">
+                    Detected: {helperVersion || "unknown"}. Required: {latestHelperVersion || REQUIRED_CONNECTOR_VERSION} or newer.
+                    Printing is blocked until this workstation connector is updated.
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => navigate(APP_PATHS.connectorDownload)}>
+                      Download latest Windows connector
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => runtimeQuery.refetch()}>
+                      Re-check connector
                     </Button>
                   </div>
                 </div>
@@ -739,10 +782,45 @@ export default function PrinterSetupPage() {
               </div>
             </div>
 
+            {recommendedUsbPrinter && selectedPrinter ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-950">
+                <div className="font-medium">Network Zebra queue is broken</div>
+                <div className="mt-1 text-xs leading-5">
+                  Saved WiFi queue points to{" "}
+                  {selectedPrinter.windowsPortHost
+                    ? `${selectedPrinter.windowsPortHost}:${selectedPrinter.windowsPortNumber || 9100}`
+                    : selectedPrinter.windowsPortName || selectedPrinter.portName || "its saved Windows TCP/IP port"}
+                  , which is unreachable from this workstation. USB Zebra is available on{" "}
+                  {recommendedUsbPrinter.portName || recommendedUsbPrinter.windowsPortName || "USB"}.
+                  {Number(selectedPrinter.stuckJobCount || 0) > 0
+                    ? ` Windows queue has ${selectedPrinter.stuckJobCount} stuck MSCQR job${Number(selectedPrinter.stuckJobCount) === 1 ? "" : "s"}.`
+                    : ""}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <ActionButton
+                    size="sm"
+                    onClick={useRecommendedUsbPrinter}
+                    state={saving ? createUiActionState("pending", "Switching this workstation to the USB Zebra.") : createUiActionState("enabled")}
+                    idleLabel="Use USB Zebra"
+                    pendingLabel="Switching..."
+                  />
+                  <Button size="sm" variant="outline" onClick={() => navigate(APP_PATHS.connectorDownload)}>
+                    Update connector
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
             {suggestion?.routeType === "LOCAL_ONLY" ? (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
-                This printer is best kept on the built-in printer helper path. Once the helper is ready, go back to batches and start printing without saving a separate shared printer.
+                This printer is best kept on the built-in printer helper path. Print a setup test label first, then start with one production label before a full batch.
                 <div className="mt-4 flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => navigate(APP_PATHS.connectorDownload)}>
+                    Step 1: Update connector
+                  </Button>
+                  <Button variant="outline" onClick={() => testExistingPrinter(registeredPrinters[0]?.id || "")} disabled={!registeredPrinters[0]?.id || Boolean(testingPrinterId)}>
+                    Step 3: Print setup test label
+                  </Button>
                   <Button variant="outline" onClick={() => navigate(APP_PATHS.dashboard)}>
                     Back to dashboard
                   </Button>

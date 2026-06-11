@@ -17,6 +17,14 @@ export type LocalAgentPrinter = {
   dpi: number | null;
   deviceUri?: string | null;
   portName?: string | null;
+  windowsPortName?: string | null;
+  windowsPortHost?: string | null;
+  windowsPortNumber?: number | null;
+  queueStatus?: string | null;
+  queueHasErrors?: boolean;
+  stuckJobCount?: number;
+  retainedJobCount?: number;
+  usbAvailable?: boolean;
 };
 
 export type LocalAgentCapabilitySummary = {
@@ -74,6 +82,12 @@ type ParsedWindowsPrinter = {
   name: string;
   driverName: string | null;
   portName: string | null;
+  portHost: string | null;
+  portNumber: number | null;
+  queueStatus: string | null;
+  queueHasErrors: boolean;
+  stuckJobCount: number;
+  retainedJobCount: number;
   online: boolean;
   isDefault: boolean;
 };
@@ -276,20 +290,62 @@ export const parseSystemProfilerPrinters = (stdout: string): ParsedSystemProfile
 
 export const parseWindowsPrinters = (stdout: string): ParsedWindowsPrinter[] => {
   const raw = JSON.parse(String(stdout || "[]"));
-  const rows = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  const rows = Array.isArray(raw) ? raw : Array.isArray(raw?.printers) ? raw.printers : raw ? [raw] : [];
+  const portsByName = new Map<string, any>();
+  const jobsByPrinter = new Map<string, any[]>();
+  if (!Array.isArray(raw) && raw && typeof raw === "object") {
+    for (const port of Array.isArray(raw.ports) ? raw.ports : []) {
+      const name = toCleanString(port?.Name || port?.name, 180);
+      if (name) portsByName.set(name, port);
+    }
+    for (const job of Array.isArray(raw.jobs) ? raw.jobs : []) {
+      const printerName = toCleanString(job?.PrinterName || job?.printerName, 180);
+      if (!printerName) continue;
+      jobsByPrinter.set(printerName, [...(jobsByPrinter.get(printerName) || []), job]);
+    }
+  }
   const printers: ParsedWindowsPrinter[] = [];
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
     const name = toCleanString((row as any).Name || (row as any).name);
     if (!name) continue;
+    const portName = toCleanString((row as any).PortName || (row as any).portName, 180) || null;
+    const port = portName ? portsByName.get(portName) : null;
     const workOffline = Boolean((row as any).WorkOffline);
-    const printerStatus = Number((row as any).PrinterStatus);
+    const printerStatusRaw = (row as any).PrinterStatus;
+    const printerStatus = Number(printerStatusRaw);
     const extendedStatus = Number((row as any).ExtendedPrinterStatus);
-    const online = !workOffline && ![7].includes(printerStatus) && ![7].includes(extendedStatus);
+    const detectedErrorState = Number((row as any).DetectedErrorState);
+    const queueStatus = toCleanString(
+      typeof printerStatusRaw === "string" ? printerStatusRaw : (row as any).Status || (row as any).status,
+      120
+    ) || (Number.isFinite(printerStatus) ? `PrinterStatus ${printerStatus}` : null);
+    const queueStatusText = `${queueStatus || ""} ${toCleanString((row as any).Status || (row as any).status, 120)}`.toLowerCase();
+    const jobs = jobsByPrinter.get(name) || [];
+    const retainedJobCount = jobs.filter((job) => String(job?.JobStatus || job?.jobStatus || "").toLowerCase().includes("retained")).length;
+    const stuckJobCount = jobs.filter((job) => {
+      const text = String(job?.JobStatus || job?.jobStatus || "").toLowerCase();
+      return /error|blocked|paused|offline|retained|restart|delet/i.test(text);
+    }).length;
+    const queueHasErrors =
+      workOffline ||
+      queueStatusText.includes("error") ||
+      queueStatusText.includes("offline") ||
+      queueStatusText.includes("paused") ||
+      [7].includes(printerStatus) ||
+      [7].includes(extendedStatus) ||
+      (Number.isFinite(detectedErrorState) && detectedErrorState >= 4 && detectedErrorState !== 12);
+    const online = !queueHasErrors;
     printers.push({
       name,
       driverName: toCleanString((row as any).DriverName || (row as any).driverName) || null,
-      portName: toCleanString((row as any).PortName || (row as any).portName, 180) || null,
+      portName,
+      portHost: toCleanString(port?.PrinterHostAddress || port?.printerHostAddress || port?.HostAddress, 180) || null,
+      portNumber: Number.isFinite(Number(port?.PortNumber || port?.portNumber)) ? Number(port?.PortNumber || port?.portNumber) : null,
+      queueStatus,
+      queueHasErrors,
+      stuckJobCount,
+      retainedJobCount,
       online,
       isDefault: Boolean((row as any).Default),
     });
@@ -342,6 +398,7 @@ const inferWindowsConnection = (portName: string | null) => {
   const normalized = toCleanString(portName, 180).toUpperCase();
   if (!normalized) return "spooler";
   if (normalized.startsWith("USB")) return "usb";
+  if (normalized.includes("9100")) return "network";
   if (normalized.startsWith("WSD")) return "network";
   if (normalized.startsWith("IP_")) return "network";
   if (normalized.includes("IPP")) return "ipp";
@@ -356,7 +413,7 @@ const inferWindowsProtocols = (portName: string | null) => {
   if (!normalized) return protocols;
   if (normalized.startsWith("USB")) protocols.push("usb");
   if (normalized.startsWith("WSD")) protocols.push("wsd");
-  if (normalized.startsWith("IP_")) protocols.push("tcp");
+  if (normalized.startsWith("IP_") || normalized.includes("9100")) protocols.push("tcp");
   if (normalized.includes("IPP")) protocols.push("ipp");
   if (normalized.includes("IPPS")) protocols.push("ipps");
   if (normalized.startsWith("\\\\")) protocols.push("shared");
@@ -488,13 +545,14 @@ export const buildSetupVerification = (params: {
   if (
     params.selection.printer &&
     params.selection.printer.online &&
+    !params.selection.printer.queueHasErrors &&
     params.connected &&
     !isVirtualNonLabelPrinter(params.selection.printer)
   ) {
     return {
       state: "READY",
       success: true,
-      message: `${params.selection.printer.printerName} is installed, reachable, and ready to print.`,
+      message: `${params.selection.printer.printerName} is installed and ready for a printer test label.`,
       printerCount,
       onlinePrinterCount,
       selectedPrinterId: params.selection.printer.printerId,
@@ -506,6 +564,8 @@ export const buildSetupVerification = (params: {
   const message = params.selection.printer
     ? isVirtualNonLabelPrinter(params.selection.printer)
       ? "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer."
+      : params.selection.printer.queueHasErrors
+        ? `${params.selection.printer.printerName} has a Windows queue error. Clear the queue or choose another Zebra printer.`
       : `${params.selection.printer.printerName} is installed, but Windows is not exposing it as an online printer yet.`
     : "Printers were detected, but MSCQR could not resolve a usable printer yet.";
 
@@ -528,8 +588,13 @@ export const listLocalPrinters = async (): Promise<{
   if (process.platform === "win32") {
     const script = [
       "$ErrorActionPreference='Stop'",
-      "$printers = Get-CimInstance Win32_Printer | Select-Object Name,DriverName,PortName,WorkOffline,Default,PrinterStatus,ExtendedPrinterStatus",
-      "$printers | ConvertTo-Json -Compress",
+      "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new()",
+      "$printers = Get-CimInstance Win32_Printer | Select-Object Name,DriverName,PortName,WorkOffline,Default,PrinterStatus,ExtendedPrinterStatus,DetectedErrorState,Status",
+      "$ports = @()",
+      "try { $ports = Get-PrinterPort | Select-Object Name,PrinterHostAddress,PortNumber } catch { $ports = @() }",
+      "$jobs = @()",
+      "try { Get-Printer | ForEach-Object { $pn=$_.Name; try { $jobs += Get-PrintJob -PrinterName $pn | Select-Object @{n='PrinterName';e={$pn}},ID,Name,JobStatus } catch {} } } catch { $jobs = @() }",
+      "[pscustomobject]@{ printers=$printers; ports=$ports; jobs=$jobs } | ConvertTo-Json -Compress -Depth 5",
     ].join("; ");
     const result = await maybeExecFile("powershell.exe", [
       "-NoProfile",
@@ -561,6 +626,14 @@ export const listLocalPrinters = async (): Promise<{
         dpi: null,
         deviceUri: null,
         portName: row.portName,
+        windowsPortName: row.portName,
+        windowsPortHost: row.portHost,
+        windowsPortNumber: row.portNumber,
+        queueStatus: row.queueStatus,
+        queueHasErrors: row.queueHasErrors,
+        stuckJobCount: row.stuckJobCount,
+        retainedJobCount: row.retainedJobCount,
+        usbAvailable: inferWindowsConnection(row.portName) === "usb" && row.online,
       }))
       .sort((a, b) => {
         if (a.isDefault && !b.isDefault) return -1;
