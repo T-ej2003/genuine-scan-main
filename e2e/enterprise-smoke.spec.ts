@@ -55,7 +55,19 @@ const requireEnterpriseCondition = (condition: boolean, message: string) => {
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const E2E_LOCAL_AGENT_PROTOCOL_VERSION = "local-agent-direct-v2";
-const E2E_LOCAL_AGENT_BUILD_VERSION = "2026.5.19-e2e";
+const E2E_LOCAL_AGENT_BUILD_VERSION = "2026.6.11-e2e";
+const E2E_TRANSPORT_DIAGNOSTICS_VERSION = "transport-diagnostics-v1";
+const E2E_LOCAL_AGENT_CAPABILITIES = {
+  supportsPrinterQueueSnapshot: true,
+  supportsWindowsTcpPortInspection: true,
+  supportsRawTcpConnectTest: true,
+  supportsRawTcpZplSend: true,
+  supportsUsbRawSpooler: true,
+  supportsSpoolJobCancel: true,
+  supportsSpoolJobStatus: true,
+  supportsTransportDiagnostics: true,
+  supportsTestLabel: true,
+};
 
 const goto = async (page: Page, path: string) => {
   await page.goto(path, { waitUntil: "domcontentloaded" });
@@ -100,6 +112,8 @@ const buildE2EPrinterPayload = () => ({
   agentVersion: "e2e-ci",
   protocolVersion: E2E_LOCAL_AGENT_PROTOCOL_VERSION,
   buildVersion: E2E_LOCAL_AGENT_BUILD_VERSION,
+  transportDiagnosticsVersion: E2E_TRANSPORT_DIAGNOSTICS_VERSION,
+  capabilities: E2E_LOCAL_AGENT_CAPABILITIES,
   agentId: "e2e-agent",
   deviceFingerprint: "e2e-device-fingerprint",
   printers: [
@@ -110,6 +124,7 @@ const buildE2EPrinterPayload = () => ({
       connection: "LOCAL_AGENT",
       online: true,
       isDefault: true,
+      commandLanguage: "PDF",
       protocols: ["DRIVER_QUEUE"],
       languages: ["PDF"],
       mediaSizes: ["50x30mm"],
@@ -154,6 +169,8 @@ const installLocalPrintAgentMock = async (page: Page) => {
         selectedPrinterName: env.printerProfileName || "E2E Local Agent Printer",
         protocolVersion: E2E_LOCAL_AGENT_PROTOCOL_VERSION,
         buildVersion: E2E_LOCAL_AGENT_BUILD_VERSION,
+        transportDiagnosticsVersion: E2E_TRANSPORT_DIAGNOSTICS_VERSION,
+        capabilities: E2E_LOCAL_AGENT_CAPABILITIES,
       }),
     })
   );

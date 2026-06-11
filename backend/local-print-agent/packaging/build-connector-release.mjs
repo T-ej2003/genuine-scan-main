@@ -5,12 +5,13 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import archiver from "archiver";
+import * as archiverModule from "archiver";
 import { readConnectorSourceVersion } from "./source-version.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const backendRoot = path.resolve(__dirname, "../..");
+const archiver = archiverModule.default || archiverModule;
 const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const buildRoot = path.join(backendRoot, ".connector-build");
 const defaultVersion = readConnectorSourceVersion(backendRoot);
@@ -23,7 +24,19 @@ const readExportedString = (name) => {
   return match[1];
 };
 const requiredProtocolVersion = readExportedString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION");
+const transportDiagnosticsVersion = readExportedString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION");
 const minimumBuildVersion = version;
+const connectorCapabilities = {
+  supportsPrinterQueueSnapshot: true,
+  supportsWindowsTcpPortInspection: true,
+  supportsRawTcpConnectTest: true,
+  supportsRawTcpZplSend: true,
+  supportsUsbRawSpooler: true,
+  supportsSpoolJobCancel: true,
+  supportsSpoolJobStatus: true,
+  supportsTransportDiagnostics: true,
+  supportsTestLabel: true,
+};
 const pkgBinary = process.platform === "win32"
   ? path.join(backendRoot, "node_modules", ".bin", "pkg.cmd")
   : path.join(backendRoot, "node_modules", ".bin", "pkg");
@@ -635,6 +648,8 @@ const updateManifest = (macArtifact, windowsArtifact) => {
       sha256: sha256ForFile(windowsArtifact.artifactPath),
       protocolVersion: requiredProtocolVersion,
       buildVersion: version,
+      transportDiagnosticsVersion,
+      capabilities: connectorCapabilities,
       notes: windowsArtifact.notes,
     },
   };
@@ -662,6 +677,8 @@ const updateManifest = (macArtifact, windowsArtifact) => {
     publishedAt,
     requiredProtocolVersion,
     minimumBuildVersion,
+    transportDiagnosticsVersion,
+    capabilities: connectorCapabilities,
     summary: "Install once on the printing computer, then the MSCQR Connector starts automatically in the background.",
     notes: [
       "Use the Mac package on the Mac that is connected to the printer.",
@@ -691,6 +708,8 @@ const updateManifest = (macArtifact, windowsArtifact) => {
     latestVersion: version,
     requiredProtocolVersion,
     minimumBuildVersion,
+    transportDiagnosticsVersion,
+    capabilities: connectorCapabilities,
     supportPath: existing.supportPath || "/help/manufacturer",
     helpPath: existing.helpPath || "/connector-download",
     setupGuidePath: existing.setupGuidePath || "/help/manufacturer",

@@ -10,8 +10,12 @@ import prisma from "../config/database";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
 import {
   CONNECTOR_UPDATE_REQUIRED_MESSAGE,
+  hasRequiredTransportDiagnosticsCapabilities,
+  isLocalAgentBuildAtLeast,
   isLocalAgentProtocolCompatible,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_MIN_VERSION_HINT,
+  LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "./localAgentProtocol";
 
 export type { PrinterCapabilitySummary, PrinterConnectionStatus, PrinterInventoryDevice };
@@ -248,6 +252,9 @@ const normalizePrinterInventory = (value: unknown): PrinterInventoryDevice[] => 
 
 const normalizeStatusPayload = (metadata: any) => {
   const source = metadata && typeof metadata === "object" ? metadata : {};
+  const capabilities = source.capabilities && typeof source.capabilities === "object"
+    ? (source.capabilities as Record<string, unknown>)
+    : null;
   return {
     connected: Boolean(source.connected),
     printerName: toCleanString(source.printerName, 180) || null,
@@ -256,6 +263,8 @@ const normalizeStatusPayload = (metadata: any) => {
     agentVersion: toCleanString(source.agentVersion, 80) || null,
     protocolVersion: toCleanString(source.protocolVersion, 80) || null,
     buildVersion: toCleanString(source.buildVersion, 80) || null,
+    transportDiagnosticsVersion: toCleanString(source.transportDiagnosticsVersion, 80) || null,
+    capabilities,
     error: toCleanString(source.error, 500) || null,
     selectedPrinterId: toCleanString(source.selectedPrinterId, 180) || null,
     selectedPrinterName: toCleanString(source.selectedPrinterName, 180) || null,
@@ -305,7 +314,13 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
 
   const latestAttestation = registration.attestations[0] || null;
   const payload = normalizeStatusPayload(latestAttestation?.metadata || {});
-  const connectorUpdateRequired = Boolean(payload.connected && !isLocalAgentProtocolCompatible(payload.protocolVersion));
+  const connectorUpdateRequired = Boolean(
+    payload.connected &&
+      (!isLocalAgentProtocolCompatible(payload.protocolVersion) ||
+        !isLocalAgentBuildAtLeast(payload.buildVersion, LOCAL_AGENT_MIN_VERSION_HINT) ||
+        payload.transportDiagnosticsVersion !== LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION ||
+        !hasRequiredTransportDiagnosticsCapabilities(payload.capabilities))
+  );
   const nowMs = Date.now();
   const attestedMs = latestAttestation?.attestedAt ? new Date(latestAttestation.attestedAt).getTime() : NaN;
   const ageMs = Number.isFinite(attestedMs) ? Math.max(0, nowMs - attestedMs) : null;
@@ -340,7 +355,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     : connected && compatibilityMode
       ? `Compatibility mode active: ${compatibilityReason}`
       : connectorUpdateRequired
-        ? `${CONNECTOR_UPDATE_REQUIRED_MESSAGE} Expected protocol ${LOCAL_AGENT_DIRECT_PROTOCOL_VERSION}.`
+        ? `${CONNECTOR_UPDATE_REQUIRED_MESSAGE} Expected protocol ${LOCAL_AGENT_DIRECT_PROTOCOL_VERSION}, build ${LOCAL_AGENT_MIN_VERSION_HINT}, and transport diagnostics ${LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION}.`
       : payload.error ||
         (stale
           ? "Printer attestation stale"
@@ -380,6 +395,8 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     agentVersion: payload.agentVersion,
     protocolVersion: payload.protocolVersion,
     buildVersion: payload.buildVersion,
+    transportDiagnosticsVersion: payload.transportDiagnosticsVersion,
+    capabilities: payload.capabilities,
     connectorUpdateRequired,
     selectedPrinterId: payload.selectedPrinterId || payload.printerId || null,
     selectedPrinterName: payload.selectedPrinterName || payload.printerName || null,
@@ -426,6 +443,8 @@ const statusChanged = (a: PrinterConnectionStatus, b: PrinterConnectionStatus) =
     String(a.deviceName || "") !== String(b.deviceName || "") ||
     String(a.agentVersion || "") !== String(b.agentVersion || "") ||
     String((a as any).protocolVersion || "") !== String((b as any).protocolVersion || "") ||
+    String((a as any).buildVersion || "") !== String((b as any).buildVersion || "") ||
+    String((a as any).transportDiagnosticsVersion || "") !== String((b as any).transportDiagnosticsVersion || "") ||
     Boolean((a as any).connectorUpdateRequired) !== Boolean((b as any).connectorUpdateRequired) ||
     String(a.selectedPrinterId || "") !== String(b.selectedPrinterId || "") ||
     String(a.selectedPrinterName || "") !== String(b.selectedPrinterName || "")
@@ -459,6 +478,8 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   agentVersion?: string | null;
   protocolVersion?: string | null;
   buildVersion?: string | null;
+  transportDiagnosticsVersion?: string | null;
+  capabilities?: any;
   error?: string | null;
   sourceIp?: string | null;
   userAgent?: string | null;
@@ -508,6 +529,8 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     agentVersion: String(input.agentVersion || "").trim() || null,
     protocolVersion: String(input.protocolVersion || "").trim() || null,
     buildVersion: String(input.buildVersion || "").trim() || null,
+    transportDiagnosticsVersion: String(input.transportDiagnosticsVersion || "").trim() || null,
+    capabilities: input.capabilities && typeof input.capabilities === "object" ? input.capabilities : null,
     error: String(input.error || "").trim() || null,
     selectedPrinterId: toCleanString(input.selectedPrinterId, 180) || null,
     selectedPrinterName: toCleanString(input.selectedPrinterName, 180) || null,

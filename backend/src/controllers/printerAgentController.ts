@@ -37,6 +37,8 @@ const heartbeatSchema = z.object({
   agentVersion: z.string().trim().max(80).optional(),
   protocolVersion: z.string().trim().max(80).optional(),
   buildVersion: z.string().trim().max(80).optional(),
+  transportDiagnosticsVersion: z.string().trim().max(80).optional(),
+  capabilities: boundedJsonSchema({ maxDepth: 2, maxKeys: 20, maxArrayLength: 10 }).optional(),
   error: z.string().trim().max(500).optional(),
   agentId: z.string().trim().max(180).optional(),
   deviceFingerprint: z.string().trim().max(256).optional(),
@@ -104,6 +106,11 @@ const buildDegradedHeartbeatStatus = (input: z.infer<typeof heartbeatSchema>, cu
     agentVersion: input.agentVersion || currentStatus?.agentVersion || null,
     protocolVersion: input.protocolVersion || currentStatus?.protocolVersion || null,
     buildVersion: input.buildVersion || currentStatus?.buildVersion || null,
+    transportDiagnosticsVersion: input.transportDiagnosticsVersion || currentStatus?.transportDiagnosticsVersion || null,
+    capabilities:
+      (input.capabilities && typeof input.capabilities === "object" ? input.capabilities : null) ||
+      currentStatus?.capabilities ||
+      null,
     connectorUpdateRequired: Boolean(currentStatus?.connectorUpdateRequired),
     capabilitySummary:
       (input.capabilitySummary && typeof input.capabilitySummary === "object" ? input.capabilitySummary : null) ||
@@ -148,6 +155,8 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
         agentVersion: parsed.data.agentVersion || null,
         protocolVersion: parsed.data.protocolVersion || null,
         buildVersion: parsed.data.buildVersion || null,
+        transportDiagnosticsVersion: parsed.data.transportDiagnosticsVersion || null,
+        capabilities: parsed.data.capabilities || null,
         error: parsed.data.error || null,
         sourceIp: req.ip,
         userAgent: req.get("user-agent") || null,

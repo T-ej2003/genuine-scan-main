@@ -24,7 +24,11 @@ import {
 import { startGatewayWorker } from "./gateway";
 import { startDirectPrintWorker } from "./directPrintWorker";
 import { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
-import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
+import {
+  LOCAL_AGENT_CAPABILITIES,
+  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+} from "../services/localAgentProtocol";
 import { randomOpaqueToken } from "../utils/security";
 import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
 
@@ -46,6 +50,8 @@ type AgentSnapshot = {
   agentVersion: string;
   protocolVersion: string;
   buildVersion: string;
+  transportDiagnosticsVersion: string;
+  capabilities: typeof LOCAL_AGENT_CAPABILITIES;
   error: string | null;
   agentId: string;
   deviceFingerprint: string;
@@ -148,6 +154,8 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
     agentVersion: AGENT_VERSION,
     protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
     buildVersion: AGENT_BUILD_VERSION,
+    transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+    capabilities: LOCAL_AGENT_CAPABILITIES,
     error,
     agentId: state.agentId,
     deviceFingerprint: state.deviceFingerprint,

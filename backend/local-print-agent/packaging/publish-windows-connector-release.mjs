@@ -20,7 +20,19 @@ const readExportedString = (name) => {
 const normalize = (value) => String(value || "").trim();
 const sourceVersion = readConnectorSourceVersion(backendRoot);
 const requiredProtocolVersion = readExportedString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION");
+const transportDiagnosticsVersion = readExportedString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION");
 const minimumBuildVersion = sourceVersion;
+const connectorCapabilities = {
+  supportsPrinterQueueSnapshot: true,
+  supportsWindowsTcpPortInspection: true,
+  supportsRawTcpConnectTest: true,
+  supportsRawTcpZplSend: true,
+  supportsUsbRawSpooler: true,
+  supportsSpoolJobCancel: true,
+  supportsSpoolJobStatus: true,
+  supportsTransportDiagnostics: true,
+  supportsTestLabel: true,
+};
 const version = normalize(process.env.CONNECTOR_RELEASE_VERSION) || sourceVersion;
 const signedInstallerSource = normalize(process.env.WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH);
 const publisherName = normalize(process.env.WINDOWS_CONNECTOR_PUBLISHER_NAME) || "L&D Health Ltd";
@@ -82,6 +94,8 @@ const nextRelease = {
   publishedAt,
   requiredProtocolVersion,
   minimumBuildVersion,
+  transportDiagnosticsVersion,
+  capabilities: connectorCapabilities,
   summary:
     "Install the signed Windows connector once on the printing computer, then the MSCQR Connector starts automatically in the background.",
   notes: [
@@ -110,6 +124,8 @@ const nextRelease = {
       sha256: sha256ForFile(artifactPath),
       protocolVersion: requiredProtocolVersion,
       buildVersion: version,
+      transportDiagnosticsVersion,
+      capabilities: connectorCapabilities,
       notes: [
         "Run the signed Windows installer once on the Windows computer that will print.",
         "The installer installs the connector, configures auto-start, and verifies local printer readiness.",
@@ -124,6 +140,8 @@ const manifest = {
   latestVersion: version,
   requiredProtocolVersion,
   minimumBuildVersion,
+  transportDiagnosticsVersion,
+  capabilities: connectorCapabilities,
   supportPath: existing.supportPath || "/help/manufacturer",
   helpPath: existing.helpPath || "/connector-download",
   setupGuidePath: existing.setupGuidePath || "/help/manufacturer",

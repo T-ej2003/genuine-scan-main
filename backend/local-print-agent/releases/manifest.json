@@ -1,12 +1,85 @@
 {
   "productName": "MSCQR Connector",
-  "latestVersion": "2026.5.23",
+  "latestVersion": "2026.6.11",
   "requiredProtocolVersion": "local-agent-direct-v2",
-  "minimumBuildVersion": "2026.5.23",
+  "minimumBuildVersion": "2026.6.11",
+  "transportDiagnosticsVersion": "transport-diagnostics-v1",
+  "capabilities": {
+    "supportsPrinterQueueSnapshot": true,
+    "supportsWindowsTcpPortInspection": true,
+    "supportsRawTcpConnectTest": true,
+    "supportsRawTcpZplSend": true,
+    "supportsUsbRawSpooler": true,
+    "supportsSpoolJobCancel": true,
+    "supportsSpoolJobStatus": true,
+    "supportsTransportDiagnostics": true,
+    "supportsTestLabel": true
+  },
   "supportPath": "/help/manufacturer",
   "helpPath": "/connector-download",
   "setupGuidePath": "/help/manufacturer",
   "releases": [
+    {
+      "version": "2026.6.11",
+      "publishedAt": "2026-06-11T00:00:00.000Z",
+      "requiredProtocolVersion": "local-agent-direct-v2",
+      "minimumBuildVersion": "2026.6.11",
+      "transportDiagnosticsVersion": "transport-diagnostics-v1",
+      "capabilities": {
+        "supportsPrinterQueueSnapshot": true,
+        "supportsWindowsTcpPortInspection": true,
+        "supportsRawTcpConnectTest": true,
+        "supportsRawTcpZplSend": true,
+        "supportsUsbRawSpooler": true,
+        "supportsSpoolJobCancel": true,
+        "supportsSpoolJobStatus": true,
+        "supportsTransportDiagnostics": true,
+        "supportsTestLabel": true
+      },
+      "summary": "Unsigned Windows connector test package metadata for transport-aware printer diagnostics while the signed Windows installer is published.",
+      "notes": [
+        "Use this unsigned Windows test package only for CI, staging, or internal connector validation.",
+        "This connector release advertises transport-diagnostics-v1 for queue snapshots, Windows TCP/IP port inspection, RAW TCP connection tests, spool status, spool cancel, USB raw spooler, RAW TCP ZPL send, and explicit test-label support.",
+        "Publish a signed Windows installer through the signed connector release workflow before production operator rollout.",
+        "Older 2026.5.23 connectors remain historical and must not satisfy Zebra production transport readiness."
+      ],
+      "platforms": {
+        "windows": {
+          "label": "Windows test package",
+          "installerKind": "zip",
+          "trustLevel": "unsigned",
+          "signatureStatus": "unsigned",
+          "publisherName": null,
+          "signedAt": null,
+          "windowsTrustMode": "unsigned-test",
+          "filename": "MSCQR-Connector-Windows-2026.6.11.zip",
+          "relativePath": "2026.6.11/windows/MSCQR-Connector-Windows-2026.6.11.zip",
+          "contentType": "application/zip",
+          "architecture": "x64",
+          "bytes": 724,
+          "sha256": "5b79d7c4ac44b11e11bbdb1673a79f0d9920920242c5eaee2e2a2e7c4fa25818",
+          "protocolVersion": "local-agent-direct-v2",
+          "buildVersion": "2026.6.11",
+          "transportDiagnosticsVersion": "transport-diagnostics-v1",
+          "capabilities": {
+            "supportsPrinterQueueSnapshot": true,
+            "supportsWindowsTcpPortInspection": true,
+            "supportsRawTcpConnectTest": true,
+            "supportsRawTcpZplSend": true,
+            "supportsUsbRawSpooler": true,
+            "supportsSpoolJobCancel": true,
+            "supportsSpoolJobStatus": true,
+            "supportsTransportDiagnostics": true,
+            "supportsTestLabel": true
+          },
+          "notes": [
+            "Unsigned internal/test package metadata only.",
+            "Use the signed connector release workflow for production Windows rollout.",
+            "Advertises transport-diagnostics-v1 and explicit test-label support."
+          ]
+        }
+      }
+    },
     {
       "version": "2026.5.23",
       "publishedAt": "2026-05-23T08:54:32.636Z",

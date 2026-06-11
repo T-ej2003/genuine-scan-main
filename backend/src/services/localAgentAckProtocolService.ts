@@ -16,6 +16,8 @@ export const claimSchema = agentAuthSchema
   .extend({
     protocolVersion: z.string().trim().max(80).optional().nullable(),
     buildVersion: z.string().trim().max(80).optional().nullable(),
+    transportDiagnosticsVersion: z.string().trim().max(80).optional().nullable(),
+    capabilities: z.record(z.boolean()).optional().nullable(),
     selectedPrinterId: z.string().trim().max(180).optional().nullable(),
     selectedPrinterName: z.string().trim().max(180).optional().nullable(),
     deviceName: z.string().trim().max(180).optional(),

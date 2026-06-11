@@ -41,6 +41,11 @@ const run = () => {
     "Connector metadata should expose the manifest minimum build version"
   );
   assert(
+    latest.transportDiagnosticsVersion === "transport-diagnostics-v1" &&
+      latest.capabilities.supportsTransportDiagnostics === true,
+    "Connector metadata should expose transport diagnostics capability at manifest level"
+  );
+  assert(
     latest.release.requiredProtocolVersion === LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
     "Latest release should expose the backend-required local agent protocol"
   );
@@ -76,6 +81,16 @@ const run = () => {
   assert(
     latest.release.platforms.windows.buildVersion === sourceVersion,
     "Windows download metadata should advertise the latest connector build version"
+  );
+  assert(
+    latest.release.platforms.windows.transportDiagnosticsVersion === "transport-diagnostics-v1",
+    "Windows download metadata should advertise transport diagnostics v1"
+  );
+  assert(
+    latest.release.platforms.windows.capabilities.supportsTransportDiagnostics === true &&
+      latest.release.platforms.windows.capabilities.supportsPrinterQueueSnapshot === true &&
+      latest.release.platforms.windows.capabilities.supportsRawTcpConnectTest === true,
+    "Windows download metadata should advertise transport-aware diagnostics capabilities"
   );
   assert(
     latest.release.platforms.windows.downloadUrl ===

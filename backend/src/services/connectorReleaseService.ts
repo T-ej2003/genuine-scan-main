@@ -1,7 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION, LOCAL_AGENT_MIN_VERSION_HINT } from "./localAgentProtocol";
+import {
+  LOCAL_AGENT_CAPABILITIES,
+  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_MIN_VERSION_HINT,
+  LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+} from "./localAgentProtocol";
+
+const connectorCapabilitiesSchema = z
+  .object({
+    supportsPrinterQueueSnapshot: z.boolean().optional(),
+    supportsWindowsTcpPortInspection: z.boolean().optional(),
+    supportsRawTcpConnectTest: z.boolean().optional(),
+    supportsRawTcpZplSend: z.boolean().optional(),
+    supportsUsbRawSpooler: z.boolean().optional(),
+    supportsSpoolJobCancel: z.boolean().optional(),
+    supportsSpoolJobStatus: z.boolean().optional(),
+    supportsTransportDiagnostics: z.boolean().optional(),
+    supportsTestLabel: z.boolean().optional(),
+  })
+  .passthrough();
 
 const connectorPlatformSchema = z.object({
   label: z.string().min(2),
@@ -19,6 +38,8 @@ const connectorPlatformSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/i),
   protocolVersion: z.string().min(3).optional(),
   buildVersion: z.string().min(3).optional(),
+  transportDiagnosticsVersion: z.string().min(3).optional(),
+  capabilities: connectorCapabilitiesSchema.optional(),
   notes: z.array(z.string().min(2)).default([]),
 });
 
@@ -27,6 +48,8 @@ const connectorReleaseSchema = z.object({
   publishedAt: z.string().min(10),
   requiredProtocolVersion: z.string().min(3).optional(),
   minimumBuildVersion: z.string().min(3).optional(),
+  transportDiagnosticsVersion: z.string().min(3).optional(),
+  capabilities: connectorCapabilitiesSchema.optional(),
   summary: z.string().min(8),
   notes: z.array(z.string().min(2)).default([]),
   platforms: z.object({
@@ -40,6 +63,8 @@ const connectorManifestSchema = z.object({
   latestVersion: z.string().min(3),
   requiredProtocolVersion: z.string().min(3).default(LOCAL_AGENT_DIRECT_PROTOCOL_VERSION),
   minimumBuildVersion: z.string().min(3).default(LOCAL_AGENT_MIN_VERSION_HINT),
+  transportDiagnosticsVersion: z.string().min(3).default(LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION),
+  capabilities: connectorCapabilitiesSchema.default(LOCAL_AGENT_CAPABILITIES),
   supportPath: z.string().min(1).default("/help/manufacturer"),
   helpPath: z.string().min(1).default("/connector-download"),
   setupGuidePath: z.string().min(1).default("/help/manufacturer"),
@@ -119,6 +144,8 @@ const toPublicPlatform = (
     sha256: platform.sha256,
     protocolVersion: platform.protocolVersion || LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
     buildVersion: platform.buildVersion || version,
+    transportDiagnosticsVersion: platform.transportDiagnosticsVersion || LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+    capabilities: platform.capabilities || LOCAL_AGENT_CAPABILITIES,
     notes: platform.notes || [],
     contentType: platform.contentType,
     downloadPath,
@@ -131,6 +158,8 @@ const toPublicRelease = (release: ConnectorRelease, baseUrl?: string | null) => 
   publishedAt: release.publishedAt,
   requiredProtocolVersion: release.requiredProtocolVersion || LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
   minimumBuildVersion: release.minimumBuildVersion || LOCAL_AGENT_MIN_VERSION_HINT,
+  transportDiagnosticsVersion: release.transportDiagnosticsVersion || LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+  capabilities: release.capabilities || LOCAL_AGENT_CAPABILITIES,
   summary: release.summary,
   notes: release.notes || [],
   platforms: {
@@ -179,6 +208,8 @@ export const getConnectorReleaseManifest = (baseUrl?: string | null) => {
     latestVersion: manifest.latestVersion,
     requiredProtocolVersion: manifest.requiredProtocolVersion || LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
     minimumBuildVersion: manifest.minimumBuildVersion || LOCAL_AGENT_MIN_VERSION_HINT,
+    transportDiagnosticsVersion: manifest.transportDiagnosticsVersion || LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+    capabilities: manifest.capabilities || LOCAL_AGENT_CAPABILITIES,
     supportPath: manifest.supportPath,
     helpPath: manifest.helpPath,
     setupGuidePath: manifest.setupGuidePath,
@@ -197,6 +228,8 @@ export const getLatestConnectorRelease = (baseUrl?: string | null) => {
     latestVersion: manifest.latestVersion,
     requiredProtocolVersion: manifest.requiredProtocolVersion || LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
     minimumBuildVersion: manifest.minimumBuildVersion || LOCAL_AGENT_MIN_VERSION_HINT,
+    transportDiagnosticsVersion: manifest.transportDiagnosticsVersion || LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+    capabilities: manifest.capabilities || LOCAL_AGENT_CAPABILITIES,
     supportPath: manifest.supportPath,
     helpPath: manifest.helpPath,
     setupGuidePath: manifest.setupGuidePath,

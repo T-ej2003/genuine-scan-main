@@ -41,16 +41,34 @@ const run = () => {
   assert(latestRelease, "Connector manifest latestVersion must reference a release");
   assert(windows, "Latest connector manifest release must include a Windows artifact");
   assert(windows.buildVersion === sourceVersion, "Latest Windows artifact buildVersion must match source buildVersion");
+  assert(windows.transportDiagnosticsVersion === "transport-diagnostics-v1", "Latest Windows artifact must advertise transport diagnostics v1");
+  assert(windows.capabilities?.supportsTransportDiagnostics === true, "Latest Windows artifact must advertise transport diagnostics support");
+  assert(windows.capabilities?.supportsPrinterQueueSnapshot === true, "Latest Windows artifact must advertise queue snapshot support");
+  assert(windows.capabilities?.supportsRawTcpConnectTest === true, "Latest Windows artifact must advertise RAW TCP connection testing");
+  assert(windows.capabilities?.supportsTestLabel === true, "Latest Windows artifact must advertise explicit test-label support");
   assert(windows.filename.includes(sourceVersion), "Latest Windows artifact filename must include source buildVersion");
   assert(!windows.filename.includes("2026.5.19"), "Latest Windows artifact filename must not point at the stale 2026.5.19 installer");
   assert(latest.latestVersion === sourceVersion, "Connector download API latestVersion must match source buildVersion");
   assert(latest.release.platforms.windows.buildVersion === sourceVersion, "Connector download API must expose source buildVersion");
+  assert(
+    latest.release.platforms.windows.transportDiagnosticsVersion === "transport-diagnostics-v1",
+    "Connector download API must expose the transport diagnostics contract"
+  );
+  assert(
+    latest.release.platforms.windows.capabilities.supportsTransportDiagnostics === true,
+    "Connector download API must expose transport diagnostics capability"
+  );
+  assert(
+    latest.release.platforms.windows.capabilities.supportsRawTcpConnectTest === true,
+    "Connector download API must expose RAW TCP test capability"
+  );
   assert(
     latest.release.platforms.windows.filename === windows.filename,
     "Connector download API filename must come from latest manifest metadata"
   );
   assert(resolved.filename === windows.filename, "Resolved Windows download must serve the latest source-versioned artifact");
   assert(fs.existsSync(resolved.filePath), "Resolved Windows connector artifact must exist on disk");
+  assert(resolveConnectorDownload("2026.6.11", "windows").filename === windows.filename, "Explicit 2026.6.11 Windows download must resolve");
 
   console.log("connector release metadata guard tests passed");
 };

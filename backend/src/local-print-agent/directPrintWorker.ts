@@ -5,7 +5,11 @@ import { listLocalPrinters, resolveSelectedPrinter, waitForLocalPrintJobCompleti
 import { printLabel } from "./render";
 import { loadAgentState } from "./state";
 import { buildPrinterAgentActionPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
-import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
+import {
+  LOCAL_AGENT_CAPABILITIES,
+  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+} from "../services/localAgentProtocol";
 import { buildPrintPayloadDiagnostics } from "../services/printPayloadService";
 import { randomOpaqueToken } from "../utils/security";
 import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
@@ -119,6 +123,8 @@ const claimNextLocalJob = async () => {
     ...signed.body,
     protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
     buildVersion: AGENT_BUILD_VERSION,
+    transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+    capabilities: LOCAL_AGENT_CAPABILITIES,
     selectedPrinterId,
     ...(optionalString(selection.printerName) ? { selectedPrinterName: optionalString(selection.printerName) } : {}),
     deviceName: os.hostname(),
