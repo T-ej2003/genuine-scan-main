@@ -50,7 +50,11 @@ export const LEGACY_FILE_BUDGETS = {
     reason: "Printer agent job endpoints remain legacy-sized after full connector capability gating and upgrade backoff; split agent registration and polling handlers in a focused follow-up.",
   },
   "backend/src/controllers/printerController.ts": { label: "Legacy controller", maxLines: 680 },
-  "backend/src/controllers/printerGatewayController.ts": { label: "Legacy controller", maxLines: 1080 },
+  "backend/src/controllers/printerGatewayController.ts": {
+    label: "Legacy controller",
+    maxLines: 1112,
+    reason: "Gateway controller remains legacy-sized after adding site-gateway serial-context safety; extract gateway claim and acknowledgement handlers into services next.",
+  },
   "backend/src/controllers/verify/claimHandlers.ts": { label: "Legacy controller", maxLines: 580 },
   "backend/src/controllers/governanceController.ts": {
     label: "Legacy controller",

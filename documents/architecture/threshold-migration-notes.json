@@ -30,8 +30,8 @@
     "targetMaxLines": 500
   },
   "backend/src/controllers/printerGatewayController.ts": {
-    "summary": "Gateway registration, trust exchange, and delivery workflow logic are still heavily centralized.",
-    "nextStep": "Extract gateway trust negotiation and delivery orchestration into dedicated printer gateway services.",
+    "summary": "Gateway registration, trust exchange, delivery workflow, and site-gateway serial-context assembly are still heavily centralized.",
+    "nextStep": "Extract gateway trust negotiation, claim payload assembly, and delivery orchestration into dedicated printer gateway services.",
     "targetMaxLines": 500
   },
   "backend/src/controllers/qrController.ts": {
