@@ -179,6 +179,8 @@ const reportLocalPrinterHeartbeat = async () => {
     agentVersion?: string;
     protocolVersion?: string;
     buildVersion?: string;
+    transportDiagnosticsVersion?: string;
+    capabilities?: Record<string, unknown> | null;
     error?: string;
     agentId?: string;
     deviceFingerprint?: string;
@@ -201,6 +203,8 @@ const reportLocalPrinterHeartbeat = async () => {
     agentVersion: data.agentVersion || undefined,
     protocolVersion: data.protocolVersion || undefined,
     buildVersion: data.buildVersion || undefined,
+    transportDiagnosticsVersion: data.transportDiagnosticsVersion || undefined,
+    capabilities: data.capabilities || undefined,
     error: data.error || undefined,
     agentId: data.agentId || undefined,
     deviceFingerprint: data.deviceFingerprint || undefined,
