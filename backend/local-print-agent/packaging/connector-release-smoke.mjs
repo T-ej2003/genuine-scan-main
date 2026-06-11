@@ -113,6 +113,11 @@ const runPackagedWindowsSelfTest = async (windows, artifactPath) => {
     return;
   }
 
+  if (["exe", "msi"].includes(windows.installerKind) && windows.artifactType === "windows-signed-installer") {
+    console.log("packaged Windows self-test skipped: signed installer is not the local-agent runtime");
+    return;
+  }
+
   let executablePath = artifactPath;
   let tempDir = null;
   if (windows.installerKind === "zip") {
