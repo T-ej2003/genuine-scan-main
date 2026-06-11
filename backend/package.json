@@ -56,6 +56,7 @@
     "prisma:studio": "prisma studio",
     "connector:release": "node local-print-agent/packaging/build-connector-release.mjs",
     "connector:windows:publish-signed": "node local-print-agent/packaging/publish-windows-connector-release.mjs",
+    "connector:windows:publish-zip": "node local-print-agent/packaging/publish-windows-connector-zip-release.mjs",
     "connector:windows:build-installer": "node local-print-agent/packaging/build-windows-installer.mjs",
     "connector:windows:verify": "node local-print-agent/packaging/verify-windows-installer.mjs",
     "connector:smoke": "node local-print-agent/packaging/connector-release-smoke.mjs",

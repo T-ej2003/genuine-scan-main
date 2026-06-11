@@ -21,7 +21,7 @@
   "releases": [
     {
       "version": "2026.6.11",
-      "publishedAt": "2026-06-11T00:00:00.000Z",
+      "publishedAt": "2026-06-11T18:31:41.784Z",
       "requiredProtocolVersion": "local-agent-direct-v2",
       "minimumBuildVersion": "2026.6.11",
       "transportDiagnosticsVersion": "transport-diagnostics-v1",
@@ -36,12 +36,12 @@
         "supportsTransportDiagnostics": true,
         "supportsTestLabel": true
       },
-      "summary": "Unsigned Windows connector test package metadata for transport-aware printer diagnostics while the signed Windows installer is published.",
+      "summary": "Install this complete Windows connector package on the printing computer, then MSCQR verifies local printer readiness.",
       "notes": [
-        "Use this unsigned Windows test package only for CI, staging, or internal connector validation.",
-        "This connector release advertises transport-diagnostics-v1 for queue snapshots, Windows TCP/IP port inspection, RAW TCP connection tests, spool status, spool cancel, USB raw spooler, RAW TCP ZPL send, and explicit test-label support.",
-        "Publish a signed Windows installer through the signed connector release workflow before production operator rollout.",
-        "Older 2026.5.23 connectors remain historical and must not satisfy Zebra production transport readiness."
+        "Use this unsigned Windows package only for internal validation until the signed Windows installer is published.",
+        "Extract the ZIP fully on the Windows computer that will print, then run Install Connector.cmd.",
+        "The connector advertises transport-diagnostics-v1 and verifies local printer readiness before production printing can start.",
+        "Windows Smart App Control can block unsigned packages; use the signed installer for production operator rollout."
       ],
       "platforms": {
         "windows": {
@@ -56,8 +56,8 @@
           "relativePath": "2026.6.11/windows/MSCQR-Connector-Windows-2026.6.11.zip",
           "contentType": "application/zip",
           "architecture": "x64",
-          "bytes": 724,
-          "sha256": "5b79d7c4ac44b11e11bbdb1673a79f0d9920920242c5eaee2e2a2e7c4fa25818",
+          "bytes": 66843464,
+          "sha256": "f0fe703940ce6774a57d28827cf9a47b4bbe34444999de4c63c6461bf592d2e0",
           "protocolVersion": "local-agent-direct-v2",
           "buildVersion": "2026.6.11",
           "transportDiagnosticsVersion": "transport-diagnostics-v1",
@@ -73,9 +73,9 @@
             "supportsTestLabel": true
           },
           "notes": [
-            "Unsigned internal/test package metadata only.",
-            "Use the signed connector release workflow for production Windows rollout.",
-            "Advertises transport-diagnostics-v1 and explicit test-label support."
+            "Extract the ZIP fully before running Install Connector.cmd.",
+            "Run Install Connector.cmd once on the Windows computer that will print.",
+            "Unsigned package for internal validation; use the signed Windows installer for production rollout."
           ]
         }
       }

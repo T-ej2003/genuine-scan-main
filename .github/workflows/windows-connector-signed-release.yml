@@ -130,7 +130,32 @@ jobs:
           CONNECTOR_RELEASE_VERSION: ${{ steps.release_settings.outputs.connector_release_version }}
           WEB_APP_BASE_URL: ${{ steps.release_settings.outputs.web_app_base_url }}
           INNO_SETUP_COMPILER_PATH: C:\__compile_after_payload_signing__\ISCC.exe
+          WINDOWS_CONNECTOR_PKG_TARGET: node24-win-x64
         run: npm --prefix backend run connector:windows:build-installer
+
+      - name: Verify staged Windows connector runtime
+        shell: pwsh
+        run: |
+          $requiredFiles = @(
+            "Install Connector.cmd",
+            "Uninstall Connector.cmd",
+            "README.txt",
+            "install-startup-task.ps1",
+            "uninstall-startup-task.ps1",
+            "bin\mscqr-local-print-agent.exe"
+          )
+          foreach ($relativePath in $requiredFiles) {
+            $path = Join-Path $env:WINDOWS_INSTALLER_STAGE_DIR $relativePath
+            if (-not (Test-Path $path -PathType Leaf)) {
+              throw "Windows connector staging is missing required file: $relativePath"
+            }
+          }
+
+          $runtime = Join-Path $env:WINDOWS_INSTALLER_STAGE_DIR "bin\mscqr-local-print-agent.exe"
+          $runtimeBytes = (Get-Item $runtime).Length
+          if ($runtimeBytes -lt 1000000) {
+            throw "Windows connector staged runtime is too small: $runtimeBytes bytes"
+          }
 
       - name: Azure login
         uses: azure/login@v3
@@ -187,6 +212,11 @@ jobs:
           if (-not $artifacts) {
             throw "No Windows .exe, .dll, or .msi artifacts were created in $env:WINDOWS_RELEASE_OUTPUT_DIR"
           }
+          foreach ($artifact in $artifacts) {
+            if ($artifact.Length -lt 1000000) {
+              throw "Windows release artifact is too small: $($artifact.FullName) $($artifact.Length) bytes"
+            }
+          }
 
       - name: Sign final Windows release artifacts
         uses: azure/artifact-signing-action@v2
@@ -218,6 +248,9 @@ jobs:
           }
 
           foreach ($artifact in $signedArtifacts) {
+            if ($artifact.Length -lt 1000000) {
+              throw "Signed Windows artifact is too small: $($artifact.FullName) $($artifact.Length) bytes"
+            }
             $signature = Get-AuthenticodeSignature -FilePath $artifact.FullName
             if ($signature.Status -ne "Valid") {
               throw "Invalid signature for $($artifact.FullName): $($signature.Status) $($signature.StatusMessage)"

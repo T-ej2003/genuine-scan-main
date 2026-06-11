@@ -188,7 +188,7 @@ export const createBackendApp = () => {
     res.json(healthPayload());
   });
 
-  app.get("/health/live", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
+  app.get("/health/live", (_req, res) => {
     res.json({
       ...healthPayload(),
       status: "live",

@@ -25,6 +25,8 @@ audit-artifacts
 # Backend/runtime artifacts not needed for frontend image context
 backend/node_modules
 backend/dist
+backend/.connector-build
+backend/.pkg-cache
 backend/.env
 backend/certs
 backend/*.zip

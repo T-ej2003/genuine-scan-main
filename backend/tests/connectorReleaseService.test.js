@@ -1,5 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
+const JSZip = require("jszip");
 const { getLatestConnectorRelease, resolveConnectorDownload } = require("../dist/services/connectorReleaseService");
 const { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } = require("../dist/services/localAgentProtocol");
 
@@ -19,7 +21,31 @@ const loadSourceConnectorVersion = () => {
   return match[1];
 };
 
-const run = () => {
+const sha256ForFile = (filePath) => crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+const minWindowsArtifactBytes = 1_000_000;
+
+const assertWindowsDownloadIsInstallable = async (windowsPackage, latestManifestWindows) => {
+  const stat = fs.statSync(windowsPackage.filePath);
+  assert(stat.size === latestManifestWindows.bytes, "Windows download file size should match the manifest");
+  assert(stat.size >= minWindowsArtifactBytes, "Windows download should not be a placeholder artifact");
+  assert(sha256ForFile(windowsPackage.filePath) === latestManifestWindows.sha256, "Windows download file hash should match the manifest");
+
+  if (latestManifestWindows.installerKind === "zip") {
+    const zip = await JSZip.loadAsync(fs.readFileSync(windowsPackage.filePath));
+    for (const entry of [
+      "Install Connector.cmd",
+      "Uninstall Connector.cmd",
+      "README.txt",
+      "install-startup-task.ps1",
+      "uninstall-startup-task.ps1",
+      "bin/mscqr-local-print-agent.exe",
+    ]) {
+      assert(zip.file(entry), `Windows ZIP should include ${entry}`);
+    }
+  }
+};
+
+const run = async () => {
   const sourceVersion = loadSourceConnectorVersion();
   const manifest = loadReleaseManifest();
   const latestManifestRelease = manifest.releases.find((release) => release.version === manifest.latestVersion);
@@ -127,6 +153,7 @@ const run = () => {
     "Windows package checksum should match the published artifact"
   );
   assert(windowsPackage.bytes === latestManifestWindows.bytes, "Windows package bytes should match the published artifact");
+  await assertWindowsDownloadIsInstallable(windowsPackage, latestManifestWindows);
 
   const signedWindowsPackage = resolveConnectorDownload("2026.5.19", "windows");
   assert(
@@ -150,4 +177,7 @@ const run = () => {
   console.log("connector release service tests passed");
 };
 
-run();
+run().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -14,6 +14,8 @@ const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const defaultVersion = readConnectorSourceVersion(backendRoot);
 const version = String(process.env.CONNECTOR_RELEASE_VERSION || defaultVersion).trim();
 const webAppBaseUrl = String(process.env.WEB_APP_BASE_URL || "").trim().replace(/\/+$/g, "");
+const windowsPkgTarget = String(process.env.WINDOWS_CONNECTOR_PKG_TARGET || "node24-win-x64").trim();
+const minWindowsBinaryBytes = 1_000_000;
 const pkgBinary = process.platform === "win32"
   ? path.join(backendRoot, "node_modules", ".bin", "pkg.cmd")
   : path.join(backendRoot, "node_modules", ".bin", "pkg");
@@ -107,10 +109,14 @@ const buildWindowsBinary = (binariesDir) => {
   }
 
   const outputBase = path.join(binariesDir, "mscqr-local-print-agent");
-  run(pkgBinary, ["--targets", "node20-win-x64", "--output", outputBase, entry]);
+  run(pkgBinary, ["--targets", windowsPkgTarget, "--fallback-to-source", "--output", outputBase, entry]);
 
   const expectedOutput = `${outputBase}.exe`;
   if (fs.existsSync(expectedOutput)) {
+    const size = fs.statSync(expectedOutput).size;
+    if (size < minWindowsBinaryBytes) {
+      throw new Error(`Packaged Windows connector binary is too small (${size} bytes).`);
+    }
     return expectedOutput;
   }
 
@@ -123,7 +129,12 @@ const buildWindowsBinary = (binariesDir) => {
     throw new Error(`Expected packaged Windows binary was not created. Looked for ${expectedOutput}. Created files: ${createdFiles}`);
   }
 
-  return path.join(binariesDir, builtFile);
+  const builtPath = path.join(binariesDir, builtFile);
+  const size = fs.statSync(builtPath).size;
+  if (size < minWindowsBinaryBytes) {
+    throw new Error(`Packaged Windows connector binary is too small (${size} bytes).`);
+  }
+  return builtPath;
 };
 
 const renderInstallerScript = (templatePath, stageDir, outputDir) =>

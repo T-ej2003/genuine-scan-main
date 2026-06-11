@@ -1,5 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
+const JSZip = require("jszip");
 const { getLatestConnectorRelease, resolveConnectorDownload } = require("../dist/services/connectorReleaseService");
 
 const assert = (condition, message) => {
@@ -7,6 +9,15 @@ const assert = (condition, message) => {
 };
 
 const backendRoot = path.join(__dirname, "..");
+const minWindowsArtifactBytes = 1_000_000;
+const requiredWindowsZipEntries = [
+  "Install Connector.cmd",
+  "Uninstall Connector.cmd",
+  "README.txt",
+  "install-startup-task.ps1",
+  "uninstall-startup-task.ps1",
+  "bin/mscqr-local-print-agent.exe",
+];
 
 const readSourceVersion = () => {
   const versionSource = fs.readFileSync(path.join(backendRoot, "src", "local-print-agent", "version.ts"), "utf8");
@@ -26,7 +37,25 @@ const compareConnectorVersions = (left, right) => {
   return 0;
 };
 
-const run = () => {
+const sha256ForFile = (filePath) => crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+
+const assertInstallableWindowsArtifact = async (resolved, windows) => {
+  const stat = fs.statSync(resolved.filePath);
+  assert(stat.size === windows.bytes, "Latest Windows artifact manifest bytes must match the file on disk");
+  assert(stat.size >= minWindowsArtifactBytes, "Latest Windows artifact must not be placeholder-sized");
+  assert(sha256ForFile(resolved.filePath) === windows.sha256, "Latest Windows artifact manifest hash must match the file on disk");
+
+  if (windows.installerKind === "zip") {
+    const zip = await JSZip.loadAsync(fs.readFileSync(resolved.filePath));
+    for (const entry of requiredWindowsZipEntries) {
+      assert(zip.file(entry), `Latest Windows ZIP must include ${entry}`);
+    }
+    const runtimeBytes = (await zip.file("bin/mscqr-local-print-agent.exe").async("nodebuffer")).length;
+    assert(runtimeBytes >= minWindowsArtifactBytes, "Latest Windows ZIP runtime must not be placeholder-sized");
+  }
+};
+
+const run = async () => {
   const sourceVersion = readSourceVersion();
   const manifestPath = path.join(backendRoot, "local-print-agent", "releases", "manifest.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
@@ -69,8 +98,12 @@ const run = () => {
   assert(resolved.filename === windows.filename, "Resolved Windows download must serve the latest source-versioned artifact");
   assert(fs.existsSync(resolved.filePath), "Resolved Windows connector artifact must exist on disk");
   assert(resolveConnectorDownload("2026.6.11", "windows").filename === windows.filename, "Explicit 2026.6.11 Windows download must resolve");
+  await assertInstallableWindowsArtifact(resolved, windows);
 
   console.log("connector release metadata guard tests passed");
 };
 
-run();
+run().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

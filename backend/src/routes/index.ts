@@ -1559,7 +1559,7 @@ cookieMutationRouter.post(
 );
 publicReadRouter.get("/health", publicStatusIpLimiter, publicStatusActorLimiter, healthCheck);
 publicReadRouter.get("/healthz", publicStatusIpLimiter, publicStatusActorLimiter, healthCheck);
-publicReadRouter.get("/health/live", publicStatusIpLimiter, publicStatusActorLimiter, liveHealthCheck);
+publicReadRouter.get("/health/live", liveHealthCheck);
 publicReadRouter.get("/health/ready", publicStatusIpLimiter, publicStatusActorLimiter, readyHealthCheck);
 publicReadRouter.get("/health/latency", publicStatusIpLimiter, publicStatusActorLimiter, latencySummary);
 protectedReadRouter.get("/internal/release", internalReleasePreAuthRouteLimiter, authenticate, requirePlatformAdmin, internalReleaseRouteLimiter, internalReleaseIpLimiter, internalReleaseActorLimiter, internalReleaseMetadata);
