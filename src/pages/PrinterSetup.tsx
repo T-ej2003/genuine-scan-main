@@ -677,7 +677,7 @@ export default function PrinterSetupPage() {
                 </div>
                 <Badge variant={inventory.length > 0 ? "default" : "secondary"}>{inventory.length}</Badge>
               </div>
-              {helperNeedsUpdate && detectedPlatformRelease ? (
+              {helperNeedsUpdate && (detectedPlatformRelease || remoteStatus?.connectorUpdateRequired) ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
                   <div className="font-medium">Connector update required</div>
                   <div className="mt-1">
@@ -686,7 +686,7 @@ export default function PrinterSetupPage() {
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button size="sm" onClick={() => navigate(APP_PATHS.connectorDownload)}>
-                      Download latest Windows connector
+                      {detectedPlatform === "macos" ? "Download latest Mac connector" : "Download latest Windows connector"}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => runtimeQuery.refetch()}>
                       Re-check connector
