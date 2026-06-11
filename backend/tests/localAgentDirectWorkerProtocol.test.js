@@ -11,6 +11,7 @@ const {
   isLocalAgentProtocolCompatible,
   LOCAL_AGENT_CAPABILITIES,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_MIN_VERSION_HINT,
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } = require("../dist/services/localAgentProtocol");
 
@@ -30,7 +31,7 @@ const run = () => {
   assert(
     isLocalAgentTransportDiagnosticsCurrent({
       protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-      buildVersion: "2026.6.11",
+      buildVersion: LOCAL_AGENT_MIN_VERSION_HINT,
       transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
       capabilities: LOCAL_AGENT_CAPABILITIES,
     }),

@@ -71,7 +71,7 @@ const NETWORK_DIRECT_LANGUAGES: ManagedRouteForm["commandLanguage"][] = [
   "ZSIM",
   "CPCL",
 ];
-const REQUIRED_CONNECTOR_VERSION = "2026.6.11";
+const REQUIRED_CONNECTOR_VERSION = "2026.6.12";
 
 type ManualFieldHelpKey = "vendor" | "model" | "host" | "port" | "resourcePath" | "printerUri";
 

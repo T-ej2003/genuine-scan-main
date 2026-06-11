@@ -64,6 +64,90 @@ const assertReadableFile = (filePath) => {
   return stat;
 };
 
+const assertSelfTestOutput = (label, output) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(String(output || "").trim());
+  } catch (error) {
+    throw new Error(`${label} did not emit valid JSON self-test output: ${String(output || "").slice(0, 500)}`);
+  }
+  if (parsed.ok !== true) {
+    throw new Error(`${label} self-test did not report ok=true: ${String(output || "").slice(0, 500)}`);
+  }
+  if (parsed.buildVersion !== sourceVersion) {
+    throw new Error(`${label} self-test buildVersion ${parsed.buildVersion} does not match ${sourceVersion}.`);
+  }
+  if (parsed.transportDiagnosticsVersion !== readExportedString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION")) {
+    throw new Error(`${label} self-test did not report the current transport diagnostics version.`);
+  }
+  for (const capability of requiredCapabilities) {
+    if (parsed.capabilities?.[capability] !== true) {
+      throw new Error(`${label} self-test is missing capability ${capability}.`);
+    }
+  }
+};
+
+const runCompiledSelfTest = () => {
+  const entry = path.join(backendRoot, "dist", "local-print-agent", "index.js");
+  if (!fs.existsSync(entry)) {
+    console.log("compiled local-agent self-test skipped: backend build output is not present");
+    return;
+  }
+  const output = execFileSync(process.execPath, [entry, "--self-test"], {
+    cwd: backendRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PRINT_AGENT_VERSION: sourceVersion,
+      PRINT_AGENT_BUILD_VERSION: sourceVersion,
+    },
+    maxBuffer: 1024 * 1024,
+  });
+  assertSelfTestOutput("compiled local-agent", output);
+  console.log("compiled local-agent self-test: passed");
+};
+
+const runPackagedWindowsSelfTest = async (windows, artifactPath) => {
+  if (process.platform !== "win32") {
+    console.log("packaged Windows self-test skipped: not running on Windows");
+    return;
+  }
+
+  let executablePath = artifactPath;
+  let tempDir = null;
+  if (windows.installerKind === "zip") {
+    const zip = await JSZip.loadAsync(fs.readFileSync(artifactPath));
+    const runtimeEntry = zip.files["bin/mscqr-local-print-agent.exe"];
+    if (!runtimeEntry) throw new Error("Windows ZIP is missing bin/mscqr-local-print-agent.exe");
+    tempDir = fs.mkdtempSync(path.join(backendRoot, ".connector-smoke-"));
+    executablePath = path.join(tempDir, "mscqr-local-print-agent.exe");
+    fs.writeFileSync(executablePath, await runtimeEntry.async("nodebuffer"));
+  }
+
+  if (!/\.exe$/i.test(executablePath)) {
+    console.log(`packaged Windows self-test skipped: ${path.basename(executablePath)} is not directly executable`);
+    return;
+  }
+
+  try {
+    const output = execFileSync(executablePath, ["--self-test"], {
+      cwd: path.dirname(executablePath),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PRINT_AGENT_VERSION: sourceVersion,
+        PRINT_AGENT_BUILD_VERSION: sourceVersion,
+      },
+      timeout: 20_000,
+      maxBuffer: 1024 * 1024,
+    });
+    assertSelfTestOutput("packaged Windows connector", output);
+    console.log("packaged Windows connector self-test: passed");
+  } finally {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+};
+
 const isSignedProductionWindows = (windows) =>
   Boolean(
     windows &&
@@ -219,3 +303,6 @@ assertTrustMetadata(windows);
 if (windows.installerKind === "zip") {
   await assertZipStructure(artifactPath);
 }
+
+runCompiledSelfTest();
+await runPackagedWindowsSelfTest(windows, artifactPath);

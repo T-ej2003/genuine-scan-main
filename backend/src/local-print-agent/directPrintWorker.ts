@@ -10,8 +10,8 @@ import {
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "../services/localAgentProtocol";
-import { buildPrintPayloadDiagnostics } from "../services/printPayloadService";
-import { randomOpaqueToken } from "../utils/security";
+import { buildPrintPayloadDiagnostics } from "../printing/printPayloadSafety";
+import { randomOpaqueToken } from "./crypto";
 import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
 
 const DIRECT_PRINT_POLL_MS = Math.max(2000, Number(process.env.PRINT_AGENT_DIRECT_POLL_MS || 4000) || 4000);

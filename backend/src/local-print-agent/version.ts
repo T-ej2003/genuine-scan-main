@@ -1,4 +1,4 @@
-export const LOCAL_PRINT_AGENT_SOURCE_VERSION = "2026.6.11";
+export const LOCAL_PRINT_AGENT_SOURCE_VERSION = "2026.6.12";
 export const LOCAL_PRINT_AGENT_SOURCE_BUILD_VERSION = LOCAL_PRINT_AGENT_SOURCE_VERSION;
 
 const normalizeVersionOverride = (value?: string | null) => String(value || "").trim();

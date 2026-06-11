@@ -105,6 +105,63 @@ const run = (command, args, options = {}) => {
   );
 };
 
+const runCaptured = (command, args, options = {}) => {
+  const cwd = options.cwd || backendRoot;
+  const result = spawnSync(command, args, {
+    cwd,
+    env: options.env || process.env,
+    shell: options.shell ?? shouldUseShell(command),
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  });
+
+  if (!result.error && result.status === 0 && !result.signal) {
+    return `${result.stdout || ""}${result.stderr || ""}`;
+  }
+
+  const attempted = formatCommand(command, args);
+  const exitCode = typeof result.status === "number" ? result.status : "unknown";
+  const signal = result.signal || "none";
+  const cause = result.error?.message || (result.signal ? `terminated by ${result.signal}` : "command exited with a non-zero status");
+  throw new Error(
+    [
+      "Command failed while validating the Windows connector runtime.",
+      `command: ${attempted}`,
+      `cwd: ${cwd}`,
+      `exitCode: ${exitCode}`,
+      `signal: ${signal}`,
+      `cause: ${cause}`,
+      `stdout: ${(result.stdout || "").slice(0, 1000)}`,
+      `stderr: ${(result.stderr || "").slice(0, 1000)}`,
+    ].join("\n")
+  );
+};
+
+const verifyPackagedWindowsBinary = (binaryPath) => {
+  if (process.platform !== "win32") {
+    console.log("Packaged Windows runtime self-test skipped outside Windows.");
+    return;
+  }
+  const output = runCaptured(binaryPath, ["--self-test"], {
+    cwd: path.dirname(binaryPath),
+    env: {
+      ...process.env,
+      PRINT_AGENT_VERSION: version,
+      PRINT_AGENT_BUILD_VERSION: version,
+    },
+  });
+  let parsed;
+  try {
+    parsed = JSON.parse(String(output || "").trim());
+  } catch {
+    throw new Error(`Packaged Windows runtime self-test did not emit JSON: ${String(output || "").slice(0, 1000)}`);
+  }
+  if (parsed.ok !== true || parsed.buildVersion !== version) {
+    throw new Error(`Packaged Windows runtime self-test failed: ${String(output || "").slice(0, 1000)}`);
+  }
+  console.log(`Packaged Windows runtime self-test passed for ${parsed.buildVersion}.`);
+};
+
 const readWindowsAssetTemplate = (assetName) => {
   const templatePath = path.join(windowsInstallRoot, assetName);
   if (!fs.existsSync(templatePath)) {
@@ -192,6 +249,7 @@ const main = () => {
   ensureDir(outputDir);
 
   const windowsBinary = buildWindowsBinary(binariesDir);
+  verifyPackagedWindowsBinary(windowsBinary);
   fs.copyFileSync(windowsBinary, path.join(stageBinDir, "mscqr-local-print-agent.exe"));
   writeAsciiFile(path.join(stageDir, "install-startup-task.ps1"), readWindowsAssetTemplate("install-startup-task.ps1"));
   writeAsciiFile(path.join(stageDir, "uninstall-startup-task.ps1"), readWindowsAssetTemplate("uninstall-startup-task.ps1"));

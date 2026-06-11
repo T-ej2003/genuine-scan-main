@@ -123,18 +123,18 @@ const run = async () => {
   assert(resolved.filename === windows.filename, "Resolved Windows download must serve the latest source-versioned artifact");
   assert(fs.existsSync(resolved.filePath), "Resolved Windows connector artifact must exist on disk");
   if (signedWindows) {
-    assert(resolveConnectorDownload("2026.6.11", "windows").filename === windows.filename, "Explicit 2026.6.11 Windows download must resolve");
+    assert(resolveConnectorDownload(sourceVersion, "windows").filename === windows.filename, "Explicit latest signed Windows download must resolve");
   } else {
     let blocked = false;
     try {
-      resolveConnectorDownload("2026.6.11", "windowsUnsignedTest");
+      resolveConnectorDownload(sourceVersion, "windowsUnsignedTest");
     } catch {
       blocked = true;
     }
     assert(blocked, "Internal unsigned Windows download must not resolve without internal permission");
     assert(
-      resolveConnectorDownload("2026.6.11", "windowsUnsignedTest", { allowInternalArtifacts: true }).filename === windows.filename,
-      "Explicit internal 2026.6.11 Windows test download must resolve with internal permission"
+      resolveConnectorDownload(sourceVersion, "windowsUnsignedTest", { allowInternalArtifacts: true }).filename === windows.filename,
+      "Explicit internal latest Windows test download must resolve with internal permission"
     );
   }
   await assertInstallableWindowsArtifact(resolved, windows);

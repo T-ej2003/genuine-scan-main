@@ -21,6 +21,7 @@ import {
   type AgentState,
   type CalibrationProfile,
 } from "./state";
+import { buildDiagnosticTestZplPayload } from "./render";
 import { startGatewayWorker } from "./gateway";
 import { startDirectPrintWorker } from "./directPrintWorker";
 import { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
@@ -29,7 +30,7 @@ import {
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "../services/localAgentProtocol";
-import { randomOpaqueToken } from "../utils/security";
+import { randomOpaqueToken } from "./crypto";
 import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
 
 const app = express();
@@ -39,6 +40,7 @@ const HOST = String(process.env.PRINT_AGENT_HOST || "127.0.0.1").trim() || "127.
 const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const INVENTORY_TTL_MS = Math.max(1500, Number(String(process.env.PRINT_AGENT_INVENTORY_TTL_MS || "5000").trim()) || 5000);
+const cliArgs = new Set(process.argv.slice(2).map((arg) => String(arg || "").trim()));
 
 type AgentSnapshot = {
   connected: boolean;
@@ -84,6 +86,70 @@ const resolveDeviceName = () => {
   }
   return process.platform === "darwin" ? "macOS-workstation" : "workstation";
 };
+
+const buildVersionPayload = () => ({
+  agentVersion: AGENT_VERSION,
+  buildVersion: AGENT_BUILD_VERSION,
+  protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+  capabilities: LOCAL_AGENT_CAPABILITIES,
+});
+
+const runSelfTest = async () => {
+  const diagnosticZpl = buildDiagnosticTestZplPayload();
+  const printerInventory = await listLocalPrinters().catch((error: any) => ({
+    printers: [],
+    error: error?.message || "Printer discovery self-test failed.",
+  }));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        ...buildVersionPayload(),
+        renderModule: {
+          diagnosticZplBytes: Buffer.byteLength(diagnosticZpl, "utf8"),
+          startsWithZplStart: diagnosticZpl.trim().startsWith("^XA"),
+          endsWithZplEnd: diagnosticZpl.trim().endsWith("^XZ"),
+        },
+        printerDiscovery: {
+          printerCount: printerInventory.printers.length,
+          error: printerInventory.error || null,
+        },
+      },
+      null,
+      2
+    )
+  );
+};
+
+if (cliArgs.has("--version")) {
+  console.log(AGENT_BUILD_VERSION);
+  process.exit(0);
+}
+
+if (cliArgs.has("--version-json") || cliArgs.has("--status-json")) {
+  console.log(JSON.stringify(buildVersionPayload(), null, 2));
+  process.exit(0);
+}
+
+if (cliArgs.has("--self-test")) {
+  runSelfTest()
+    .then(() => process.exit(0))
+    .catch((error: any) => {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            ...buildVersionPayload(),
+            error: error?.message || "Local connector self-test failed.",
+          },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    });
+}
 
 app.use((_req, res, next) => {
   res.setHeader("Access-Control-Allow-Private-Network", "true");
@@ -378,8 +444,10 @@ app.post("/print", async (_req, res) => {
   });
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);
-  startGatewayWorker();
-  startDirectPrintWorker();
-});
+if (!cliArgs.has("--self-test")) {
+  app.listen(PORT, HOST, () => {
+    console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);
+    startGatewayWorker();
+    startDirectPrintWorker();
+  });
+}
