@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
 
 const env = {
   superAdminEmail: String(process.env.E2E_SUPERADMIN_EMAIL || "").trim(),
@@ -54,20 +56,29 @@ const requireEnterpriseCondition = (condition: boolean, message: string) => {
 };
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const E2E_LOCAL_AGENT_PROTOCOL_VERSION = "local-agent-direct-v2";
-const E2E_LOCAL_AGENT_BUILD_VERSION = "2026.6.11-e2e";
-const E2E_TRANSPORT_DIAGNOSTICS_VERSION = "transport-diagnostics-v1";
-const E2E_LOCAL_AGENT_CAPABILITIES = {
-  supportsPrinterQueueSnapshot: true,
-  supportsWindowsTcpPortInspection: true,
-  supportsRawTcpConnectTest: true,
-  supportsRawTcpZplSend: true,
-  supportsUsbRawSpooler: true,
-  supportsSpoolJobCancel: true,
-  supportsSpoolJobStatus: true,
-  supportsTransportDiagnostics: true,
-  supportsTestLabel: true,
+const connectorManifest = JSON.parse(
+  fs.readFileSync(path.join(process.cwd(), "backend/local-print-agent/releases/manifest.json"), "utf8")
+) as {
+  latestVersion?: string;
+  minimumBuildVersion?: string;
+  capabilities?: Record<string, boolean>;
+  releases?: Array<{
+    version?: string;
+    requiredProtocolVersion?: string;
+    transportDiagnosticsVersion?: string;
+    capabilities?: Record<string, boolean>;
+  }>;
 };
+const latestConnectorRelease = connectorManifest.releases?.find(
+  (release) => release.version === connectorManifest.latestVersion
+);
+const E2E_LOCAL_AGENT_PROTOCOL_VERSION = String(latestConnectorRelease?.requiredProtocolVersion || "local-agent-direct-v2");
+const E2E_LOCAL_AGENT_BUILD_VERSION = `${String(connectorManifest.minimumBuildVersion || connectorManifest.latestVersion)}-e2e`;
+const E2E_TRANSPORT_DIAGNOSTICS_VERSION = String(
+  latestConnectorRelease?.transportDiagnosticsVersion || "transport-diagnostics-v1"
+);
+const E2E_LOCAL_AGENT_CAPABILITIES =
+  latestConnectorRelease?.capabilities || connectorManifest.capabilities || {};
 
 const goto = async (page: Page, path: string) => {
   await page.goto(path, { waitUntil: "domcontentloaded" });
