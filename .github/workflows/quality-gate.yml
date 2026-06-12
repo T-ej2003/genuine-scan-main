@@ -172,7 +172,13 @@ jobs:
           npm --prefix backend run test:e2e:seed
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r source_file; do
+            sudo mv "$source_file" "${source_file}.disabled"
+          done < <(sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \( -iname "*microsoft*" -o -iname "*azure-cli*" \) -print)
+          npx playwright install --with-deps chromium
       - name: Playwright smoke suite
         env:
           NODE_ENV: test
