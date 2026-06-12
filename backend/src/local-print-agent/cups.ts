@@ -788,7 +788,7 @@ export const listLocalPrinters = async (): Promise<{
         return a.printerName.localeCompare(b.printerName);
       });
 
-    console.info("windows printer discovery", {
+    console.error("windows printer discovery", {
       primaryEnumerationCount: discovery.diagnostics.primaryEnumerationCount,
       fallbackEnumerationCount: discovery.diagnostics.fallbackEnumerationCount,
       selectedSource: discovery.diagnostics.selectedSource,

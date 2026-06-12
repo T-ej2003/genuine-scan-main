@@ -1,4 +1,17 @@
 {
-  "updatedAt": "2026-04-22",
-  "entries": []
+  "updatedAt": "2026-06-12",
+  "entries": [
+    {
+      "scope": "backend",
+      "package": "@yao-pkg/pkg",
+      "owner": "platform/security",
+      "expiresOn": "2026-07-12"
+    },
+    {
+      "scope": "backend",
+      "package": "esbuild",
+      "owner": "platform/security",
+      "expiresOn": "2026-07-12"
+    }
+  ]
 }

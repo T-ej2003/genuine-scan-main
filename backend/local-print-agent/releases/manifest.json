@@ -21,7 +21,7 @@
   "releases": [
     {
       "version": "2026.6.14",
-      "publishedAt": "2026-06-12T21:55:45.162Z",
+      "publishedAt": "2026-06-12T22:05:37.271Z",
       "requiredProtocolVersion": "local-agent-direct-v2",
       "minimumBuildVersion": "2026.6.14",
       "transportDiagnosticsVersion": "transport-diagnostics-v1",
@@ -59,8 +59,8 @@
           "relativePath": "2026.6.14/windows/MSCQR-Connector-Windows-2026.6.14.zip",
           "contentType": "application/zip",
           "architecture": "x64",
-          "bytes": 39504290,
-          "sha256": "191f0556c350c43e0c752b7d1821f74d6887b52994e10878be8772fa81a0096c",
+          "bytes": 39504603,
+          "sha256": "893084352c0e52ec0252c7a7a81630ab41668d78c76ff5425ce12bcc40ca73cc",
           "protocolVersion": "local-agent-direct-v2",
           "buildVersion": "2026.6.14",
           "transportDiagnosticsVersion": "transport-diagnostics-v1",
