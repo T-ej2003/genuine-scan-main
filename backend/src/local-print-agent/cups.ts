@@ -1,4 +1,5 @@
 import { execFile } from "child_process";
+import net from "net";
 import os from "os";
 import { promisify } from "util";
 
@@ -25,6 +26,24 @@ export type LocalAgentPrinter = {
   stuckJobCount?: number;
   retainedJobCount?: number;
   usbAvailable?: boolean;
+  windowsPortReachable?: boolean | null;
+  discoverySource?: LocalAgentPrinterDiscoverySource;
+};
+
+export type LocalAgentPrinterDiscoverySource = "primary" | "fallback" | "none";
+
+export type LocalAgentPrinterDiscoveryDiagnostics = {
+  platform: string;
+  primaryEnumerationCount: number;
+  fallbackEnumerationCount: number;
+  selectedSource: LocalAgentPrinterDiscoverySource;
+  primaryError: string | null;
+  fallbackError: string | null;
+  printers: Array<{
+    name: string;
+    portName: string | null;
+    source: LocalAgentPrinterDiscoverySource;
+  }>;
 };
 
 export type LocalAgentCapabilitySummary = {
@@ -90,10 +109,15 @@ type ParsedWindowsPrinter = {
   retainedJobCount: number;
   online: boolean;
   isDefault: boolean;
+  discoverySource?: LocalAgentPrinterDiscoverySource;
 };
 
 const COMMAND_TIMEOUT_MS = 1500;
 const MAX_BUFFER = 1024 * 1024 * 2;
+const WINDOWS_PORT_PROBE_TIMEOUT_MS = Math.max(
+  150,
+  Number(process.env.PRINT_AGENT_WINDOWS_PORT_PROBE_TIMEOUT_MS || 350) || 350
+);
 const JOB_POLL_MS = Math.max(500, Number(process.env.PRINT_AGENT_JOB_POLL_MS || 1200) || 1200);
 const JOB_WAIT_TIMEOUT_MS = Math.max(5_000, Number(process.env.PRINT_AGENT_JOB_WAIT_TIMEOUT_MS || 60_000) || 60_000);
 const LABEL_PRINTER_TERMS = ["zdesigner", "zebra", "zt410", "zt411", "zpl"];
@@ -109,6 +133,13 @@ const VIRTUAL_PRINTER_TERMS = [
 ];
 
 const toCleanString = (value: unknown, max = 180) => String(value || "").trim().slice(0, max);
+
+const toBoolean = (value: unknown) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["1", "true", "yes", "y", "on"].includes(normalized);
+};
 
 const uniqueStrings = (values: Array<string | null | undefined>, maxItems = 24) => {
   const seen = new Set<string>();
@@ -288,21 +319,29 @@ export const parseSystemProfilerPrinters = (stdout: string): ParsedSystemProfile
   return printers;
 };
 
-export const parseWindowsPrinters = (stdout: string): ParsedWindowsPrinter[] => {
-  const raw = JSON.parse(String(stdout || "[]"));
-  const rows = Array.isArray(raw) ? raw : Array.isArray(raw?.printers) ? raw.printers : raw ? [raw] : [];
+const parseWindowsPrinterRows = (
+  raw: unknown,
+  options: {
+    ports?: unknown;
+    jobs?: unknown;
+    source?: LocalAgentPrinterDiscoverySource;
+  } = {}
+): ParsedWindowsPrinter[] => {
+  const rows = Array.isArray(raw) ? raw : Array.isArray((raw as any)?.printers) ? (raw as any).printers : raw ? [raw] : [];
   const portsByName = new Map<string, any>();
   const jobsByPrinter = new Map<string, any[]>();
-  if (!Array.isArray(raw) && raw && typeof raw === "object") {
-    for (const port of Array.isArray(raw.ports) ? raw.ports : []) {
-      const name = toCleanString(port?.Name || port?.name, 180);
-      if (name) portsByName.set(name, port);
-    }
-    for (const job of Array.isArray(raw.jobs) ? raw.jobs : []) {
-      const printerName = toCleanString(job?.PrinterName || job?.printerName, 180);
-      if (!printerName) continue;
-      jobsByPrinter.set(printerName, [...(jobsByPrinter.get(printerName) || []), job]);
-    }
+  const portRows =
+    Array.isArray(options.ports) ? options.ports : !Array.isArray(raw) && raw && typeof raw === "object" ? (raw as any).ports : [];
+  const jobRows =
+    Array.isArray(options.jobs) ? options.jobs : !Array.isArray(raw) && raw && typeof raw === "object" ? (raw as any).jobs : [];
+  for (const port of Array.isArray(portRows) ? portRows : []) {
+    const name = toCleanString(port?.Name || port?.name, 180);
+    if (name) portsByName.set(name, port);
+  }
+  for (const job of Array.isArray(jobRows) ? jobRows : []) {
+    const printerName = toCleanString(job?.PrinterName || job?.printerName, 180);
+    if (!printerName) continue;
+    jobsByPrinter.set(printerName, [...(jobsByPrinter.get(printerName) || []), job]);
   }
   const printers: ParsedWindowsPrinter[] = [];
   for (const row of rows) {
@@ -311,7 +350,7 @@ export const parseWindowsPrinters = (stdout: string): ParsedWindowsPrinter[] => 
     if (!name) continue;
     const portName = toCleanString((row as any).PortName || (row as any).portName, 180) || null;
     const port = portName ? portsByName.get(portName) : null;
-    const workOffline = Boolean((row as any).WorkOffline);
+    const workOffline = toBoolean((row as any).WorkOffline);
     const printerStatusRaw = (row as any).PrinterStatus;
     const printerStatus = Number(printerStatusRaw);
     const extendedStatus = Number((row as any).ExtendedPrinterStatus);
@@ -347,10 +386,57 @@ export const parseWindowsPrinters = (stdout: string): ParsedWindowsPrinter[] => 
       stuckJobCount,
       retainedJobCount,
       online,
-      isDefault: Boolean((row as any).Default),
+      isDefault: toBoolean((row as any).Default),
+      discoverySource: options.source,
     });
   }
   return printers;
+};
+
+export const parseWindowsPrinters = (stdout: string): ParsedWindowsPrinter[] => {
+  const raw = JSON.parse(String(stdout || "[]"));
+  return parseWindowsPrinterRows(raw);
+};
+
+export const parseWindowsPrinterDiscovery = (
+  stdout: string
+): {
+  rows: ParsedWindowsPrinter[];
+  diagnostics: LocalAgentPrinterDiscoveryDiagnostics;
+} => {
+  const raw = JSON.parse(String(stdout || "{}"));
+  const ports = raw?.ports || [];
+  const jobs = raw?.jobs || [];
+  const primaryRows = parseWindowsPrinterRows(raw?.primaryPrinters || [], {
+    ports,
+    jobs,
+    source: "primary",
+  });
+  const fallbackRows = parseWindowsPrinterRows(raw?.fallbackPrinters || [], {
+    ports,
+    jobs,
+    source: "fallback",
+  });
+  const selectedSource: LocalAgentPrinterDiscoverySource =
+    primaryRows.length > 0 ? "primary" : fallbackRows.length > 0 ? "fallback" : "none";
+  const rows = selectedSource === "primary" ? primaryRows : selectedSource === "fallback" ? fallbackRows : [];
+
+  return {
+    rows,
+    diagnostics: {
+      platform: "win32",
+      primaryEnumerationCount: primaryRows.length,
+      fallbackEnumerationCount: fallbackRows.length,
+      selectedSource,
+      primaryError: toCleanString(raw?.primaryError, 500) || null,
+      fallbackError: toCleanString(raw?.fallbackError, 500) || null,
+      printers: rows.map((printer) => ({
+        name: printer.name,
+        portName: printer.portName,
+        source: printer.discoverySource || selectedSource,
+      })),
+    },
+  };
 };
 
 const inferProtocols = (uri: string | null) => {
@@ -419,6 +505,20 @@ const inferWindowsProtocols = (portName: string | null) => {
   if (normalized.startsWith("\\\\")) protocols.push("shared");
   return uniqueStrings(protocols, 8);
 };
+
+const isWindowsNetworkPortReachable = (host: string, port: number) =>
+  new Promise<boolean>((resolve) => {
+    const socket = net.createConnection({ host, port, timeout: WINDOWS_PORT_PROBE_TIMEOUT_MS }, () => {
+      socket.destroy();
+      resolve(true);
+    });
+    const finish = () => {
+      socket.destroy();
+      resolve(false);
+    };
+    socket.once("timeout", finish);
+    socket.once("error", finish);
+  });
 
 const inferWindowsLanguages = (driverName: string | null, printerName: string) => {
   const combined = `${driverName || ""} ${printerName}`.toUpperCase();
@@ -584,17 +684,25 @@ export const buildSetupVerification = (params: {
 export const listLocalPrinters = async (): Promise<{
   printers: LocalAgentPrinter[];
   error: string | null;
+  diagnostics?: LocalAgentPrinterDiscoveryDiagnostics;
 }> => {
   if (process.platform === "win32") {
     const script = [
       "$ErrorActionPreference='Stop'",
       "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new()",
-      "$printers = Get-CimInstance Win32_Printer | Select-Object Name,DriverName,PortName,WorkOffline,Default,PrinterStatus,ExtendedPrinterStatus,DetectedErrorState,Status",
+      "$primaryPrinters = @()",
+      "$primaryError = $null",
+      "$fallbackPrinters = @()",
+      "$fallbackError = $null",
+      "$defaultByName = @{}",
+      "try { Get-CimInstance Win32_Printer | ForEach-Object { $defaultByName[[string]$_.Name] = [bool]$_.Default } } catch {}",
+      "try { $primaryPrinters = @(Get-Printer | Select-Object Name,DriverName,PortName,PrinterStatus,WorkOffline,@{n='Default';e={if ($defaultByName.ContainsKey([string]$_.Name)) { [bool]$defaultByName[[string]$_.Name] } else { $false }}},Status) } catch { $primaryError = $_.Exception.Message }",
+      "try { $fallbackPrinters = @(Get-CimInstance Win32_Printer | Select-Object Name,DriverName,PortName,WorkOffline,Default,PrinterStatus,ExtendedPrinterStatus,DetectedErrorState,Status) } catch { $fallbackError = $_.Exception.Message }",
       "$ports = @()",
       "try { $ports = Get-PrinterPort | Select-Object Name,PrinterHostAddress,PortNumber } catch { $ports = @() }",
       "$jobs = @()",
       "try { Get-Printer | ForEach-Object { $pn=$_.Name; try { $jobs += Get-PrintJob -PrinterName $pn | Select-Object @{n='PrinterName';e={$pn}},ID,Name,JobStatus } catch {} } } catch { $jobs = @() }",
-      "[pscustomobject]@{ printers=$printers; ports=$ports; jobs=$jobs } | ConvertTo-Json -Compress -Depth 5",
+      "[pscustomobject]@{ primaryPrinters=$primaryPrinters; fallbackPrinters=$fallbackPrinters; ports=$ports; jobs=$jobs; primaryError=$primaryError; fallbackError=$fallbackError } | ConvertTo-Json -Compress -Depth 5",
     ].join("; ");
     const result = await maybeExecFile("powershell.exe", [
       "-NoProfile",
@@ -605,50 +713,106 @@ export const listLocalPrinters = async (): Promise<{
       script,
     ]);
 
-    let rows: ParsedWindowsPrinter[] = [];
+    let discovery: ReturnType<typeof parseWindowsPrinterDiscovery> = {
+      rows: [],
+      diagnostics: {
+        platform: "win32",
+        primaryEnumerationCount: 0,
+        fallbackEnumerationCount: 0,
+        selectedSource: "none",
+        primaryError: null,
+        fallbackError: null,
+        printers: [],
+      },
+    };
     try {
-      rows = result.stdout ? parseWindowsPrinters(result.stdout) : [];
+      discovery = result.stdout ? parseWindowsPrinterDiscovery(result.stdout) : discovery;
     } catch {
-      rows = [];
+      discovery.rows = [];
     }
 
-    const printers = rows
-      .map((row) => ({
-        printerId: row.name,
-        printerName: row.name,
-        model: row.driverName,
-        connection: inferWindowsConnection(row.portName),
-        online: row.online,
-        isDefault: row.isDefault,
-        protocols: inferWindowsProtocols(row.portName),
-        languages: inferWindowsLanguages(row.driverName, row.name),
-        mediaSizes: [],
-        dpi: null,
-        deviceUri: null,
-        portName: row.portName,
-        windowsPortName: row.portName,
-        windowsPortHost: row.portHost,
-        windowsPortNumber: row.portNumber,
-        queueStatus: row.queueStatus,
-        queueHasErrors: row.queueHasErrors,
-        stuckJobCount: row.stuckJobCount,
-        retainedJobCount: row.retainedJobCount,
-        usbAvailable: inferWindowsConnection(row.portName) === "usb" && row.online,
-      }))
+    const printers = (
+      await Promise.all(
+        discovery.rows.map(async (row) => {
+          const connection = inferWindowsConnection(row.portName);
+          let online = row.online;
+          let queueHasErrors = row.queueHasErrors;
+          let queueStatus = row.queueStatus;
+          let portReachable: boolean | null = null;
+
+          if (connection === "network") {
+            if (row.portHost && row.portNumber) {
+              portReachable = await isWindowsNetworkPortReachable(row.portHost, row.portNumber);
+              if (!portReachable) {
+                online = false;
+                queueHasErrors = true;
+                queueStatus = uniqueStrings([queueStatus, "TCP port unreachable"], 4).join("; ") || "TCP port unreachable";
+              }
+            } else if (String(row.portName || "").includes("9100")) {
+              online = false;
+              queueHasErrors = true;
+              queueStatus = uniqueStrings([queueStatus, "TCP port unverified"], 4).join("; ") || "TCP port unverified";
+            }
+          }
+
+          return {
+            printerId: row.name,
+            printerName: row.name,
+            model: row.driverName,
+            connection,
+            online,
+            isDefault: row.isDefault,
+            protocols: inferWindowsProtocols(row.portName),
+            languages: inferWindowsLanguages(row.driverName, row.name),
+            mediaSizes: [],
+            dpi: null,
+            deviceUri: null,
+            portName: row.portName,
+            windowsPortName: row.portName,
+            windowsPortHost: row.portHost,
+            windowsPortNumber: row.portNumber,
+            windowsPortReachable: portReachable,
+            queueStatus,
+            queueHasErrors,
+            stuckJobCount: row.stuckJobCount,
+            retainedJobCount: row.retainedJobCount,
+            usbAvailable: connection === "usb" && online,
+            discoverySource: row.discoverySource || discovery.diagnostics.selectedSource,
+          };
+        })
+      )
+    )
       .sort((a, b) => {
         if (a.isDefault && !b.isDefault) return -1;
         if (!a.isDefault && b.isDefault) return 1;
         return a.printerName.localeCompare(b.printerName);
       });
 
+    console.info("windows printer discovery", {
+      primaryEnumerationCount: discovery.diagnostics.primaryEnumerationCount,
+      fallbackEnumerationCount: discovery.diagnostics.fallbackEnumerationCount,
+      selectedSource: discovery.diagnostics.selectedSource,
+      printers: printers.map((printer) => ({
+        name: printer.printerName,
+        portName: printer.windowsPortName || printer.portName || null,
+        online: printer.online,
+        source: printer.discoverySource || null,
+      })),
+    });
+
     if (printers.length > 0) {
-      return { printers, error: null };
+      return { printers, error: null, diagnostics: discovery.diagnostics };
     }
 
     const stderr = String(result.stderr || "").trim();
     return {
       printers: [],
-      error: stderr || "No printers detected by the Windows print spooler.",
+      error:
+        stderr ||
+        discovery.diagnostics.primaryError ||
+        discovery.diagnostics.fallbackError ||
+        "No printers detected by the Windows print spooler.",
+      diagnostics: discovery.diagnostics,
     };
   }
 

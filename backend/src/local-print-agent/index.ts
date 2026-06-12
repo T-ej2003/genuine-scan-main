@@ -11,6 +11,7 @@ import {
   listLocalPrinters,
   resolveSelectedPrinter,
   type LocalAgentPrinter,
+  type LocalAgentPrinterDiscoveryDiagnostics,
   type LocalAgentSetupVerification,
 } from "./cups";
 import {
@@ -64,6 +65,7 @@ type AgentSnapshot = {
   heartbeatSignature: string;
   capabilitySummary: ReturnType<typeof buildCapabilitySummary>;
   printers: LocalAgentPrinter[];
+  printerDiscoveryDiagnostics: LocalAgentPrinterDiscoveryDiagnostics | null;
   calibrationProfile: CalibrationProfile | null;
   setupVerification: LocalAgentSetupVerification;
 };
@@ -100,6 +102,7 @@ const runSelfTest = async () => {
   const printerInventory = await listLocalPrinters().catch((error: any) => ({
     printers: [],
     error: error?.message || "Printer discovery self-test failed.",
+    diagnostics: null,
   }));
   console.log(
     JSON.stringify(
@@ -114,6 +117,7 @@ const runSelfTest = async () => {
         printerDiscovery: {
           printerCount: printerInventory.printers.length,
           error: printerInventory.error || null,
+          diagnostics: printerInventory.diagnostics || null,
         },
       },
       null,
@@ -234,6 +238,7 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
     }),
     capabilitySummary: buildCapabilitySummary(printers, selection.printerId),
     printers,
+    printerDiscoveryDiagnostics: inventory.diagnostics || null,
     calibrationProfile: selectedPrinter ? state.calibrationProfiles[selectedPrinter.printerId] || null : null,
     setupVerification,
   };
@@ -335,6 +340,7 @@ app.get("/printers", async (_req, res) => {
     res.json({
       success: true,
       printers: snapshot.printers,
+      printerDiscoveryDiagnostics: snapshot.printerDiscoveryDiagnostics,
       selectedPrinterId: snapshot.selectedPrinterId,
       selectedPrinterName: snapshot.selectedPrinterName,
       connected: snapshot.connected,

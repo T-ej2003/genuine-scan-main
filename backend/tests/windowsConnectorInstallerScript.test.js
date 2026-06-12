@@ -225,8 +225,29 @@ const run = async () => {
     "Windows installer should implement a PRINTER_UNAVAILABLE partial-success path"
   );
   assert(
-    installScript.includes("Existing scheduled task could not be removed without elevation"),
-    "Windows installer should tolerate legacy scheduled task cleanup failures"
+    installScript.includes("Run the installer as Administrator") &&
+      installScript.includes("could not be removed") &&
+      installScript.includes("old connector startup path can be replaced"),
+    "Windows installer should fail visibly when legacy startup cleanup needs elevation"
+  );
+  assert(
+    installScript.includes("Stop-RunningAgent") &&
+      installScript.includes("Remove-LegacyRuntimeFiles") &&
+      installScript.includes("Remove-LegacyStartupEntries"),
+    "Windows installer should stop old connectors and remove stale runtime/startup paths before installing"
+  );
+  assert(
+    installScript.includes("agentVersion") &&
+      installScript.includes("buildVersion") &&
+      installScript.includes("ExpectedVersion") &&
+      installScript.includes("local-agent-direct-v2"),
+    "Windows installer should verify the status endpoint is running the expected connector version and protocol"
+  );
+  assert(
+    installScript.includes("Assert-PostInstallProcessState") &&
+      installScript.includes("exactly one MSCQR connector process") &&
+      installScript.includes("canonical path"),
+    "Windows installer should verify exactly one active connector process at the canonical binary path"
   );
   assert(
     installScript.includes('Start-Process $TargetUrl'),

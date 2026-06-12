@@ -15,6 +15,15 @@ $InstallResultPath = Join-Path $AgentHome "install-result.json"
 $TaskName = "MSCQR Local Print Agent"
 $StatusUrl = "http://127.0.0.1:17866/status"
 $DialogTitle = "MSCQR Connector Setup"
+$SetupLog = Join-Path $LogDir "setup.log"
+$CanonicalAgentExe = Join-Path $BinDir "mscqr-local-print-agent.exe"
+$LegacyTaskNames = @($TaskName, "MSCQR Connector", "MSCQR Print Agent", "MSCQR Local Connector") | Select-Object -Unique
+$LegacyInstallRoots = @(
+  $AgentHome,
+  (Join-Path $env:LOCALAPPDATA "MSCQR Connector"),
+  (Join-Path $env:LOCALAPPDATA "MSCQR\connector"),
+  (Join-Path $env:APPDATA "MSCQR\local-print-agent")
+) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique
 
 $PackagedInstall = $false
 if ("1", "true", "yes", "on" -contains [string]$env:MSCQR_PACKAGED_INSTALL) {
@@ -47,6 +56,17 @@ function Show-SetupDialog {
     [System.Windows.Forms.MessageBoxButtons]::OK,
     $messageBoxIcon
   ) | Out-Null
+}
+
+function Write-UpgradeLog {
+  param(
+    [string]$Message
+  )
+
+  New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+  $line = "$(Get-Date -Format o) $Message"
+  Add-Content -Path $SetupLog -Value $line -Encoding ASCII
+  Write-Host $Message
 }
 
 function Write-InstallResult {
@@ -185,6 +205,7 @@ function Get-SetupVerification {
 function Wait-ForVerifiedStatus {
   param(
     [string]$TargetUrl,
+    [string]$ExpectedVersion,
     [int]$MaxAttempts = 24,
     [int]$DelayMs = 500
   )
@@ -199,6 +220,16 @@ function Wait-ForVerifiedStatus {
 
       $statusPayload = $response.Content | ConvertFrom-Json
       if ($null -eq $statusPayload) {
+        continue
+      }
+
+      if ([string]$statusPayload.agentVersion -ne $ExpectedVersion -or [string]$statusPayload.buildVersion -ne $ExpectedVersion) {
+        Write-UpgradeLog "Status endpoint responded with stale version agent=$($statusPayload.agentVersion) build=$($statusPayload.buildVersion); waiting for $ExpectedVersion."
+        continue
+      }
+
+      if ([string]$statusPayload.protocolVersion -ne "local-agent-direct-v2") {
+        Write-UpgradeLog "Status endpoint protocolVersion=$($statusPayload.protocolVersion); waiting for local-agent-direct-v2."
         continue
       }
 
@@ -272,7 +303,8 @@ function Install-PackagedAgentFiles {
     throw "Connector package is incomplete. mscqr-local-print-agent.exe was not found."
   }
 
-  $TargetExe = Join-Path $BinDir "mscqr-local-print-agent.exe"
+  $TargetExe = $CanonicalAgentExe
+  Write-UpgradeLog "Installing new connector binary to canonical path: $TargetExe"
   Copy-Item -Path $SourceExe -Destination $TargetExe -Force
 
   $ExecutableCommand = """$TargetExe"""
@@ -293,6 +325,7 @@ function Ensure-AgentEnvFile {
 }
 
 function Register-StartupLauncher {
+  Write-UpgradeLog "Registering startup launcher: $StartupLauncher"
   $LauncherBody = @"
 Set WshShell = CreateObject("WScript.Shell")
 WshShell.Run chr(34) & "$Wrapper" & chr(34), 0, False
@@ -301,33 +334,126 @@ WshShell.Run chr(34) & "$Wrapper" & chr(34), 0, False
 }
 
 function Cleanup-LegacyTask {
-  $ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-  if (-not $ExistingTask) {
-    return
-  }
+  foreach ($legacyTaskName in $LegacyTaskNames) {
+    $ExistingTask = Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
+    if (-not $ExistingTask) {
+      continue
+    }
 
-  try {
-    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
-  } catch {
-  }
+    Write-UpgradeLog "Found legacy scheduled task: $legacyTaskName"
+    try {
+      Stop-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue | Out-Null
+      Write-UpgradeLog "Stopped legacy scheduled task: $legacyTaskName"
+    } catch {
+    }
 
-  try {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
-    Write-Host "Removed legacy scheduled-task startup entry."
-  } catch {
-    Write-Warning "Existing scheduled task could not be removed without elevation. Continuing with the per-user Startup entry instead."
+    try {
+      Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction Stop
+      Write-UpgradeLog "Removed legacy scheduled-task startup entry: $legacyTaskName"
+    } catch {
+      throw "Existing scheduled task '$legacyTaskName' could not be removed. Run the installer as Administrator so the old connector startup path can be replaced."
+    }
   }
 }
 
+function Get-AgentProcessCandidates {
+  $agentProcesses = @()
+  try {
+    $agentProcesses = Get-CimInstance Win32_Process | Where-Object {
+      $name = [string]$_.Name
+      $commandLine = [string]$_.CommandLine
+      $name -in @("mscqr-local-print-agent.exe", "local-print-agent.exe", "mscqr-print-agent.exe") -or
+        ($name -ieq "node.exe" -and $commandLine -match "local-print-agent") -or
+        ($commandLine -match "mscqr-local-print-agent")
+    }
+  } catch {
+    Write-UpgradeLog "Could not inspect running connector processes: $($_.Exception.Message)"
+  }
+
+  return @($agentProcesses | Sort-Object ProcessId -Unique)
+}
+
 function Stop-RunningAgent {
-  $runningAgent = Get-Process -Name "mscqr-local-print-agent" -ErrorAction SilentlyContinue
-  if ($runningAgent) {
-    $runningAgent | Stop-Process -Force -ErrorAction SilentlyContinue
+  $runningAgents = Get-AgentProcessCandidates
+  if ($runningAgents.Count -eq 0) {
+    Write-UpgradeLog "No running MSCQR connector process found before install."
+    return
+  }
+
+  foreach ($process in $runningAgents) {
+    Write-UpgradeLog "Stopping old connector process: pid=$($process.ProcessId) path=$($process.ExecutablePath)"
+    try {
+      Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+    } catch {
+      throw "Could not stop old MSCQR connector process pid=$($process.ProcessId). $($_.Exception.Message)"
+    }
+  }
+
+  Start-Sleep -Milliseconds 500
+  $remainingAgents = Get-AgentProcessCandidates
+  if ($remainingAgents.Count -gt 0) {
+    $remainingSummary = ($remainingAgents | ForEach-Object { "pid=$($_.ProcessId) path=$($_.ExecutablePath)" }) -join "; "
+    throw "Old MSCQR connector process is still running after stop attempt: $remainingSummary"
+  }
+}
+
+function Remove-LegacyStartupEntries {
+  if (-not (Test-Path $StartupDir)) {
+    return
+  }
+
+  $startupEntries = @()
+  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "MSCQR*.vbs" -ErrorAction SilentlyContinue
+  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "MSCQR*.lnk" -ErrorAction SilentlyContinue
+  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "MSCQR*.cmd" -ErrorAction SilentlyContinue
+
+  foreach ($entry in ($startupEntries | Sort-Object FullName -Unique)) {
+    try {
+      Write-UpgradeLog "Removing stale startup entry: $($entry.FullName)"
+      Remove-Item -Path $entry.FullName -Force -ErrorAction Stop
+    } catch {
+      throw "Could not remove stale startup entry $($entry.FullName). $($_.Exception.Message)"
+    }
+  }
+}
+
+function Remove-LegacyRuntimeFiles {
+  foreach ($root in $LegacyInstallRoots) {
+    if (-not (Test-Path $root)) {
+      continue
+    }
+
+    Write-UpgradeLog "Found install path during upgrade cleanup: $root"
+    if ($root -eq $AgentHome) {
+      $oldBin = Join-Path $root "bin"
+      if (Test-Path $oldBin) {
+        Write-UpgradeLog "Removing old connector runtime files from: $oldBin"
+        Remove-Item -Path $oldBin -Recurse -Force -ErrorAction Stop
+      }
+    } else {
+      Write-UpgradeLog "Removing legacy connector install path: $root"
+      Remove-Item -Path $root -Recurse -Force -ErrorAction Stop
+    }
   }
 }
 
 function Start-AgentProcess {
+  Write-UpgradeLog "Starting newly installed connector via wrapper: $Wrapper"
   Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$Wrapper`"" -WindowStyle Hidden
+}
+
+function Assert-PostInstallProcessState {
+  $activeAgents = Get-AgentProcessCandidates
+  if ($activeAgents.Count -ne 1) {
+    $summary = ($activeAgents | ForEach-Object { "pid=$($_.ProcessId) path=$($_.ExecutablePath)" }) -join "; "
+    throw "Post-install verification expected exactly one MSCQR connector process, found $($activeAgents.Count). $summary"
+  }
+
+  $activePath = [string]$activeAgents[0].ExecutablePath
+  Write-UpgradeLog "Post-install active connector process: pid=$($activeAgents[0].ProcessId) path=$activePath"
+  if ([string]::IsNullOrWhiteSpace($activePath) -or $activePath -ne $CanonicalAgentExe) {
+    throw "Post-install verification found connector running from '$activePath' instead of canonical path '$CanonicalAgentExe'."
+  }
 }
 
 function Complete-Install {
@@ -359,6 +485,15 @@ try {
   New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
   New-Item -ItemType Directory -Force -Path $StartupDir | Out-Null
 
+  Write-UpgradeLog "Starting MSCQR Connector install/upgrade to version $ResolvedVersion."
+  Stop-RunningAgent
+  Cleanup-LegacyTask
+  Remove-LegacyStartupEntries
+  Remove-LegacyRuntimeFiles
+
+  New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+  New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
   Ensure-AgentEnvFile
 
   if ($PackagedInstall) {
@@ -368,14 +503,14 @@ try {
   }
 
   Register-StartupLauncher
-  Stop-RunningAgent
-  Cleanup-LegacyTask
   Start-AgentProcess
 
-  $verificationResult = Wait-ForVerifiedStatus -TargetUrl $StatusUrl
+  $verificationResult = Wait-ForVerifiedStatus -TargetUrl $StatusUrl -ExpectedVersion $ResolvedVersion
   if ($null -eq $verificationResult) {
-    throw "Connector installed, but the local status endpoint did not start in time. Check $LogDir\agent.log."
+    throw "Connector installed, but the local status endpoint did not start at version $ResolvedVersion in time. Check $LogDir\agent.log and $SetupLog."
   }
+  Assert-PostInstallProcessState
+  Write-UpgradeLog "Post-install status verification passed for agentVersion/buildVersion $ResolvedVersion."
 
   $setupVerification = $verificationResult.setupVerification
   $printerName = [string]$setupVerification.selectedPrinterName

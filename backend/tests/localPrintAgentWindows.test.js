@@ -1,6 +1,7 @@
 const {
   buildSetupVerification,
   extractWindowsJobId,
+  parseWindowsPrinterDiscovery,
   parseWindowsPrinters,
   resolveSelectedPrinter,
   waitForLocalPrintJobCompletion,
@@ -87,6 +88,72 @@ const run = async () => {
     inventoryError: "No printers detected by the Windows print spooler.",
   });
   assert(noPrintersVerification.state === "NO_PRINTERS", "No printers should return NO_PRINTERS");
+
+  const fallbackDiscovery = parseWindowsPrinterDiscovery(
+    JSON.stringify({
+      primaryPrinters: [],
+      fallbackPrinters: [
+        {
+          Name: "ZDesigner ZT410-300dpi ZPL",
+          DriverName: "ZDesigner ZT410-300dpi ZPL",
+          PortName: "USB001",
+          WorkOffline: false,
+          Default: true,
+          PrinterStatus: 3,
+          ExtendedPrinterStatus: 2,
+        },
+        {
+          Name: "MSCQR Zebra ZT410 WiFi",
+          DriverName: "ZDesigner ZT410-300dpi ZPL",
+          PortName: "MSCQR-ZT410-WIFI-9100",
+          WorkOffline: false,
+          Default: false,
+          PrinterStatus: 3,
+          ExtendedPrinterStatus: 2,
+        },
+      ],
+      ports: [{ Name: "USB001", PrinterHostAddress: null, PortNumber: null }],
+      jobs: [],
+      primaryError: null,
+      fallbackError: null,
+    })
+  );
+  assert(fallbackDiscovery.diagnostics.primaryEnumerationCount === 0, "Primary discovery count should be tracked");
+  assert(fallbackDiscovery.diagnostics.fallbackEnumerationCount === 2, "Fallback discovery count should be tracked");
+  assert(fallbackDiscovery.diagnostics.selectedSource === "fallback", "Fallback should be selected when primary returns no printers");
+  assert(
+    fallbackDiscovery.rows.some((printer) => printer.name === "ZDesigner ZT410-300dpi ZPL" && printer.portName === "USB001"),
+    "Fallback discovery should include the Zebra USB queue"
+  );
+  const fallbackLocalPrinters = fallbackDiscovery.rows.map((printer) => ({
+    printerId: printer.name,
+    printerName: printer.name,
+    model: printer.driverName,
+    connection: printer.portName === "USB001" ? "usb" : "network",
+    online: printer.portName === "USB001",
+    isDefault: printer.isDefault,
+    protocols: printer.portName === "USB001" ? ["usb"] : ["tcp"],
+    languages: ["ZPL"],
+    mediaSizes: [],
+    dpi: null,
+    portName: printer.portName,
+    windowsPortName: printer.portName,
+    queueStatus: printer.queueStatus,
+    queueHasErrors: printer.portName !== "USB001",
+    discoverySource: printer.discoverySource,
+  }));
+  const fallbackSelection = resolveSelectedPrinter(fallbackLocalPrinters, null);
+  const fallbackVerification = buildSetupVerification({
+    printers: fallbackLocalPrinters,
+    selection: fallbackSelection,
+    connected: fallbackSelection.printer?.online === true,
+  });
+  assert(
+    fallbackSelection.printerId === "ZDesigner ZT410-300dpi ZPL",
+    "Fallback inventory should prefer the real Zebra USB queue over stale WiFi"
+  );
+  assert(fallbackVerification.state !== "NO_PRINTERS", "Fallback USB discovery must not report NO_PRINTERS");
+  assert(fallbackVerification.state === "READY", "Fallback USB discovery should verify READY");
 
   const defaultReadySelection = resolveSelectedPrinter(localPrinters, null);
   const defaultReadyVerification = buildSetupVerification({
