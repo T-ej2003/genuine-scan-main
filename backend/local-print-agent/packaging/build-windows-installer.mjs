@@ -116,7 +116,7 @@ const runCaptured = (command, args, options = {}) => {
   });
 
   if (!result.error && result.status === 0 && !result.signal) {
-    return `${result.stdout || ""}${result.stderr || ""}`;
+    return String(result.stdout || "");
   }
 
   const attempted = formatCommand(command, args);
