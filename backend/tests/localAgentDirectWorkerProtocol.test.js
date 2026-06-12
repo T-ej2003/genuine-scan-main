@@ -2,6 +2,7 @@ const { createHash } = require("crypto");
 const {
   isCloudConnectivityError,
   resolveConnectivityRetryAfterMs,
+  resolveNoWorkRetryAfterMs,
   validateClaimedLocalPrintJobForAttempt,
 } = require("../dist/local-print-agent/directPrintWorker");
 const {
@@ -56,6 +57,11 @@ const run = () => {
   );
   assert(isCloudConnectivityError(Object.assign(new Error("fetch failed"), { cause: { code: "ENOTFOUND" } })), "DNS failures should be classified as cloud connectivity issues");
   assert(resolveConnectivityRetryAfterMs(5) >= 4000, "Connectivity retry should stay within bounded backoff");
+  assert(resolveNoWorkRetryAfterMs(8000, 1) >= 15000, "No-work claims must back off beyond the old 8s server hint");
+  assert(
+    resolveNoWorkRetryAfterMs(8000, 3) >= resolveNoWorkRetryAfterMs(8000, 1),
+    "Repeated no-work claims should not become more aggressive"
+  );
 
   const payloadContent = "^XA\n^XZ";
   const valid = validateClaimedLocalPrintJobForAttempt({

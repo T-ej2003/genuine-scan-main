@@ -434,7 +434,7 @@ export const getPrinterDiagnosticSummary = (params: {
       badgeLabel: "Update connector",
       title: "Connector update required",
       summary: "Printing is blocked until this workstation connector is updated.",
-      detail: `Detected: ${detected}. Required: 2026.6.12 or newer with transport diagnostics.`,
+      detail: `Detected: ${detected}. Required: 2026.6.13 or newer with transport diagnostics.`,
       tone: "danger",
       nextSteps: [
         "Update MSCQR Connector on this workstation.",

@@ -24,9 +24,9 @@ type PrinterMutationState = {
   inFlight: Promise<ApiResponse<unknown>> | null;
 };
 
-export const PRINTER_STATUS_MIN_REFRESH_MS = 15_000;
-export const PRINTER_LIST_MIN_REFRESH_MS = 30_000;
-export const PRINTER_HEARTBEAT_MIN_REFRESH_MS = 8_000;
+export const PRINTER_STATUS_MIN_REFRESH_MS = 45_000;
+export const PRINTER_LIST_MIN_REFRESH_MS = 60_000;
+export const PRINTER_HEARTBEAT_MIN_REFRESH_MS = 90_000;
 
 const PRINTER_RATE_LIMIT_FALLBACK_MS = 60_000;
 const PRINTER_RATE_LIMIT_NOTICE =

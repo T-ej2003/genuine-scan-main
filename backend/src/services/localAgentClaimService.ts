@@ -13,8 +13,8 @@ import { buildPrintConfirmationDeadline } from "./printConfirmationService";
 import { failStopPrintSession } from "./printLifecycleService";
 
 export const LOCAL_AGENT_NO_WORK_RETRY_MS = Math.max(
-  2_000,
-  Math.min(60_000, Number(process.env.LOCAL_AGENT_NO_WORK_RETRY_MS || 8_000) || 8_000)
+  15_000,
+  Math.min(60_000, Number(process.env.LOCAL_AGENT_NO_WORK_RETRY_MS || 15_000) || 15_000)
 );
 export const LOCAL_AGENT_BUSY_RETRY_MS = Math.max(
   1_000,

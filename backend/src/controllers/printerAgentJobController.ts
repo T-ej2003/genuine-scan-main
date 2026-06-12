@@ -58,6 +58,19 @@ const toRecord = (value: unknown) => {
   return value as Record<string, unknown>;
 };
 
+const sampledClaimLogAt = new Map<string, number>();
+const logLocalAgentClaim = (event: string, payload: Record<string, unknown>) => {
+  const noWorkEvent = event === "no_active_job" || event === "no_registered_printer_match" || event === "no_reserved_item";
+  if (noWorkEvent) {
+    const key = `${event}:${String(payload.registrationId || "")}:${String(payload.selectedPrinterId || "")}`;
+    const now = Date.now();
+    if (now - (sampledClaimLogAt.get(key) || 0) < 60_000) return;
+    sampledClaimLogAt.set(key, now);
+  }
+  const log = noWorkEvent ? console.debug : console.info;
+  log("local_agent_claim", { event, ...payload });
+};
+
 const hasQueueConfirmationUnavailable = (value: unknown) => {
   const root = toRecord(value);
   const dispatchMetadata = toRecord(root.dispatchMetadata);
@@ -115,14 +128,7 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
 
     const printerIds = candidatePrinters.map((printer) => printer.id);
     if (printerIds.length === 0) {
-      console.info("local_agent_claim", {
-        event: "no_registered_printer_match",
-        registrationId: registration.id,
-        agentId: registration.agentId,
-        selectedPrinterId,
-        candidatePrinterCount: candidatePrinters.length,
-        retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS,
-      });
+      logLocalAgentClaim("no_registered_printer_match", { registrationId: registration.id, agentId: registration.agentId, selectedPrinterId, candidatePrinterCount: candidatePrinters.length, retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS });
       return noClaimWork(res);
     }
 
@@ -184,16 +190,7 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
           },
         });
       }
-      console.info("local_agent_claim", {
-        event: "no_active_job",
-        registrationId: registration.id,
-        agentId: registration.agentId,
-        selectedPrinterId,
-        printerIds,
-        availableItemCount,
-        inFlightItemCount,
-        retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS,
-      });
+      logLocalAgentClaim("no_active_job", { registrationId: registration.id, agentId: registration.agentId, selectedPrinterId, printerIds, availableItemCount, inFlightItemCount, retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS });
       return noClaimWork(res, inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS);
     }
 
@@ -253,16 +250,7 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
     });
 
     if (!item) {
-      console.info("local_agent_claim", {
-        event: "no_reserved_item",
-        registrationId: registration.id,
-        agentId: registration.agentId,
-        printJobId: job.id,
-        printSessionId: job.printSession.id,
-        availableItemCount,
-        inFlightItemCount,
-        retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS,
-      });
+      logLocalAgentClaim("no_reserved_item", { registrationId: registration.id, agentId: registration.agentId, selectedPrinterId, printJobId: job.id, printSessionId: job.printSession.id, availableItemCount, inFlightItemCount, retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS });
       return noClaimWork(res, inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS);
     }
 

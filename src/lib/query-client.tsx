@@ -9,7 +9,10 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: (failureCount, error) => {
-        if (error instanceof ApiResponseError && error.code === "RATE_LIMITED") return false;
+        if (error instanceof ApiResponseError) {
+          if (error.code === "RATE_LIMITED") return false;
+          if ([400, 401, 403, 404, 409, 428, 429].includes(Number(error.status || 0))) return false;
+        }
         return failureCount < 1;
       },
       staleTime: 10_000,

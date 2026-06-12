@@ -23,10 +23,11 @@ import { buildOverviewLifecycleSteps } from "@/features/dashboard/presentation";
 import apiClient from "@/lib/api-client";
 import { ApiResponseError } from "@/lib/api/query-utils";
 import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
+import { canPollVisibleDocument, pollingPolicy } from "@/lib/query-polling-policy";
 
 import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/runtime/dashboard.ts";
 
-const STATS_POLL_MS = 30_000;
+const STATS_POLL_MS = pollingPolicy.dashboardFallbackMs;
 type StatusFocus = "all" | "dormant" | "allocated" | "printed" | "scanned";
 type QrStatsDashboardExtras = QrStatsDTO & {
   suspiciousScans?: number;
@@ -145,7 +146,7 @@ export default function Dashboard() {
     // start polling stats (fallback when SSE disconnects)
     closeRealtime();
     pollRef.current = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
+      if (!canPollVisibleDocument()) return;
       if (sseConnectedRef.current) return;
       void refreshDashboard();
     }, STATS_POLL_MS);

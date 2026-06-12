@@ -25,6 +25,7 @@ import {
 import { getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { createUiActionState } from "@/lib/ui-actions";
 import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
+import { pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
 import { APP_PATHS } from "@/app/route-metadata";
 import type { RegisteredPrinterDTO } from "../../shared/contracts/runtime/printing";
 
@@ -71,7 +72,7 @@ const NETWORK_DIRECT_LANGUAGES: ManagedRouteForm["commandLanguage"][] = [
   "ZSIM",
   "CPCL",
 ];
-const REQUIRED_CONNECTOR_VERSION = "2026.6.12";
+const REQUIRED_CONNECTOR_VERSION = "2026.6.13";
 
 type ManualFieldHelpKey = "vendor" | "model" | "host" | "port" | "resourcePath" | "printerUri";
 
@@ -348,9 +349,8 @@ export default function PrinterSetupPage() {
   const detectedPlatform = useMemo(() => detectCurrentPlatform(), []);
   const runtimeQuery = useManufacturerPrinterRuntime(true, true);
   const inventoryQuery = useQuery({
-    queryKey: ["printer-setup", "inventory"],
-    refetchInterval: 30_000,
-    refetchOnWindowFocus: false,
+    queryKey: ["printer-setup", "inventory"], refetchInterval: visibleRefetchInterval(pollingPolicy.printerSetupRefreshMs),
+    refetchOnWindowFocus: false, staleTime: pollingPolicy.printerSetupRefreshMs,
     queryFn: async () => {
       const response = await apiClient.getLocalPrintAgentStatus();
       if (!response.success) return [] as PrinterInventoryRow[];

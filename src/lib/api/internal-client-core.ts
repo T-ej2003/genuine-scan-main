@@ -250,6 +250,7 @@ export type ApiClientCore = {
 export function createApiClientCore(): ApiClientCore {
   let token: string | null = null;
   const getCache = new Map<string, unknown>();
+  const endpointCooldowns = new Map<string, number>();
   let refreshInFlight: Promise<ApiResponse<{ user: any }>> | null = null;
 
   const setToken = (nextToken: string | null) => {
@@ -318,6 +319,18 @@ export function createApiClientCore(): ApiClientCore {
 
     const method = String(options.method || "GET").toUpperCase();
     const cacheKey = `${getToken() || "cookie"}:${endpoint}`;
+    const cooldownKey = `${method}:${endpoint}`;
+    const cooldownUntil = endpointCooldowns.get(cooldownKey) || 0;
+    if (Date.now() < cooldownUntil) {
+      return {
+        success: false,
+        error: "Request paused after rate limit. Please wait before retrying.",
+        status: 429,
+        code: "RATE_LIMITED",
+        errorCode: "RATE_LIMITED",
+        retryAfterSec: Math.ceil((cooldownUntil - Date.now()) / 1000),
+      };
+    }
 
     const hasBody = options.body !== undefined && options.body !== null;
     const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -445,6 +458,9 @@ export function createApiClientCore(): ApiClientCore {
             : Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
               ? retryAfterHeader
               : undefined;
+        if (response.status === 429) {
+          endpointCooldowns.set(cooldownKey, Date.now() + Math.max(1, retryAfterSec || 60) * 1000);
+        }
         const responseData =
           payload && typeof payload === "object" && "data" in payload ? (payload as any).data : undefined;
         if (response.status === 428 && responseCode === "STEP_UP_REQUIRED") {

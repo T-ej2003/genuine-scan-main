@@ -19,6 +19,10 @@ const DIRECT_PRINT_MAX_BACKOFF_MS = Math.max(
   DIRECT_PRINT_POLL_MS,
   Number(process.env.PRINT_AGENT_DIRECT_MAX_BACKOFF_MS || 60_000) || 60_000
 );
+const DIRECT_PRINT_IDLE_MIN_BACKOFF_MS = Math.max(
+  15_000,
+  Number(process.env.PRINT_AGENT_DIRECT_IDLE_MIN_BACKOFF_MS || 20_000) || 20_000
+);
 const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -27,6 +31,19 @@ const clampRetryAfterMs = (value: unknown) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return DIRECT_PRINT_POLL_MS;
   return Math.max(DIRECT_PRINT_POLL_MS, Math.min(DIRECT_PRINT_MAX_BACKOFF_MS, Math.floor(parsed)));
+};
+
+const addRetryJitterMs = (value: number) => {
+  const jitter = Math.floor(Math.random() * Math.min(5_000, Math.max(500, Math.floor(value * 0.2))));
+  return clampRetryAfterMs(value + jitter);
+};
+
+export const resolveNoWorkRetryAfterMs = (serverRetryAfterMs: unknown, noWorkCount: number) => {
+  const serverRetry = clampRetryAfterMs(serverRetryAfterMs);
+  const exponent = Math.min(3, Math.max(0, noWorkCount - 1));
+  const idleMax = Math.max(DIRECT_PRINT_MAX_BACKOFF_MS, DIRECT_PRINT_IDLE_MIN_BACKOFF_MS);
+  const idleBackoff = Math.min(idleMax, DIRECT_PRINT_IDLE_MIN_BACKOFF_MS * 2 ** exponent);
+  return Math.max(DIRECT_PRINT_IDLE_MIN_BACKOFF_MS, addRetryJitterMs(Math.max(serverRetry, idleBackoff)));
 };
 
 export const isCloudConnectivityError = (error: any) => {
@@ -131,7 +148,10 @@ const claimNextLocalJob = async () => {
   const state = await loadAgentState();
   const inventory = await listLocalPrinters();
   const selection = resolveSelectedPrinter(inventory.printers, state.selectedPrinterId);
-  const selectedPrinterId = selection.printerId || "unknown-printer";
+  const selectedPrinterId = String(selection.printerId || "").trim();
+  if (!selectedPrinterId || !state.selectedPrinterId) {
+    return { success: true, data: null, retryAfterMs: DIRECT_PRINT_IDLE_MIN_BACKOFF_MS };
+  }
   const signed = await buildSignedBody({
     action: "claim",
     printerId: selectedPrinterId,
@@ -492,12 +512,16 @@ const runLocalDiagnosticTestJob = async (payload: any, printerId: string) => {
   }
 };
 
-const runOnce = async () => {
+type DirectPrintCycleResult = {
+  retryAfterMs: number;
+  noWork: boolean;
+};
+
+const runOnce = async (): Promise<DirectPrintCycleResult> => {
   const claimed = await claimNextLocalJob();
   if (!claimed?.data) {
     const retryAfterMs = clampRetryAfterMs(claimed?.retryAfterMs);
-    console.info("local direct-print claim returned no work", { retryAfterMs });
-    return retryAfterMs;
+    return { retryAfterMs, noWork: true };
   }
 
   const payload = claimed.data;
@@ -523,7 +547,7 @@ const runOnce = async () => {
       printItemId: String(payload.printItemId || "").trim(),
       reason: "Local agent has no selected workstation printer for this job.",
     });
-    return;
+    return { retryAfterMs: clampRetryAfterMs(claimed?.retryAfterMs), noWork: false };
   }
 
   const printJobId = String(payload.printJobId || "").trim();
@@ -533,7 +557,7 @@ const runOnce = async () => {
   try {
     if (payload.testJobId) {
       await runLocalDiagnosticTestJob(payload, printerId);
-      return clampRetryAfterMs(claimed?.retryAfterMs);
+      return { retryAfterMs: clampRetryAfterMs(claimed?.retryAfterMs), noWork: false };
     }
 
     validated = validateClaimedLocalPrintJobForAttempt(payload);
@@ -644,7 +668,7 @@ const runOnce = async () => {
         jobRef: result.jobRef || null,
         queue: (completion as any)?.queue || null,
       });
-      return clampRetryAfterMs(claimed?.retryAfterMs);
+      return { retryAfterMs: clampRetryAfterMs(claimed?.retryAfterMs), noWork: false };
     }
     await confirmLocalJob({
       printerId,
@@ -706,20 +730,34 @@ const runOnce = async () => {
     throw error;
   }
 
-  return clampRetryAfterMs(claimed?.retryAfterMs);
+  return { retryAfterMs: clampRetryAfterMs(claimed?.retryAfterMs), noWork: false };
 };
 
+let activeDirectPrintWorkerStop: (() => void) | null = null;
+
 export const startDirectPrintWorker = () => {
+  if (activeDirectPrintWorkerStop) return activeDirectPrintWorkerStop;
+
   let stopped = false;
   let connectivityFailureCount = 0;
+  let noWorkCount = 0;
+  let lastNoWorkLogAt = 0;
 
   const loop = async () => {
     while (!stopped) {
       try {
         if (await resolveBackendUrl()) {
-          const retryAfterMs = await runOnce();
+          const result = await runOnce();
           connectivityFailureCount = 0;
-          await new Promise((resolve) => setTimeout(resolve, clampRetryAfterMs(retryAfterMs)));
+          noWorkCount = result.noWork ? noWorkCount + 1 : 0;
+          const retryAfterMs = result.noWork
+            ? resolveNoWorkRetryAfterMs(result.retryAfterMs, noWorkCount)
+            : clampRetryAfterMs(result.retryAfterMs);
+          if (result.noWork && Date.now() - lastNoWorkLogAt > 60_000) {
+            lastNoWorkLogAt = Date.now();
+            console.debug("local direct-print claim idle", { retryAfterMs, noWorkCount });
+          }
+          await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
           continue;
         }
       } catch (error) {
@@ -752,7 +790,9 @@ export const startDirectPrintWorker = () => {
 
   void loop();
 
-  return () => {
+  activeDirectPrintWorkerStop = () => {
     stopped = true;
+    activeDirectPrintWorkerStop = null;
   };
+  return activeDirectPrintWorkerStop;
 };

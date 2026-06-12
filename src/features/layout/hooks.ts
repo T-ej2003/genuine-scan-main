@@ -5,6 +5,7 @@ import { z } from "zod";
 import apiClient from "@/lib/api-client";
 import { ApiResponseError, parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
+import { canPollVisibleDocument, pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
 import { queryKeys } from "@/lib/query-keys";
 
 import {
@@ -47,7 +48,7 @@ const attentionQueueSchema = z
 export type OperationalAttentionQueue = z.infer<typeof attentionQueueSchema>;
 
 const NOTIFICATION_CLEAR_ANIMATION_MS = 260;
-const NOTIFICATION_MIN_REFRESH_MS = 15_000;
+const NOTIFICATION_MIN_REFRESH_MS = 60_000;
 
 const notificationsResponseSchema = z
   .object({
@@ -60,7 +61,9 @@ export function useDashboardNotifications(enabled: boolean, limit = 24, unreadOn
   return useQuery({
     queryKey: queryKeys.layout.notifications(limit, unreadOnly),
     enabled,
-    refetchInterval: enabled ? 90_000 : false,
+    staleTime: pollingPolicy.notificationsMs,
+    refetchInterval: enabled ? visibleRefetchInterval(pollingPolicy.notificationsMs) : false,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<NotificationsSnapshot> => {
       const payload = unwrapParsedApiResponse(
         await apiClient.getNotifications({ limit, offset: 0, unreadOnly }),
@@ -145,9 +148,9 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   useEffect(() => {
     if (!userId) return;
     const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
+      if (!canPollVisibleDocument()) return;
       void loadNotifications();
-    }, 90_000);
+    }, pollingPolicy.notificationsMs);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
@@ -279,7 +282,9 @@ export function useOperationalAttentionQueue(enabled: boolean) {
   return useQuery({
     queryKey: queryKeys.layout.attentionQueue(),
     enabled,
-    refetchInterval: enabled ? 45_000 : false,
+    staleTime: pollingPolicy.attentionQueueMs,
+    refetchInterval: enabled ? visibleRefetchInterval(pollingPolicy.attentionQueueMs) : false,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<OperationalAttentionQueue> =>
       unwrapParsedApiResponse(
         await apiClient.getOperationalAttentionQueue(),

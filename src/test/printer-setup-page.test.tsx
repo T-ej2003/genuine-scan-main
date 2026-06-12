@@ -134,8 +134,8 @@ describe("PrinterSetupPage", () => {
     vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
       success: true,
       data: {
-        latestVersion: "2026.6.12",
-        release: { platforms: { windows: { version: "2026.6.12" } } },
+        latestVersion: "2026.6.13",
+        release: { platforms: { windows: { version: "2026.6.13" } } },
       },
     } as any);
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({

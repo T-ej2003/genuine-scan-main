@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import apiClient from "@/lib/api-client";
 import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
+import { pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
 import { queryKeys } from "@/lib/query-keys";
 import { chooseStablePrinterSelection, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
 
@@ -168,8 +169,8 @@ export function useManufacturerPrinterRuntime(includeInactive = true, enabled = 
   return useQuery({
     queryKey: queryKeys.printing.runtime(includeInactive),
     enabled,
-    staleTime: 20_000,
-    refetchInterval: enabled ? 30_000 : false,
+    staleTime: pollingPolicy.printerRuntimeRefreshMs,
+    refetchInterval: enabled ? visibleRefetchInterval(pollingPolicy.printerRuntimeRefreshMs) : false,
     refetchOnWindowFocus: false,
     queryFn: () => loadManufacturerPrinterRuntimeSnapshot(includeInactive),
   });

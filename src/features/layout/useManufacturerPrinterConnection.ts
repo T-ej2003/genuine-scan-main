@@ -32,7 +32,6 @@ import {
 import {
   defaultPrinterStatus,
   DISABLE_E2E_PRINTER_AGENT_POLLING,
-  PRINTER_BACKGROUND_REFRESH_MS,
   PRINTER_DIALOG_SESSION_STORAGE_VERSION,
   PRINTER_FAILURE_REPORT_COOLDOWN_MS,
   PRINTER_ONBOARDING_STORAGE_VERSION,
@@ -446,11 +445,6 @@ export function useManufacturerPrinterConnection({
   useEffect(() => {
     if (!user || user.role !== "manufacturer") return;
     void syncManufacturerPrinterStatus({ silent: true });
-    const timer = window.setInterval(() => {
-      void syncManufacturerPrinterStatus({ silent: true });
-    }, PRINTER_BACKGROUND_REFRESH_MS);
-
-    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.role]);
 

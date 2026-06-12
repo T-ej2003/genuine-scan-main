@@ -23,6 +23,7 @@ type PrintJobErrorCode =
   | "printer_not_verified"
   | "printer_selection_mismatch"
   | "printer_status_unavailable"
+  | "PRINTER_TEST_LABEL_REQUIRED"
   | "print_job_conflict"
   | "print_job_transaction_failed"
   | "print_item_reservation_failed"
@@ -354,6 +355,20 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
           error?.reason,
           "The site print connector needs attention before this printer can be used."
         ),
+      }, context),
+    };
+  }
+  if (msg.includes("PRINTER_TEST_LABEL_REQUIRED")) {
+    return {
+      status: 428,
+      logReason: "printer_test_label_required",
+      payload: withFailureContext({
+        code: "PRINTER_TEST_LABEL_REQUIRED",
+        message: sanitizePrinterActionError(
+          error?.reason,
+          "Send and confirm a live printer setup test label before starting production printing."
+        ),
+        data: { recoveryAction: "print_setup_test_label" },
       }, context),
     };
   }

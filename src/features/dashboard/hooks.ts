@@ -4,6 +4,7 @@ import { z } from "zod";
 import apiClient from "@/lib/api-client";
 import type { ApiResponse } from "@/lib/api-client";
 import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
+import { pollingPolicy } from "@/lib/query-polling-policy";
 import { queryKeys } from "@/lib/query-keys";
 
 import {
@@ -32,6 +33,8 @@ const isPausedResponse = (response: ApiResponse<unknown>) =>
 export function useDashboardStats(licenseeId?: string) {
   return useQuery({
     queryKey: queryKeys.dashboard.stats(licenseeId),
+    staleTime: pollingPolicy.dashboardFallbackMs,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<DashboardStatsResult> => {
       const [summaryResponse, qrStatsResponse] = await Promise.all([
         apiClient.getDashboardStats(licenseeId),
@@ -51,6 +54,8 @@ export function useDashboardAuditLogs(enabled: boolean, limit = 5) {
   return useQuery({
     queryKey: queryKeys.dashboard.audit(limit),
     enabled,
+    staleTime: pollingPolicy.dashboardFallbackMs,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<DashboardAuditLogsResult> => {
       const response = await apiClient.getAuditLogs({ limit });
       const payload = unwrapParsedApiResponse(

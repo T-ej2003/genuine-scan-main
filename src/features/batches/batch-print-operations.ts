@@ -4,6 +4,7 @@ import apiClient from "@/lib/api-client";
 import { setOptionalLocalStorageItem } from "@/lib/consent";
 import { chooseStablePrinterSelection } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { canPollVisibleDocument, jitterMs, pollingPolicy } from "@/lib/query-polling-policy";
 
 import { defaultPrinterStatus } from "./print-workflow-utils";
 import type {
@@ -39,6 +40,25 @@ type AutoReportPrinterFailure = (params: {
   diagnostics?: Record<string, unknown>;
 }) => Promise<boolean> | boolean;
 
+export const isPrintJobServerSettled = (job: PrintJobRow | null | undefined) => {
+  if (!job) return false;
+  const total = Number(job.session?.totalItems || job.itemCount || job.quantity || 0);
+  const confirmed = Number(job.session?.confirmedItems || 0);
+  const sessionStatus = String(job.session?.status || "").toUpperCase();
+  return (
+    job.status === "CONFIRMED" ||
+    job.status === "FAILED" ||
+    job.status === "CANCELLED" ||
+    job.status === "STOPPED" ||
+    sessionStatus === "COMPLETED" ||
+    sessionStatus === "FAILED" ||
+    sessionStatus === "CANCELLED" ||
+    sessionStatus === "STOPPED" ||
+    Boolean(job.confirmedAt) ||
+    (total > 0 && confirmed >= total)
+  );
+};
+
 export const formatActionablePrintWorkflowError = (
   response: any,
   fallback = "Complete the previous step before continuing."
@@ -49,6 +69,7 @@ export const formatActionablePrintWorkflowError = (
   const mapped: Record<string, string> = {
     PHYSICAL_CONFIRMATION_REQUIRED: "Confirm physical printing before scanning or releasing.",
     SAMPLE_SCAN_REQUIRED: "Scan one printed label before release.",
+    PRINTER_TEST_LABEL_REQUIRED: "Send and confirm a live printer setup test label before production printing.",
     APPROVAL_REQUIRED: "A different authorized checker must approve this high-value release.",
     CHECKER_REQUIRED: "A different authorized checker must approve this release.",
     MAKER_CANNOT_APPROVE: "The release checker must be a different user.",
@@ -98,24 +119,29 @@ export const syncProgressFromPrintJob = (
 ) => {
   if (!job) return;
 
-  const total = Number(job.itemCount || job.quantity || 0);
-  const confirmed = Number(job.session?.confirmedItems || 0);
+  const total = Number(job.session?.totalItems || job.itemCount || job.quantity || 0);
+  const confirmed = Math.min(total || Number.MAX_SAFE_INTEGER, Number(job.session?.confirmedItems || 0));
   const remaining =
     typeof job.session?.remainingToPrint === "number"
-      ? job.session.remainingToPrint
+      ? Math.max(0, job.session.remainingToPrint)
       : Math.max(0, total - confirmed);
+  const serverCompleted =
+    job.status === "CONFIRMED" ||
+    String(job.session?.status || "").toUpperCase() === "COMPLETED" ||
+    Boolean(job.confirmedAt) ||
+    (total > 0 && confirmed >= total);
 
   if (total > 0) setPrintProgressTotal(total);
-  setPrintProgressPrinted(confirmed);
-  setPrintProgressRemaining(remaining);
-  setDirectRemainingToPrint(remaining);
+  setPrintProgressPrinted(serverCompleted && total > 0 ? total : confirmed);
+  setPrintProgressRemaining(serverCompleted ? 0 : remaining);
+  setDirectRemainingToPrint(serverCompleted ? 0 : remaining);
   setPrintProgressDispatchMode((previous) => job.printMode || previous || null);
   setPrintProgressPrinterName((previous) => {
     const resolvedName = String(job.printer?.name || "").trim();
     return resolvedName || previous || null;
   });
 
-  if (job.status === "CONFIRMED") {
+  if (serverCompleted) {
     setPrintProgressPhase("Print job completed");
     setPrintProgressError(null);
     return;
@@ -133,6 +159,11 @@ export const syncProgressFromPrintJob = (
   if (job.status === "CANCELLED") {
     setPrintProgressPhase("Print job cancelled");
     setPrintProgressError(sanitizePrinterUiError(job.failureReason, "This print job was cancelled before completion."));
+    return;
+  }
+  if (job.status === "STOPPED" || String(job.session?.status || "").toUpperCase() === "STOPPED") {
+    setPrintProgressPhase("Print job stopped");
+    setPrintProgressError(sanitizePrinterUiError(job.failureReason || job.session?.failedReason, "This print job was stopped."));
     return;
   }
 
@@ -242,6 +273,9 @@ export const printJobCreateFailureMessage = (response: {
   if (errorCode === "printer_not_verified") {
     return "Finish printer verification or choose a verified printer before starting this print run.";
   }
+  if (errorCode === "printer_test_label_required") {
+    return "Send and confirm a live printer setup test label before starting production printing.";
+  }
   if (errorCode === "missing_printer_session") {
     return "Refresh the printer connection, then start the print run again.";
   }
@@ -324,11 +358,11 @@ export const pollPrintJobUntilSettled = async (
     if (response.success && response.data) {
       latest = response.data as PrintJobRow;
       syncProgressFromPrintJob(latest, progressSetters);
-      if (latest.status === "CONFIRMED" || latest.status === "FAILED" || latest.status === "CANCELLED") {
+      if (isPrintJobServerSettled(latest)) {
         return { settled: true as const, job: latest };
       }
     }
-    await sleep(1200);
+    await sleep(canPollVisibleDocument() ? jitterMs(pollingPolicy.activePrintJobMs) : pollingPolicy.hiddenTabBackoffMs);
   }
 
   return { settled: false as const, job: latest };
