@@ -54,10 +54,13 @@ export function useActivePrintJobPolling({
       modalOpen: printProgressOpen,
       terminal,
     });
+  }, [printJobId, printProgressOpen, printProgressPhase, printProgressPrinted, printProgressTotal]);
+
+  useEffect(() => {
     return () => {
       clearActivePrintSession(printJobId);
     };
-  }, [printJobId, printProgressOpen, printProgressPhase, printProgressPrinted, printProgressTotal]);
+  }, [printJobId]);
 
   useEffect(() => {
     if (printing) return;
@@ -92,8 +95,22 @@ export function useActivePrintJobPolling({
         const settled = isPrintJobServerSettled(job);
         if (settled && !completedRefreshJobIdsRef.current.has(polledJobId)) {
           completedRefreshJobIdsRef.current.add(polledJobId);
-          clearActivePrintSession(polledJobId);
-          void Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
+          updateActivePrintSession({
+            active: false,
+            jobId: polledJobId,
+            modalOpen: true,
+            terminal: true,
+          });
+          const total = Number(job.session?.totalItems || job.itemCount || job.quantity || 0);
+          const confirmed = Number(job.session?.confirmedItems || 0);
+          const completed =
+            job.status === "CONFIRMED" ||
+            String(job.session?.status || "").toUpperCase() === "COMPLETED" ||
+            Boolean(job.confirmedAt) ||
+            (total > 0 && confirmed >= total);
+          if (completed) {
+            void Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
+          }
         }
         return settled;
       } finally {

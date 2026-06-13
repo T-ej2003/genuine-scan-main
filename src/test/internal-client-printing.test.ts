@@ -84,6 +84,37 @@ describe("printing api request control", () => {
     );
   });
 
+  it("suppresses mutation fanout for live print control actions", async () => {
+    const request = vi.fn(async () => ({ success: true, data: { status: "PARTIALLY_COMPLETED" } }));
+    const api = createPrintingApi(createCore(request));
+
+    await api.stopPrintJob("job-stop", "operator stopped this run");
+    await api.pausePrintJob("job-pause", "operator paused this run");
+    await api.resumePrintJob("job-resume");
+
+    expect(request).toHaveBeenCalledWith(
+      "/manufacturer/print-jobs/job-stop/stop",
+      expect.objectContaining({
+        method: "POST",
+        suppressMutationEvent: true,
+      })
+    );
+    expect(request).toHaveBeenCalledWith(
+      "/manufacturer/print-jobs/job-pause/pause",
+      expect.objectContaining({
+        method: "POST",
+        suppressMutationEvent: true,
+      })
+    );
+    expect(request).toHaveBeenCalledWith(
+      "/manufacturer/print-jobs/job-resume/resume",
+      expect.objectContaining({
+        method: "POST",
+        suppressMutationEvent: true,
+      })
+    );
+  });
+
   it("collapses repeated print job creation clicks into one mutation with one idempotency key", async () => {
     let resolveRequest: ((response: ApiResponse<{ printJobId: string }>) => void) | null = null;
     const request = vi.fn(

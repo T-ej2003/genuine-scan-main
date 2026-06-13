@@ -80,7 +80,7 @@ describe("dialog recovery states", () => {
     renderPrintDialog();
 
     expect(screen.getByTestId("print-job-start-button")).toBeEnabled();
-    expect(screen.getByText("Pause, resume, and stop appear after a print run starts.")).toBeInTheDocument();
+    expect(screen.getByText("Stop and refresh appear after a print run starts.")).toBeInTheDocument();
   });
 
   it("keeps print start disabled when backend lifecycle readiness blocks the batch", () => {
@@ -246,16 +246,15 @@ describe("dialog recovery states", () => {
     expect(screen.getByText("5 printed")).toBeInTheDocument();
     expect(screen.getByText("25 remaining")).toBeInTheDocument();
     expect(screen.getByText("30 total labels")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Pause print run" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop print run" }));
     fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
-    expect(onOpenControl).toHaveBeenCalledWith("pause", expect.objectContaining({ id: "job-live" }));
     expect(onOpenControl).toHaveBeenCalledWith("stop", expect.objectContaining({ id: "job-live" }));
     expect(onRefresh).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Pause print run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume print run" })).not.toBeInTheDocument();
   });
 
-  it.each([0, 1, 6])("shows progress modal controls at %i/10 confirmed labels", (printed) => {
-    const onPause = vi.fn();
+  it.each([0, 1, 6])("shows only stop and refresh in the progress modal at %i/10 confirmed labels", (printed) => {
     const onStop = vi.fn();
     const onRefresh = vi.fn();
     const activeJob = {
@@ -280,16 +279,15 @@ describe("dialog recovery states", () => {
         printerName="ZDesigner ZT410-300dpi ZPL"
         modeLabel="Printer on this computer"
         activeJob={activeJob}
-        onPause={onPause}
         onStop={onStop}
         onRefresh={onRefresh}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Pause print run" }));
+    expect(screen.queryByRole("button", { name: "Pause print run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume print run" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stop print run" }));
     fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
-    expect(onPause).toHaveBeenCalledWith(expect.objectContaining({ id: activeJob.id }));
     expect(onStop).toHaveBeenCalledWith(expect.objectContaining({ id: activeJob.id }));
     expect(onRefresh).toHaveBeenCalled();
   });
@@ -319,9 +317,72 @@ describe("dialog recovery states", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Pause print run" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause print run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume print run" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop print run" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh status" })).toBeInTheDocument();
+  });
+
+  it("shows stopped partially completed progress as recoverable without live controls", () => {
+    render(
+      <PrintProgressDialog
+        open
+        phase="Partially completed"
+        total={10}
+        printed={4}
+        remaining={6}
+        printerName="ZDesigner ZT410-300dpi ZPL"
+        modeLabel="Printer on this computer"
+        activeJob={{
+          id: "job-stopped",
+          status: "PARTIALLY_COMPLETED",
+          pipelineState: "STOPPED",
+          printMode: "LOCAL_AGENT",
+          quantity: 10,
+          itemCount: 10,
+          createdAt: new Date().toISOString(),
+          printer: { name: "ZDesigner ZT410-300dpi ZPL" },
+          session: { status: "STOPPED", totalItems: 10, confirmedItems: 4, remainingToPrint: 6 },
+        } as any}
+      />,
+    );
+
+    expect(screen.getByText("Print run stopped")).toBeInTheDocument();
+    expect(screen.getByText("4 of 10 labels confirmed. Unprinted labels remain recoverable.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause print run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume print run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop print run" })).not.toBeInTheDocument();
+  });
+
+  it("shows stopped partially completed current print run as recoverable without live controls", () => {
+    renderPrintDialog({
+      printJobId: "job-stopped",
+      printProgressPhase: "Partially completed",
+      printProgressTotal: 10,
+      printProgressPrinted: 4,
+      printProgressPrinterName: "ZDesigner ZT410-300dpi ZPL",
+      printProgressDispatchMode: "LOCAL_AGENT",
+      directRemainingToPrint: 6,
+      recentPrintJobs: [
+        {
+          id: "job-stopped",
+          status: "PARTIALLY_COMPLETED",
+          pipelineState: "STOPPED",
+          printMode: "LOCAL_AGENT",
+          quantity: 10,
+          itemCount: 10,
+          createdAt: new Date().toISOString(),
+          printer: { name: "ZDesigner ZT410-300dpi ZPL" },
+          session: { status: "STOPPED", totalItems: 10, confirmedItems: 4, remainingToPrint: 6 },
+        } as any,
+      ],
+    });
+
+    expect(screen.getByText("Print run stopped")).toBeInTheDocument();
+    expect(screen.getByText("Confirmed labels stay printed. Unprinted labels remain recoverable through the controlled recovery flow.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause print run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume print run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop print run" })).not.toBeInTheDocument();
   });
 
   it("uses backend completed session state for active local-agent progress", () => {

@@ -56,12 +56,12 @@ export const clearActivePrintSession = (jobId?: string | null) => {
   });
 };
 
-export const isActivePrintSessionSuppressed = () => state.active && state.modalOpen && !state.terminal;
+export const isActivePrintSessionSuppressed = () => state.modalOpen && Boolean(state.jobId);
 
 export const useActivePrintSession = () =>
   useSyncExternalStore(subscribeActivePrintSession, getActivePrintSessionSnapshot, getActivePrintSessionSnapshot);
 
 export const useActivePrintSessionSuppression = () => {
   const snapshot = useActivePrintSession();
-  return snapshot.active && snapshot.modalOpen && !snapshot.terminal;
+  return snapshot.modalOpen && Boolean(snapshot.jobId);
 };

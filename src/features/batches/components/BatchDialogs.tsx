@@ -359,7 +359,7 @@ export function BatchPrintJobDialog({
     batchPrintReadiness?.requiredPreviousStep ||
     "Complete the previous batch step first.";
   const isJobActive = (job: PrintJobRow) =>
-    ["PENDING", "SENT", "PARTIALLY_COMPLETED"].includes(job.status) ||
+    ["PENDING", "SENT"].includes(job.status) ||
     ["ACTIVE", "RESUME_PENDING", "RETRY_WAITING"].includes(String(job.session?.status || "").toUpperCase()) ||
     ["PRINT_CONFIRMED", "PRINTER_ACKNOWLEDGED", "QUEUED"].includes(String(job.pipelineState || "").toUpperCase());
   const isJobPaused = (job: PrintJobRow) =>
@@ -405,16 +405,23 @@ export function BatchPrintJobDialog({
         : Math.max(0, Number(directRemainingToPrint || 0));
   const activeSessionStatus = String(activePrintJob?.session?.status || "").toUpperCase();
   const activePipelineState = String(activePrintJob?.pipelineState || "").toUpperCase();
+  const activeStoppedOrPartial =
+    activePrintJob?.status === "PARTIALLY_COMPLETED" ||
+    activePrintJob?.status === "STOPPED" ||
+    activePipelineState === "STOPPED" ||
+    activeSessionStatus === "STOPPED";
   const activeCompleted =
-    activePrintJob?.status === "CONFIRMED" ||
-    activeSessionStatus === "COMPLETED" ||
-    (activeTotal > 0 && activeConfirmed >= activeTotal);
+    !activeStoppedOrPartial &&
+    (activePrintJob?.status === "CONFIRMED" ||
+      activeSessionStatus === "COMPLETED" ||
+      (activeTotal > 0 && activeConfirmed >= activeTotal));
   const activeWaitingForConfirmation =
     Boolean(activePrintJob?.awaitingConfirmation) ||
     /waiting for printer confirmation/i.test(String(printProgressPhase || "")) ||
     Number(activePrintJob?.session?.awaitingConfirmationCount || 0) > 0;
   const showActivePrintControls = Boolean(
     activePrintJob &&
+      !activeStoppedOrPartial &&
       !activeCompleted &&
       (activePrintJob.status === "SENT" ||
         activePrintJob.status === "PAUSED" ||
@@ -681,29 +688,33 @@ export function BatchPrintJobDialog({
                 state={
                   printing
                     ? createUiActionState("pending", "Starting the print run now.")
-                    : !selectedPrinterProfile
-                      ? createUiActionState("disabled", "Choose a saved printer before you start this run.")
+                      : printJobId
+                        ? createUiActionState("disabled", "Finish or stop the current print run before starting another one.")
+                      : !selectedPrinterProfile
+                        ? createUiActionState("disabled", "Choose a saved printer before you start this run.")
                       : batchLifecycleBlocked
                         ? createUiActionState("disabled", batchLifecycleBlockReason)
                       : !selectedPrinterCanPrint
                         ? createUiActionState("disabled", selectedPrinterNotice.detail || "This printer needs attention before it can print.")
                         : createUiActionState("enabled")
                 }
-                idleLabel={printJobId ? "Resume print run" : "Start print run"}
+                idleLabel={printJobId ? "Print run active" : "Start print run"}
                 pendingLabel="Starting..."
               />
             </div>
 
             {!printJobId ? (
               <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-                Pause, resume, and stop appear after a print run starts.
+                Stop and refresh appear after a print run starts.
               </div>
             ) : null}
 
             {printJobId ? (
               <div className="space-y-2 rounded-md border p-3 text-sm">
                 <div className="text-xs text-muted-foreground">Current print run</div>
-                <div className="font-medium">{activeCompleted ? "Print run completed" : "Printing in progress"}</div>
+                <div className="font-medium">
+                  {activeStoppedOrPartial ? "Print run stopped" : activeCompleted ? "Print run completed" : "Printing in progress"}
+                </div>
                 <div className="text-xs text-muted-foreground">
                   Using {printProgressPrinterName || selectedPrinterProfile?.name || "—"} ·{" "}
                   {formatDispatchModeLabel(printProgressDispatchMode || selectedPrinterProfile?.connectionType || null)}
@@ -719,7 +730,9 @@ export function BatchPrintJobDialog({
                   <div className="text-xs text-muted-foreground">Remaining to print: {activeCompleted ? 0 : directRemainingToPrint}</div>
                 ) : null}
                 <div className="text-xs text-muted-foreground">
-                  {activeCompleted
+                  {activeStoppedOrPartial
+                    ? "Confirmed labels stay printed. Unprinted labels remain recoverable through the controlled recovery flow."
+                    : activeCompleted
                     ? "MSCQR received backend confirmation for this print run."
                     : activeWaitingForConfirmation
                       ? "MSCQR is waiting for printer confirmation before marking the remaining labels printed."
@@ -727,38 +740,6 @@ export function BatchPrintJobDialog({
                 </div>
                 {showActivePrintControls && activePrintJob ? (
                   <div className="mt-3 flex flex-wrap justify-end gap-2">
-                    {isJobActive(activePrintJob) ? (
-                      <ActionButton
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onOpenPrintControlDialog("pause", activePrintJob)}
-                        state={
-                          printControlBusyJobId === activePrintJob.id || printControlDialog.submitting
-                            ? createUiActionState("pending", "Pausing the print run.")
-                            : createUiActionState("enabled")
-                        }
-                        idleLabel="Pause print run"
-                        pendingLabel="Pausing..."
-                        showReasonBelow={false}
-                      />
-                    ) : null}
-                    {isJobPaused(activePrintJob) || activeSessionStatus === "RETRY_WAITING" ? (
-                      <ActionButton
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onResumePrintJob(activePrintJob.id)}
-                        state={
-                          printCooldownRemainingSeconds > 0
-                            ? createUiActionState("disabled", `Try again after ${printCooldownRemainingSeconds} seconds.`)
-                            : printControlBusyJobId === activePrintJob.id
-                              ? createUiActionState("pending", "Resuming the print run.")
-                              : createUiActionState("enabled")
-                        }
-                        idleLabel="Resume print run"
-                        pendingLabel="Resuming..."
-                        showReasonBelow={false}
-                      />
-                    ) : null}
                     {canStopJob(activePrintJob) ? (
                       <ActionButton
                         variant="outline"

@@ -20,13 +20,12 @@ type PrintProgressDialogProps = {
   notice?: string | null;
   printJobId?: string;
   activeJob?: PrintJobRow | null;
-  onPause?: (job: PrintJobRow) => void;
   onStop?: (job: PrintJobRow) => void;
-  onResume?: (jobId: string) => void;
   onRefresh?: () => void;
   printControlBusyJobId?: string | null;
   printControlSubmitting?: boolean;
-  printCooldownRemainingSeconds?: number;
+  refreshBusy?: boolean;
+  refreshDisabled?: boolean;
   onOpenChange?: (open: boolean) => void;
 };
 
@@ -36,7 +35,7 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
   const safeRemaining = Math.max(0, Number(props.remaining || Math.max(0, safeTotal - safePrinted)));
   const progressValue = safeTotal > 0 ? Math.max(0, Math.min(100, Math.round((safePrinted / safeTotal) * 100))) : 0;
   const normalizedPhase = String(props.phase || "").trim().toLowerCase();
-  const isCompleted = !props.error && normalizedPhase.includes("complete");
+  const isCompleted = !props.error && ["completed", "print job completed", "print run completed", "print session completed"].includes(normalizedPhase);
   const activeJob = props.activeJob || null;
   const activeSessionStatus = String(activeJob?.session?.status || "").toUpperCase();
   const activePipelineState = String(activeJob?.pipelineState || "").toUpperCase();
@@ -46,12 +45,20 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
   const activeTerminal =
     isCompleted ||
     activeStatus === "CONFIRMED" ||
+    activeStatus === "PARTIALLY_COMPLETED" ||
+    activePipelineState === "STOPPED" ||
     ["COMPLETED", "FAILED", "CANCELLED", "STOPPED"].includes(activeSessionStatus) ||
     ["FAILED", "CANCELLED", "STOPPED"].includes(activeStatus) ||
     (activeTotal > 0 && activeConfirmed >= activeTotal);
-  const activePaused = activeStatus === "PAUSED" || activeSessionStatus === "PAUSED";
+  const stoppedOrPartial =
+    !props.error &&
+    (normalizedPhase.includes("stopped") ||
+      normalizedPhase === "partially completed" ||
+      activeStatus === "PARTIALLY_COMPLETED" ||
+      activePipelineState === "STOPPED" ||
+      activeSessionStatus === "STOPPED");
   const activeRunnable =
-    ["PENDING", "SENT", "PARTIALLY_COMPLETED"].includes(activeStatus) ||
+    ["PENDING", "SENT"].includes(activeStatus) ||
     ["ACTIVE", "RESUME_PENDING", "RETRY_WAITING"].includes(activeSessionStatus) ||
     ["PRINT_CONFIRMED", "PRINTER_ACKNOWLEDGED", "QUEUED"].includes(activePipelineState) ||
     normalizedPhase.includes("local print session active") ||
@@ -59,13 +66,21 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
     normalizedPhase.includes("preparing printer job") ||
     normalizedPhase.includes("waiting for connector") ||
     (activeTotal > 0 && activeConfirmed < activeTotal);
-  const showControls = Boolean(activeJob && !activeTerminal && (activeRunnable || activePaused));
+  const showControls = Boolean(activeJob && !activeTerminal && !stoppedOrPartial && activeRunnable);
   const controlsBusy = Boolean(
-    activeJob && (props.printControlBusyJobId === activeJob.id || props.printControlSubmitting)
+    activeJob && (props.printControlBusyJobId === activeJob.id || props.printControlSubmitting || props.refreshBusy)
   );
-  const dialogTitle = props.error ? "Print needs attention" : isCompleted ? "Print completed" : "Printing in progress";
+  const dialogTitle = props.error
+    ? "Print needs attention"
+    : stoppedOrPartial
+      ? "Print run stopped"
+      : isCompleted
+        ? "Print completed"
+        : "Printing in progress";
   const dialogDescription = props.error
     ? "Review the failure details before retrying or closing this session."
+    : stoppedOrPartial
+      ? "The confirmed labels remain printed. Unprinted labels require controlled recovery."
     : isCompleted
       ? "All labels for the current secure print session were confirmed."
       : "Live direct-print status for your current secure print session.";
@@ -109,6 +124,11 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
               <CircleCheckBig className="h-3.5 w-3.5" />
               Print run completed.
             </div>
+          ) : stoppedOrPartial ? (
+            <div className="flex items-center gap-2 text-xs text-amber-700">
+              <CircleCheckBig className="h-3.5 w-3.5" />
+              {safePrinted.toLocaleString()} of {safeTotal.toLocaleString()} labels confirmed. Unprinted labels remain recoverable.
+            </div>
           ) : (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -118,28 +138,6 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
 
           {showControls && activeJob ? (
             <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
-              {!activePaused ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => props.onPause?.(activeJob)}
-                  disabled={controlsBusy}
-                >
-                  Pause print run
-                </Button>
-              ) : null}
-              {activePaused || activeSessionStatus === "RETRY_WAITING" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => props.onResume?.(activeJob.id)}
-                  disabled={controlsBusy || Number(props.printCooldownRemainingSeconds || 0) > 0}
-                >
-                  Resume print run
-                </Button>
-              ) : null}
               <Button
                 type="button"
                 variant="outline"
@@ -154,9 +152,9 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
                 variant="outline"
                 size="sm"
                 onClick={props.onRefresh}
-                disabled={controlsBusy}
+                disabled={controlsBusy || props.refreshDisabled}
               >
-                Refresh status
+                {props.refreshBusy ? "Refreshing..." : "Refresh status"}
               </Button>
             </div>
           ) : null}

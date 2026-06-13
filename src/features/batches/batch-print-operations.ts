@@ -46,11 +46,14 @@ export const isPrintJobServerSettled = (job: PrintJobRow | null | undefined) => 
   const total = Number(job.session?.totalItems || job.itemCount || job.quantity || 0);
   const confirmed = Number(job.session?.confirmedItems || 0);
   const sessionStatus = String(job.session?.status || "").toUpperCase();
+  const pipelineState = String(job.pipelineState || "").toUpperCase();
   return (
     job.status === "CONFIRMED" ||
+    job.status === "PARTIALLY_COMPLETED" ||
     job.status === "FAILED" ||
     job.status === "CANCELLED" ||
     job.status === "STOPPED" ||
+    pipelineState === "STOPPED" ||
     sessionStatus === "COMPLETED" ||
     sessionStatus === "FAILED" ||
     sessionStatus === "CANCELLED" ||
@@ -146,6 +149,18 @@ export const syncProgressFromPrintJob = (
   if (serverCompleted) {
     setPrintProgressPhase("Print job completed");
     setPrintProgressError(null);
+    setPrintProgressNotice?.(null);
+    return;
+  }
+  const stoppedOrPartial =
+    job.status === "PARTIALLY_COMPLETED" ||
+    job.status === "STOPPED" ||
+    String(job.pipelineState || "").toUpperCase() === "STOPPED" ||
+    String(job.session?.status || "").toUpperCase() === "STOPPED";
+  if (stoppedOrPartial) {
+    setPrintProgressPhase(job.status === "PARTIALLY_COMPLETED" ? "Partially completed" : "Print run stopped");
+    setPrintProgressError(null);
+    setPrintProgressNotice?.("Unprinted labels remain recoverable through the controlled recovery flow.");
     return;
   }
   if (job.status === "FAILED") {
@@ -163,12 +178,6 @@ export const syncProgressFromPrintJob = (
     setPrintProgressError(sanitizePrinterUiError(job.failureReason, "This print job was cancelled before completion."));
     return;
   }
-  if (job.status === "STOPPED" || String(job.session?.status || "").toUpperCase() === "STOPPED") {
-    setPrintProgressPhase("Print job stopped");
-    setPrintProgressError(sanitizePrinterUiError(job.failureReason || job.session?.failedReason, "This print job was stopped."));
-    return;
-  }
-
   const awaitingConfirmation =
     Boolean(job.awaitingConfirmation) ||
     Number(job.session?.awaitingConfirmationCount || 0) > 0 ||
