@@ -1,8 +1,8 @@
 {
   "productName": "MSCQR Connector",
-  "latestVersion": "2026.6.14",
+  "latestVersion": "2026.6.15",
   "requiredProtocolVersion": "local-agent-direct-v2",
-  "minimumBuildVersion": "2026.6.14",
+  "minimumBuildVersion": "2026.6.15",
   "transportDiagnosticsVersion": "transport-diagnostics-v1",
   "capabilities": {
     "supportsPrinterQueueSnapshot": true,
@@ -19,6 +19,79 @@
   "helpPath": "/connector-download",
   "setupGuidePath": "/help/manufacturer",
   "releases": [
+    {
+      "version": "2026.6.15",
+      "publishedAt": "2026-06-13T17:34:36.720Z",
+      "requiredProtocolVersion": "local-agent-direct-v2",
+      "minimumBuildVersion": "2026.6.15",
+      "transportDiagnosticsVersion": "transport-diagnostics-v1",
+      "capabilities": {
+        "supportsPrinterQueueSnapshot": true,
+        "supportsWindowsTcpPortInspection": true,
+        "supportsRawTcpConnectTest": true,
+        "supportsRawTcpZplSend": true,
+        "supportsUsbRawSpooler": true,
+        "supportsSpoolJobCancel": true,
+        "supportsSpoolJobStatus": true,
+        "supportsTransportDiagnostics": true,
+        "supportsTestLabel": true
+      },
+      "summary": "Install this complete Windows connector package on the printing computer, then MSCQR verifies local printer readiness.",
+      "notes": [
+        "Use this unsigned Windows package only for internal validation until the signed Windows installer is published.",
+        "Extract the ZIP fully on the Windows computer that will print, then run Install Connector.cmd.",
+        "The connector advertises transport-diagnostics-v1 and verifies local printer readiness before production printing can start.",
+        "Windows Smart App Control can block unsigned packages; use the signed installer for production operator rollout."
+      ],
+      "platforms": {
+        "windowsUnsignedTest": {
+          "label": "Windows test package",
+          "installerKind": "zip",
+          "artifactType": "windows-unsigned-test-zip",
+          "trustLevel": "internal-test",
+          "signatureStatus": "unsigned",
+          "smartAppControlSafe": false,
+          "publisherName": null,
+          "signedAt": null,
+          "windowsTrustMode": "unsigned-test",
+          "internalOnly": true,
+          "filename": "MSCQR-Connector-Windows-2026.6.15.zip",
+          "relativePath": "2026.6.15/windows/MSCQR-Connector-Windows-2026.6.15.zip",
+          "contentType": "application/zip",
+          "architecture": "x64",
+          "bytes": 39512461,
+          "sha256": "1c614989b77bb7eba993bf02073a39ded31c1b56631ecc056107a3e25b8ea02b",
+          "protocolVersion": "local-agent-direct-v2",
+          "buildVersion": "2026.6.15",
+          "transportDiagnosticsVersion": "transport-diagnostics-v1",
+          "capabilities": {
+            "supportsPrinterQueueSnapshot": true,
+            "supportsWindowsTcpPortInspection": true,
+            "supportsRawTcpConnectTest": true,
+            "supportsRawTcpZplSend": true,
+            "supportsUsbRawSpooler": true,
+            "supportsSpoolJobCancel": true,
+            "supportsSpoolJobStatus": true,
+            "supportsTransportDiagnostics": true,
+            "supportsTestLabel": true
+          },
+          "legalDocumentsIncluded": [
+            "legal/TERMS_AND_CONDITIONS.txt",
+            "legal/PRIVACY_POLICY.txt",
+            "legal/EULA.txt",
+            "legal/SECURITY_NOTICE.txt",
+            "legal/INSTALLATION_GUIDE.txt",
+            "legal/THIRD_PARTY_NOTICES.txt"
+          ],
+          "releaseNotesIncluded": true,
+          "notes": [
+            "Extract the ZIP fully before running Install Connector.cmd.",
+            "Run Install Connector.cmd once on the Windows computer that will print.",
+            "Unsigned package for internal validation; use the signed Windows installer for production rollout."
+          ]
+        }
+      }
+    },
     {
       "version": "2026.6.14",
       "publishedAt": "2026-06-12T22:14:41.232Z",

@@ -1,6 +1,7 @@
 const {
   buildSetupVerification,
   extractWindowsJobId,
+  listWindowsLocalPrinters,
   parseWindowsPrinterDiscovery,
   parseWindowsPrinters,
   resolveSelectedPrinter,
@@ -120,7 +121,7 @@ const run = async () => {
   );
   assert(fallbackDiscovery.diagnostics.primaryEnumerationCount === 0, "Primary discovery count should be tracked");
   assert(fallbackDiscovery.diagnostics.fallbackEnumerationCount === 2, "Fallback discovery count should be tracked");
-  assert(fallbackDiscovery.diagnostics.selectedSource === "fallback", "Fallback should be selected when primary returns no printers");
+  assert(fallbackDiscovery.diagnostics.selectedSource === "cim", "CIM should be selected when Get-Printer returns no printers");
   assert(
     fallbackDiscovery.rows.some((printer) => printer.name === "ZDesigner ZT410-300dpi ZPL" && printer.portName === "USB001"),
     "Fallback discovery should include the Zebra USB queue"
@@ -154,6 +155,95 @@ const run = async () => {
   );
   assert(fallbackVerification.state !== "NO_PRINTERS", "Fallback USB discovery must not report NO_PRINTERS");
   assert(fallbackVerification.state === "READY", "Fallback USB discovery should verify READY");
+
+  const toUtf16LeWithBom = (value) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(value, "utf16le")]);
+  const packagedRuntimeDiscovery = await listWindowsLocalPrinters({
+    execPowerShellJsonCommand: async (commandName, command) => {
+      assert(command.includes("ConvertTo-Json"), "Windows discovery commands must use JSON output");
+      if (commandName === "powershell-get-printer") {
+        return {
+          commandPath: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          exitCode: 0,
+          stdout: "[]",
+          stderr: "",
+        };
+      }
+      if (commandName === "cim") {
+        return {
+          commandPath: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          exitCode: 0,
+          stdout: toUtf16LeWithBom(
+            JSON.stringify([
+              {
+                Name: "ZDesigner ZT410-300dpi ZPL",
+                DriverName: "ZDesigner ZT410-300dpi ZPL",
+                PortName: "USB001",
+                WorkOffline: false,
+                Default: true,
+                Local: true,
+                Network: false,
+                PrinterStatus: 3,
+              },
+              {
+                Name: "MSCQR Zebra ZT410 WiFi",
+                DriverName: "ZDesigner ZT410-300dpi ZPL",
+                PortName: "MSCQR-ZT410-WIFI-9100",
+                WorkOffline: false,
+                Default: false,
+                Local: false,
+                Network: true,
+                PrinterStatus: 3,
+              },
+            ])
+          ),
+          stderr: "",
+        };
+      }
+      return {
+        commandPath: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        exitCode: 0,
+        stdout: JSON.stringify([{ Name: "USB001", PrinterHostAddress: null, PortNumber: null }]),
+        stderr: "",
+      };
+    },
+    portProbe: async () => false,
+  });
+  assert(packagedRuntimeDiscovery.error === null, "Mocked packaged discovery should not return an error");
+  assert(
+    packagedRuntimeDiscovery.diagnostics.primaryEnumerationCount === 0,
+    "Mocked Get-Printer empty result should be counted"
+  );
+  assert(
+    packagedRuntimeDiscovery.diagnostics.fallbackEnumerationCount === 2,
+    "Mocked CIM UTF-16 JSON result should be counted"
+  );
+  assert(
+    packagedRuntimeDiscovery.diagnostics.selectedSource === "cim",
+    "Mocked packaged discovery should use CIM when Get-Printer is empty"
+  );
+  assert(
+    packagedRuntimeDiscovery.diagnostics.commands.fallback.stdoutLength > 0 &&
+      packagedRuntimeDiscovery.diagnostics.commands.fallback.rawStdoutSample.includes("ZDesigner ZT410-300dpi ZPL"),
+    "Fallback command diagnostics should expose safe stdout evidence"
+  );
+  assert(
+    packagedRuntimeDiscovery.printers.some(
+      (printer) =>
+        printer.printerName === "ZDesigner ZT410-300dpi ZPL" &&
+        printer.portName === "USB001" &&
+        printer.online === true &&
+        printer.usbAvailable === true
+    ),
+    "Mocked packaged discovery should return the USB Zebra printer"
+  );
+  const mockedWifiQueue = packagedRuntimeDiscovery.printers.find(
+    (printer) => printer.printerName === "MSCQR Zebra ZT410 WiFi"
+  );
+  assert(mockedWifiQueue && mockedWifiQueue.online === false, "Stale WiFi queue must be unavailable without TCP 9100");
+  assert(
+    resolveSelectedPrinter(packagedRuntimeDiscovery.printers, null).printerId === "ZDesigner ZT410-300dpi ZPL",
+    "Packaged discovery should select USB Zebra over stale WiFi"
+  );
 
   const defaultReadySelection = resolveSelectedPrinter(localPrinters, null);
   const defaultReadyVerification = buildSetupVerification({

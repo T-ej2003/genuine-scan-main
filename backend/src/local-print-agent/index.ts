@@ -354,6 +354,31 @@ app.get("/printers", async (_req, res) => {
   }
 });
 
+app.get("/debug/windows-printer-discovery", async (_req, res) => {
+  try {
+    const inventory = await listLocalPrinters();
+    res.json({
+      success: inventory.printers.length > 0,
+      platform: process.platform,
+      agentVersion: AGENT_VERSION,
+      buildVersion: AGENT_BUILD_VERSION,
+      printers: inventory.printers,
+      printerDiscoveryDiagnostics: inventory.diagnostics || null,
+      error: inventory.error || null,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      platform: process.platform,
+      agentVersion: AGENT_VERSION,
+      buildVersion: AGENT_BUILD_VERSION,
+      printers: [],
+      printerDiscoveryDiagnostics: null,
+      error: error?.message || "Windows printer discovery debug failed.",
+    });
+  }
+});
+
 const selectPrinter = async (req: express.Request, res: express.Response) => {
   try {
     const printerId = String(req.body?.printerId || "").trim();
