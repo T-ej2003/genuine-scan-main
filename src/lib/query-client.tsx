@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { ApiResponseError } from "@/lib/api/query-utils";
+import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
 import { onMutationEvent } from "@/lib/mutation-events";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -30,6 +31,10 @@ export function MutationEventBridge(): null {
   useEffect(() => {
     return onMutationEvent((detail) => {
       const endpoint = detail.endpoint || "";
+
+      if (isActivePrintSessionSuppressed()) {
+        return;
+      }
 
       if (endpoint.startsWith("/notifications")) {
         void client.invalidateQueries({ queryKey: queryKeys.layout.notifications() });

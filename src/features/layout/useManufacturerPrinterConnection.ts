@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { APP_PATHS } from "@/app/route-metadata";
 import apiClient from "@/lib/api-client";
+import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import {
   getOptionalLocalStorageItem,
   removeOptionalLocalStorageItem,
@@ -58,6 +59,7 @@ export function useManufacturerPrinterConnection({
   navigate,
   toast,
 }: UseManufacturerPrinterConnectionParams) {
+  const activePrintSuppressed = useActivePrintSessionSuppression();
   const detectedPrintersRef = useRef<NonNullable<PrinterConnectionStatusDTO["printers"]>>([]);
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
@@ -251,6 +253,7 @@ export function useManufacturerPrinterConnection({
 
   const syncManufacturerPrinterStatus = async (options?: { silent?: boolean; force?: boolean }) => {
     if (!user || user.role !== "manufacturer") return;
+    if (activePrintSuppressed && !options?.force) return;
     if (syncInFlightRef.current) return syncInFlightRef.current;
     const run = (async () => {
       setPrinterStatusChecking(true);
@@ -444,9 +447,10 @@ export function useManufacturerPrinterConnection({
 
   useEffect(() => {
     if (!user || user.role !== "manufacturer") return;
+    if (activePrintSuppressed) return;
     void syncManufacturerPrinterStatus({ silent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.role]);
+  }, [user?.id, user?.role, activePrintSuppressed]);
 
   useEffect(() => {
     detectedPrintersRef.current = detectedPrinters;
@@ -455,6 +459,7 @@ export function useManufacturerPrinterConnection({
   useEffect(() => {
     if (!user || user.role !== "manufacturer") return;
     if (DISABLE_E2E_PRINTER_AGENT_POLLING) return;
+    if (activePrintSuppressed) return;
 
     const stop = apiClient.streamPrinterConnectionStatus(
       (payload) => {
@@ -476,7 +481,7 @@ export function useManufacturerPrinterConnection({
       stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.role]);
+  }, [user?.id, user?.role, activePrintSuppressed]);
 
   useEffect(() => {
     if (!printerStatus) return;

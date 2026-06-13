@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 
 import { shouldBootstrapCurrentUser } from "@/contexts/auth-bootstrap";
 import apiClient from "@/lib/api-client";
+import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
 import type { AuthState, PendingAuthSession, User } from "@/types";
 
 interface AuthContextType {
@@ -149,6 +150,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (Date.now() - lastRefreshSuccessAtRef.current < AUTH_BOOTSTRAP_MIN_INTERVAL_MS ||
         Date.now() - lastRefreshAttemptAtRef.current < AUTH_BOOTSTRAP_MIN_INTERVAL_MS);
     if (recentlyLoaded) {
+      setIsLoading(false);
+      return;
+    }
+    if (user && isActivePrintSessionSuppressed()) {
       setIsLoading(false);
       return;
     }

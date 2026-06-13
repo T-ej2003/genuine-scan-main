@@ -2,7 +2,7 @@ import type { ApiResponse } from "@/lib/api/internal-client-core";
 
 const DEFAULT_TTL_MS = 30_000;
 const DEFAULT_MIN_REFRESH_MS = 10_000;
-const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
+const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 10_000;
 const PAUSED_MESSAGE = "Activity is refreshing too often. Please try again in a moment.";
 
 type CacheEntry<T> = {
@@ -10,6 +10,7 @@ type CacheEntry<T> = {
   lastGoodAt: number;
   lastAttemptAt: number;
   cooldownUntil: number;
+  rateLimitHits: number;
   inFlight: Promise<ApiResponse<T>> | null;
 };
 
@@ -23,9 +24,18 @@ const entries = new Map<string, CacheEntry<unknown>>();
 
 const now = () => Date.now();
 
-const retryAfterMs = (response: ApiResponse<unknown>) => {
+const fallbackBackoffMs = (hits: number) => {
+  if (hits <= 1) return 10_000;
+  if (hits === 2) return 20_000;
+  if (hits === 3) return 30_000;
+  return 60_000;
+};
+
+const retryAfterMs = (response: ApiResponse<unknown>, hits: number) => {
   const seconds = Number(response.retryAfterSec);
-  return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds * 1000) : DEFAULT_RATE_LIMIT_COOLDOWN_MS;
+  return Number.isFinite(seconds) && seconds > 0
+    ? Math.ceil(seconds * 1000)
+    : Math.min(60_000, Math.max(DEFAULT_RATE_LIMIT_COOLDOWN_MS, fallbackBackoffMs(hits)));
 };
 
 const secondsUntil = (timestamp: number) => Math.max(1, Math.ceil((timestamp - now()) / 1000));
@@ -67,6 +77,7 @@ export const controlledDashboardGet = async <T>(
       lastGoodAt: 0,
       lastAttemptAt: 0,
       cooldownUntil: 0,
+      rateLimitHits: 0,
       inFlight: null,
     } satisfies CacheEntry<T>);
 
@@ -93,11 +104,13 @@ export const controlledDashboardGet = async <T>(
         entry.lastGood = response;
         entry.lastGoodAt = now();
         entry.cooldownUntil = 0;
+        entry.rateLimitHits = 0;
         return response;
       }
 
       if (isRateLimited(response)) {
-        const cooldownUntil = now() + retryAfterMs(response);
+        entry.rateLimitHits += 1;
+        const cooldownUntil = now() + retryAfterMs(response, entry.rateLimitHits);
         entry.cooldownUntil = cooldownUntil;
         return pausedFromLastGood<T>(entry, cooldownUntil) || { ...response, error: PAUSED_MESSAGE };
       }
@@ -137,6 +150,7 @@ export const getDashboardRequestControlState = () =>
     key,
     hasLastGood: Boolean(entry.lastGood?.success),
     cooldownUntil: entry.cooldownUntil,
+    rateLimitHits: entry.rateLimitHits,
     inFlight: Boolean(entry.inFlight),
   }));
 

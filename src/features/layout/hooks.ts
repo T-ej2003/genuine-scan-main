@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 
 import apiClient from "@/lib/api-client";
+import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import { ApiResponseError, parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
 import { canPollVisibleDocument, pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
@@ -58,11 +59,13 @@ const notificationsResponseSchema = z
   .passthrough();
 
 export function useDashboardNotifications(enabled: boolean, limit = 24, unreadOnly?: boolean) {
+  const activePrintSuppressed = useActivePrintSessionSuppression();
+  const queryEnabled = enabled && !activePrintSuppressed;
   return useQuery({
     queryKey: queryKeys.layout.notifications(limit, unreadOnly),
-    enabled,
+    enabled: queryEnabled,
     staleTime: pollingPolicy.notificationsMs,
-    refetchInterval: enabled ? visibleRefetchInterval(pollingPolicy.notificationsMs) : false,
+    refetchInterval: queryEnabled ? visibleRefetchInterval(pollingPolicy.notificationsMs) : false,
     refetchOnWindowFocus: false,
     queryFn: async (): Promise<NotificationsSnapshot> => {
       const payload = unwrapParsedApiResponse(
@@ -80,6 +83,7 @@ export function useDashboardNotifications(enabled: boolean, limit = 24, unreadOn
 }
 
 export function useDashboardNotificationCenter(userId?: string | null, limit = 24) {
+  const activePrintSuppressed = useActivePrintSessionSuppression();
   const notificationsQuery = useDashboardNotifications(false, limit);
   const [notifications, setNotifications] = useState<DashboardNotificationDTO[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
@@ -102,6 +106,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
 
   const loadNotifications = async (options?: { force?: boolean }) => {
     if (!userId) return;
+    if (activePrintSuppressed && !options?.force) return;
     if (loadNotificationsInFlightRef.current) return loadNotificationsInFlightRef.current;
     const elapsed = Date.now() - lastNotificationsLoadAtRef.current;
     if (!options?.force && elapsed < NOTIFICATION_MIN_REFRESH_MS) return;
@@ -135,9 +140,10 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
 
   useEffect(() => {
     if (!userId) return;
+    if (activePrintSuppressed) return;
     void loadNotifications({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, activePrintSuppressed]);
 
   useEffect(() => {
     if (notificationsQuery.data) {
@@ -147,16 +153,18 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
 
   useEffect(() => {
     if (!userId) return;
+    if (activePrintSuppressed) return;
     const timer = window.setInterval(() => {
       if (!canPollVisibleDocument()) return;
       void loadNotifications();
     }, pollingPolicy.notificationsMs);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, activePrintSuppressed]);
 
   useEffect(() => {
     if (!userId) return;
+    if (activePrintSuppressed) return;
     if (clearNotificationsTimerRef.current) {
       window.clearTimeout(clearNotificationsTimerRef.current);
       clearNotificationsTimerRef.current = null;
@@ -185,7 +193,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
       stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, limit]);
+  }, [userId, limit, activePrintSuppressed]);
 
   useEffect(() => {
     return () => {
@@ -279,11 +287,13 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
 }
 
 export function useOperationalAttentionQueue(enabled: boolean) {
+  const activePrintSuppressed = useActivePrintSessionSuppression();
+  const queryEnabled = enabled && !activePrintSuppressed;
   return useQuery({
     queryKey: queryKeys.layout.attentionQueue(),
-    enabled,
+    enabled: queryEnabled,
     staleTime: pollingPolicy.attentionQueueMs,
-    refetchInterval: enabled ? visibleRefetchInterval(pollingPolicy.attentionQueueMs) : false,
+    refetchInterval: queryEnabled ? visibleRefetchInterval(pollingPolicy.attentionQueueMs) : false,
     refetchOnWindowFocus: false,
     queryFn: async (): Promise<OperationalAttentionQueue> =>
       unwrapParsedApiResponse(

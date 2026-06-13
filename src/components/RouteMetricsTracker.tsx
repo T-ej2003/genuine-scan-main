@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 
 import apiClient from "@/lib/api-client";
+import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
 import { pollingPolicy } from "@/lib/query-polling-policy";
 
 const getDeviceType = () => {
@@ -24,6 +25,11 @@ export default function RouteMetricsTracker() {
 
   useEffect(() => {
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+    if (isActivePrintSessionSuppressed()) {
+      prevRef.current = { route, at: now };
+      return;
+    }
 
     if (prevRef.current && prevRef.current.route !== route) {
       const transitionMs = Math.max(0, Math.round(now - prevRef.current.at));

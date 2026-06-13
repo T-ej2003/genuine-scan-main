@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
+import { PrintProgressDialog } from "@/components/printing/PrintProgressDialog";
 import { BatchPrintJobDialog, DeleteBatchDialog, RenameBatchDialog } from "@/features/batches/components/BatchDialogs";
 import { LicenseeDialogs } from "@/features/licensees/components/LicenseeDialogs";
 import { ManufacturerDetailsDialog } from "@/features/manufacturers/components/ManufacturerDetailsDialog";
@@ -251,6 +252,76 @@ describe("dialog recovery states", () => {
     expect(onOpenControl).toHaveBeenCalledWith("pause", expect.objectContaining({ id: "job-live" }));
     expect(onOpenControl).toHaveBeenCalledWith("stop", expect.objectContaining({ id: "job-live" }));
     expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it.each([0, 1, 6])("shows progress modal controls at %i/10 confirmed labels", (printed) => {
+    const onPause = vi.fn();
+    const onStop = vi.fn();
+    const onRefresh = vi.fn();
+    const activeJob = {
+      id: `job-${printed}`,
+      status: "SENT",
+      pipelineState: printed === 0 ? "QUEUED" : "PRINT_CONFIRMED",
+      printMode: "LOCAL_AGENT",
+      quantity: 10,
+      itemCount: 10,
+      createdAt: new Date().toISOString(),
+      printer: { name: "ZDesigner ZT410-300dpi ZPL" },
+      session: { status: "ACTIVE", totalItems: 10, confirmedItems: printed, remainingToPrint: 10 - printed },
+    } as any;
+
+    render(
+      <PrintProgressDialog
+        open
+        phase={printed === 0 ? "Waiting for connector to claim job" : "Local print session active"}
+        total={10}
+        printed={printed}
+        remaining={10 - printed}
+        printerName="ZDesigner ZT410-300dpi ZPL"
+        modeLabel="Printer on this computer"
+        activeJob={activeJob}
+        onPause={onPause}
+        onStop={onStop}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Pause print run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop print run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
+    expect(onPause).toHaveBeenCalledWith(expect.objectContaining({ id: activeJob.id }));
+    expect(onStop).toHaveBeenCalledWith(expect.objectContaining({ id: activeJob.id }));
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it("shows progress modal controls while waiting for printer confirmation", () => {
+    render(
+      <PrintProgressDialog
+        open
+        phase="Waiting for printer confirmation"
+        total={10}
+        printed={6}
+        remaining={4}
+        printerName="ZDesigner ZT410-300dpi ZPL"
+        modeLabel="Printer on this computer"
+        activeJob={{
+          id: "job-confirming",
+          status: "SENT",
+          pipelineState: "PRINTER_ACKNOWLEDGED",
+          printMode: "LOCAL_AGENT",
+          quantity: 10,
+          itemCount: 10,
+          createdAt: new Date().toISOString(),
+          printer: { name: "ZDesigner ZT410-300dpi ZPL" },
+          awaitingConfirmation: true,
+          session: { status: "ACTIVE", totalItems: 10, confirmedItems: 6, remainingToPrint: 4 },
+        } as any}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Pause print run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop print run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh status" })).toBeInTheDocument();
   });
 
   it("uses backend completed session state for active local-agent progress", () => {

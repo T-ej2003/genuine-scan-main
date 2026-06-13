@@ -28,7 +28,7 @@ export const PRINTER_STATUS_MIN_REFRESH_MS = 45_000;
 export const PRINTER_LIST_MIN_REFRESH_MS = 60_000;
 export const PRINTER_HEARTBEAT_MIN_REFRESH_MS = 90_000;
 
-const PRINTER_RATE_LIMIT_FALLBACK_MS = 60_000;
+const PRINTER_RATE_LIMIT_FALLBACK_MS = 10_000;
 const PRINTER_RATE_LIMIT_NOTICE =
   "Printer status refresh is temporarily paused. Printing can continue if the printer was already ready.";
 
@@ -43,10 +43,13 @@ const isRateLimitedResponse = (response: ApiResponse<unknown>) =>
 const getRetryAfterMs = (response: ApiResponse<unknown>, hits: number) => {
   const fromResponse = Number(response.retryAfterSec || 0);
   if (Number.isFinite(fromResponse) && fromResponse > 0) {
-    return Math.min(5 * 60_000, Math.ceil(fromResponse * 1000));
+    return Math.min(60_000, Math.ceil(fromResponse * 1000));
   }
 
-  return Math.min(5 * 60_000, PRINTER_RATE_LIMIT_FALLBACK_MS * Math.max(1, hits));
+  if (hits <= 1) return PRINTER_RATE_LIMIT_FALLBACK_MS;
+  if (hits === 2) return 20_000;
+  if (hits === 3) return 30_000;
+  return 60_000;
 };
 
 const withPrinterRefreshMeta = <T>(data: T, response: ApiResponse<unknown>): T & PrinterRefreshMeta => {

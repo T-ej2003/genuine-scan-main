@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { buildStableBatchOverviewRows, type StableBatchOverviewRow } from "@/lib/batch-workspace";
 import apiClient from "@/lib/api-client";
+import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
 import { onMutationEvent } from "@/lib/mutation-events";
 
 import { useAssignableManufacturers, useBatches } from "./hooks";
@@ -71,7 +72,8 @@ export function useBatchOperationsController({
   const batchesQuery = useBatches(undefined, false);
   const manufacturersQuery = useAssignableManufacturers(userLicenseeId || undefined, false);
 
-  const fetchBatches = async () => {
+  const fetchBatches = async (options?: { force?: boolean }) => {
+    if (isActivePrintSessionSuppressed() && !options?.force) return;
     setLoading(true);
     setError(null);
     try {
@@ -130,6 +132,7 @@ export function useBatchOperationsController({
 
   useEffect(() => {
     const off = onMutationEvent(() => {
+      if (isActivePrintSessionSuppressed()) return;
       void fetchBatches();
       void fetchManufacturersForAssign();
     });

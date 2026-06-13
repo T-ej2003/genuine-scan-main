@@ -360,9 +360,10 @@ export function BatchPrintJobDialog({
     "Complete the previous batch step first.";
   const isJobActive = (job: PrintJobRow) =>
     ["PENDING", "SENT", "PARTIALLY_COMPLETED"].includes(job.status) ||
-    ["ACTIVE", "RESUME_PENDING", "RETRY_WAITING"].includes(String(job.session?.status || ""));
+    ["ACTIVE", "RESUME_PENDING", "RETRY_WAITING"].includes(String(job.session?.status || "").toUpperCase()) ||
+    ["PRINT_CONFIRMED", "PRINTER_ACKNOWLEDGED", "QUEUED"].includes(String(job.pipelineState || "").toUpperCase());
   const isJobPaused = (job: PrintJobRow) =>
-    job.status === "PAUSED" || String(job.session?.status || "") === "PAUSED";
+    job.status === "PAUSED" || String(job.session?.status || "").toUpperCase() === "PAUSED";
   const canStopJob = (job: PrintJobRow) =>
     isJobActive(job) || isJobPaused(job);
   const canRequestReissue = (job: PrintJobRow) =>
@@ -403,6 +404,7 @@ export function BatchPrintJobDialog({
         ? Math.max(0, activeTotal - activeConfirmed)
         : Math.max(0, Number(directRemainingToPrint || 0));
   const activeSessionStatus = String(activePrintJob?.session?.status || "").toUpperCase();
+  const activePipelineState = String(activePrintJob?.pipelineState || "").toUpperCase();
   const activeCompleted =
     activePrintJob?.status === "CONFIRMED" ||
     activeSessionStatus === "COMPLETED" ||
@@ -420,6 +422,8 @@ export function BatchPrintJobDialog({
         activeSessionStatus === "ACTIVE" ||
         activeSessionStatus === "PAUSED" ||
         activeSessionStatus === "RETRY_WAITING" ||
+        activePipelineState === "PRINT_CONFIRMED" ||
+        activePipelineState === "PRINTER_ACKNOWLEDGED" ||
         /local print session active/i.test(String(printProgressPhase || "")) ||
         activeWaitingForConfirmation ||
         (activeTotal > 0 && activeConfirmed < activeTotal))

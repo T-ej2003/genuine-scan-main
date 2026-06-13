@@ -33,7 +33,8 @@ export const isTerminalPrintProgressPhase = (phase?: string | null) => {
   return (
     isCompletedPrintProgressPhase(normalized) ||
     normalized === "print job failed" ||
-    normalized === "print job cancelled"
+    normalized === "print job cancelled" ||
+    normalized === "print job stopped"
   );
 };
 

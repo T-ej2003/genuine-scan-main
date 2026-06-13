@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import apiClient from "@/lib/api-client";
+import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
 import { queryKeys } from "@/lib/query-keys";
@@ -166,11 +167,13 @@ export async function loadManufacturerPrinterRuntimeSnapshot(
 }
 
 export function useManufacturerPrinterRuntime(includeInactive = true, enabled = true) {
+  const activePrintSuppressed = useActivePrintSessionSuppression();
+  const queryEnabled = enabled && !activePrintSuppressed;
   return useQuery({
     queryKey: queryKeys.printing.runtime(includeInactive),
-    enabled,
+    enabled: queryEnabled,
     staleTime: pollingPolicy.printerRuntimeRefreshMs,
-    refetchInterval: enabled ? visibleRefetchInterval(pollingPolicy.printerRuntimeRefreshMs) : false,
+    refetchInterval: queryEnabled ? visibleRefetchInterval(pollingPolicy.printerRuntimeRefreshMs) : false,
     refetchOnWindowFocus: false,
     queryFn: () => loadManufacturerPrinterRuntimeSnapshot(includeInactive),
   });

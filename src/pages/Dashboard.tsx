@@ -21,6 +21,7 @@ import { formatDistanceToNow } from "date-fns";
 import { useDashboardAuditLogs, useDashboardStats } from "@/features/dashboard/hooks";
 import { buildOverviewLifecycleSteps } from "@/features/dashboard/presentation";
 import apiClient from "@/lib/api-client";
+import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import { ApiResponseError } from "@/lib/api/query-utils";
 import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
 import { canPollVisibleDocument, pollingPolicy } from "@/lib/query-polling-policy";
@@ -70,6 +71,7 @@ const normalizeLegacyPublicCodeReport = (value: unknown): LegacyPublicCodeReport
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const activePrintSuppressed = useActivePrintSessionSuppression();
   const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
   const canReadAuditFeed = user?.role === "super_admin" || user?.role === "licensee_admin";
   const dashboardQuery = useDashboardStats(scopedLicenseeId);
@@ -102,6 +104,7 @@ export default function Dashboard() {
   }, [auditLogsQuery.data]);
 
   const refreshDashboard = useCallback(async (options?: { bypassCache?: boolean }) => {
+    if (activePrintSuppressed && !options?.bypassCache) return;
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
     if (options?.bypassCache) {
       clearDashboardReadCache(["dashboard:stats", "qr:stats", "audit:logs"]);
@@ -117,7 +120,7 @@ export default function Dashboard() {
     });
 
     return refreshInFlightRef.current;
-  }, [auditLogsRefetch, canReadAuditFeed, dashboardRefetch]);
+  }, [activePrintSuppressed, auditLogsRefetch, canReadAuditFeed, dashboardRefetch]);
 
   useEffect(() => {
     const closeRealtime = () => {
@@ -133,7 +136,7 @@ export default function Dashboard() {
       setSseConnected(false);
     };
 
-    if (!liveUpdates) {
+    if (!liveUpdates || activePrintSuppressed) {
       setLiveSummary(null);
       setLiveQrStats(null);
       setLiveLogs(null);
@@ -199,7 +202,7 @@ export default function Dashboard() {
     return () => {
       closeRealtime();
     };
-  }, [canReadAuditFeed, liveUpdates, refreshDashboard, scopedLicenseeId, user?.role]);
+  }, [activePrintSuppressed, canReadAuditFeed, liveUpdates, refreshDashboard, scopedLicenseeId, user?.role]);
 
   useEffect(() => {
     if (dashboardQuery.dataUpdatedAt) {
