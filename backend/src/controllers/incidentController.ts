@@ -24,13 +24,14 @@ import {
   toHumanIncidentType,
 } from "../services/incidentService";
 import { runTamperEvidenceChecks, summarizeTamperFindings } from "../services/tamperEvidenceService";
-import { ensureIncidentWorkflowArtifacts, ticketSlaSnapshot } from "../services/supportWorkflowService";
+import { ensureIncidentWorkflowArtifacts } from "../services/supportWorkflowService";
 import { getSuperadminAlertEmails, sendIncidentEmail } from "../services/incidentEmailService";
 import { createAuditLog } from "../services/auditService";
 import { incidentEvidenceUpload, incidentReportUpload, resolveUploadPath } from "../middleware/incidentUpload";
 import { buildIncidentPdfBuffer } from "../services/incidentPdfService";
 import { runIncidentAutoContainment } from "../services/soarService";
 import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
+import { buildPublicIncidentReportResponse } from "./incidents/publicIncidentResponse";
 
 const publicIncidentRawSchema = z.object({
   qrCodeValue: z.string().trim().max(128).optional(),
@@ -363,19 +364,7 @@ export const reportIncident = async (req: Request, res: Response) => {
 
     return res.status(201).json({
       success: true,
-      data: {
-        reference: supportTicket?.referenceCode || null,
-        supportTicketRef: supportTicket?.referenceCode || null,
-        supportTicketStatus: supportTicket?.status || null,
-        supportTicketSla: supportTicket ? ticketSlaSnapshot(supportTicket.slaDueAt) : null,
-        status: incident.status,
-        severity: incident.severity,
-        tamperChecks: {
-          summary: tamperSummary.summary,
-          highestRisk: tamperSummary.highestRisk,
-          hasWarnings: tamperSummary.hasWarnings,
-        },
-      },
+      data: buildPublicIncidentReportResponse(incident, supportTicket, tamperSummary),
     });
   } catch (error) {
     console.error("reportIncident error:", error);
