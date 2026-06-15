@@ -106,6 +106,9 @@ const canUseEntryForRole = (entryRole: HelpKbRole, activeRole: HelpKbRole) => {
 
 const legalDocumentRoutes = new Set(["/cookies", "/privacy", "/terms"]);
 
+const isPublicVerificationResultRoute = (pathname: string) =>
+  pathname === "/scan" || /^\/verify\/[^/]+/.test(pathname);
+
 const roleScopedIntro = (activeRole: HelpKbRole) => {
   if (activeRole === "all") {
     return "Super Admin mode: ask about any role workflow, policy, incident response, or customer verification.";
@@ -310,7 +313,7 @@ export default function HelpAssistantWidget() {
 
   const activeRoleLabel = ROLE_LABELS[activeRole] || "General";
 
-  if (legalDocumentRoutes.has(location.pathname)) {
+  if (legalDocumentRoutes.has(location.pathname) || isPublicVerificationResultRoute(location.pathname)) {
     return null;
   }
 

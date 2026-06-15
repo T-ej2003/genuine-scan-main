@@ -165,6 +165,7 @@ export type VerifyPayload = {
     detail?: string;
   } | null;
   code?: string;
+  maskedCode?: string | null;
   status?: string;
   scanOutcome?: string;
   classification?: VerificationClassification;

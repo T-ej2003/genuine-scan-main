@@ -1,7 +1,7 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import Verify from "@/pages/Verify";
 import apiClient from "@/lib/api-client";
@@ -92,7 +92,15 @@ const buildVerifyPayload = (overrides: Record<string, unknown> = {}) => ({
   reasonCodes: ["FIRST_SCAN", "SIGNED_LABEL"],
   customerTrustLevel: "ANONYMOUS",
   replacementStatus: "NONE",
-  licensee: { id: "lic-1", name: "MSCQR Demo", brandName: "MSCQR", prefix: "MSC", supportEmail: "support@mscqr.com" },
+  licensee: {
+    id: "lic-1",
+    name: "MSCQR Demo",
+    brandName: "MSCQR",
+    prefix: "MSC",
+    website: "https://brand.example/verify",
+    supportEmail: "support@mscqr.com",
+    supportPhone: "+44 20 0000 0000",
+  },
   batch: { id: "batch-1", name: "Batch 1", printedAt: "2026-04-05T11:00:00.000Z" },
   ownershipStatus: {
     isClaimed: false,
@@ -355,6 +363,23 @@ describe("Verify page", () => {
 
     expect(await screen.findByText("This garment matches a registered brand record.")).toBeInTheDocument();
     expect(screen.getByText("Verification passed")).toBeInTheDocument();
+    const brandDetails = screen.getByRole("region", { name: "Brand details" });
+    expect(within(brandDetails).getByText("Brand")).toBeInTheDocument();
+    expect(within(brandDetails).getByText("MSCQR")).toBeInTheDocument();
+    expect(within(brandDetails).getByText("Label code")).toBeInTheDocument();
+    expect(within(brandDetails).getByText("AADS-6007")).toBeInTheDocument();
+    const websiteLink = within(brandDetails).getByRole("link", { name: /brand\.example\/verify/i });
+    expect(websiteLink).toHaveAttribute("href", "https://brand.example/verify");
+    expect(websiteLink).toHaveAttribute("target", "_blank");
+    expect(websiteLink).toHaveAttribute("rel", "noreferrer");
+    expect(within(brandDetails).getByRole("link", { name: "support@mscqr.com" })).toHaveAttribute(
+      "href",
+      "mailto:support@mscqr.com"
+    );
+    expect(within(brandDetails).getByRole("link", { name: "+44 20 0000 0000" })).toHaveAttribute(
+      "href",
+      "tel:+442000000000"
+    );
     expect(screen.getByText("Verification summary")).toBeInTheDocument();
     expect(screen.getByText("Save verification")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Report a concern" })).toBeInTheDocument();
@@ -363,6 +388,35 @@ describe("Verify page", () => {
     expect(screen.queryByText("Decision reference")).toBeNull();
     expect(screen.queryByText("Session reference")).toBeNull();
     expect(screen.queryByText("Support notes")).toBeNull();
+    expect(document.body).not.toHaveTextContent(/decisionId|classification|riskScore|proofSource|proofTier|decision-1/i);
+  });
+
+  it("omits missing brand contact rows without placeholder text", async () => {
+    vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
+      success: true,
+      data: buildSession({
+        authState: "VERIFIED",
+        intakeCompleted: true,
+        revealed: true,
+        verification: buildVerifyPayload({
+          licensee: {
+            name: "Minimal Public Brand",
+            brandName: "Minimal Public Brand",
+          },
+        }),
+      }),
+    } as never);
+
+    renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
+
+    const brandDetails = await screen.findByRole("region", { name: "Brand details" });
+    expect(within(brandDetails).getByText("Brand")).toBeInTheDocument();
+    expect(within(brandDetails).getByText("Minimal Public Brand")).toBeInTheDocument();
+    expect(within(brandDetails).getByText("Label code")).toBeInTheDocument();
+    expect(within(brandDetails).queryByText("Website")).toBeNull();
+    expect(within(brandDetails).queryByText("Support email")).toBeNull();
+    expect(within(brandDetails).queryByText("Support phone")).toBeNull();
+    expect(document.body).not.toHaveTextContent("Not available");
   });
 
   it("does not render raw backend verification labels on the public result", async () => {
@@ -394,9 +448,10 @@ describe("Verify page", () => {
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
     expect(await screen.findByText("This garment matches a registered brand record.")).toBeInTheDocument();
-    expect(screen.getByText("support@example.com")).toBeInTheDocument();
-    expect(screen.getByText("+44 20 0000 0000")).toBeInTheDocument();
-    expect(screen.getByText("brand.example")).toBeInTheDocument();
+    const brandDetails = screen.getByRole("region", { name: "Brand details" });
+    expect(within(brandDetails).getByRole("link", { name: "support@example.com" })).toBeInTheDocument();
+    expect(within(brandDetails).getByRole("link", { name: "+44 20 0000 0000" })).toBeInTheDocument();
+    expect(within(brandDetails).getByRole("link", { name: /brand\.example/i })).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("Manual Registry Lookup");
     expect(document.body).not.toHaveTextContent("Manual Code Lookup");
     expect(document.body).not.toHaveTextContent("MANUAL_REGISTRY_LOOKUP");
@@ -404,6 +459,7 @@ describe("Verify page", () => {
     expect(document.body).not.toHaveTextContent("Decision reference");
     expect(document.body).not.toHaveTextContent("Session reference");
     expect(document.body).not.toHaveTextContent("Support notes");
+    expect(document.body).not.toHaveTextContent(/decisionId|classification|riskScore|proofSource|proofTier|decision-1/i);
   });
 
   it("reports a concern with session and decision ids after reveal", async () => {

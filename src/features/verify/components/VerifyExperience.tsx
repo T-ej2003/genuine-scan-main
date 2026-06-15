@@ -298,9 +298,18 @@ type PublicSupportContact = {
   href: string;
 };
 
+type BrandDetailItem = {
+  label: string;
+  value: string;
+  href?: string;
+  external?: boolean;
+};
+
 type PublicVerificationView = {
   brandName: string;
+  brandDisplayName: string;
   codeLabel: string;
+  brandDetails: BrandDetailItem[];
   checkedAt: string;
   summaryItems: PublicSummaryItem[];
   supportContacts: PublicSupportContact[];
@@ -363,7 +372,13 @@ const getSummaryTone = (category: CustomerResultCategory): PublicSummaryItem["to
 const toPublicUrl = (value?: string | null) => {
   const trimmed = String(value || "").trim();
   if (!trimmed) return "";
-  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
 };
 
 const buildPublicSupportContacts = (payload: VerifyPayload | null): PublicSupportContact[] => {
@@ -375,6 +390,34 @@ const buildPublicSupportContacts = (payload: VerifyPayload | null): PublicSuppor
   if (phone) contacts.push({ type: "phone", label: "Phone", value: phone, href: `tel:${phone.replace(/[^\d+]/g, "")}` });
   if (website) contacts.push({ type: "website", label: "Website", value: website.replace(/^https?:\/\//i, ""), href: website });
   return contacts;
+};
+
+const getPublicBrandDisplayName = (payload: VerifyPayload | null, session: VerificationSessionSummary | null) =>
+  String(payload?.licensee?.brandName || payload?.licensee?.name || session?.brandName || "").trim();
+
+const buildBrandDetails = ({
+  payload,
+  session,
+  currentCode,
+}: {
+  payload: VerifyPayload | null;
+  session: VerificationSessionSummary | null;
+  currentCode: string;
+}): BrandDetailItem[] => {
+  const brandDisplayName = getPublicBrandDisplayName(payload, session);
+  const codeLabel = String(payload?.maskedCode || session?.maskedCode || maskCode(currentCode)).trim();
+  const website = toPublicUrl(payload?.licensee?.website || "");
+  const supportEmail = String(payload?.licensee?.supportEmail || "").trim();
+  const supportPhone = String(payload?.licensee?.supportPhone || "").trim();
+  const rows: BrandDetailItem[] = [];
+
+  if (brandDisplayName) rows.push({ label: "Brand", value: brandDisplayName });
+  if (codeLabel) rows.push({ label: "Label code", value: codeLabel });
+  if (website) rows.push({ label: "Website", value: website.replace(/^https?:\/\//i, ""), href: website, external: true });
+  if (supportEmail) rows.push({ label: "Support email", value: supportEmail, href: `mailto:${supportEmail}` });
+  if (supportPhone) rows.push({ label: "Support phone", value: supportPhone, href: `tel:${supportPhone.replace(/[^\d+]/g, "")}` });
+
+  return rows;
 };
 
 const buildPublicVerificationView = ({
@@ -391,9 +434,12 @@ const buildPublicVerificationView = ({
   currentCode: string;
 }): PublicVerificationView => {
   const tone = getSummaryTone(category);
+  const brandDisplayName = getPublicBrandDisplayName(payload, session);
   return {
     brandName,
-    codeLabel: session?.maskedCode || maskCode(currentCode),
+    brandDisplayName,
+    codeLabel: payload?.maskedCode || session?.maskedCode || maskCode(currentCode),
+    brandDetails: buildBrandDetails({ payload, session, currentCode }),
     checkedAt: getLastCheckedLabel(payload),
     summaryItems: [
       { label: "Label record", value: getPublicLabelRecordLabel(category), tone },
@@ -478,6 +524,51 @@ function VerificationSummary({ items }: { items: PublicSummaryItem[] }) {
         ))}
       </div>
     </SectionFrame>
+  );
+}
+
+function BrandDetailsCard({ items }: { items: BrandDetailItem[] }) {
+  if (!items.length) return null;
+
+  return (
+    <Card
+      className="border-mscqr-border bg-white text-mscqr-primary shadow-sm"
+      role="region"
+      aria-labelledby="brand-details-heading"
+    >
+      <CardHeader className="space-y-2 border-b border-mscqr-border px-4 pb-5 pt-5 sm:px-6">
+        <CardTitle id="brand-details-heading" className="text-xl text-mscqr-primary sm:text-2xl">
+          Brand details
+        </CardTitle>
+        <CardDescription className="text-sm leading-6 text-mscqr-secondary">
+          The public brand record connected to this QR label.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-4 sm:p-6">
+        <dl className="grid gap-3 sm:grid-cols-2">
+          {items.map((item) => (
+            <div key={item.label} className="min-w-0 rounded-xl border border-mscqr-border bg-mscqr-surface-muted p-4">
+              <dt className="text-sm font-medium text-mscqr-secondary">{item.label}</dt>
+              <dd className="mt-2 min-w-0 text-base font-semibold leading-6 text-mscqr-primary">
+                {item.href ? (
+                  <a
+                    href={item.href}
+                    target={item.external ? "_blank" : undefined}
+                    rel={item.external ? "noreferrer" : undefined}
+                    className="inline-flex max-w-full items-center gap-1 break-all text-mscqr-accent underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mscqr-accent/35"
+                  >
+                    <span className="min-w-0 break-all">{item.value}</span>
+                    {item.external ? <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+                  </a>
+                ) : (
+                  <span className="block break-words">{item.value}</span>
+                )}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1421,6 +1512,7 @@ export default function VerifyExperience() {
                 Additional review check completed{challengeCompletedBy === "CUSTOMER_IDENTITY" ? " with your verified identity." : "."}
               </div>
             ) : null}
+            <BrandDetailsCard items={publicView.brandDetails} />
             <VerificationSummary items={publicView.summaryItems} />
             <VerificationProcess />
             <VerificationNotice />
