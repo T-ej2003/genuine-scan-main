@@ -1,4 +1,11 @@
 {
-  "updatedAt": "2026-06-12",
-  "entries": []
+  "updatedAt": "2026-06-15",
+  "entries": [
+    {
+      "scope": "root",
+      "package": "vite",
+      "owner": "Abhi Ram Teja Karatlapally",
+      "expiresOn": "2026-07-15"
+    }
+  ]
 }
