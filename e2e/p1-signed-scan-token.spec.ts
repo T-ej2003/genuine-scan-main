@@ -9,12 +9,19 @@ type VerifyMockResponse = { success: true; data: Record<string, unknown> };
 const scenarioData = (kind: "valid" | "invalid" | "suspicious") =>
   (verifyScenarioBody("SIGNED-P1", kind) as VerifyMockResponse).data;
 
+const publicScenarioData = (kind: "valid" | "invalid" | "suspicious") => {
+  const data = { ...scenarioData(kind) };
+  delete data.decisionId;
+  delete data.sessionStartToken;
+  return data;
+};
+
 const signedPayload = (kind: "valid" | "expired" | "tampered" | "revoked" | "missing" | "suspicious") => {
   if (kind === "valid") {
     return {
       success: true,
       data: {
-        ...scenarioData("valid"),
+        ...publicScenarioData("valid"),
         proofSource: "SIGNED_LABEL",
         publicOutcome: "SIGNED_LABEL_ACTIVE",
         classification: "FIRST_SCAN",
@@ -25,7 +32,7 @@ const signedPayload = (kind: "valid" | "expired" | "tampered" | "revoked" | "mis
     return {
       success: true,
       data: {
-        ...scenarioData("suspicious"),
+        ...publicScenarioData("suspicious"),
         proofSource: "SIGNED_LABEL",
         publicOutcome: "REVIEW_REQUIRED",
         challenge: { required: true, methods: ["SIGN_IN"] },
@@ -34,7 +41,7 @@ const signedPayload = (kind: "valid" | "expired" | "tampered" | "revoked" | "mis
     };
   }
   if (kind === "missing") {
-    return { success: true, data: { ...scenarioData("invalid"), proofSource: "SIGNED_LABEL" } };
+    return { success: true, data: { ...publicScenarioData("invalid"), proofSource: "SIGNED_LABEL" } };
   }
   return {
     success: true,

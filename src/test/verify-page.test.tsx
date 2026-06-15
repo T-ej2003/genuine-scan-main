@@ -174,7 +174,7 @@ describe("Verify page", () => {
   it("creates a secure verification session and navigates to the canonical signed URL", async () => {
     vi.mocked(apiClient.scanToken).mockResolvedValue({
       success: true,
-      data: buildVerifyPayload(),
+      data: buildVerifyPayload({ decisionId: undefined, sessionStartToken: "session-start-1" }),
     } as never);
     vi.mocked(apiClient.startVerificationSession).mockResolvedValue({
       success: true,
@@ -273,7 +273,9 @@ describe("Verify page", () => {
     fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "abhi@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Send code" }));
 
-    await screen.findByText("Code email accepted for ab***@example.com.");
+    await screen.findByText("Code sent. Check your email.");
+    expect(screen.getByText("Sent to ab***@example.com.")).toBeInTheDocument();
+    expect(vi.mocked(apiClient.requestVerifyEmailOtp)).toHaveBeenCalledWith("abhi@example.com");
 
     fireEvent.change(screen.getByLabelText("6-digit code"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: "Verify and continue" }));
@@ -281,6 +283,27 @@ describe("Verify page", () => {
     expect(await screen.findByText("Help the brand review this scan")).toBeInTheDocument();
     expect(localStorageStore.has("mscqr_verify_customer_email")).toBe(false);
     expect(localStorageStore.has("authenticqr_verify_customer_email")).toBe(false);
+  });
+
+  it("shows a public-safe inline email error when the OTP request fails", async () => {
+    vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
+      success: true,
+      data: buildSession(),
+    } as never);
+    vi.mocked(apiClient.requestVerifyEmailOtp).mockResolvedValue({
+      success: false,
+      error: "SIGN_IN_AUTH_FAILED",
+    } as never);
+
+    renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
+
+    fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "abhi@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send code" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "We could not send the code right now. Please try again or report a concern."
+    );
+    expect(document.body).not.toHaveTextContent("SIGN_IN_AUTH_FAILED");
   });
 
   it("lets customers skip optional intake questions and still reveal the locked result", async () => {
@@ -462,7 +485,7 @@ describe("Verify page", () => {
     expect(document.body).not.toHaveTextContent(/decisionId|classification|riskScore|proofSource|proofTier|decision-1/i);
   });
 
-  it("reports a concern with session and decision ids after reveal", async () => {
+  it("opens and submits a concern with public session context after reveal", async () => {
     vi.mocked(apiClient.getCustomerAuthSession).mockResolvedValue({
       success: true,
       data: {
@@ -473,10 +496,11 @@ describe("Verify page", () => {
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession({
+        decisionId: undefined,
         authState: "VERIFIED",
         intakeCompleted: true,
         revealed: true,
-        verification: buildVerifyPayload(),
+        verification: buildVerifyPayload({ decisionId: undefined }),
         intake: {
           purchaseChannel: "offline",
           sourceCategory: "retail_store",
@@ -499,6 +523,8 @@ describe("Verify page", () => {
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
     fireEvent.click(await screen.findByRole("button", { name: "Report a concern" }));
+    expect(await screen.findByRole("heading", { name: "Report a concern" })).toBeInTheDocument();
+    expect(screen.getByLabelText("What do you want to report?")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Submit concern" }));
 
     await waitFor(() => {
@@ -506,10 +532,11 @@ describe("Verify page", () => {
         expect.objectContaining({
           code: CODE,
           sessionId: SESSION_ID,
-          decisionId: "decision-1",
         })
       );
     });
+    const payload = vi.mocked(apiClient.reportFraud).mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("decisionId");
   });
 
   it("lets a signed-in customer complete a replay review check and refresh the session", async () => {

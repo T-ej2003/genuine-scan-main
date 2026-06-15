@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -128,6 +128,25 @@ const DEFAULT_INTAKE: CustomerTrustIntake = {
   scanReason: "routine_check",
   ownershipIntent: "verify_only",
   notes: "",
+};
+
+const PUBLIC_EMAIL_CODE_ERROR = "We could not send the code right now. Please try again or report a concern.";
+const PUBLIC_REPORT_OPEN_ERROR = "We could not open the report form. Please try again or contact the brand.";
+const PUBLIC_REPORT_SUBMIT_ERROR = "We could not submit the concern right now. Please try again or contact the brand.";
+const PUBLIC_EMAIL_CODE_SENT = "Code sent. Check your email.";
+
+const looksLikeBackendErrorCode = (value: string) => {
+  const normalized = value.trim();
+  if (!normalized) return false;
+  if (/^[A-Z][A-Z0-9_:-]{2,}$/.test(normalized)) return true;
+  return /\b(AUTH|SIGN_IN|SMTP|EMAIL|OTP|TOKEN|CSRF|JWT|DATABASE|PRISMA)\b/i.test(normalized);
+};
+
+const publicActionErrorMessage = (value: unknown, fallback: string) => {
+  const message = value instanceof Error ? value.message : String(value || "");
+  const trimmed = message.trim();
+  if (!trimmed || looksLikeBackendErrorCode(trimmed)) return fallback;
+  return trimmed;
 };
 
 const maskCode = (value?: string | null) => {
@@ -711,6 +730,8 @@ export default function VerifyExperience() {
   const [otpCode, setOtpCode] = useState("");
   const [otpSending, setOtpSending] = useState(false);
   const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpRequestError, setOtpRequestError] = useState("");
+  const [otpRequestSuccess, setOtpRequestSuccess] = useState("");
 
   const [intake, setIntake] = useState<CustomerTrustIntake>(DEFAULT_INTAKE);
   const [, setFlowStep] = useState<FlowStep>("identity");
@@ -729,7 +750,10 @@ export default function VerifyExperience() {
   const [reportReason, setReportReason] = useState("counterfeit_suspected");
   const [lastSupportTicketRef, setLastSupportTicketRef] = useState("");
   const [showConcernForm, setShowConcernForm] = useState(false);
+  const [reportOpenError, setReportOpenError] = useState("");
+  const [reportSubmitError, setReportSubmitError] = useState("");
   const [socialProviders, setSocialProviders] = useState<ProviderOption[]>([]);
+  const concernFormRef = useRef<HTMLDivElement | null>(null);
 
   const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
   const passkeySupported = isWebAuthnSupported();
@@ -744,6 +768,22 @@ export default function VerifyExperience() {
   const updateIntake = useCallback(<K extends keyof CustomerTrustIntake>(key: K, value: CustomerTrustIntake[K]) => {
     setIntake((prev) => ({ ...prev, [key]: value }));
   }, []);
+
+  const handleOtpEmailChange = useCallback((value: string) => {
+    setOtpEmail(value);
+    setOtpRequestError("");
+    setOtpRequestSuccess("");
+  }, []);
+
+  const openConcernForm = useCallback(() => {
+    if (!currentCode) {
+      setReportOpenError(PUBLIC_REPORT_OPEN_ERROR);
+      return;
+    }
+    setReportOpenError("");
+    setReportSubmitError("");
+    setShowConcernForm(true);
+  }, [currentCode]);
 
   const loadCustomerPasskeys = useCallback(async () => {
     if (!passkeySupported || !customerAuthenticated) {
@@ -1017,14 +1057,29 @@ export default function VerifyExperience() {
     loadCustomerPasskeys();
   }, [authReady, loadCustomerPasskeys]);
 
+  useEffect(() => {
+    if (!showConcernForm) return;
+    const focusTimer = window.setTimeout(() => {
+      concernFormRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      const focusTarget = concernFormRef.current?.querySelector<HTMLElement>(
+        "[data-report-focus], button, textarea, input"
+      );
+      focusTarget?.focus?.();
+    }, 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [showConcernForm]);
+
   const handleRequestOtp = async () => {
     const email = otpEmail.trim();
     if (!email) {
-      toast({ title: "Email required", description: "Enter your email to continue.", variant: "destructive" });
+      setOtpRequestError("Enter your email to continue.");
+      setOtpRequestSuccess("");
       return;
     }
 
     setOtpSending(true);
+    setOtpRequestError("");
+    setOtpRequestSuccess("");
     try {
       const response = await apiClient.requestVerifyEmailOtp(email);
       if (!response.success || !response.data) {
@@ -1032,13 +1087,14 @@ export default function VerifyExperience() {
       }
       setOtpChallengeToken(response.data.challengeToken);
       setOtpMaskedEmail(response.data.maskedEmail);
-      toast({ title: "Code email accepted", description: `The mail provider accepted the verification code for ${response.data.maskedEmail}.` });
+      setOtpRequestSuccess(PUBLIC_EMAIL_CODE_SENT);
     } catch (nextError: unknown) {
-      toast({
-        title: "Could not send code",
-        description: nextError instanceof Error ? nextError.message : "Please try again.",
-        variant: "destructive",
-      });
+      if (import.meta.env.DEV) {
+        console.warn("Verify email OTP request failed", {
+          error: nextError instanceof Error ? nextError.message : String(nextError || ""),
+        });
+      }
+      setOtpRequestError(publicActionErrorMessage(nextError, PUBLIC_EMAIL_CODE_ERROR));
     } finally {
       setOtpSending(false);
     }
@@ -1282,8 +1338,12 @@ export default function VerifyExperience() {
   };
 
   const handleReportConcern = async () => {
-    if (!currentCode) return;
+    if (!currentCode) {
+      setReportSubmitError(PUBLIC_REPORT_SUBMIT_ERROR);
+      return;
+    }
     setReporting(true);
+    setReportSubmitError("");
     try {
       const response = await apiClient.reportFraud({
         code: currentCode,
@@ -1291,11 +1351,10 @@ export default function VerifyExperience() {
         incidentType: reportReason,
         description: String(intake.notes || "").trim() || `Customer reported ${reportReason.replace(/_/g, " ")} during verification.`,
         contactEmail: customerEmail || undefined,
-        observedStatus: result?.status,
-        observedOutcome: result?.latestDecisionOutcome || result?.scanOutcome,
+        observedStatus: result?.publicStatus || result?.status,
+        observedOutcome: result?.publicOutcome || result?.publicStatus || result?.status,
         pageUrl: window.location.href,
         sessionId: session?.sessionId,
-        decisionId: result?.decisionId || session?.decisionId,
       });
       if (!response.success) {
         throw new Error(response.error || "Could not submit the concern.");
@@ -1310,11 +1369,12 @@ export default function VerifyExperience() {
           : "MSCQR support has received your report.",
       });
     } catch (nextError: unknown) {
-      toast({
-        title: "Could not report concern",
-        description: nextError instanceof Error ? nextError.message : "Please try again.",
-        variant: "destructive",
-      });
+      if (import.meta.env.DEV) {
+        console.warn("Verify report concern failed", {
+          error: nextError instanceof Error ? nextError.message : String(nextError || ""),
+        });
+      }
+      setReportSubmitError(publicActionErrorMessage(nextError, PUBLIC_REPORT_SUBMIT_ERROR));
     } finally {
       setReporting(false);
     }
@@ -1475,7 +1535,7 @@ export default function VerifyExperience() {
                 </Button>
               ) : null}
               {canReportConcern ? (
-                <Button className="w-full sm:w-auto" variant="outline" onClick={() => setShowConcernForm(true)}>
+                <Button className="w-full sm:w-auto" variant="outline" onClick={openConcernForm}>
                   <AlertTriangle className="mr-2 h-4 w-4" />
                   Report a concern
                 </Button>
@@ -1483,6 +1543,14 @@ export default function VerifyExperience() {
               <Button className="w-full sm:w-auto" variant="ghost" asChild>
                 <Link to="/verify">Verify another garment</Link>
               </Button>
+              {reportOpenError ? (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm leading-6 text-red-950 sm:col-span-2 lg:basis-full"
+                >
+                  {reportOpenError}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </VerificationHero>
@@ -1649,7 +1717,7 @@ export default function VerifyExperience() {
                       <Input
                         id="otp-email"
                         value={otpEmail}
-                        onChange={(event) => setOtpEmail(event.target.value)}
+                        onChange={(event) => handleOtpEmailChange(event.target.value)}
                         placeholder="you@example.com"
                         type="email"
                       />
@@ -1659,12 +1727,18 @@ export default function VerifyExperience() {
                         {otpSending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         Send code
                       </Button>
-                      {otpChallengeToken ? (
-                        <Badge className="border-slate-300 bg-white text-slate-700">
-                          Code email accepted for {otpMaskedEmail || "your address"}.
-                        </Badge>
-                      ) : null}
                     </div>
+                    {otpRequestSuccess ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm leading-6 text-emerald-950">
+                        {otpRequestSuccess}
+                        {otpMaskedEmail ? <span className="ml-1">Sent to {otpMaskedEmail}.</span> : null}
+                      </div>
+                    ) : null}
+                    {otpRequestError ? (
+                      <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm leading-6 text-red-950">
+                        {otpRequestError}
+                      </div>
+                    ) : null}
                     {otpChallengeToken ? (
                       <div className="grid gap-4 md:grid-cols-[1fr,auto] md:items-end">
                         <div className="grid gap-2">
@@ -1762,16 +1836,17 @@ export default function VerifyExperience() {
         ) : null}
 
         {showConcernForm && canReportConcern ? (
-          <SectionFrame
-            eyebrow="Report"
-            title="Report a concern"
-            description="Tell the brand what worried you. You can cancel and return to the result at any time."
-          >
+          <div ref={concernFormRef}>
+            <SectionFrame
+              eyebrow="Report"
+              title="Report a concern"
+              description="Tell the brand what worried you. You can cancel and return to the result at any time."
+            >
             <div className="grid gap-4 md:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="report-reason">What do you want to report?</Label>
                 <Select value={reportReason} onValueChange={setReportReason}>
-                  <SelectTrigger id="report-reason">
+                  <SelectTrigger id="report-reason" data-report-focus>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1803,6 +1878,11 @@ export default function VerifyExperience() {
                 Submit concern
               </Button>
             </div>
+            {reportSubmitError ? (
+              <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm leading-6 text-red-950">
+                {reportSubmitError}
+              </div>
+            ) : null}
             {lastSupportTicketRef ? (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
                 Concern submitted. Support reference:{" "}
@@ -1811,7 +1891,8 @@ export default function VerifyExperience() {
                 </span>
               </div>
             ) : null}
-          </SectionFrame>
+            </SectionFrame>
+          </div>
         ) : lastSupportTicketRef ? (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
             Concern submitted. Support reference:{" "}
