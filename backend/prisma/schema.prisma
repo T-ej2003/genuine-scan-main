@@ -1817,19 +1817,27 @@ model AuthMfaChallenge {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   ticketHash String @unique
+  sessionBindingHash String?
+  purpose String @default("admin_login")
   riskScore Int @default(0)
   riskLevel AuthRiskLevel @default(LOW)
   reasons String[]
   createdIpHash String?
   createdUserAgentHash String?
+  attempts Int @default(0)
+  maxAttempts Int @default(5)
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   expiresAt DateTime
   consumedAt DateTime?
+  supersededAt DateTime?
 
   @@index([userId, createdAt])
+  @@index([userId, purpose, sessionBindingHash])
   @@index([expiresAt])
   @@index([consumedAt])
+  @@index([supersededAt])
 }
 
 model AuthWebAuthnChallenge {

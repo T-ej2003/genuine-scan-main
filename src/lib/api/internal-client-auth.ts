@@ -17,6 +17,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
         stepUpMethod?: "ADMIN_MFA" | "PASSWORD_REAUTH" | null;
         sessionId?: string | null;
         sessionExpiresAt?: string | null;
+        mfaChallenge?: { ticket: string; expiresAt: string } | null;
       };
     }>("/auth/login", {
       method: "POST",
@@ -128,6 +129,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
         stepUpMethod?: "ADMIN_MFA" | "PASSWORD_REAUTH" | null;
         sessionId?: string | null;
         sessionExpiresAt?: string | null;
+        mfaChallenge?: { ticket: string; expiresAt: string } | null;
       };
     }>("/auth/accept-invite", {
       method: "POST",
@@ -390,10 +392,10 @@ export const createAuthApi = (core: ApiClientCore) => ({
     });
   },
 
-  async completeAdminMfaChallenge(ticket: string, code: string) {
+  async completeAdminMfaChallenge(ticket: string, code: string, method?: "totp" | "backup_code") {
     return core.request<{ user?: any; auth?: any }>("/auth/mfa/challenge/complete", {
       method: "POST",
-      body: JSON.stringify({ ticket, code }),
+      body: JSON.stringify({ ticket, code, ...(method ? { method } : {}) }),
     });
   },
 

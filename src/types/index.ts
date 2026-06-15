@@ -17,6 +17,10 @@ export interface AuthState {
   stepUpMethod?: StepUpMethod | null;
   sessionId?: string | null;
   sessionExpiresAt?: string | null;
+  mfaChallenge?: {
+    ticket: string;
+    expiresAt: string;
+  } | null;
 }
 
 export interface PendingAuthSession {

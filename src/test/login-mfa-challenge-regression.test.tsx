@@ -102,11 +102,88 @@ describe("Login MFA challenge regression", () => {
     });
 
     await waitFor(() => {
-      expect(completeChallengeMock).toHaveBeenCalledWith("ticket-1", "ABCDE-12345");
+      expect(completeChallengeMock).toHaveBeenCalledWith("ticket-1", "ABCDE-12345", "backup_code");
     });
     await waitFor(() => {
       expect(completeMfaSessionMock).toHaveBeenCalled();
       expect(navigateMock).toHaveBeenCalledWith("/dashboard");
     });
+  });
+
+  it("prevents duplicate authenticator submissions while verification is in flight", async () => {
+    let resolveComplete: (value: unknown) => void = () => undefined;
+    completeChallengeMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveComplete = resolve;
+      })
+    );
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(beginChallengeMock).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
+    const submit = screen.getByRole("button", { name: "Open secure session" });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+
+    expect(completeChallengeMock).toHaveBeenCalledTimes(1);
+    expect(completeChallengeMock).toHaveBeenCalledWith("ticket-1", "123456", "totp");
+
+    resolveComplete({
+      success: true,
+      data: { user: { id: "admin-1" }, auth: { sessionStage: "ACTIVE" } },
+    });
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/dashboard"));
+  });
+
+  it("shows invalid-code copy for 400 without expiring the current challenge", async () => {
+    completeChallengeMock.mockResolvedValue({
+      success: false,
+      status: 400,
+      error: "Invalid authentication code.",
+    });
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(beginChallengeMock).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open secure session" }));
+
+    expect(await screen.findByText("The security code could not be verified. Check the code and try again.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open secure session" })).not.toBeDisabled();
+  });
+
+  it("shows expired-session copy for 410 and stops stale challenge retries", async () => {
+    completeChallengeMock.mockResolvedValue({
+      success: false,
+      status: 410,
+      error: "This MFA challenge expired. Start again.",
+    });
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(beginChallengeMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open secure session" }));
+
+    expect(await screen.findByText("This verification session expired. Start sign-in again.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open secure session" })).toBeDisabled());
+    expect(beginChallengeMock).toHaveBeenCalledTimes(1);
   });
 });

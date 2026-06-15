@@ -3,6 +3,7 @@ import { AuthRiskLevel } from "@prisma/client";
 
 import prisma from "../../config/database";
 import { buildTokenHashCandidates, hashToken, matchesHashedToken, randomOpaqueToken } from "../../utils/security";
+import { createAuditLogSafely, type AuditLogInput } from "../auditService";
 
 const TOTP_STEP_SECONDS = 30;
 const TOTP_DIGITS = 6;
@@ -17,6 +18,8 @@ const getTotpWindow = () => {
   const configured = parseIntEnv("AUTH_MFA_TOTP_WINDOW", DEFAULT_TOTP_WINDOW);
   return Math.max(0, Math.min(4, configured));
 };
+
+const getMaxChallengeAttempts = () => Math.max(1, Math.min(10, parseIntEnv("AUTH_MFA_CHALLENGE_MAX_ATTEMPTS", 5)));
 
 const issuer = () => String(process.env.MFA_TOTP_ISSUER || process.env.APP_NAME || "MSCQR").trim();
 
@@ -157,6 +160,36 @@ const generateBackupCodes = (count = 8) => {
 };
 
 const backupHash = (code: string) => hashToken(String(code || "").trim().toUpperCase());
+
+const sessionBindingValue = (sessionId: string) => `admin-mfa-session:${String(sessionId || "").trim()}`;
+const sessionBindingHash = (sessionId?: string | null) => {
+  const normalized = String(sessionId || "").trim();
+  return normalized ? hashToken(sessionBindingValue(normalized)) : null;
+};
+const sessionBindingCandidates = (sessionId?: string | null) => {
+  const normalized = String(sessionId || "").trim();
+  return normalized ? buildTokenHashCandidates(sessionBindingValue(normalized)) : [];
+};
+
+const auditMfaEvent = async (input: {
+  userId?: string | null;
+  action: string;
+  entityId?: string | null;
+  details?: Record<string, unknown>;
+  ipHash?: string | null;
+  userAgent?: string | null;
+}) => {
+  const event: AuditLogInput = {
+    userId: input.userId || undefined,
+    action: input.action,
+    entityType: "AuthMfaChallenge",
+    entityId: input.entityId || undefined,
+    details: input.details || {},
+    ipHash: input.ipHash || undefined,
+    userAgent: input.userAgent || undefined,
+  };
+  await createAuditLogSafely(event).catch(() => undefined);
+};
 
 const normalizeRiskLevel = (level?: AuthRiskLevel | string | null): AuthRiskLevel => {
   const value = String(level || "").toUpperCase();
@@ -312,27 +345,68 @@ export const disableAdminMfa = async (userId: string) => {
 
 export const createAdminMfaChallenge = async (params: {
   userId: string;
+  sessionId?: string | null;
+  purpose?: string | null;
   riskScore: number;
   riskLevel?: AuthRiskLevel | string | null;
   reasons?: string[];
   ipHash?: string | null;
   userAgent?: string | null;
+  supersedeOpen?: boolean;
+  maxAttempts?: number;
 }) => {
   const rawTicket = randomOpaqueToken(36);
   const ticketHash = hashToken(rawTicket);
-  const expiresAt = new Date(Date.now() + parseIntEnv("AUTH_MFA_CHALLENGE_TTL_MINUTES", 5) * 60_000);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + parseIntEnv("AUTH_MFA_CHALLENGE_TTL_MINUTES", 5) * 60_000);
+  const bindingHash = sessionBindingHash(params.sessionId);
+  const purpose = String(params.purpose || "admin_login").trim() || "admin_login";
+  const maxAttempts = Math.max(1, Math.min(10, params.maxAttempts || getMaxChallengeAttempts()));
 
-  await prisma.authMfaChallenge.create({
+  if (params.supersedeOpen !== false) {
+    await prisma.authMfaChallenge.updateMany({
+      where: {
+        userId: params.userId,
+        purpose,
+        ...(bindingHash ? { sessionBindingHash: bindingHash } : {}),
+        consumedAt: null,
+        supersededAt: null,
+        expiresAt: { gt: now },
+      },
+      data: { supersededAt: now },
+    });
+  }
+
+  const challenge = await prisma.authMfaChallenge.create({
     data: {
       userId: params.userId,
       ticketHash,
+      sessionBindingHash: bindingHash,
+      purpose,
       riskScore: Math.max(0, Math.min(100, Math.round(params.riskScore || 0))),
       riskLevel: normalizeRiskLevel(params.riskLevel),
       reasons: Array.isArray(params.reasons) ? params.reasons.slice(0, 12) : [],
       createdIpHash: params.ipHash || null,
       createdUserAgentHash: params.userAgent ? hashToken(params.userAgent) : null,
+      attempts: 0,
+      maxAttempts,
       expiresAt,
     },
+  });
+
+  await auditMfaEvent({
+    userId: params.userId,
+    action: "AUTH_MFA_CHALLENGE_ISSUED",
+    entityId: challenge.id,
+    details: {
+      purpose,
+      riskScore: challenge.riskScore,
+      riskLevel: challenge.riskLevel,
+      expiresAt: expiresAt.toISOString(),
+      sessionBound: Boolean(bindingHash),
+    },
+    ipHash: params.ipHash,
+    userAgent: params.userAgent,
   });
 
   return {
@@ -417,7 +491,10 @@ export const rotateAdminMfaBackupCodes = async (params: { userId: string; code: 
 };
 
 export const completeAdminMfaChallenge = async (params: {
+  userId: string;
+  sessionId?: string | null;
   ticket: string;
+  method?: "totp" | "backup_code" | null;
   code: string;
   ipHash?: string | null;
   userAgent?: string | null;
@@ -428,8 +505,6 @@ export const completeAdminMfaChallenge = async (params: {
   const challenge = await prisma.authMfaChallenge.findFirst({
     where: {
       ticketHash: { in: ticketHashCandidates },
-      consumedAt: null,
-      expiresAt: { gt: now },
     },
     include: {
       user: {
@@ -449,14 +524,106 @@ export const completeAdminMfaChallenge = async (params: {
   });
 
   if (!challenge) throw new Error("MFA_CHALLENGE_NOT_FOUND");
+  if (challenge.userId !== params.userId) throw new Error("MFA_CHALLENGE_FORBIDDEN");
 
-  await verifyAdminMfaCode({
-    userId: challenge.userId,
-    code: params.code,
-  });
+  if (challenge.sessionBindingHash) {
+    const bindingCandidates = sessionBindingCandidates(params.sessionId);
+    if (!bindingCandidates.length || !bindingCandidates.includes(challenge.sessionBindingHash)) {
+      throw new Error("MFA_CHALLENGE_NOT_FOUND");
+    }
+  } else if (challenge.purpose === "admin_login") {
+    throw new Error("MFA_CHALLENGE_NOT_FOUND");
+  }
 
-  await prisma.authMfaChallenge.update({
-    where: { id: challenge.id },
+  if (challenge.supersededAt || challenge.consumedAt) {
+    throw new Error("MFA_CHALLENGE_NOT_FOUND");
+  }
+
+  if (challenge.expiresAt.getTime() <= now.getTime()) {
+    await auditMfaEvent({
+      userId: challenge.userId,
+      action: "AUTH_MFA_CHALLENGE_EXPIRED",
+      entityId: challenge.id,
+      details: { purpose: challenge.purpose, expiresAt: challenge.expiresAt.toISOString() },
+      ipHash: params.ipHash,
+      userAgent: params.userAgent,
+    });
+    throw new Error("MFA_CHALLENGE_NOT_FOUND");
+  }
+
+  if (challenge.attempts >= challenge.maxAttempts) {
+    await auditMfaEvent({
+      userId: challenge.userId,
+      action: "AUTH_MFA_TOO_MANY_ATTEMPTS",
+      entityId: challenge.id,
+      details: { purpose: challenge.purpose, attempts: challenge.attempts, maxAttempts: challenge.maxAttempts },
+      ipHash: params.ipHash,
+      userAgent: params.userAgent,
+    });
+    throw new Error("MFA_TOO_MANY_ATTEMPTS");
+  }
+
+  const normalizedCode = String(params.code || "").trim();
+  const requestedMethod = params.method || null;
+  const totpShapeOk = /^\d{6}$/.test(normalizedCode.replace(/\s+/g, ""));
+  const backupShapeOk = /^[A-Za-z0-9]{4,8}-[A-Za-z0-9]{4,8}$/.test(normalizedCode);
+  const codeShapeOk =
+    requestedMethod === "totp"
+      ? totpShapeOk
+      : requestedMethod === "backup_code"
+        ? backupShapeOk
+        : totpShapeOk || backupShapeOk;
+  if (!codeShapeOk) {
+    const nextAttempts = challenge.attempts + 1;
+    await prisma.authMfaChallenge.updateMany({
+      where: { id: challenge.id, consumedAt: null, supersededAt: null },
+      data: { attempts: { increment: 1 } },
+    });
+    await auditMfaEvent({
+      userId: challenge.userId,
+      action: nextAttempts >= challenge.maxAttempts ? "AUTH_MFA_TOO_MANY_ATTEMPTS" : "AUTH_MFA_FAILURE",
+      entityId: challenge.id,
+      details: { purpose: challenge.purpose, reason: "INVALID_CODE_SHAPE", attempts: nextAttempts, maxAttempts: challenge.maxAttempts },
+      ipHash: params.ipHash,
+      userAgent: params.userAgent,
+    });
+    throw new Error(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE");
+  }
+
+  let verification: Awaited<ReturnType<typeof verifyAdminMfaCode>>;
+  try {
+    verification = await verifyAdminMfaCode({
+      userId: challenge.userId,
+      code: normalizedCode,
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error || "");
+    if (message === "INVALID_MFA_CODE") {
+      const nextAttempts = challenge.attempts + 1;
+      await prisma.authMfaChallenge.updateMany({
+        where: { id: challenge.id, consumedAt: null, supersededAt: null },
+        data: { attempts: { increment: 1 } },
+      });
+      await auditMfaEvent({
+        userId: challenge.userId,
+        action: nextAttempts >= challenge.maxAttempts ? "AUTH_MFA_TOO_MANY_ATTEMPTS" : "AUTH_MFA_FAILURE",
+        entityId: challenge.id,
+        details: { purpose: challenge.purpose, attempts: nextAttempts, maxAttempts: challenge.maxAttempts },
+        ipHash: params.ipHash,
+        userAgent: params.userAgent,
+      });
+      throw new Error(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE");
+    }
+    throw error;
+  }
+
+  const consumed = await prisma.authMfaChallenge.updateMany({
+    where: {
+      id: challenge.id,
+      consumedAt: null,
+      supersededAt: null,
+      expiresAt: { gt: now },
+    },
     data: {
       consumedAt: now,
       createdIpHash: params.ipHash || challenge.createdIpHash || null,
@@ -464,10 +631,29 @@ export const completeAdminMfaChallenge = async (params: {
     },
   });
 
+  if (consumed.count !== 1) {
+    throw new Error("MFA_CHALLENGE_NOT_FOUND");
+  }
+
+  await auditMfaEvent({
+    userId: challenge.userId,
+    action: verification.method === "BACKUP_CODE" ? "AUTH_MFA_BACKUP_CODE_USED" : "AUTH_MFA_SUCCESS",
+    entityId: challenge.id,
+    details: {
+      purpose: challenge.purpose,
+      method: verification.method,
+      riskScore: challenge.riskScore,
+      riskLevel: challenge.riskLevel,
+    },
+    ipHash: params.ipHash,
+    userAgent: params.userAgent,
+  });
+
   return {
     userId: challenge.userId,
     riskScore: challenge.riskScore,
     riskLevel: challenge.riskLevel,
     reasons: challenge.reasons,
+    method: verification.method,
   };
 };

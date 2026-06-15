@@ -24,6 +24,7 @@ export interface MfaBootstrapPayload {
   licenseeId: string | null;
   orgId: string | null;
   linkedLicenseeIds?: string[] | null;
+  sessionId: string;
   stage: "MFA_BOOTSTRAP";
 }
 
@@ -38,6 +39,7 @@ export interface AuthenticatedSessionClaims {
   authAssurance: AuthAssuranceLevel;
   authenticatedAt?: string | null;
   mfaVerifiedAt?: string | null;
+  sessionId?: string | null;
 }
 
 export interface AuthenticatedRequest extends Express.Request {

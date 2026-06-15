@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import QRCode from "qrcode";
 import { AlertCircle, Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from "lucide-react";
@@ -32,6 +32,8 @@ export default function Login() {
   const [mfaQrDataUrl, setMfaQrDataUrl] = useState("");
   const [mfaLoading, setMfaLoading] = useState(false);
   const [mfaBackupCodesRevealed, setMfaBackupCodesRevealed] = useState(true);
+  const [mfaChallengeExpired, setMfaChallengeExpired] = useState(false);
+  const mfaSubmitInFlightRef = useRef(false);
   const webauthnSupported = isWebAuthnSupported();
 
   const { login, logout, pendingAuth, completeMfaSession } = useAuth();
@@ -60,6 +62,22 @@ export default function Login() {
     return value || "Login failed";
   }, []);
 
+  const mfaStatusMessage = useCallback((response: { status?: number; error?: string }) => {
+    if (response.status === 400) {
+      return "The security code could not be verified. Check the code and try again.";
+    }
+    if (response.status === 410) {
+      return "This verification session expired. Start sign-in again.";
+    }
+    if (response.status === 429) {
+      return "Too many attempts. Wait and try again.";
+    }
+    if (response.status === 401) {
+      return "Your sign-in session expired. Sign in again.";
+    }
+    return humanizeAuthError(response.error || "Could not complete MFA challenge.");
+  }, [humanizeAuthError]);
+
   useEffect(() => {
     if (!pendingAuth) {
       setMfaMode(null);
@@ -70,11 +88,14 @@ export default function Login() {
       setMfaChallengeMethod("authenticator");
       setMfaChallengeCode("");
       setMfaBackupCode("");
+      setMfaChallengeExpired(false);
       return;
     }
 
     setError("");
     setMfaMode(pendingAuth.auth.mfaEnrolled ? "challenge" : "setup");
+    setMfaTicket(pendingAuth.auth.mfaChallenge?.ticket || null);
+    setMfaChallengeExpired(false);
     setMfaChallengeMethod("authenticator");
     setMfaChallengeCode("");
     setMfaBackupCode("");
@@ -120,7 +141,7 @@ export default function Login() {
         .finally(() => setMfaLoading(false));
     }
 
-    if (mfaMode === "challenge" && !mfaTicket) {
+    if (mfaMode === "challenge" && !mfaTicket && !mfaChallengeExpired) {
       setMfaLoading(true);
       void apiClient.beginAdminMfaChallenge()
         .then((response) => {
@@ -134,7 +155,7 @@ export default function Login() {
         })
         .finally(() => setMfaLoading(false));
     }
-  }, [humanizeAuthError, mfaLoading, mfaMode, mfaSetup, mfaTicket, pendingAuth]);
+  }, [humanizeAuthError, mfaChallengeExpired, mfaLoading, mfaMode, mfaSetup, mfaTicket, pendingAuth]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,9 +202,14 @@ export default function Login() {
 
   const handleCompleteMfaChallenge = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (mfaSubmitInFlightRef.current) return;
     setError("");
+    if (mfaChallengeExpired) {
+      setError("This verification session expired. Start sign-in again.");
+      return;
+    }
     if (!mfaTicket) {
-      setError("This security challenge expired. Start again.");
+      setError("This verification session expired. Start sign-in again.");
       return;
     }
     const challengeCode = mfaChallengeMethod === "backup"
@@ -193,18 +219,32 @@ export default function Login() {
       setError(mfaChallengeMethod === "backup" ? "Enter a backup code." : "Enter the authenticator code.");
       return;
     }
+    if (mfaChallengeMethod === "authenticator" && !/^\d{6}$/.test(challengeCode.replace(/\s+/g, ""))) {
+      setError("The security code could not be verified. Check the code and try again.");
+      return;
+    }
 
+    mfaSubmitInFlightRef.current = true;
     setMfaLoading(true);
     try {
-      const response = await apiClient.completeAdminMfaChallenge(mfaTicket, challengeCode);
+      const response = await apiClient.completeAdminMfaChallenge(
+        mfaTicket,
+        challengeCode,
+        mfaChallengeMethod === "backup" ? "backup_code" : "totp"
+      );
       if (!response.success || !response.data?.user) {
-        setError(humanizeAuthError(response.error || "Could not complete MFA challenge."));
+        setError(mfaStatusMessage(response));
+        if (response.status === 410 || response.status === 401) {
+          setMfaTicket(null);
+          setMfaChallengeExpired(true);
+        }
         return;
       }
 
       completeMfaSession({ user: response.data.user, auth: response.data.auth || null });
       navigate("/dashboard");
     } finally {
+      mfaSubmitInFlightRef.current = false;
       setMfaLoading(false);
     }
   };
@@ -244,6 +284,7 @@ export default function Login() {
     setMfaTicket(null);
     setMfaSetup(null);
     setMfaQrDataUrl("");
+    setMfaChallengeExpired(false);
     setError("");
     logout();
   };
@@ -578,7 +619,7 @@ export default function Login() {
             <Button type="button" variant="outline" className="flex-1" disabled={mfaLoading} onClick={resetMfaFlow}>
               Use different account
             </Button>
-            <Button type="submit" className="flex-1 bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100" disabled={mfaLoading}>
+            <Button type="submit" className="flex-1 bg-none bg-cyan-200 text-slate-950 hover:bg-cyan-100" disabled={mfaLoading || mfaChallengeExpired}>
               {mfaLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

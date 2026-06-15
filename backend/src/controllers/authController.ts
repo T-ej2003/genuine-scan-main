@@ -98,6 +98,9 @@ export const me = async (req: Request, res: Response) => {
     return res.json({
       success: true,
       data: {
+        authenticated: true,
+        mfaRequired: Boolean(auth?.mfaRequired),
+        mfaVerified: Boolean(auth?.mfaVerifiedAt && auth?.sessionStage === "ACTIVE"),
         id: user.id,
         email: user.email,
         name: user.name,

@@ -84,6 +84,10 @@ let mockedMfaStatus = {
 };
 mockModule("services/auth/mfaService.js", {
   getAdminMfaStatus: async () => mockedMfaStatus,
+  createAdminMfaChallenge: async () => ({
+    ticket: "mfa-ticket",
+    expiresAt: new Date("2026-05-01T12:10:00.000Z"),
+  }),
 });
 
 const { loginWithPassword } = require("../dist/services/auth/authService");
@@ -143,6 +147,7 @@ const run = async () => {
 
   assert.strictEqual(staleMfaSession.sessionStage, "MFA_BOOTSTRAP", "stale MFA should require a fresh challenge");
   assert.strictEqual(staleMfaSession.auth?.stepUpMethod, "ADMIN_MFA");
+  assert.strictEqual(staleMfaSession.auth?.mfaChallenge?.ticket, "mfa-ticket");
   assert(
     auditEvents.some((entry) => entry?.action === "AUTH_LOGIN_MFA_CHALLENGE_REQUIRED"),
     "stale MFA login should emit challenge-required audit action"
