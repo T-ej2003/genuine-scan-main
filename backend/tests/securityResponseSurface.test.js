@@ -81,6 +81,7 @@ const createResponse = () => ({
   mockModule("services/degradationEventService.js", { recordDegradationEvent: async () => undefined });
   mockModule("services/verificationDecisionService.js", {
     attachVerificationPresentationSnapshot: async () => undefined,
+    issuePublicVerificationSessionStartToken: async () => "public-session-start-token",
   });
 
   const { getUsers } = require("../dist/controllers/userController");
@@ -171,8 +172,9 @@ const createResponse = () => ({
   const serialized = JSON.stringify(publicObjects);
   assert.doesNotMatch(
     serialized,
-    /tenantId|platformId|manufacturerId|licenseeId|userId|decisionId|lic-internal|manufacturer-internal|admin@example\.com/
+    /tenantId|platformId|manufacturerId|licenseeId|userId|decisionId|proofTier|reasonCodes|riskBand|lic-internal|manufacturer-internal|admin@example\.com/
   );
+  assert.match(serialized, /public-session-start-token/);
 
   console.log("security response surface regression test passed");
 })().catch((error) => {

@@ -108,8 +108,8 @@ const run = async () => {
     assert(latest.release.platforms.windows === null, "Normal users should not receive unsigned ZIP as the Windows download");
     assert(latest.release.platforms.windowsUnsignedTest === null, "Normal users should not receive internal ZIP metadata");
     assert(
-      /Signed Windows connector is not available yet/i.test(latest.release.productionSignedMessage),
-      "Missing signed artifact should return a safe unavailable message"
+      /Signed Windows connector is pending release/i.test(latest.release.productionSignedMessage),
+      "Missing signed artifact should return a safe pending-release message"
     );
     assert(latestInternal.release.platforms.windowsUnsignedTest.trustLevel === "internal-test", "Internal view exposes unsigned ZIP as internal-test");
     assert(latestInternal.release.platforms.windowsUnsignedTest.internalOnly === true, "Internal ZIP should be marked internal-only");

@@ -136,6 +136,10 @@ export type VerificationActivitySummary = {
 export type VerifyPayload = {
   isAuthentic: boolean;
   decisionId?: string | null;
+  sessionStartToken?: string | null;
+  publicStatus?: "verified" | "review_needed" | "blocked" | "not_ready" | "not_found" | string | null;
+  scanStatus?: "first_successful_scan" | "previously_scanned" | "checked" | string | null;
+  riskSignalStatus?: "clear" | "needs_brand_review" | "brand_action_required" | "not_assessed" | "activation_not_complete" | string | null;
   decisionVersion?: number;
   message?: string;
   warningMessage?: string | null;
@@ -228,9 +232,9 @@ export type VerifyPayload = {
     distinctUntrustedCountryCount24h?: number;
   } | null;
   licensee?: {
-    id: string;
-    name: string;
-    prefix: string;
+    id?: string;
+    name?: string;
+    prefix?: string;
     brandName?: string | null;
     location?: string | null;
     website?: string | null;
@@ -238,11 +242,11 @@ export type VerifyPayload = {
     supportPhone?: string | null;
   } | null;
   batch?: {
-    id: string;
-    name: string;
+    id?: string;
+    name?: string;
     printedAt?: string | null;
     manufacturer?: {
-      id: string;
+      id?: string;
       name: string;
       email?: string | null;
       location?: string | null;
@@ -285,6 +289,13 @@ export const DEFAULT_OWNERSHIP_STATUS: OwnershipStatus = {
 
 export const inferClassification = (result: VerifyPayload | null): VerificationClassification => {
   if (result?.classification) return result.classification;
+  const publicStatus = String(result?.publicStatus || result?.status || "").trim().toLowerCase();
+  if (publicStatus === "not_found") return "NOT_FOUND";
+  if (publicStatus === "review_needed") return "SUSPICIOUS_DUPLICATE";
+  if (publicStatus === "blocked") return "BLOCKED_BY_SECURITY";
+  if (publicStatus === "not_ready") return "NOT_READY_FOR_CUSTOMER_USE";
+  if (publicStatus === "verified" && result?.isFirstScan) return "FIRST_SCAN";
+  if (publicStatus === "verified") return "LEGIT_REPEAT";
   const status = String(result?.status || "").trim().toUpperCase();
   const scanOutcome = String(result?.scanOutcome || "").trim().toUpperCase();
   const publicOutcome = String(result?.publicOutcome || "").trim().toUpperCase();

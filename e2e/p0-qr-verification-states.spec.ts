@@ -5,12 +5,12 @@ import { installP0VerifyMocks, verifyScenarioBody } from "./helpers/p0-trust-moc
 const scenarios = [
   {
     code: "VALID-P0",
-    title: "This garment is genuine",
+    title: "This garment matches a registered brand record.",
     body: verifyScenarioBody("VALID-P0", "valid"),
   },
   {
     code: "INVALID-P0",
-    title: "We could not find this QR label",
+    title: "MSCQR could not match this QR label.",
     body: verifyScenarioBody("INVALID-P0", "invalid"),
   },
   {
@@ -25,7 +25,7 @@ const scenarios = [
   },
   {
     code: "DUPLICATE-P0",
-    title: "We could not fully verify this item",
+    title: "This scan needs brand review.",
     body: verifyScenarioBody("DUPLICATE-P0", "suspicious"),
   },
 ];
@@ -38,10 +38,14 @@ test.describe("P0 public QR verification result states", () => {
       await page.goto(`/verify/${scenario.code}`);
 
       await expect(page.getByText(scenario.title, { exact: false }).first()).toBeVisible();
+      await expect(page.getByText("Verification summary", { exact: false }).first()).toBeVisible();
       await expect(page.getByRole("link", { name: /Verify another garment/i }).first()).toBeVisible();
       await expect(page.getByRole("button", { name: /Report a concern/i })).toBeVisible();
+      await expect(page.getByRole("button", { name: /Save verification/i })).toBeVisible();
 
       const body = page.locator("body");
+      await expect(body).not.toContainText(/Technical details for support|Manual Registry Lookup|Manual Code Lookup/i);
+      await expect(body).not.toContainText(/Decision reference|Session reference|Support notes/i);
       await expect(body).not.toContainText(/licensee-acme|batch-p0|manufacturer-p0|org-acme|admin@|factory@/i);
       await expect(body).not.toContainText(/stack trace|Prisma|JWT|Bearer|access token/i);
     });
@@ -71,8 +75,11 @@ test.describe("P0 public QR verification result states", () => {
 
     await page.goto("/verify/VALID-MOBILE-P0");
 
-    await expect(page.getByRole("heading", { name: /This garment is genuine/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /This garment matches a registered brand record/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /Verify another garment/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /Save verification/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Report a concern/i })).toBeVisible();
     await expect(page.locator("body")).not.toContainText(/admin-only|internal|licensee-acme|manufacturer-p0/i);
+    await expect(page.locator("body")).not.toContainText(/Technical details for support|Decision reference|Session reference|Support notes/i);
   });
 });

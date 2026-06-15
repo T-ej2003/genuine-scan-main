@@ -1,15 +1,20 @@
-import { expect, test, type Route } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 import { verifyScenarioBody } from "./helpers/p0-trust-mocks";
 
 const json = (route: Route, body: unknown, status = 200) =>
   route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+
+type VerifyMockResponse = { success: true; data: Record<string, unknown> };
+
+const scenarioData = (kind: "valid" | "invalid" | "suspicious") =>
+  (verifyScenarioBody("SIGNED-P1", kind) as VerifyMockResponse).data;
 
 const signedPayload = (kind: "valid" | "expired" | "tampered" | "revoked" | "missing" | "suspicious") => {
   if (kind === "valid") {
     return {
       success: true,
       data: {
-        ...(verifyScenarioBody("SIGNED-P1", "valid") as any).data,
+        ...scenarioData("valid"),
         proofSource: "SIGNED_LABEL",
         publicOutcome: "SIGNED_LABEL_ACTIVE",
         classification: "FIRST_SCAN",
@@ -20,7 +25,7 @@ const signedPayload = (kind: "valid" | "expired" | "tampered" | "revoked" | "mis
     return {
       success: true,
       data: {
-        ...(verifyScenarioBody("SIGNED-P1", "suspicious") as any).data,
+        ...scenarioData("suspicious"),
         proofSource: "SIGNED_LABEL",
         publicOutcome: "REVIEW_REQUIRED",
         challenge: { required: true, methods: ["SIGN_IN"] },
@@ -29,7 +34,7 @@ const signedPayload = (kind: "valid" | "expired" | "tampered" | "revoked" | "mis
     };
   }
   if (kind === "missing") {
-    return { success: true, data: { ...(verifyScenarioBody("SIGNED-P1", "invalid") as any).data, proofSource: "SIGNED_LABEL" } };
+    return { success: true, data: { ...scenarioData("invalid"), proofSource: "SIGNED_LABEL" } };
   }
   return {
     success: true,
@@ -52,7 +57,7 @@ const signedPayload = (kind: "valid" | "expired" | "tampered" | "revoked" | "mis
   };
 };
 
-async function installSignedScanMocks(page: any) {
+async function installSignedScanMocks(page: Page) {
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "mscqr_cookie_consent_state:v1",
@@ -88,8 +93,11 @@ test.describe("P1 signed /scan?t= QR result states", () => {
 
   test("renders a valid signed scan result without admin data", async ({ page }) => {
     await page.goto("/scan?t=valid-signed-p1-token");
-    await expect(page.getByText(/genuine|verified|signed/i).first()).toBeVisible();
+    await expect(page.getByText(/Verification passed|registered brand record/i).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /Verify another garment/i }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /Save verification/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Report a concern/i })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(/Technical details for support|Decision reference|Session reference|Support notes/i);
     await expect(page.locator("body")).not.toContainText(/tokenHash|licenseeId|manufacturerId|admin-only|Bearer|JWT|stack trace/i);
   });
 
@@ -102,17 +110,20 @@ test.describe("P1 signed /scan?t= QR result states", () => {
     }
 
     await page.goto("/scan?t=missing-p1-token");
-    await expect(page.locator("body")).toContainText(/could not|not found|MSCQR registry|enter code again/i);
+    await expect(page.locator("body")).toContainText(/could not|not found|match this QR label|enter code again/i);
     await expect(page.locator("body")).not.toContainText(/HTTP 400|HTTP 404|Cannot GET/i);
     await expect(page.getByRole("link", { name: /Enter code again/i })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(/Technical details for support|Decision reference|Session reference|Support notes/i);
     await expect(page.locator("body")).not.toContainText(/\{.*error.*\}|tokenHash|Prisma|localhost|undefined|null/i);
   });
 
   test("renders suspicious duplicate signed scan on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/scan?t=suspicious-p1-token");
-    await expect(page.getByText(/review|required|unusual|different context/i).first()).toBeVisible();
+    await expect(page.getByText(/review needed|brand review|suspicious/i).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /Report a concern/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Save verification/i })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(/Technical details for support|Decision reference|Session reference|Support notes/i);
     await expect(page.locator("body")).not.toContainText(/admin-only|internal id|tokenHash|Bearer/i);
   });
 });

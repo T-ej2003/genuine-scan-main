@@ -5,16 +5,18 @@ import {
   ArrowLeft,
   Ban,
   CheckCircle2,
+  ClipboardCheck,
   CircleDashed,
   ExternalLink,
+  FileCheck2,
+  Globe2,
   KeyRound,
   Loader2,
   Lock,
   Mail,
-  MapPin,
+  Phone,
+  QrCode,
   ShieldCheck,
-  ShoppingBag,
-  Store,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -30,12 +32,10 @@ import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
 import { BASE_URL } from "@/lib/api/internal-client-core";
 import {
   APP_NAME,
-  deriveReasons,
   formatDateTime,
   inferClassification,
   normalizeVerifyCode,
   readCachedGeo,
-  toLabel,
   type CustomerTrustIntake,
   type VerificationClassification,
   type VerificationSessionSummary,
@@ -69,25 +69,24 @@ const RESULT_COPY: Record<
   }
 > = {
   genuine: {
-    title: "This garment is genuine",
-    subtitle: "Verified by MSCQR",
-    explanation: "This QR label matches a brand record and passed the available verification checks.",
-    badge: "Verified",
+    title: "This garment matches a registered brand record.",
+    subtitle: "MSCQR checked this label against the brand's registered product records.",
+    explanation: "No unusual scan pattern was detected at this time.",
+    badge: "Verification passed",
     cardClass: "border-emerald-200 bg-emerald-50 text-emerald-950",
     iconClass: "bg-emerald-100 text-emerald-700",
   },
   suspicious: {
-    title: "We could not fully verify this item",
-    subtitle: "Some scan details need review.",
-    explanation:
-      "This can happen when a QR label is scanned unusually often, from unexpected locations, or when the label status needs checking.",
+    title: "This scan needs brand review.",
+    subtitle: "MSCQR found signals the brand should review before you rely on this label.",
+    explanation: "Check the garment, seller, packaging, and scan context before buying or reselling.",
     badge: "Review needed",
     cardClass: "border-amber-200 bg-amber-50 text-amber-950",
     iconClass: "bg-amber-100 text-amber-700",
   },
   invalid: {
-    title: "We could not find this QR label",
-    subtitle: "The code was not found.",
+    title: "MSCQR could not match this QR label.",
+    subtitle: "The code was not found in the public verification records.",
     explanation: "Check that the code is correct. If this came from a garment tag, you can report it to the brand.",
     badge: "Not found",
     cardClass: "border-slate-200 bg-slate-50 text-slate-950",
@@ -95,33 +94,20 @@ const RESULT_COPY: Record<
   },
   blocked: {
     title: "This QR label is blocked",
-    subtitle: "The brand has blocked this label.",
+    subtitle: "The brand has blocked this label from public verification.",
     explanation: "The brand has blocked this label from verification. Please contact the seller or brand before purchasing.",
     badge: "Blocked",
     cardClass: "border-red-200 bg-red-50 text-red-950",
     iconClass: "bg-red-100 text-red-700",
   },
   pending: {
-    title: "We could not fully verify this item",
-    subtitle: "This label is not ready for customer verification.",
+    title: "This label is not ready for customer verification.",
+    subtitle: "The brand record exists, but customer verification is not active yet.",
     explanation: "The brand record exists, but this QR label is not ready to be shown as verified yet.",
     badge: "Not ready",
     cardClass: "border-indigo-200 bg-indigo-50 text-indigo-950",
     iconClass: "bg-indigo-100 text-indigo-700",
   },
-};
-
-const LABEL_STATUS_COPY: Record<string, string> = {
-  DORMANT: "Not active yet",
-  ACTIVE: "Active",
-  ALLOCATED: "Assigned",
-  PRINTED: "Printed",
-  REDEEMED: "First scan completed",
-  SCANNED: "Scanned",
-  BLOCKED: "Blocked",
-  PRINT_CONFIRMED: "Printed",
-  NOT_CONFIRMED: "Not confirmed",
-  UNKNOWN: "Not available",
 };
 
 const LEGACY_VERIFY_EMAIL_STORAGE_KEYS = ["mscqr_verify_customer_email", "authenticqr_verify_customer_email"] as const;
@@ -249,15 +235,17 @@ function ProviderButton({ provider }: { provider: ProviderOption }) {
   );
 }
 
-const plainStatus = (value?: string | null) => {
-  const key = String(value || "UNKNOWN").trim().toUpperCase();
-  return LABEL_STATUS_COPY[key] || toLabel(key);
-};
-
 const getCustomerResultCategory = (
   payload: VerifyPayload | null,
   classification: VerificationClassification
 ): CustomerResultCategory => {
+  const publicStatus = String(payload?.publicStatus || payload?.status || "").toLowerCase();
+  if (publicStatus === "blocked") return "blocked";
+  if (publicStatus === "not_found") return "invalid";
+  if (publicStatus === "not_ready") return "pending";
+  if (publicStatus === "review_needed") return "suspicious";
+  if (publicStatus === "verified") return "genuine";
+
   const outcome = String(payload?.publicOutcome || "").toUpperCase();
   const status = String(payload?.status || payload?.labelState || "").toUpperCase();
   if (payload?.isBlocked || classification === "BLOCKED_BY_SECURITY" || status === "BLOCKED" || outcome === "BLOCKED") {
@@ -280,21 +268,6 @@ const getCustomerResultCategory = (
   return payload?.isAuthentic ? "genuine" : "suspicious";
 };
 
-const getScanHistoryLabel = (payload: VerifyPayload | null) => {
-  if (!payload) return "Not available";
-  if (payload.isFirstScan || payload.classification === "FIRST_SCAN") return "First scan completed";
-  const count = payload.scanCount || payload.totalScans || payload.scanSummary?.totalScans;
-  if (count && count > 1) return `${count} scans recorded`;
-  if (payload.latestScanAt || payload.latestVerifiedAt) return "Scanned before";
-  return "No scan history available";
-};
-
-const getPrintCheckLabel = (payload: VerifyPayload | null, session?: VerificationSessionSummary | null) => {
-  const printState = payload?.printTrustState || session?.printTrustState || "";
-  if (!printState) return payload?.batch?.printedAt ? "Printed" : "Not available";
-  return plainStatus(printState);
-};
-
 const getLastCheckedLabel = (payload: VerifyPayload | null) => {
   const timestamp =
     payload?.latestVerifiedAt ||
@@ -312,12 +285,306 @@ function ResultIcon({ category }: { category: CustomerResultCategory }) {
   return <AlertTriangle className="h-7 w-7" aria-hidden="true" />;
 }
 
-function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+type PublicSummaryItem = {
+  label: string;
+  value: string;
+  tone?: "success" | "warning" | "danger" | "neutral";
+};
+
+type PublicSupportContact = {
+  type: "email" | "phone" | "website";
+  label: string;
+  value: string;
+  href: string;
+};
+
+type PublicVerificationView = {
+  brandName: string;
+  codeLabel: string;
+  checkedAt: string;
+  summaryItems: PublicSummaryItem[];
+  supportContacts: PublicSupportContact[];
+};
+
+const publicToneClass: Record<NonNullable<PublicSummaryItem["tone"]>, string> = {
+  success: "border-emerald-200 bg-emerald-50 text-emerald-950",
+  warning: "border-amber-200 bg-amber-50 text-amber-950",
+  danger: "border-red-200 bg-red-50 text-red-950",
+  neutral: "border-slate-200 bg-slate-50 text-slate-950",
+};
+
+const getPublicLabelRecordLabel = (category: CustomerResultCategory) => {
+  if (category === "invalid") return "Not matched";
+  if (category === "blocked") return "Blocked";
+  if (category === "pending") return "Not active yet";
+  return "Matched";
+};
+
+const getPublicBrandRecordLabel = (category: CustomerResultCategory) => {
+  if (category === "invalid") return "Not found";
+  if (category === "blocked") return "Blocked";
+  if (category === "pending") return "Pending activation";
+  return "Active";
+};
+
+const getPublicScanStatusLabel = (payload: VerifyPayload | null) => {
+  if (!payload) return "Checked";
+  const publicScanStatus = String(payload.scanStatus || "").toLowerCase();
+  if (publicScanStatus === "first_successful_scan") return "First successful scan";
+  if (publicScanStatus === "previously_scanned") return "Previously scanned";
+  if (payload.isFirstScan || payload.classification === "FIRST_SCAN") return "First successful scan";
+  const count = Number(payload.scanCount || payload.totalScans || payload.scanSummary?.totalScans || 0);
+  if (count > 1 || payload.latestScanAt || payload.latestVerifiedAt || payload.previousScanAt) return "Previously scanned";
+  return "Checked";
+};
+
+const getPublicRiskSignalsLabel = (category: CustomerResultCategory, payload: VerifyPayload | null) => {
+  const publicRiskStatus = String(payload?.riskSignalStatus || "").toLowerCase();
+  if (publicRiskStatus === "clear") return "No unusual activity detected";
+  if (publicRiskStatus === "brand_action_required") return "Brand action required";
+  if (publicRiskStatus === "not_assessed") return "Could not assess";
+  if (publicRiskStatus === "activation_not_complete") return "Activation not complete";
+  if (publicRiskStatus === "needs_brand_review") return "Needs brand review";
+  if (category === "genuine") return "No unusual activity detected";
+  if (category === "blocked") return "Brand action required";
+  if (category === "invalid") return "Could not assess";
+  if (category === "pending") return "Activation not complete";
+  if (String(payload?.riskDisposition || "").toUpperCase().includes("BLOCK")) return "Brand action required";
+  return "Needs brand review";
+};
+
+const getSummaryTone = (category: CustomerResultCategory): PublicSummaryItem["tone"] => {
+  if (category === "genuine") return "success";
+  if (category === "blocked") return "danger";
+  if (category === "suspicious" || category === "pending") return "warning";
+  return "neutral";
+};
+
+const toPublicUrl = (value?: string | null) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+};
+
+const buildPublicSupportContacts = (payload: VerifyPayload | null): PublicSupportContact[] => {
+  const email = String(payload?.licensee?.supportEmail || "").trim();
+  const phone = String(payload?.licensee?.supportPhone || "").trim();
+  const website = toPublicUrl(payload?.licensee?.website || payload?.batch?.manufacturer?.website || "");
+  const contacts: PublicSupportContact[] = [];
+  if (email) contacts.push({ type: "email", label: "Email", value: email, href: `mailto:${email}` });
+  if (phone) contacts.push({ type: "phone", label: "Phone", value: phone, href: `tel:${phone.replace(/[^\d+]/g, "")}` });
+  if (website) contacts.push({ type: "website", label: "Website", value: website.replace(/^https?:\/\//i, ""), href: website });
+  return contacts;
+};
+
+const buildPublicVerificationView = ({
+  payload,
+  session,
+  category,
+  brandName,
+  currentCode,
+}: {
+  payload: VerifyPayload | null;
+  session: VerificationSessionSummary | null;
+  category: CustomerResultCategory;
+  brandName: string;
+  currentCode: string;
+}): PublicVerificationView => {
+  const tone = getSummaryTone(category);
+  return {
+    brandName,
+    codeLabel: session?.maskedCode || maskCode(currentCode),
+    checkedAt: getLastCheckedLabel(payload),
+    summaryItems: [
+      { label: "Label record", value: getPublicLabelRecordLabel(category), tone },
+      { label: "Brand record", value: getPublicBrandRecordLabel(category), tone },
+      { label: "Scan status", value: getPublicScanStatusLabel(payload), tone: category === "suspicious" ? "warning" : "neutral" },
+      { label: "Risk signals", value: getPublicRiskSignalsLabel(category, payload), tone },
+    ],
+    supportContacts: buildPublicSupportContacts(payload),
+  };
+};
+
+function VerificationHero({
+  view,
+  resultCopy,
+  resultCategory,
+  showQuickCheck,
+  children,
+}: {
+  view: PublicVerificationView;
+  resultCopy: (typeof RESULT_COPY)[CustomerResultCategory];
+  resultCategory: CustomerResultCategory;
+  showQuickCheck: boolean;
+  children: React.ReactNode;
+}) {
+  const activeCopy = showQuickCheck ? RESULT_COPY.suspicious : resultCopy;
+
   return (
-    <div className="rounded-2xl border border-mscqr-border bg-mscqr-surface-muted/45 px-4 py-3">
-      <div className="text-sm font-medium text-mscqr-secondary">{label}</div>
-      <div className="mt-1 text-base font-semibold text-mscqr-primary">{value}</div>
-    </div>
+    <header className="overflow-hidden rounded-2xl border border-mscqr-border bg-white shadow-sm">
+      <div className={`border-b px-4 py-6 sm:px-7 sm:py-8 ${showQuickCheck ? RESULT_COPY.suspicious.cardClass : resultCopy.cardClass}`}>
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="max-w-full border-white/70 bg-white/75 text-inherit">
+                <span className="truncate">{view.brandName}</span>
+              </Badge>
+              <Badge variant="outline" className="border-white/70 bg-white/75 text-inherit">
+                {view.codeLabel}
+              </Badge>
+            </div>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+              <div className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${activeCopy.iconClass}`}>
+                {showQuickCheck ? <AlertTriangle className="h-6 w-6" aria-hidden="true" /> : <ResultIcon category={resultCategory} />}
+              </div>
+              <div className="min-w-0 space-y-2">
+                <p className="text-sm font-semibold">{showQuickCheck ? "Quick check needed" : activeCopy.badge}</p>
+                <h1 className="max-w-4xl text-3xl font-semibold leading-tight tracking-normal sm:text-4xl lg:text-5xl">
+                  {showQuickCheck ? "We need one quick check before showing the full result." : activeCopy.title}
+                </h1>
+                <p className="max-w-3xl text-base font-medium leading-7 sm:text-lg">
+                  {showQuickCheck ? "Sign in to continue." : activeCopy.subtitle}
+                </p>
+                <p className="max-w-3xl text-sm leading-7 sm:text-base">
+                  {showQuickCheck ? "This protects customers and brands when a scan needs extra review." : activeCopy.explanation}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-white/70 bg-white/70 p-4 text-sm leading-6 text-inherit lg:max-w-xs">
+            <div className="font-semibold">Checked by MSCQR</div>
+            <div className="mt-1">{view.checkedAt}</div>
+          </div>
+        </div>
+      </div>
+      <div className="px-4 py-4 sm:px-7">{children}</div>
+    </header>
+  );
+}
+
+function VerificationSummary({ items }: { items: PublicSummaryItem[] }) {
+  return (
+    <SectionFrame
+      eyebrow="Verification summary"
+      title="Public verification summary"
+      description="MSCQR shows only the customer-safe result of the checks for this label."
+    >
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {items.map((item) => (
+          <div key={item.label} className={`rounded-xl border p-4 ${publicToneClass[item.tone || "neutral"]}`}>
+            <div className="text-sm font-medium opacity-80">{item.label}</div>
+            <div className="mt-2 text-lg font-semibold leading-6">{item.value}</div>
+          </div>
+        ))}
+      </div>
+    </SectionFrame>
+  );
+}
+
+function VerificationProcess() {
+  const steps = [
+    {
+      title: "QR scanned",
+      body: "MSCQR read the label code from the scan or entered code.",
+      icon: <QrCode className="h-5 w-5" aria-hidden="true" />,
+    },
+    {
+      title: "Brand record checked",
+      body: "MSCQR compared the label with registered brand records and activation data where available.",
+      icon: <FileCheck2 className="h-5 w-5" aria-hidden="true" />,
+    },
+    {
+      title: "Result generated",
+      body: "MSCQR reviewed available scan history for unusual activity before showing this result.",
+      icon: <ClipboardCheck className="h-5 w-5" aria-hidden="true" />,
+    },
+  ];
+
+  return (
+    <SectionFrame
+      eyebrow="What MSCQR checked"
+      title="How this result was created"
+      description="MSCQR uses brand records and scan signals to provide a simple public verification result."
+    >
+      <div className="grid gap-3 md:grid-cols-3">
+        {steps.map((step) => (
+          <div key={step.title} className="rounded-xl border border-mscqr-border bg-white p-4">
+            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-mscqr-surface-muted text-mscqr-accent">
+              {step.icon}
+            </div>
+            <h3 className="mt-4 text-base font-semibold text-mscqr-primary">{step.title}</h3>
+            <p className="mt-2 text-sm leading-6 text-mscqr-secondary">{step.body}</p>
+          </div>
+        ))}
+      </div>
+    </SectionFrame>
+  );
+}
+
+function VerificationNotice() {
+  return (
+    <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950 sm:p-5" aria-labelledby="verification-note-heading">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden="true" />
+        <div>
+          <h2 id="verification-note-heading" className="text-base font-semibold">
+            Important note
+          </h2>
+          <p className="mt-1">
+            A QR label can still be copied. If the garment, seller, packaging, or scan history seems suspicious,
+            report a concern so the brand can review it.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BrandSupportCard({
+  brandName,
+  contacts,
+}: {
+  brandName: string;
+  contacts: PublicSupportContact[];
+}) {
+  const iconByType: Record<PublicSupportContact["type"], React.ReactNode> = {
+    email: <Mail className="h-4 w-4" aria-hidden="true" />,
+    phone: <Phone className="h-4 w-4" aria-hidden="true" />,
+    website: <Globe2 className="h-4 w-4" aria-hidden="true" />,
+  };
+
+  return (
+    <SectionFrame
+      eyebrow="Brand support"
+      title="Need help with this garment?"
+      description="Use brand support or report a concern if something about the garment, seller, packaging, or result feels wrong."
+    >
+      {contacts.length ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {contacts.map((contact) => (
+            <a
+              key={`${contact.type}:${contact.value}`}
+              href={contact.href}
+              target={contact.type === "website" ? "_blank" : undefined}
+              rel={contact.type === "website" ? "noreferrer" : undefined}
+              className="flex min-w-0 items-start gap-3 rounded-xl border border-mscqr-border bg-white p-4 text-sm text-mscqr-primary transition hover:border-mscqr-accent/50 hover:bg-mscqr-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mscqr-accent/35"
+            >
+              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-mscqr-surface-muted text-mscqr-accent">
+                {iconByType[contact.type]}
+              </span>
+              <span className="min-w-0">
+                <span className="block font-semibold">{contact.label}</span>
+                <span className="mt-1 block break-words text-mscqr-secondary">{contact.value}</span>
+              </span>
+            </a>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-mscqr-border bg-mscqr-surface-muted p-4 text-sm leading-6 text-mscqr-secondary">
+          No direct public support contact is listed for {brandName}. You can still report a concern from this page.
+        </div>
+      )}
+    </SectionFrame>
   );
 }
 
@@ -375,14 +642,6 @@ export default function VerifyExperience() {
 
   const deviceId = useMemo(() => getOrCreateAnonDeviceId(), []);
   const passkeySupported = isWebAuthnSupported();
-  const classification = useMemo(
-    () => inferClassification(result || lockedResult || session?.verification || null),
-    [lockedResult, result, session?.verification]
-  );
-  const reasonList = useMemo(
-    () => deriveReasons(result || lockedResult || session?.verification || null, classification),
-    [classification, lockedResult, result, session?.verification]
-  );
   const currentCode = normalizeVerifyCode(result?.code || lockedResult?.code || session?.verification?.code || session?.code || codeParam);
   const authReady = customerAuthenticated || session?.authState === "VERIFIED";
   const displaySessionSummary = session || null;
@@ -617,14 +876,15 @@ export default function VerifyExperience() {
       const nextResult = verificationResponse.data as VerifyPayload;
       setLockedResult(nextResult);
 
-      if (!nextResult.decisionId) {
+      const sessionStartHandle = String(nextResult.sessionStartToken || nextResult.decisionId || "").trim();
+      if (!sessionStartHandle) {
         setResult(nextResult);
         setFlowStep("result");
         return;
       }
 
       const sessionResponse = await apiClient.startVerificationSession(
-        nextResult.decisionId,
+        sessionStartHandle,
         token ? "SIGNED_SCAN" : "MANUAL_CODE"
       );
 
@@ -756,7 +1016,8 @@ export default function VerifyExperience() {
       setLockedResult(nextResult);
       setResult(nextResult);
 
-      if (!nextResult.decisionId) {
+      const sessionStartHandle = String(nextResult.sessionStartToken || nextResult.decisionId || "").trim();
+      if (!sessionStartHandle) {
         setFlowStep("result");
         toast({
           title: "Review check updated",
@@ -766,7 +1027,7 @@ export default function VerifyExperience() {
       }
 
       const sessionResponse = await apiClient.startVerificationSession(
-        nextResult.decisionId,
+        sessionStartHandle,
         token ? "SIGNED_SCAN" : "MANUAL_CODE"
       );
 
@@ -1087,93 +1348,56 @@ export default function VerifyExperience() {
   const resultCategory = getCustomerResultCategory(displayResult, displayClassification);
   const resultCopy = RESULT_COPY[resultCategory];
   const brandName = displayResult?.licensee?.brandName || displayResult?.licensee?.name || displaySessionSummary?.brandName || "Brand";
-  const manufacturerName = displayResult?.batch?.manufacturer?.name || "";
-  const supportEmail = displayResult?.licensee?.supportEmail || "support@mscqr.com";
-  const supportPhone = displayResult?.licensee?.supportPhone || "";
-  const brandWebsite = displayResult?.licensee?.website || displayResult?.batch?.manufacturer?.website || "";
-  const labelStatus = plainStatus(displayResult?.labelState || displayResult?.status || displaySessionSummary?.labelState);
   const showQuickCheck = !displayResult || (challengeRequired && !challengeCompleted && !authReady);
   const canClaimGarment = Boolean(displayResult?.ownershipStatus?.canClaim && authReady);
   const canReportConcern = Boolean(displayResult?.verifyUxPolicy?.allowFraudReport ?? true);
+  const publicView = buildPublicVerificationView({
+    payload: displayResult,
+    session: displaySessionSummary,
+    category: resultCategory,
+    brandName,
+    currentCode,
+  });
 
   return (
     <div className="min-h-screen bg-mscqr-background-soft px-3 py-4 text-mscqr-primary sm:px-6 sm:py-10">
       <div className="mx-auto max-w-6xl space-y-5 sm:space-y-7">
-        <header className="rounded-[28px] border border-mscqr-border bg-white p-5 shadow-sm sm:p-8">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="bg-mscqr-surface-muted text-mscqr-secondary">
-                  {brandName}
-                </Badge>
-                <Badge variant="outline" className="bg-white text-mscqr-secondary">
-                  {displaySessionSummary?.maskedCode || maskCode(currentCode)}
-                </Badge>
-              </div>
-              <div className={`rounded-[26px] border p-5 sm:p-6 ${showQuickCheck ? RESULT_COPY.suspicious.cardClass : resultCopy.cardClass}`}>
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                  <div className={`inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${showQuickCheck ? RESULT_COPY.suspicious.iconClass : resultCopy.iconClass}`}>
-                    {showQuickCheck ? <AlertTriangle className="h-7 w-7" aria-hidden="true" /> : <ResultIcon category={resultCategory} />}
-                  </div>
-                  <div className="min-w-0 space-y-2">
-                    <div className="text-sm font-semibold">{showQuickCheck ? "Quick check needed" : resultCopy.badge}</div>
-                    <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">
-                      {showQuickCheck ? "We need one quick check before showing the full result." : resultCopy.title}
-                    </h1>
-                    <p className="text-lg font-medium">{showQuickCheck ? "Sign in to continue." : resultCopy.subtitle}</p>
-                    <p className="max-w-3xl text-sm leading-7 sm:text-base">
-                      {showQuickCheck
-                        ? "This helps protect customers and brands when a scan needs extra review."
-                        : resultCopy.explanation}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              {displayResult ? (
-                <div className="flex flex-wrap gap-3">
-                  {canClaimGarment ? (
-                    <Button onClick={handleClaimOwnership} disabled={claiming}>
-                      {claiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-                      Register this garment
-                    </Button>
-                  ) : !authReady ? (
-                    <Button
-                      onClick={() => document.getElementById("customer-sign-in")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                    >
-                      Save this verification
-                    </Button>
-                  ) : null}
-                  {canReportConcern ? (
-                    <Button variant="outline" onClick={() => setShowConcernForm(true)}>
-                      <AlertTriangle className="mr-2 h-4 w-4" />
-                      Report a concern
-                    </Button>
-                  ) : null}
-                  <Button variant="ghost" asChild>
-                    <Link to="/verify">Verify another garment</Link>
-                  </Button>
-                </div>
+        <VerificationHero
+          view={publicView}
+          resultCopy={resultCopy}
+          resultCategory={resultCategory}
+          showQuickCheck={showQuickCheck}
+        >
+          {displayResult ? (
+            <div className="grid gap-3 sm:grid-cols-[auto,auto] lg:flex lg:flex-wrap">
+              {canClaimGarment ? (
+                <Button className="w-full sm:w-auto" onClick={handleClaimOwnership} disabled={claiming}>
+                  {claiming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                  Save verification
+                </Button>
+              ) : !authReady ? (
+                <Button
+                  className="w-full sm:w-auto"
+                  onClick={() => document.getElementById("customer-sign-in")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                >
+                  Save verification
+                </Button>
               ) : null}
+              {canReportConcern ? (
+                <Button className="w-full sm:w-auto" variant="outline" onClick={() => setShowConcernForm(true)}>
+                  <AlertTriangle className="mr-2 h-4 w-4" />
+                  Report a concern
+                </Button>
+              ) : null}
+              <Button className="w-full sm:w-auto" variant="ghost" asChild>
+                <Link to="/verify">Verify another garment</Link>
+              </Button>
             </div>
-
-            <div className="rounded-2xl border border-mscqr-border bg-mscqr-surface-muted p-5 text-sm leading-6 text-mscqr-secondary lg:max-w-sm">
-              <div className="flex items-center gap-2 font-semibold text-mscqr-primary">
-                <ShieldCheck className="h-4 w-4" />
-                What MSCQR checks
-              </div>
-              <p className="mt-3">
-                MSCQR checks the QR label, brand record, print status, and unusual scan patterns. A QR code can be copied, so suspicious repeats may still need brand review.
-              </p>
-            </div>
-          </div>
-        </header>
+          ) : null}
+        </VerificationHero>
 
         {displayResult ? (
-          <SectionFrame
-            eyebrow="Result details"
-            title="What we found"
-            description="Simple verification details are shown first. Support details are available below if a brand or MSCQR support team asks for them."
-          >
+          <>
             {challengeRequired && !challengeCompleted ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
                 <div className="font-semibold">We need one quick check before showing the full result.</div>
@@ -1197,54 +1421,10 @@ export default function VerifyExperience() {
                 Additional review check completed{challengeCompletedBy === "CUSTOMER_IDENTITY" ? " with your verified identity." : "."}
               </div>
             ) : null}
-            {displayResult.warningMessage ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
-                {displayResult.warningMessage}
-              </div>
-            ) : null}
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              <DetailRow label="Brand" value={brandName} />
-              {manufacturerName ? <DetailRow label="Manufacturer" value={manufacturerName} /> : null}
-              <DetailRow label="QR label" value={displaySessionSummary?.maskedCode || maskCode(currentCode)} />
-              <DetailRow label="Status" value={labelStatus} />
-              <DetailRow label="Scan history" value={getScanHistoryLabel(displayResult)} />
-              <DetailRow label="Print check" value={getPrintCheckLabel(displayResult, displaySessionSummary)} />
-              <DetailRow label="Last checked" value={getLastCheckedLabel(displayResult)} />
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm leading-6 text-slate-700">
-                <div className="font-semibold text-slate-950">What this means</div>
-                <p className="mt-2">
-                  {resultCategory === "genuine"
-                    ? "The QR label matched an MSCQR brand record and passed the available checks."
-                    : "The scan needs caution. Check the garment tag, seller details, and brand support guidance before relying on it."}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm leading-6 text-slate-700">
-                <div className="font-semibold text-slate-950">A helpful note</div>
-                <p className="mt-2">
-                  MSCQR helps brands spot copied labels and unusual repeat scans, but no QR label can prove by itself that copying is impossible.
-                </p>
-              </div>
-            </div>
-            <details className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700">
-              <summary className="cursor-pointer font-semibold text-slate-950">Technical details for support</summary>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <DetailRow label="Verification result" value={displayClassification.replace(/_/g, " ").toLowerCase()} />
-                <DetailRow label="Verification confidence" value={plainStatus(displayResult.proofTier || "Not available")} />
-                <DetailRow label="Scan risk" value={plainStatus(displayResult.riskDisposition || "Clear")} />
-                <DetailRow label="Source check" value={plainStatus(displayResult.proofSource || "Not available")} />
-                <DetailRow label="Decision reference" value={<span className="break-all font-mono text-sm">{displayResult.decisionId || session?.decisionId || "Not available"}</span>} />
-                <DetailRow label="Session reference" value={<span className="break-all font-mono text-sm">{session?.sessionId || "Not available"}</span>} />
-              </div>
-              <div className="mt-4 rounded-xl bg-slate-50 p-4">
-                <div className="font-medium text-slate-950">Support notes</div>
-                <ul className="mt-2 list-disc space-y-1 pl-5">
-                  {reasonList.length ? reasonList.map((reason) => <li key={reason}>{reason}</li>) : <li>No additional support notes were recorded.</li>}
-                </ul>
-              </div>
-            </details>
-          </SectionFrame>
+            <VerificationSummary items={publicView.summaryItems} />
+            <VerificationProcess />
+            <VerificationNotice />
+          </>
         ) : null}
 
         {!displayResult && authReady && challengeRequired && !challengeCompleted ? (
@@ -1349,12 +1529,12 @@ export default function VerifyExperience() {
 
         {!authReady ? (
           <SectionFrame
-            eyebrow="Optional sign-in"
-            title={showQuickCheck ? "Sign in to continue" : "Sign in to save this item"}
+            eyebrow="Optional: save this scan"
+            title={showQuickCheck ? "Sign in to continue" : "Sign in with email to keep a copy"}
             description={
               showQuickCheck
                 ? "This scan needs one quick check before the full result can be shown."
-                : "You can save proof of verification or register this garment if the brand supports it."
+                : "Sign in with email to keep a copy of this verification or include it when reporting a concern."
             }
           >
             <div id="customer-sign-in" className="grid gap-4 lg:grid-cols-[1.15fr,0.85fr]">
@@ -1414,7 +1594,7 @@ export default function VerifyExperience() {
                   Why sign in?
                 </div>
                 <p className="mt-3">
-                  Sign-in is optional for normal scans. It helps you save this verification and gives the brand better context if you report a concern.
+                  Sign-in is optional for normal scans. It keeps this scan connected to you and gives the brand better context if you report a concern.
                 </p>
               </div>
             </div>
@@ -1549,27 +1729,7 @@ export default function VerifyExperience() {
           </div>
         ) : null}
 
-        <SectionFrame
-          eyebrow="Support"
-          title="Need help with this garment?"
-          description="If the result is unclear, check the tag, contact the brand, or report a concern."
-        >
-          <div className="grid gap-3 text-sm leading-6 text-slate-700">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="font-semibold text-slate-950">Brand support</div>
-              <div className="mt-2 space-y-1">
-                <div>{supportEmail}</div>
-                {supportPhone ? <div>{supportPhone}</div> : null}
-                {brandWebsite ? (
-                  <a className="inline-flex items-center gap-1 text-mscqr-accent underline" href={brandWebsite} target="_blank" rel="noreferrer">
-                    Visit brand site
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </SectionFrame>
+        <BrandSupportCard brandName={publicView.brandName} contacts={publicView.supportContacts} />
 
         <div className="flex flex-col gap-2 text-sm text-mscqr-muted sm:flex-row sm:items-center sm:justify-between">
           <Link to="/verify" className="inline-flex items-center gap-2 hover:text-mscqr-primary">

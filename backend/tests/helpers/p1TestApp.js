@@ -512,8 +512,13 @@ mockModule("services/incidentEmailService.js", { sendIncidentEmail: async () => 
 mockModule("services/objectStorageService.js", {
   getObjectStorageConfiguration: () => ({ configured: false }),
   getObjectStorageClient: () => null,
+  getObjectStorageHealth: async () => ({ configured: false, ready: true }),
 });
-mockModule("services/redisService.js", { isRedisConfigured: () => false, getRedisClient: () => null });
+mockModule("services/redisService.js", {
+  isRedisConfigured: () => false,
+  getRedisClient: () => null,
+  getRedisHealth: async () => ({ configured: false, ready: true }),
+});
 mockModule("services/qrService.js", {
   getQRStats: async () => ({ total: state.qrCodes.length, printed: 1, redeemed: 0, blocked: 0 }),
   recordScan: async (code, metadata = {}) => {

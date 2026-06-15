@@ -10,13 +10,19 @@ import {
   revealCustomerVerificationSession,
   saveCustomerTrustIntake,
 } from "../../services/customerVerificationSessionService";
+import { resolvePublicVerificationSessionStartToken } from "../../services/verificationDecisionService";
 
 const startSessionSchema = z
   .object({
-    decisionId: z.string().trim().min(8).max(128),
+    decisionId: z.string().trim().min(8).max(128).optional(),
+    sessionStartToken: z.string().trim().min(16).max(512).optional(),
     entryMethod: z.nativeEnum(CustomerVerificationEntryMethod),
   })
-  .strict();
+  .strict()
+  .refine((value) => Boolean(value.decisionId || value.sessionStartToken), {
+    message: "Verification session token is required",
+    path: ["sessionStartToken"],
+  });
 
 const sessionParamsSchema = z
   .object({
@@ -59,8 +65,10 @@ const requireCustomerIdentity = (req: CustomerVerifyRequest, res: Response) => {
   };
 };
 
-const resolveSessionErrorStatus = (error: any) => {
-  const message = String(error?.message || "").toLowerCase();
+const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error || ""));
+
+const resolveSessionErrorStatus = (error: unknown) => {
+  const message = getErrorMessage(error).toLowerCase();
   if (/not found/.test(message)) return 404;
   if (/authentication required/.test(message)) return 401;
   if (/belongs to a different signed-in customer/.test(message)) return 403;
@@ -78,8 +86,19 @@ export const startCustomerVerificationSession = async (req: CustomerVerifyReques
       });
     }
 
+    const decisionId = parsed.data.sessionStartToken
+      ? await resolvePublicVerificationSessionStartToken(parsed.data.sessionStartToken)
+      : parsed.data.decisionId || null;
+
+    if (!decisionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Verification session token is invalid or expired",
+      });
+    }
+
     const session = await createCustomerVerificationSession({
-      decisionId: parsed.data.decisionId,
+      decisionId,
       entryMethod: parsed.data.entryMethod,
       customer: req.customer || null,
     });
@@ -100,10 +119,10 @@ export const startCustomerVerificationSession = async (req: CustomerVerifyReques
       success: true,
       data: session,
     });
-  } catch (error: any) {
+  } catch (error) {
     return res.status(resolveSessionErrorStatus(error)).json({
       success: false,
-      error: error?.message || "Could not start verification session",
+      error: getErrorMessage(error) || "Could not start verification session",
     });
   }
 };
@@ -135,10 +154,10 @@ export const getCustomerVerificationSessionState = async (req: CustomerVerifyReq
       success: true,
       data: session,
     });
-  } catch (error: any) {
+  } catch (error) {
     return res.status(resolveSessionErrorStatus(error)).json({
       success: false,
-      error: error?.message || "Could not load verification session",
+      error: getErrorMessage(error) || "Could not load verification session",
     });
   }
 };
@@ -189,10 +208,10 @@ export const submitCustomerVerificationIntake = async (req: CustomerVerifyReques
         intakeSaved: true,
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     return res.status(resolveSessionErrorStatus(error)).json({
       success: false,
-      error: error?.message || "Could not save verification intake",
+      error: getErrorMessage(error) || "Could not save verification intake",
     });
   }
 };
@@ -232,10 +251,10 @@ export const revealCustomerVerificationResult = async (req: CustomerVerifyReques
       success: true,
       data: reveal,
     });
-  } catch (error: any) {
+  } catch (error) {
     return res.status(resolveSessionErrorStatus(error)).json({
       success: false,
-      error: error?.message || "Could not reveal verification result",
+      error: getErrorMessage(error) || "Could not reveal verification result",
     });
   }
 };

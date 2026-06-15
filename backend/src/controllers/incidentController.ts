@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { Request, Response } from "express";
-import { IncidentActorType, IncidentEventType, IncidentSeverity, IncidentStatus, UserRole } from "@prisma/client";
+import { IncidentActorType, IncidentEventType, IncidentSeverity, IncidentStatus, IncidentType, Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
 
 import prisma from "../config/database";
@@ -162,7 +162,19 @@ const mapFileToStorageRecord = (file: Express.Multer.File) => {
   };
 };
 
-const incidentSummaryText = (incident: any) =>
+type IncidentSummary = {
+  id: string;
+  qrCodeValue: string | null;
+  incidentType: IncidentType;
+  severity: IncidentSeverity;
+  status: IncidentStatus;
+  description: string | null;
+  locationName?: string | null;
+  customerEmail?: string | null;
+  customerPhone?: string | null;
+};
+
+const incidentSummaryText = (incident: IncidentSummary) =>
   [
     `Incident ID: ${incident.id}`,
     `QR Code: ${incident.qrCodeValue}`,
@@ -352,8 +364,7 @@ export const reportIncident = async (req: Request, res: Response) => {
     return res.status(201).json({
       success: true,
       data: {
-        incidentId: incident.id,
-        reference: incident.id,
+        reference: supportTicket?.referenceCode || null,
         supportTicketRef: supportTicket?.referenceCode || null,
         supportTicketStatus: supportTicket?.status || null,
         supportTicketSla: supportTicket ? ticketSlaSnapshot(supportTicket.slaDueAt) : null,
@@ -478,7 +489,7 @@ export const patchIncident = async (req: AuthRequest, res: Response) => {
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
     const payload = parsed.data;
-    const updateData: any = {};
+    const updateData: Prisma.IncidentUncheckedUpdateInput = {};
     const changedFields: string[] = [];
 
     if (payload.status && payload.status !== incident.status) {

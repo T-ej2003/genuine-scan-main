@@ -161,15 +161,10 @@ export const reportFraud = async (req: Request, res: Response) => {
     return res.status(201).json({
       success: true,
       data: {
-        reportId: incident.id,
         supportTicketRef: supportTicket?.referenceCode || null,
         supportTicketStatus: supportTicket?.status || null,
         supportTicketSla: supportTicket ? ticketSlaSnapshot(supportTicket.slaDueAt) : null,
         message: "Fraud report submitted successfully.",
-        classification: snapshot.classification,
-        reasons: snapshot.reasons,
-        scanSummary: snapshot.scanSummary,
-        ownershipStatus: snapshot.ownershipStatus,
         tamperChecks: {
           summary: tamperSummary.summary,
           highestRisk: tamperSummary.highestRisk,

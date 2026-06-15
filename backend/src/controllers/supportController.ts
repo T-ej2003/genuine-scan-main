@@ -1,4 +1,4 @@
-import { IncidentActorType, SupportTicketStatus, UserRole } from "@prisma/client";
+import { IncidentActorType, Prisma, SupportTicketStatus, UserRole } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
 
@@ -60,7 +60,7 @@ export const listSupportTickets = async (req: AuthRequest, res: Response) => {
     const limit = parsed.data.limit ?? fallbackLimit;
     const offset = parsed.data.offset ?? fallbackOffset;
 
-    const where: any = {};
+    const where: Prisma.SupportTicketWhereInput = {};
     if (parsed.data.status) where.status = parsed.data.status;
     if (parsed.data.priority) where.priority = parsed.data.priority;
 
@@ -143,7 +143,7 @@ export const getSupportTicket = async (req: AuthRequest, res: Response) => {
     if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Ticket ID is required" });
     const id = paramsParsed.data.id;
 
-    const where: any = { id };
+    const where: Prisma.SupportTicketWhereInput = { id };
     if (!isPlatform(req.user.role)) {
       where.licenseeId = req.user.licenseeId || "__none__";
     }
@@ -207,7 +207,7 @@ export const patchSupportTicket = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
     }
 
-    const where: any = { id };
+    const where: Prisma.SupportTicketWhereInput = { id };
     if (!isPlatform(req.user.role)) {
       where.licenseeId = req.user.licenseeId || "__none__";
     }
@@ -215,7 +215,7 @@ export const patchSupportTicket = async (req: AuthRequest, res: Response) => {
     const existing = await prisma.supportTicket.findFirst({ where });
     if (!existing) return res.status(404).json({ success: false, error: "Support ticket not found" });
 
-    const updateData: any = {};
+    const updateData: Prisma.SupportTicketUncheckedUpdateInput = {};
     if (parsed.data.status && parsed.data.status !== existing.status) {
       updateData.status = parsed.data.status;
       if ((parsed.data.status === SupportTicketStatus.RESOLVED || parsed.data.status === SupportTicketStatus.CLOSED) && !existing.resolvedAt) {
@@ -297,7 +297,7 @@ export const addSupportMessage = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid message" });
     }
 
-    const where: any = { id };
+    const where: Prisma.SupportTicketWhereInput = { id };
     if (!isPlatform(req.user.role)) {
       where.licenseeId = req.user.licenseeId || "__none__";
     }
@@ -386,7 +386,6 @@ export const trackSupportTicketPublic = async (req: Request, res: Response) => {
         status: ticket.status,
         priority: ticket.priority,
         updatedAt: ticket.updatedAt,
-        incidentId: ticket.incidentId,
         handoffStage: ticket.incident?.handoff?.currentStage || null,
         sla: ticketSlaSnapshot(ticket.slaDueAt || ticket.incident?.handoff?.slaDueAt || null),
       },
