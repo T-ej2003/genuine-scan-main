@@ -20,6 +20,7 @@ const getTotpWindow = () => {
 };
 
 const getMaxChallengeAttempts = () => Math.max(1, Math.min(10, parseIntEnv("AUTH_MFA_CHALLENGE_MAX_ATTEMPTS", 5)));
+const getBackupCodeCount = () => Math.max(1, Math.min(20, parseIntEnv("AUTH_MFA_BACKUP_CODE_COUNT", 8)));
 
 const issuer = () => String(process.env.MFA_TOTP_ISSUER || process.env.APP_NAME || "MSCQR").trim();
 
@@ -261,7 +262,7 @@ export const getAdminMfaStatus = async (userId: string) => {
 export const beginAdminMfaSetup = async (params: { userId: string; email: string }) => {
   const secret = base32Encode(randomBytes(20));
   const encrypted = encryptSecret(secret);
-  const backupCodes = generateBackupCodes(parseIntEnv("AUTH_MFA_BACKUP_CODE_COUNT", 8));
+  const backupCodes = generateBackupCodes(getBackupCodeCount());
 
   const backupCodesHash = backupCodes.map((code) => backupHash(code));
 
@@ -478,7 +479,7 @@ export const verifyAdminMfaCode = async (params: { userId: string; code: string 
 
 export const rotateAdminMfaBackupCodes = async (params: { userId: string; code: string }) => {
   await verifyAdminMfaCode({ userId: params.userId, code: params.code });
-  const backupCodes = generateBackupCodes(parseIntEnv("AUTH_MFA_BACKUP_CODE_COUNT", 8));
+  const backupCodes = generateBackupCodes(getBackupCodeCount());
   await prisma.adminMfaCredential.update({
     where: { userId: params.userId },
     data: {

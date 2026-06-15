@@ -9,6 +9,7 @@ process.env.TOKEN_HASH_SECRET_CURRENT = process.env.TOKEN_HASH_SECRET_CURRENT ||
 process.env.AUTH_MFA_ENCRYPTION_KEY = process.env.AUTH_MFA_ENCRYPTION_KEY || "auth-mfa-state-machine-encryption-secret";
 process.env.AUTH_MFA_CHALLENGE_TTL_MINUTES = "5";
 process.env.AUTH_MFA_CHALLENGE_MAX_ATTEMPTS = "3";
+process.env.AUTH_MFA_BACKUP_CODE_COUNT = "8";
 
 const distRoot = path.resolve(__dirname, "../dist");
 const mockModule = (relativePath, exportsValue) => {

@@ -6,6 +6,8 @@ ALTER TABLE "AuthMfaChallenge"
   ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ADD COLUMN "supersededAt" TIMESTAMP(3);
 
+ALTER TABLE "AuthMfaChallenge" ALTER COLUMN "updatedAt" DROP DEFAULT;
+
 CREATE INDEX "AuthMfaChallenge_userId_purpose_sessionBindingHash_idx"
   ON "AuthMfaChallenge"("userId", "purpose", "sessionBindingHash");
 
