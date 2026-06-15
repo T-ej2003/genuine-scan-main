@@ -332,9 +332,11 @@ test.describe.serial("Enterprise smoke flows", () => {
     await page.locator("#otp-code").fill(testOtp);
     await page.getByRole("button", { name: /verify and continue/i }).click();
 
-    await expect(page.getByRole("heading", { name: /this garment is genuine|we could not fully verify this item/i })).toBeVisible({
-      timeout: 30_000,
-    });
+    await expect(
+      page.getByRole("heading", {
+        name: /this garment matches a registered brand record|this scan needs brand review|mscqr could not match this qr label|we could not complete this verification/i,
+      })
+    ).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: /report a concern/i }).click();
     await expect(page.getByRole("heading", { name: /report a concern/i })).toBeVisible();
     await page.getByTestId("verify-report-concern").click();
