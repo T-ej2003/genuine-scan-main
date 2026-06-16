@@ -319,17 +319,101 @@ const rejectError = async (promise) => {
   throw new Error("Expected promise to reject");
 };
 
+const withAuthMfaChallengeTtl = async (value, fn) => {
+  const previous = process.env.AUTH_MFA_CHALLENGE_TTL_MINUTES;
+  if (value == null) {
+    delete process.env.AUTH_MFA_CHALLENGE_TTL_MINUTES;
+  } else {
+    process.env.AUTH_MFA_CHALLENGE_TTL_MINUTES = value;
+  }
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AUTH_MFA_CHALLENGE_TTL_MINUTES;
+    } else {
+      process.env.AUTH_MFA_CHALLENGE_TTL_MINUTES = previous;
+    }
+  }
+};
+
+const assertSafeFutureExpiry = (expiresAt, beforeMs, label) => {
+  const ttlMs = expiresAt.getTime() - beforeMs;
+  assert(ttlMs >= 60_000, `${label} should be valid for at least 60 seconds`);
+  assert(ttlMs >= 290_000 && ttlMs <= 310_000, `${label} should default to roughly 5 minutes, got ${ttlMs}ms`);
+};
+
 const run = async () => {
+  await reset();
+  for (const [value, label] of [
+    [undefined, "unset env"],
+    ["5", "integer env"],
+    ["0", "zero env"],
+    ["0.1", "decimal env"],
+    ["-1", "negative env"],
+    ["abc", "invalid env"],
+  ]) {
+    await withAuthMfaChallengeTtl(value, async () => {
+      const beforeMs = Date.now();
+      const challenge = await makeChallenge();
+      assertSafeFutureExpiry(challenge.expiresAt, beforeMs, label);
+    });
+  }
+
+  await withAuthMfaChallengeTtl("0", async () => {
+    const beforeMs = Date.now();
+    const legacyChallenge = await createAdminMfaChallenge({
+      userId: "admin-1",
+      sessionId: "bootstrap-session-1",
+      purpose: "high_risk_action",
+      riskScore: 10,
+      riskLevel: "LOW",
+      reasons: ["test"],
+      ipHash: "ip-hash",
+      userAgent: "agent",
+    });
+    assertSafeFutureExpiry(legacyChallenge.expiresAt, beforeMs, "legacy high-risk challenge");
+  });
+
+  const productionEvidenceSetup = await reset();
+  await withAuthMfaChallengeTtl(undefined, async () => {
+    const beforeMs = Date.now();
+    const challenge = await makeChallenge();
+    assertSafeFutureExpiry(challenge.expiresAt, beforeMs, "production evidence login ticket");
+
+    const wrong = await rejectError(completeAdminMfaChallenge({
+      userId: "admin-1",
+      sessionId: "bootstrap-session-1",
+      ticket: challenge.ticket,
+      method: "totp",
+      code: "000000",
+    }));
+    assert.strictEqual(String(wrong?.message || ""), "INVALID_MFA_CODE");
+    assert.strictEqual(wrong.status, 400);
+    assert.strictEqual(challenges[challenges.length - 1].consumedAt, null);
+
+    const correct = await completeAdminMfaChallenge({
+      userId: "admin-1",
+      sessionId: "bootstrap-session-1",
+      ticket: challenge.ticket,
+      method: "totp",
+      code: totp(productionEvidenceSetup.secret),
+    });
+    assert.strictEqual(correct.method, "TOTP");
+    assert(challenges[challenges.length - 1].consumedAt, "same login-returned ticket should complete and be consumed");
+  });
+
   const setup = await reset();
   const invalidChallenge = await makeChallenge();
-  const invalidError = await rejectCode(completeAdminMfaChallenge({
+  const invalid = await rejectError(completeAdminMfaChallenge({
     userId: "admin-1",
     sessionId: "bootstrap-session-1",
     ticket: invalidChallenge.ticket,
     method: "totp",
     code: "000000",
   }));
-  assert.strictEqual(invalidError, "INVALID_MFA_CODE");
+  assert.strictEqual(String(invalid?.message || ""), "INVALID_MFA_CODE");
+  assert.strictEqual(invalid.status, 400);
   assert.strictEqual(challenges[0].attempts, 1);
   assert.strictEqual(challenges[0].consumedAt, null);
 
@@ -432,6 +516,7 @@ const run = async () => {
   assert.strictEqual(reuseError, "INVALID_MFA_CODE");
 
   assert(auditEvents.some((entry) => entry.action === "AUTH_MFA_CHALLENGE_ISSUED"));
+  assert(auditEvents.some((entry) => entry.details?.ttlMs >= 60_000 && entry.details?.ttlMinutes >= 1));
   assert(auditEvents.some((entry) => entry.action === "AUTH_MFA_BACKUP_CODE_USED"));
   console.log("auth MFA challenge state machine tests passed");
 };

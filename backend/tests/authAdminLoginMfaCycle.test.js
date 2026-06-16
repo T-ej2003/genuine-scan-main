@@ -86,7 +86,7 @@ mockModule("services/auth/mfaService.js", {
   getAdminMfaStatus: async () => mockedMfaStatus,
   createAdminMfaChallenge: async () => ({
     ticket: "mfa-ticket",
-    expiresAt: new Date("2026-05-01T12:10:00.000Z"),
+    expiresAt: new Date(Date.now() + 5 * 60 * 1000),
   }),
 });
 
@@ -148,6 +148,11 @@ const run = async () => {
   assert.strictEqual(staleMfaSession.sessionStage, "MFA_BOOTSTRAP", "stale MFA should require a fresh challenge");
   assert.strictEqual(staleMfaSession.auth?.stepUpMethod, "ADMIN_MFA");
   assert.strictEqual(staleMfaSession.auth?.mfaChallenge?.ticket, "mfa-ticket");
+  assert(
+    new Date(staleMfaSession.auth?.mfaChallenge?.expiresAt || 0).getTime() -
+      new Date(staleMfaSession.auth?.authenticatedAt || 0).getTime() >= 60_000,
+    "login response MFA challenge expiry should be at least 60 seconds after authenticatedAt"
+  );
   assert(
     auditEvents.some((entry) => entry?.action === "AUTH_LOGIN_MFA_CHALLENGE_REQUIRED"),
     "stale MFA login should emit challenge-required audit action"
