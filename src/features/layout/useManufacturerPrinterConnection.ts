@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { APP_PATHS } from "@/app/route-metadata";
 import apiClient from "@/lib/api-client";
+import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
+import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
 import {
-  getOptionalLocalStorageItem,
   removeOptionalLocalStorageItem,
   removeOptionalSessionStorageItem,
   setOptionalLocalStorageItem,
@@ -17,6 +18,7 @@ import {
   type LocalPrinterAgentSnapshot,
 } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { canPollVisibleDocument } from "@/lib/query-polling-policy";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 import { normalizeLocalPrinterRows } from "@/features/printing/hooks";
 import {
@@ -32,11 +34,11 @@ import {
 import {
   defaultPrinterStatus,
   DISABLE_E2E_PRINTER_AGENT_POLLING,
-  PRINTER_BACKGROUND_REFRESH_MS,
   PRINTER_DIALOG_SESSION_STORAGE_VERSION,
   PRINTER_FAILURE_REPORT_COOLDOWN_MS,
   PRINTER_ONBOARDING_STORAGE_VERSION,
 } from "@/features/layout/manufacturerPrinterConnectionUtils";
+import { usePrinterOnboardingAutoOpen } from "@/features/layout/usePrinterOnboardingAutoOpen";
 import type { User } from "@/types";
 import type { PrinterConnectionStatusDTO } from "../../../shared/contracts/runtime/printing.ts";
 
@@ -49,6 +51,7 @@ type ToastLike = (options: {
 type UseManufacturerPrinterConnectionParams = {
   user: User | null;
   contextualHelpRoute: string;
+  currentPath: string;
   navigate: (to: string) => void;
   toast: ToastLike;
 };
@@ -56,9 +59,11 @@ type UseManufacturerPrinterConnectionParams = {
 export function useManufacturerPrinterConnection({
   user,
   contextualHelpRoute,
+  currentPath,
   navigate,
   toast,
 }: UseManufacturerPrinterConnectionParams) {
+  const activePrintSuppressed = useActivePrintSessionSuppression();
   const detectedPrintersRef = useRef<NonNullable<PrinterConnectionStatusDTO["printers"]>>([]);
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
@@ -90,7 +95,7 @@ export function useManufacturerPrinterConnection({
       : null;
   const printerOnboardingStorageKey =
     user?.role === "manufacturer" && user?.id
-      ? `manufacturer-printer-onboarding:${PRINTER_ONBOARDING_STORAGE_VERSION}:${user.id}`
+      ? `manufacturer-printer-onboarding:${PRINTER_ONBOARDING_STORAGE_VERSION}:${user.id}:${getOrCreateAnonDeviceId()}`
       : null;
 
   const clearPrinterDialogSession = () => {
@@ -252,6 +257,7 @@ export function useManufacturerPrinterConnection({
 
   const syncManufacturerPrinterStatus = async (options?: { silent?: boolean; force?: boolean }) => {
     if (!user || user.role !== "manufacturer") return;
+    if (activePrintSuppressed && !options?.force) return;
     if (syncInFlightRef.current) return syncInFlightRef.current;
     const run = (async () => {
       setPrinterStatusChecking(true);
@@ -445,14 +451,20 @@ export function useManufacturerPrinterConnection({
 
   useEffect(() => {
     if (!user || user.role !== "manufacturer") return;
-    void syncManufacturerPrinterStatus({ silent: true });
-    const timer = window.setInterval(() => {
-      void syncManufacturerPrinterStatus({ silent: true });
-    }, PRINTER_BACKGROUND_REFRESH_MS);
-
-    return () => window.clearInterval(timer);
+    void loadManagedPrinterProfiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!user || user.role !== "manufacturer") return;
+    if (activePrintSuppressed || printerStatusLive) return;
+    const timer = window.setInterval(() => {
+      if (!canPollVisibleDocument()) return;
+      void syncManufacturerPrinterStatus({ silent: true });
+    }, 60_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.role, activePrintSuppressed, printerStatusLive]);
 
   useEffect(() => {
     detectedPrintersRef.current = detectedPrinters;
@@ -461,6 +473,7 @@ export function useManufacturerPrinterConnection({
   useEffect(() => {
     if (!user || user.role !== "manufacturer") return;
     if (DISABLE_E2E_PRINTER_AGENT_POLLING) return;
+    if (activePrintSuppressed) return;
 
     const stop = apiClient.streamPrinterConnectionStatus(
       (payload) => {
@@ -482,7 +495,7 @@ export function useManufacturerPrinterConnection({
       stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.role]);
+  }, [user?.id, user?.role, activePrintSuppressed]);
 
   useEffect(() => {
     if (!printerStatus) return;
@@ -611,39 +624,15 @@ export function useManufacturerPrinterConnection({
     void syncManufacturerPrinterStatus({ silent: true, force: true });
   };
 
-  useEffect(() => {
-    if (!printerOnboardingStorageKey) return;
-    if (!managedPrinterProfilesLoaded) return;
-    if (printerReady || managedPrinterDiagnostics?.tone === "success") {
-      try {
-        setOptionalLocalStorageItem("functional", printerOnboardingStorageKey, "completed");
-      } catch {
-        // Ignore storage failures.
-      }
-      setPrinterOnboardingOpen(false);
-      return;
-    }
-    if (managedNetworkPrinters.length > 0) {
-      setPrinterOnboardingOpen(false);
-      return;
-    }
-
-    let stored = "";
-    try {
-      stored = String(getOptionalLocalStorageItem("functional", printerOnboardingStorageKey) || "").trim().toLowerCase();
-    } catch {
-      stored = "";
-    }
-    if (!stored) {
-      setPrinterOnboardingOpen(true);
-    }
-  }, [
-    managedNetworkPrinters.length,
-    managedPrinterDiagnostics?.tone,
-    managedPrinterProfilesLoaded,
-    printerOnboardingStorageKey,
+  usePrinterOnboardingAutoOpen({
+    storageKey: printerOnboardingStorageKey,
+    enabled: currentPath === APP_PATHS.batches,
+    managedProfilesLoaded: managedPrinterProfilesLoaded,
     printerReady,
-  ]);
+    managedPrinterReady: managedPrinterDiagnostics?.tone === "success",
+    managedNetworkPrinterCount: managedNetworkPrinters.length,
+    setOpen: setPrinterOnboardingOpen,
+  });
 
   const dismissPrinterOnboarding = () => {
     if (printerOnboardingStorageKey) {

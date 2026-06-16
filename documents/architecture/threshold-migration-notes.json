@@ -20,7 +20,7 @@
     "targetMaxLines": 500
   },
   "backend/src/controllers/printerAgentJobController.ts": {
-    "summary": "Printer agent job scheduling, retries, and status reconciliation are still controller-led.",
+    "summary": "Printer agent job scheduling, retries, upgrade-required backoff, and status reconciliation are still controller-led.",
     "nextStep": "Move job orchestration and reconciliation into printer-agent services and keep controllers request-focused.",
     "targetMaxLines": 500
   },
@@ -30,8 +30,8 @@
     "targetMaxLines": 500
   },
   "backend/src/controllers/printerGatewayController.ts": {
-    "summary": "Gateway registration, trust exchange, and delivery workflow logic are still heavily centralized.",
-    "nextStep": "Extract gateway trust negotiation and delivery orchestration into dedicated printer gateway services.",
+    "summary": "Gateway registration, trust exchange, delivery workflow, and site-gateway serial-context assembly are still heavily centralized.",
+    "nextStep": "Extract gateway trust negotiation, claim payload assembly, and delivery orchestration into dedicated printer gateway services.",
     "targetMaxLines": 500
   },
   "backend/src/controllers/qrController.ts": {
@@ -65,8 +65,8 @@
     "targetMaxLines": 700
   },
   "src/pages/ConnectorDownload.tsx": {
-    "summary": "Connector download guidance, platform branching, and operator actions still live in one large page.",
-    "nextStep": "Split platform-specific flows and operator guidance blocks into dedicated connector feature sections.",
+    "summary": "Connector download guidance, platform branching, signed production availability, and internal validation artifact handling still live in one large page.",
+    "nextStep": "Split platform cards, signed-release unavailable state, and internal validation panel into dedicated connector feature sections.",
     "targetMaxLines": 700
   },
   "src/pages/Dashboard.tsx": {
@@ -80,8 +80,8 @@
     "targetMaxLines": 700
   },
   "src/pages/PrinterSetup.tsx": {
-    "summary": "Printer setup still bundles onboarding, connection state, and troubleshooting logic in a single page.",
-    "nextStep": "Split setup wizard, connection health, and remediation flows into feature components and hooks.",
+    "summary": "Printer setup still bundles onboarding, connection state, signed connector blockers, stale WiFi remediation, USB Zebra selection, and troubleshooting logic in a single page.",
+    "nextStep": "Split setup wizard, connection health, and factory remediation panels into feature components and hooks.",
     "targetMaxLines": 700
   }
 }

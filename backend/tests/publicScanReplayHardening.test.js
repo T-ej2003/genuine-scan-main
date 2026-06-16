@@ -317,8 +317,10 @@ const runSignedScan = async (token, options = {}) => {
   const sameContextRes = await runSignedScan(sameContextToken, { ip: "198.51.100.12" });
 
   assert.strictEqual(sameContextRes.statusCode, 200, "same-context replay should still return a normal verification response");
-  assert.strictEqual(sameContextRes.body?.data?.classification, "LEGIT_REPEAT");
-  assert.strictEqual(sameContextRes.body?.data?.publicOutcome, "SIGNED_LABEL_ACTIVE");
+  assert.strictEqual(sameContextRes.body?.data?.publicStatus, "verified");
+  assert.strictEqual(sameContextRes.body?.data?.riskSignalStatus, "clear");
+  assert.strictEqual(sameContextRes.body?.data?.classification, undefined);
+  assert.strictEqual(sameContextRes.body?.data?.publicOutcome, undefined);
   assert.strictEqual(sameContextRes.body?.data?.challenge?.required, false);
 
   currentDeviceFingerprint = "device-fingerprint-2";
@@ -356,19 +358,13 @@ const runSignedScan = async (token, options = {}) => {
   const changedContextRes = await runSignedScan(changedContextToken, { ip: "203.0.113.25" });
 
   assert.strictEqual(changedContextRes.statusCode, 200, "changed-context replay should still return a structured verification response");
-  assert.strictEqual(changedContextRes.body?.data?.classification, "SUSPICIOUS_DUPLICATE");
-  assert.strictEqual(changedContextRes.body?.data?.publicOutcome, "REVIEW_REQUIRED");
+  assert.strictEqual(changedContextRes.body?.data?.publicStatus, "review_needed");
+  assert.strictEqual(changedContextRes.body?.data?.riskSignalStatus, "needs_brand_review");
+  assert.strictEqual(changedContextRes.body?.data?.classification, undefined);
+  assert.strictEqual(changedContextRes.body?.data?.publicOutcome, undefined);
   assert.strictEqual(changedContextRes.body?.data?.challenge?.required, true, "anonymous changed-context replay should require step-up");
-  assert.deepStrictEqual(
-    changedContextRes.body?.data?.challenge?.methods,
-    ["SIGN_IN"],
-    "public replay step-up should only advertise the first-party completion method exposed in the verify flow"
-  );
-  assert(
-    Array.isArray(changedContextRes.body?.data?.reasons) &&
-      changedContextRes.body.data.reasons.some((reason) => /different scan context|unusually quickly/i.test(reason)),
-    "changed-context replay should explain why the signed label result was downgraded"
-  );
+  assert.strictEqual(changedContextRes.body?.data?.challenge?.methods, undefined);
+  assert.strictEqual(changedContextRes.body?.data?.reasons, undefined);
 
   currentDeviceFingerprint = "device-fingerprint-3";
   currentQrRecord = buildSignedReplayQrRecord();
@@ -412,11 +408,13 @@ const runSignedScan = async (token, options = {}) => {
   });
 
   assert.strictEqual(customerChallengeRes.statusCode, 200, "changed-context replay with a verified customer should still return a structured response");
-  assert.strictEqual(customerChallengeRes.body?.data?.classification, "SUSPICIOUS_DUPLICATE");
-  assert.strictEqual(customerChallengeRes.body?.data?.publicOutcome, "REVIEW_REQUIRED");
+  assert.strictEqual(customerChallengeRes.body?.data?.publicStatus, "review_needed");
+  assert.strictEqual(customerChallengeRes.body?.data?.riskSignalStatus, "needs_brand_review");
+  assert.strictEqual(customerChallengeRes.body?.data?.classification, undefined);
+  assert.strictEqual(customerChallengeRes.body?.data?.publicOutcome, undefined);
   assert.strictEqual(customerChallengeRes.body?.data?.challenge?.required, false, "verified identity should satisfy replay step-up");
   assert.strictEqual(customerChallengeRes.body?.data?.challenge?.completed, true, "verified identity should mark the challenge as completed");
-  assert.strictEqual(customerChallengeRes.body?.data?.challenge?.completedBy, "CUSTOMER_IDENTITY");
+  assert.strictEqual(customerChallengeRes.body?.data?.challenge?.completedBy, undefined);
 
   console.log("public scan replay hardening integration tests passed");
 })().catch((error) => {

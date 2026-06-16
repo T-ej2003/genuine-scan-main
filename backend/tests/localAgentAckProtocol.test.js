@@ -23,7 +23,7 @@ const baseAck = {
   printJobId: "9c7a03d6-db68-4f65-96c2-efb23f83cc08",
   printSessionId: "a6e65436-e213-49b4-9aa2-449cf0e4b0aa",
   printItemId: "8b30bad4-df76-4d23-a989-b3c9fefc37b2",
-  code: "TBD0000000001",
+  code: "c_localagentackpubliccode0000001",
   payloadHash: "payload-hash",
   bytesWritten: 64,
 };

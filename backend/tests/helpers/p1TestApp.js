@@ -512,8 +512,13 @@ mockModule("services/incidentEmailService.js", { sendIncidentEmail: async () => 
 mockModule("services/objectStorageService.js", {
   getObjectStorageConfiguration: () => ({ configured: false }),
   getObjectStorageClient: () => null,
+  getObjectStorageHealth: async () => ({ configured: false, ready: true }),
 });
-mockModule("services/redisService.js", { isRedisConfigured: () => false, getRedisClient: () => null });
+mockModule("services/redisService.js", {
+  isRedisConfigured: () => false,
+  getRedisClient: () => null,
+  getRedisHealth: async () => ({ configured: false, ready: true }),
+});
 mockModule("services/qrService.js", {
   getQRStats: async () => ({ total: state.qrCodes.length, printed: 1, redeemed: 0, blocked: 0 }),
   recordScan: async (code, metadata = {}) => {
@@ -537,6 +542,11 @@ mockModule("services/qrService.js", {
 mockModule("services/batchAllocationService.js", {
   buildLineageSuccessMessage: () => "P1 allocation updated.",
   enrichBatchSummaries: async (rows) => rows,
+  listCachedBatchOperationalSummaries: async ({ where, limit, offset }) => {
+    const rows = await fakePrisma.batch.findMany({ where, take: limit, skip: offset });
+    const total = await fakePrisma.batch.count({ where });
+    return { rows, total };
+  },
   getBatchAllocationMap: async () => ({ nodes: [], edges: [] }),
 });
 mockModule("services/verificationDecisionReadService.js", {

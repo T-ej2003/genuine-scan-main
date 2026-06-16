@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
 
 const env = {
   superAdminEmail: String(process.env.E2E_SUPERADMIN_EMAIL || "").trim(),
@@ -54,8 +56,29 @@ const requireEnterpriseCondition = (condition: boolean, message: string) => {
 };
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const E2E_LOCAL_AGENT_PROTOCOL_VERSION = "local-agent-direct-v2";
-const E2E_LOCAL_AGENT_BUILD_VERSION = "2026.5.19-e2e";
+const connectorManifest = JSON.parse(
+  fs.readFileSync(path.join(process.cwd(), "backend/local-print-agent/releases/manifest.json"), "utf8")
+) as {
+  latestVersion?: string;
+  minimumBuildVersion?: string;
+  capabilities?: Record<string, boolean>;
+  releases?: Array<{
+    version?: string;
+    requiredProtocolVersion?: string;
+    transportDiagnosticsVersion?: string;
+    capabilities?: Record<string, boolean>;
+  }>;
+};
+const latestConnectorRelease = connectorManifest.releases?.find(
+  (release) => release.version === connectorManifest.latestVersion
+);
+const E2E_LOCAL_AGENT_PROTOCOL_VERSION = String(latestConnectorRelease?.requiredProtocolVersion || "local-agent-direct-v2");
+const E2E_LOCAL_AGENT_BUILD_VERSION = `${String(connectorManifest.minimumBuildVersion || connectorManifest.latestVersion)}-e2e`;
+const E2E_TRANSPORT_DIAGNOSTICS_VERSION = String(
+  latestConnectorRelease?.transportDiagnosticsVersion || "transport-diagnostics-v1"
+);
+const E2E_LOCAL_AGENT_CAPABILITIES =
+  latestConnectorRelease?.capabilities || connectorManifest.capabilities || {};
 
 const goto = async (page: Page, path: string) => {
   await page.goto(path, { waitUntil: "domcontentloaded" });
@@ -100,6 +123,8 @@ const buildE2EPrinterPayload = () => ({
   agentVersion: "e2e-ci",
   protocolVersion: E2E_LOCAL_AGENT_PROTOCOL_VERSION,
   buildVersion: E2E_LOCAL_AGENT_BUILD_VERSION,
+  transportDiagnosticsVersion: E2E_TRANSPORT_DIAGNOSTICS_VERSION,
+  capabilities: E2E_LOCAL_AGENT_CAPABILITIES,
   agentId: "e2e-agent",
   deviceFingerprint: "e2e-device-fingerprint",
   printers: [
@@ -110,6 +135,7 @@ const buildE2EPrinterPayload = () => ({
       connection: "LOCAL_AGENT",
       online: true,
       isDefault: true,
+      commandLanguage: "PDF",
       protocols: ["DRIVER_QUEUE"],
       languages: ["PDF"],
       mediaSizes: ["50x30mm"],
@@ -154,6 +180,8 @@ const installLocalPrintAgentMock = async (page: Page) => {
         selectedPrinterName: env.printerProfileName || "E2E Local Agent Printer",
         protocolVersion: E2E_LOCAL_AGENT_PROTOCOL_VERSION,
         buildVersion: E2E_LOCAL_AGENT_BUILD_VERSION,
+        transportDiagnosticsVersion: E2E_TRANSPORT_DIAGNOSTICS_VERSION,
+        capabilities: E2E_LOCAL_AGENT_CAPABILITIES,
       }),
     })
   );
@@ -275,6 +303,8 @@ test.describe.serial("Enterprise smoke flows", () => {
     await page.getByTestId("print-job-quantity-input").fill(env.printQuantity);
     await expect(page.getByTestId("print-job-printer-profile")).toBeVisible({ timeout: 30_000 });
     await selectRadixOption(page, "print-job-printer-profile", env.printerProfileName);
+    await refreshE2EPrinterHeartbeat(page);
+    await expect(page.getByTestId("create-print-job-dialog")).toContainText(/Printer ready/, { timeout: 30_000 });
     await expect(page.getByTestId("print-job-start-button")).toBeEnabled({ timeout: 30_000 });
     await page.getByTestId("print-job-start-button").click();
 
@@ -302,9 +332,11 @@ test.describe.serial("Enterprise smoke flows", () => {
     await page.locator("#otp-code").fill(testOtp);
     await page.getByRole("button", { name: /verify and continue/i }).click();
 
-    await expect(page.getByRole("heading", { name: /this garment is genuine|we could not fully verify this item/i })).toBeVisible({
-      timeout: 30_000,
-    });
+    await expect(
+      page.getByRole("heading", {
+        name: /this garment matches a registered brand record|this scan needs brand review|mscqr could not match this qr label|we could not complete this verification/i,
+      })
+    ).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: /report a concern/i }).click();
     await expect(page.getByRole("heading", { name: /report a concern/i })).toBeVisible();
     await page.getByTestId("verify-report-concern").click();

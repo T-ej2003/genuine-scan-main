@@ -166,7 +166,25 @@ const reserveGatewayItem = async (params: {
       },
     });
 
-    return row;
+    return tx.printItem.findUnique({
+      where: { id: row.id },
+      include: {
+        qrCode: {
+          select: {
+            id: true,
+            code: true,
+            displayCode: true,
+            batchId: true,
+            licenseeId: true,
+            tokenNonce: true,
+            tokenIssuedAt: true,
+            tokenExpiresAt: true,
+            tokenHash: true,
+            status: true,
+          },
+        },
+      },
+    });
   });
 };
 
@@ -340,6 +358,24 @@ export const claimGatewayIppJob = async (req: Request, res: Response) => {
             id: true,
             name: true,
             licenseeId: true,
+            metadata: true,
+            licensee: {
+              select: {
+                id: true,
+                name: true,
+                prefix: true,
+                location: true,
+                metadata: true,
+              },
+            },
+          },
+        },
+        manufacturer: {
+          select: {
+            id: true,
+            name: true,
+            location: true,
+            metadata: true,
           },
         },
         printSession: true,
@@ -398,6 +434,14 @@ export const claimGatewayIppJob = async (req: Request, res: Response) => {
       qr: item.qrCode,
       manufacturerId: job.manufacturerId,
       reprintOfJobId: job.reprintOfJobId,
+      serialContext: {
+        sequence: item.issueSequence,
+        issuedAt: item.issuedAt,
+        batch: job.batch || null,
+        licensee: job.batch?.licensee || null,
+        manufacturer: job.manufacturer || null,
+        printer,
+      },
     });
 
     return res.json({
@@ -466,6 +510,24 @@ export const claimGatewayDirectJob = async (req: Request, res: Response) => {
             id: true,
             name: true,
             licenseeId: true,
+            metadata: true,
+            licensee: {
+              select: {
+                id: true,
+                name: true,
+                prefix: true,
+                location: true,
+                metadata: true,
+              },
+            },
+          },
+        },
+        manufacturer: {
+          select: {
+            id: true,
+            name: true,
+            location: true,
+            metadata: true,
           },
         },
         printSession: true,
@@ -538,6 +600,14 @@ export const claimGatewayDirectJob = async (req: Request, res: Response) => {
       printItemId: item.id,
       jobNumber: job.jobNumber,
       reprintOfJobId: job.reprintOfJobId,
+      serialContext: {
+        sequence: item.issueSequence,
+        issuedAt: item.issuedAt,
+        batch: job.batch || null,
+        licensee: job.batch?.licensee || null,
+        manufacturer: job.manufacturer || null,
+        printer,
+      },
     });
 
     return res.json({

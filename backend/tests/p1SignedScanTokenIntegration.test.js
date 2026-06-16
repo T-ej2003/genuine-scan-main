@@ -1,6 +1,7 @@
 const assert = require("assert");
 const { QRStatus } = require("@prisma/client");
 const { request, state, withServer } = require("./helpers/p1TestApp");
+const { expectPublicResponseSafe } = require("./helpers/publicEgressContract");
 const { hashToken, signQrPayload } = require("../dist/services/qrTokenService");
 
 const qr = state.qrCodes.find((entry) => entry.id === "p1-qr-a");
@@ -48,6 +49,16 @@ const assertSafePublicPayload = ({ text }) => {
   assert.doesNotMatch(text, /tokenHash|passwordHash|JWT|Bearer|p1-licensee-b|P1 Brand B|stack|Prisma|DATABASE_URL|secret/i);
 };
 
+const assertSafePublicScanFailure = (response) => {
+  assert.strictEqual(response.payload.success, true);
+  assert.strictEqual(response.payload.data.publicStatus, "not_found");
+  assert.strictEqual(response.payload.data.message, "MSCQR could not trust this label proof.");
+  assert.strictEqual(response.payload.data.scanOutcome, undefined, "public scan failures must not expose raw signed-token outcomes");
+  assert.strictEqual(response.payload.data.proofSource, undefined, "public scan failures must not expose proof internals");
+  assert.doesNotMatch(response.text, /QR token|EXPIRED|INVALID_SIGNATURE|TOKEN_MISMATCH|revoked|mismatched|tampered|signature/i);
+  expectPublicResponseSafe(response.payload);
+};
+
 (async () => {
   await withServer(async (baseUrl) => {
     const validToken = prepareQr();
@@ -73,13 +84,13 @@ const assertSafePublicPayload = ({ text }) => {
     qr.tokenHash = hashToken(expiredPayload);
     const expired = await request(baseUrl, "GET", `/api/scan?t=${encodeURIComponent(expiredPayload)}`, null);
     assert.strictEqual(expired.status, 400, expired.text);
-    assert.match(expired.text, /expired/i);
     assertSafePublicPayload(expired);
+    assertSafePublicScanFailure(expired);
 
     const tampered = await request(baseUrl, "GET", `/api/scan?t=${encodeURIComponent(`${expiredToken.slice(0, -2)}xx`)}`, null);
     assert.strictEqual(tampered.status, 400, tampered.text);
-    assert.match(tampered.text, /Invalid|tampered|signature/i);
     assertSafePublicPayload(tampered);
+    assertSafePublicScanFailure(tampered);
 
     const missing = await request(baseUrl, "GET", "/api/scan", null);
     assert.strictEqual(missing.status, 400, missing.text);
@@ -89,13 +100,17 @@ const assertSafePublicPayload = ({ text }) => {
     qr.tokenHash = hashToken("different-issued-token");
     const revoked = await request(baseUrl, "GET", `/api/scan?t=${encodeURIComponent(revokedToken)}`, null);
     assert.strictEqual(revoked.status, 400, revoked.text);
-    assert.match(revoked.text, /revoked|mismatch|invalid/i);
     assertSafePublicPayload(revoked);
+    assertSafePublicScanFailure(revoked);
 
     const missingQrToken = buildToken({ qr_id: "p1-missing-qr", nonce: "p1-missing-nonce" });
     const notFound = await request(baseUrl, "GET", `/api/scan?t=${encodeURIComponent(missingQrToken)}`, null);
     assert.strictEqual(notFound.status, 404, notFound.text);
-    assert.match(notFound.text, /not found|registry/i);
+    assert.strictEqual(notFound.payload.success, true);
+    assert.strictEqual(notFound.payload.data.publicStatus, "not_found");
+    assert.strictEqual(notFound.payload.data.message, "MSCQR could not find a live record for this code.");
+    assert.strictEqual(notFound.payload.data.classification, undefined, "public not-found scan response must not expose raw classification");
+    expectPublicResponseSafe(notFound.payload);
     assertSafePublicPayload(notFound);
 
     state.scan.deviceFingerprint = "p1-device-b";
@@ -145,7 +160,10 @@ const assertSafePublicPayload = ({ text }) => {
     });
     const suspicious = await request(baseUrl, "GET", `/api/scan?t=${encodeURIComponent(suspiciousToken)}`, null);
     assert.strictEqual(suspicious.status, 200, suspicious.text);
-    assert.match(suspicious.text, /SUSPICIOUS_DUPLICATE|REVIEW_REQUIRED|different scan context/i);
+    assert.strictEqual(suspicious.payload.data.publicStatus, "review_needed");
+    assert.strictEqual(suspicious.payload.data.riskSignalStatus, "needs_brand_review");
+    assert.strictEqual(suspicious.payload.data.classification, undefined, "public scan response must not expose raw classification");
+    expectPublicResponseSafe(suspicious.payload);
     assertSafePublicPayload(suspicious);
   });
 

@@ -36,7 +36,8 @@ services:
       RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-unknown}
       RUN_DB_MIGRATIONS_ON_START: ${RUN_DB_MIGRATIONS_ON_START:-false}
       RUN_BACKGROUND_WORKERS: "false"
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: ${LOCAL_REDIS_URL:-redis://redis:6379/0}
+      REDIS_TLS: ${LOCAL_REDIS_TLS:-false}
       AWS_REGION: ${AWS_REGION:-${OBJECT_STORAGE_REGION:-us-east-1}}
       OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-}
       OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
@@ -60,7 +61,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "require('http').get('http://127.0.0.1:4000/health/ready', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));",
+          "require('http').get('http://127.0.0.1:4000/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));",
         ]
       interval: 15s
       timeout: 10s
@@ -89,7 +90,8 @@ services:
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-unknown}
       RUN_BACKGROUND_WORKERS: "true"
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: ${LOCAL_REDIS_URL:-redis://redis:6379/0}
+      REDIS_TLS: ${LOCAL_REDIS_TLS:-false}
       AWS_REGION: ${AWS_REGION:-${OBJECT_STORAGE_REGION:-us-east-1}}
       OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-}
       OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}

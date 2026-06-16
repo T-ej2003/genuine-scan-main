@@ -2,8 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 
 import apiClient from "@/lib/api-client";
+import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import type { ApiResponse } from "@/lib/api-client";
 import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
+import { pollingPolicy } from "@/lib/query-polling-policy";
 import { queryKeys } from "@/lib/query-keys";
 
 import {
@@ -30,8 +32,12 @@ const isPausedResponse = (response: ApiResponse<unknown>) =>
   Boolean(response.success && response.degraded && String(response.code || "").toUpperCase() === "RATE_LIMITED");
 
 export function useDashboardStats(licenseeId?: string) {
+  const activePrintSuppressed = useActivePrintSessionSuppression();
   return useQuery({
     queryKey: queryKeys.dashboard.stats(licenseeId),
+    enabled: !activePrintSuppressed,
+    staleTime: pollingPolicy.dashboardFallbackMs,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<DashboardStatsResult> => {
       const [summaryResponse, qrStatsResponse] = await Promise.all([
         apiClient.getDashboardStats(licenseeId),
@@ -48,9 +54,12 @@ export function useDashboardStats(licenseeId?: string) {
 }
 
 export function useDashboardAuditLogs(enabled: boolean, limit = 5) {
+  const activePrintSuppressed = useActivePrintSessionSuppression();
   return useQuery({
     queryKey: queryKeys.dashboard.audit(limit),
-    enabled,
+    enabled: enabled && !activePrintSuppressed,
+    staleTime: pollingPolicy.dashboardFallbackMs,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<DashboardAuditLogsResult> => {
       const response = await apiClient.getAuditLogs({ limit });
       const payload = unwrapParsedApiResponse(

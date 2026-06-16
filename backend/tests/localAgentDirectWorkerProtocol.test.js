@@ -1,8 +1,19 @@
 const { createHash } = require("crypto");
-const { validateClaimedLocalPrintJobForAttempt } = require("../dist/local-print-agent/directPrintWorker");
 const {
+  isCloudConnectivityError,
+  resolveConnectivityRetryAfterMs,
+  resolveNoWorkRetryAfterMs,
+  validateClaimedLocalPrintJobForAttempt,
+} = require("../dist/local-print-agent/directPrintWorker");
+const {
+  getMissingTransportDiagnosticsCapabilities,
+  hasRequiredTransportDiagnosticsCapabilities,
+  isLocalAgentTransportDiagnosticsCurrent,
   isLocalAgentProtocolCompatible,
+  LOCAL_AGENT_CAPABILITIES,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_MIN_VERSION_HINT,
+  LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } = require("../dist/services/localAgentProtocol");
 
 const assert = (condition, message) => {
@@ -18,13 +29,46 @@ const run = () => {
   );
   assert(!isLocalAgentProtocolCompatible(null), "Missing protocol should require connector update");
   assert(!isLocalAgentProtocolCompatible("test.v1#4"), "Stale test connector protocol should require update");
+  assert(
+    isLocalAgentTransportDiagnosticsCurrent({
+      protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+      buildVersion: LOCAL_AGENT_MIN_VERSION_HINT,
+      transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+      capabilities: LOCAL_AGENT_CAPABILITIES,
+    }),
+    "Current connector build and transport diagnostics should satisfy the production worker gate"
+  );
+  assert(
+    !isLocalAgentTransportDiagnosticsCurrent({
+      protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+      buildVersion: "2026.5.23",
+      transportDiagnosticsVersion: null,
+      capabilities: null,
+    }),
+    "Old connector 2026.5.23 must not satisfy the production worker gate"
+  );
+  assert(
+    !hasRequiredTransportDiagnosticsCapabilities({ supportsTransportDiagnostics: true }),
+    "Partial transport capability maps must not be accepted"
+  );
+  assert(
+    getMissingTransportDiagnosticsCapabilities({ supportsTransportDiagnostics: true }).includes("supportsUsbRawSpooler"),
+    "USB raw spooler capability must be required for the current connector"
+  );
+  assert(isCloudConnectivityError(Object.assign(new Error("fetch failed"), { cause: { code: "ENOTFOUND" } })), "DNS failures should be classified as cloud connectivity issues");
+  assert(resolveConnectivityRetryAfterMs(5) >= 4000, "Connectivity retry should stay within bounded backoff");
+  assert(resolveNoWorkRetryAfterMs(8000, 1) >= 15000, "No-work claims must back off beyond the old 8s server hint");
+  assert(
+    resolveNoWorkRetryAfterMs(8000, 3) >= resolveNoWorkRetryAfterMs(8000, 1),
+    "Repeated no-work claims should not become more aggressive"
+  );
 
   const payloadContent = "^XA\n^XZ";
   const valid = validateClaimedLocalPrintJobForAttempt({
     printJobId: "job-1",
     printSessionId: "session-1",
     printItemId: "item-1",
-    code: "TBD0000000002",
+    code: "c_localagentdirectpubliccode000002",
     scanUrl: "https://www.mscqr.com/scan?t=test",
     payloadContent,
     payloadHash: sha256Hex(payloadContent),
@@ -37,7 +81,7 @@ const run = () => {
       printJobId: "job-1",
       printSessionId: "session-1",
       printItemId: "item-1",
-      code: "TBD0000000002",
+      code: "c_localagentdirectpubliccode000002",
       scanUrl: "https://www.mscqr.com/scan?t=test",
       payloadContent: null,
       payloadHash: sha256Hex(payloadContent),
@@ -54,7 +98,7 @@ const run = () => {
       printJobId: "job-1",
       printSessionId: "session-1",
       printItemId: "item-1",
-      code: "TBD0000000002",
+      code: "c_localagentdirectpubliccode000002",
       scanUrl: "https://www.mscqr.com/scan?t=test",
       payloadContent,
       payloadHash: "bad-hash",

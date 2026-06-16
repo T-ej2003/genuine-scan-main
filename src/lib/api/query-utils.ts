@@ -3,12 +3,14 @@ import type { z } from "zod";
 
 export class ApiResponseError extends Error {
   code?: string;
+  status?: number;
   retryAfterSec?: number;
 
   constructor(message: string, response: ApiResponse<unknown>) {
     super(message);
     this.name = "ApiResponseError";
     this.code = response.code;
+    this.status = response.status;
     this.retryAfterSec = response.retryAfterSec;
   }
 }

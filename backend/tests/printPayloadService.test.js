@@ -13,12 +13,49 @@ const {
 } = require("../dist/services/printPayloadService");
 const { getZebraQrConfig } = require("../dist/printing/zebraQrSizing");
 const { hashToken, signQrPayload } = require("../dist/services/qrTokenService");
+const { generateHumanLabelSerial } = require("../dist/services/labelSerialService");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
 };
 
 const run = () => {
+  const ukSerialContext = {
+    sequence: 42,
+    issuedAt: new Date("2026-03-11T10:00:00.000Z"),
+    batch: { metadata: { regionCode: "UK" }, name: "Batch UK" },
+    licensee: { prefix: "ABR", name: "Abrams", metadata: { serialCode: "ABR" } },
+    manufacturer: { name: "Karat Factory", metadata: { factoryCode: "KRT" } },
+    printer: { nativePrinterId: "ZDesigner ZT410", metadata: { lineCode: "L01" } },
+  };
+  const euSerial = generateHumanLabelSerial({
+    ...ukSerialContext,
+    qrId: "qr-eu-1",
+    sequence: 188,
+    batch: { metadata: { regionCode: "EU" } },
+    licensee: { prefix: "NOV", name: "Nova", metadata: { serialCode: "NOV" } },
+    manufacturer: { name: "Milano Factory", metadata: { factoryCode: "MIL" } },
+    printer: { metadata: { lineCode: "L03" } },
+  }).humanSerial;
+  const usSerial = generateHumanLabelSerial({
+    ...ukSerialContext,
+    qrId: "qr-us-1",
+    sequence: 3301,
+    batch: { metadata: { regionCode: "US" } },
+    licensee: { prefix: "ARC", name: "Arc", metadata: { serialCode: "ARC" } },
+    manufacturer: { name: "Dallas Factory", metadata: { factoryCode: "DAL" } },
+    printer: { metadata: { lineCode: "L07" } },
+  }).humanSerial;
+  assert(/^EU-NOV-MIL-L03-26-000188-[A-Z0-9]{3}$/.test(euSerial), "EU serial should use dynamic region/brand/factory/line context");
+  assert(/^US-ARC-DAL-L07-26-003301-[A-Z0-9]{3}$/.test(usSerial), "US serial should use dynamic region/brand/factory/line context");
+  assert(euSerial !== usSerial, "Same helper must not collide across regions");
+  const fallbackSerial = generateHumanLabelSerial({ qrId: "qr-fallback-1", sequence: 7, issuedAt: new Date("2026-03-11T10:00:00.000Z") });
+  assert(
+    /^RGN-BRD-FAC-L00-26-000007-[A-Z0-9]{3}$/.test(fallbackSerial.humanSerial),
+    "Missing metadata should use safe fallback serial segments"
+  );
+  assert(!fallbackSerial.humanSerial.includes("TBD"), "Fallback serials must never use TBD");
+
   assert(resolvePayloadType({ commandLanguage: "ZPL" }) === "ZPL", "ZPL printers should resolve to ZPL payloads");
   assert(resolvePayloadType({ commandLanguage: "TSPL" }) === "TSPL", "TSPL printers should resolve to TSPL payloads");
   assert(resolvePayloadType({ commandLanguage: "EPL" }) === "EPL", "EPL printers should resolve to EPL payloads");
@@ -100,6 +137,7 @@ const run = () => {
     manufacturerId: "manufacturer-1",
     printJobId: "job-1",
     printItemId: "item-1",
+    serialContext: ukSerialContext,
   });
 
   assert(
@@ -110,10 +148,11 @@ const run = () => {
     builtPayload.scanUrl.includes("/verify/c_payloadtestpubliccode000000000001"),
     "Approved print payload should encode the public QR code in the verify URL"
   );
-  assert(
-    builtPayload.payloadContent.includes("AADS00000020171"),
-    "Approved print payload may print the display serial as human-readable label text"
-  );
+  assert(/^UK-ABR-KRT-L01-26-000042-[A-Z0-9]{3}$/.test(builtPayload.humanSerial), "Payload should expose a generated human serial");
+  assert(builtPayload.payloadContent.includes(`Serial: ${builtPayload.humanSerial}`), "ZPL should print the generated human serial");
+  assert(!builtPayload.payloadContent.includes("AADS00000020171"), "ZPL must not print legacy displayCode as the serial");
+  assert(!builtPayload.payloadContent.includes("job-1"), "ZPL must not print raw job ids");
+  assert(!builtPayload.payloadContent.includes("batch-1"), "ZPL must not print raw batch ids");
   assert(
     builtPayload.previewLabel === "MSCQR QR LABEL",
     "Preview label should use MSCQR branding"
@@ -139,7 +178,7 @@ const run = () => {
       commandLanguage: "ZPL",
       calibrationProfile: null,
       capabilitySummary: null,
-      metadata: null,
+      metadata: { lineCode: "L01" },
     },
     qr: {
       id: "qr-governed-1",
@@ -156,6 +195,7 @@ const run = () => {
     manufacturerId: "manufacturer-1",
     printJobId: "job-1",
     printItemId: "item-1",
+    serialContext: ukSerialContext,
   });
   assert(governedPayload.scanToken === governedToken, "Claim-time payload generation must preserve replay epoch");
   const diagnostics = buildPrintPayloadDiagnostics({
@@ -178,10 +218,22 @@ const run = () => {
   assert(!diagnostics.unresolvedPlaceholderPresent, "ZPL payload should not contain unresolved placeholders");
   assert(diagnostics.payloadByteLength > 120, "ZPL payload should be a complete label, not a tiny placeholder");
   assert(governedPayload.scanUrl.includes("/verify/c_governedpubliccode0000000000002"), "ZPL scan URL should use /verify/:code");
+  assert(!governedPayload.scanUrl.includes("TBD0000000002"), "ZPL scan URL must not use displayCode");
+  assert(!governedPayload.payloadContent.includes("TBD0000000002"), "ZPL label must never print TBD placeholder serials");
+  assert(governedPayload.payloadContent.includes("AUTHENTICITY CHECK"), "ZPL label should carry production authenticity copy");
+  const governedScanUrl = new URL(governedPayload.scanUrl);
+  assert(["https:", "http:"].includes(governedScanUrl.protocol), "ZPL scan URL should use an HTTP(S) verify URL");
+  assert(governedScanUrl.pathname === "/verify/c_governedpubliccode0000000000002", "ZPL scan URL should use the exact verify route");
+  const governedZplTextFields = Array.from(governedPayload.payloadContent.matchAll(/\^FD([^^]*)\^FS/g), (match) => match[1]);
+  const governedShortScanHost = "scan.mscqr.com";
+  assert(
+    governedZplTextFields.find((field) => field === governedShortScanHost) === governedShortScanHost,
+    "ZPL label should show the short scan domain",
+  );
   assert(diagnostics.qrPayloadLength > 40, "ZPL QR payload should contain the public verify URL");
   assert(diagnostics.endsWithZplEnd === true, "ZPL diagnostics should report ^XZ end");
   assert(diagnostics.qrCommandCount === 1, "Production ZPL should contain exactly one QR command");
-  assert(diagnostics.graphicBoxCommandCount === 0, "Production ZPL should not include graphic boxes");
+  assert(diagnostics.graphicBoxCommandCount <= 1, "Production ZPL should only include a minimal separator line");
   assert(diagnostics.graphicFieldCommandCount === 0, "Production ZPL should not include raster graphics");
   assert(diagnostics.hasFullLabelBlackBoxRisk === false, "Production ZPL should not look like a full black block");
   assert(diagnostics.printWidthCommandPresent === true, "Production ZPL should include print width");
@@ -199,7 +251,7 @@ const run = () => {
       commandLanguage: "ZPL",
       calibrationProfile: { qrTargetMm: 28, dpi: 300, labelWidthMm: 50, labelHeightMm: 50 },
       capabilitySummary: null,
-      metadata: null,
+      metadata: { lineCode: "L01" },
     },
     qr: {
       id: "qr-governed-1",
@@ -216,9 +268,42 @@ const run = () => {
     manufacturerId: "manufacturer-1",
     printJobId: "job-1",
     printItemId: "item-1",
+    serialContext: ukSerialContext,
   });
   const governed28Magnification = Number(governedPayload28mm.payloadContent.match(/\^BQN,2,(\d+)/)?.[1] || 0);
   assert(governed28Magnification >= governedMagnification, "Configured 28 mm Zebra QR target should not shrink the QR");
+
+  const reissuePayload = buildApprovedPrintPayload({
+    printer: {
+      id: "printer-1",
+      name: "Zebra printer",
+      connectionType: "NETWORK_DIRECT",
+      commandLanguage: "ZPL",
+      calibrationProfile: null,
+      capabilitySummary: null,
+      metadata: { lineCode: "L02" },
+    },
+    qr: {
+      id: "qr-replacement-1",
+      code: "c_replacementpubliccode000000001",
+      displayCode: "UK-ABR-KRT-L02-26-000043-OLD",
+      batchId: "batch-1",
+      licenseeId: "licensee-1",
+      tokenNonce: "nonce-replacement",
+      tokenIssuedAt,
+      tokenExpiresAt,
+      tokenHash: null,
+      replayEpoch: 7,
+    },
+    manufacturerId: "manufacturer-1",
+    printJobId: "job-replacement-1",
+    printItemId: "item-replacement-1",
+    reprintOfJobId: "job-original-1",
+    serialContext: { ...ukSerialContext, sequence: 43, printer: { metadata: { lineCode: "L02" } } },
+  });
+  assert(reissuePayload.scanUrl.includes("/verify/c_replacementpubliccode000000001"), "Controlled reissue must print replacement QRCode.code");
+  assert(!reissuePayload.scanUrl.includes("c_original"), "Controlled reissue payload must not print the old QR token");
+  assert(!reissuePayload.payloadContent.includes("UK-ABR-KRT-L02-26-000043-OLD"), "Controlled reissue must not use visible serial as QR identity");
 
   const maliciousDisplayPayload = buildApprovedPrintPayload({
     printer: {
@@ -244,6 +329,14 @@ const run = () => {
     manufacturerId: "manufacturer-1",
     printJobId: "job-1",
     printItemId: "item-1",
+    serialContext: {
+      sequence: 1,
+      issuedAt: tokenIssuedAt,
+      batch: { metadata: {} },
+      licensee: { metadata: {} },
+      manufacturer: { metadata: {} },
+      printer: { metadata: {} },
+    },
   });
   assert(
     !maliciousDisplayPayload.payloadContent.includes("SERIAL^XZ^XA"),

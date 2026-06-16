@@ -10,10 +10,13 @@ const __dirname = path.dirname(__filename);
 const backendRoot = path.resolve(__dirname, "../..");
 const buildRoot = path.join(backendRoot, ".connector-build", "windows-installer");
 const windowsInstallRoot = path.join(backendRoot, "local-print-agent", "install", "windows");
+const legalRoot = path.resolve(backendRoot, "..", "documents", "legal", "connector");
 const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const defaultVersion = readConnectorSourceVersion(backendRoot);
 const version = String(process.env.CONNECTOR_RELEASE_VERSION || defaultVersion).trim();
 const webAppBaseUrl = String(process.env.WEB_APP_BASE_URL || "").trim().replace(/\/+$/g, "");
+const windowsPkgTarget = String(process.env.WINDOWS_CONNECTOR_PKG_TARGET || "node24-win-x64").trim();
+const minWindowsBinaryBytes = 1_000_000;
 const pkgBinary = process.platform === "win32"
   ? path.join(backendRoot, "node_modules", ".bin", "pkg.cmd")
   : path.join(backendRoot, "node_modules", ".bin", "pkg");
@@ -37,6 +40,34 @@ const removeDir = (dirPath) => {
 
 const writeAsciiFile = (filePath, contents) => {
   fs.writeFileSync(filePath, String(contents), "utf8");
+};
+
+const legalDocumentFiles = [
+  "TERMS_AND_CONDITIONS",
+  "PRIVACY_POLICY",
+  "EULA",
+  "SECURITY_NOTICE",
+  "INSTALLATION_GUIDE",
+  "THIRD_PARTY_NOTICES",
+];
+
+const copyLegalDocuments = (stageDir) => {
+  const legalStageDir = path.join(stageDir, "legal");
+  ensureDir(legalStageDir);
+
+  for (const name of legalDocumentFiles) {
+    const source = path.join(legalRoot, `${name}.md`);
+    if (!fs.existsSync(source)) {
+      throw new Error(`Missing connector legal document: ${source}`);
+    }
+    fs.copyFileSync(source, path.join(legalStageDir, `${name}.txt`));
+  }
+
+  const releaseNotesSource = path.join(legalRoot, "RELEASE_NOTES.md");
+  if (!fs.existsSync(releaseNotesSource)) {
+    throw new Error(`Missing connector release notes: ${releaseNotesSource}`);
+  }
+  fs.copyFileSync(releaseNotesSource, path.join(stageDir, "RELEASE_NOTES.txt"));
 };
 
 const shouldUseShell = (command) =>
@@ -74,6 +105,63 @@ const run = (command, args, options = {}) => {
   );
 };
 
+const runCaptured = (command, args, options = {}) => {
+  const cwd = options.cwd || backendRoot;
+  const result = spawnSync(command, args, {
+    cwd,
+    env: options.env || process.env,
+    shell: options.shell ?? shouldUseShell(command),
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  });
+
+  if (!result.error && result.status === 0 && !result.signal) {
+    return String(result.stdout || "");
+  }
+
+  const attempted = formatCommand(command, args);
+  const exitCode = typeof result.status === "number" ? result.status : "unknown";
+  const signal = result.signal || "none";
+  const cause = result.error?.message || (result.signal ? `terminated by ${result.signal}` : "command exited with a non-zero status");
+  throw new Error(
+    [
+      "Command failed while validating the Windows connector runtime.",
+      `command: ${attempted}`,
+      `cwd: ${cwd}`,
+      `exitCode: ${exitCode}`,
+      `signal: ${signal}`,
+      `cause: ${cause}`,
+      `stdout: ${(result.stdout || "").slice(0, 1000)}`,
+      `stderr: ${(result.stderr || "").slice(0, 1000)}`,
+    ].join("\n")
+  );
+};
+
+const verifyPackagedWindowsBinary = (binaryPath) => {
+  if (process.platform !== "win32") {
+    console.log("Packaged Windows runtime self-test skipped outside Windows.");
+    return;
+  }
+  const output = runCaptured(binaryPath, ["--self-test"], {
+    cwd: path.dirname(binaryPath),
+    env: {
+      ...process.env,
+      PRINT_AGENT_VERSION: version,
+      PRINT_AGENT_BUILD_VERSION: version,
+    },
+  });
+  let parsed;
+  try {
+    parsed = JSON.parse(String(output || "").trim());
+  } catch {
+    throw new Error(`Packaged Windows runtime self-test did not emit JSON: ${String(output || "").slice(0, 1000)}`);
+  }
+  if (parsed.ok !== true || parsed.buildVersion !== version) {
+    throw new Error(`Packaged Windows runtime self-test failed: ${String(output || "").slice(0, 1000)}`);
+  }
+  console.log(`Packaged Windows runtime self-test passed for ${parsed.buildVersion}.`);
+};
+
 const readWindowsAssetTemplate = (assetName) => {
   const templatePath = path.join(windowsInstallRoot, assetName);
   if (!fs.existsSync(templatePath)) {
@@ -107,10 +195,14 @@ const buildWindowsBinary = (binariesDir) => {
   }
 
   const outputBase = path.join(binariesDir, "mscqr-local-print-agent");
-  run(pkgBinary, ["--targets", "node20-win-x64", "--output", outputBase, entry]);
+  run(pkgBinary, ["--targets", windowsPkgTarget, "--fallback-to-source", "--output", outputBase, entry]);
 
   const expectedOutput = `${outputBase}.exe`;
   if (fs.existsSync(expectedOutput)) {
+    const size = fs.statSync(expectedOutput).size;
+    if (size < minWindowsBinaryBytes) {
+      throw new Error(`Packaged Windows connector binary is too small (${size} bytes).`);
+    }
     return expectedOutput;
   }
 
@@ -123,7 +215,12 @@ const buildWindowsBinary = (binariesDir) => {
     throw new Error(`Expected packaged Windows binary was not created. Looked for ${expectedOutput}. Created files: ${createdFiles}`);
   }
 
-  return path.join(binariesDir, builtFile);
+  const builtPath = path.join(binariesDir, builtFile);
+  const size = fs.statSync(builtPath).size;
+  if (size < minWindowsBinaryBytes) {
+    throw new Error(`Packaged Windows connector binary is too small (${size} bytes).`);
+  }
+  return builtPath;
 };
 
 const renderInstallerScript = (templatePath, stageDir, outputDir) =>
@@ -152,12 +249,14 @@ const main = () => {
   ensureDir(outputDir);
 
   const windowsBinary = buildWindowsBinary(binariesDir);
+  verifyPackagedWindowsBinary(windowsBinary);
   fs.copyFileSync(windowsBinary, path.join(stageBinDir, "mscqr-local-print-agent.exe"));
   writeAsciiFile(path.join(stageDir, "install-startup-task.ps1"), readWindowsAssetTemplate("install-startup-task.ps1"));
   writeAsciiFile(path.join(stageDir, "uninstall-startup-task.ps1"), readWindowsAssetTemplate("uninstall-startup-task.ps1"));
   writeAsciiFile(path.join(stageDir, "Install Connector.cmd"), readWindowsAssetTemplate("Install Connector.cmd"));
   writeAsciiFile(path.join(stageDir, "Uninstall Connector.cmd"), readWindowsAssetTemplate("Uninstall Connector.cmd"));
   writeAsciiFile(path.join(stageDir, "README.txt"), readWindowsAssetTemplate("README.txt"));
+  copyLegalDocuments(stageDir);
   writeAsciiFile(issOutputPath, renderInstallerScript(issTemplatePath, stageDir, outputDir));
 
   const compilerPath = resolveInnoSetupCompiler();

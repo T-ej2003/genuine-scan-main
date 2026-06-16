@@ -11,6 +11,7 @@ import {
   listLocalPrinters,
   resolveSelectedPrinter,
   type LocalAgentPrinter,
+  type LocalAgentPrinterDiscoveryDiagnostics,
   type LocalAgentSetupVerification,
 } from "./cups";
 import {
@@ -21,11 +22,16 @@ import {
   type AgentState,
   type CalibrationProfile,
 } from "./state";
+import { buildDiagnosticTestZplPayload } from "./render";
 import { startGatewayWorker } from "./gateway";
 import { startDirectPrintWorker } from "./directPrintWorker";
 import { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
-import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
-import { randomOpaqueToken } from "../utils/security";
+import {
+  LOCAL_AGENT_CAPABILITIES,
+  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+} from "../services/localAgentProtocol";
+import { randomOpaqueToken } from "./crypto";
 import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
 
 const app = express();
@@ -35,6 +41,7 @@ const HOST = String(process.env.PRINT_AGENT_HOST || "127.0.0.1").trim() || "127.
 const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const INVENTORY_TTL_MS = Math.max(1500, Number(String(process.env.PRINT_AGENT_INVENTORY_TTL_MS || "5000").trim()) || 5000);
+const cliArgs = new Set(process.argv.slice(2).map((arg) => String(arg || "").trim()));
 
 type AgentSnapshot = {
   connected: boolean;
@@ -46,6 +53,8 @@ type AgentSnapshot = {
   agentVersion: string;
   protocolVersion: string;
   buildVersion: string;
+  transportDiagnosticsVersion: string;
+  capabilities: typeof LOCAL_AGENT_CAPABILITIES;
   error: string | null;
   agentId: string;
   deviceFingerprint: string;
@@ -56,6 +65,7 @@ type AgentSnapshot = {
   heartbeatSignature: string;
   capabilitySummary: ReturnType<typeof buildCapabilitySummary>;
   printers: LocalAgentPrinter[];
+  printerDiscoveryDiagnostics: LocalAgentPrinterDiscoveryDiagnostics | null;
   calibrationProfile: CalibrationProfile | null;
   setupVerification: LocalAgentSetupVerification;
 };
@@ -78,6 +88,72 @@ const resolveDeviceName = () => {
   }
   return process.platform === "darwin" ? "macOS-workstation" : "workstation";
 };
+
+const buildVersionPayload = () => ({
+  agentVersion: AGENT_VERSION,
+  buildVersion: AGENT_BUILD_VERSION,
+  protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+  capabilities: LOCAL_AGENT_CAPABILITIES,
+});
+
+const runSelfTest = async () => {
+  const diagnosticZpl = buildDiagnosticTestZplPayload();
+  const printerInventory = await listLocalPrinters().catch((error: any) => ({
+    printers: [],
+    error: error?.message || "Printer discovery self-test failed.",
+    diagnostics: null,
+  }));
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        ...buildVersionPayload(),
+        renderModule: {
+          diagnosticZplBytes: Buffer.byteLength(diagnosticZpl, "utf8"),
+          startsWithZplStart: diagnosticZpl.trim().startsWith("^XA"),
+          endsWithZplEnd: diagnosticZpl.trim().endsWith("^XZ"),
+        },
+        printerDiscovery: {
+          printerCount: printerInventory.printers.length,
+          error: printerInventory.error || null,
+          diagnostics: printerInventory.diagnostics || null,
+        },
+      },
+      null,
+      2
+    )
+  );
+};
+
+if (cliArgs.has("--version")) {
+  console.log(AGENT_BUILD_VERSION);
+  process.exit(0);
+}
+
+if (cliArgs.has("--version-json") || cliArgs.has("--status-json")) {
+  console.log(JSON.stringify(buildVersionPayload(), null, 2));
+  process.exit(0);
+}
+
+if (cliArgs.has("--self-test")) {
+  runSelfTest()
+    .then(() => process.exit(0))
+    .catch((error: any) => {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            ...buildVersionPayload(),
+            error: error?.message || "Local connector self-test failed.",
+          },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    });
+}
 
 app.use((_req, res, next) => {
   res.setHeader("Access-Control-Allow-Private-Network", "true");
@@ -148,6 +224,8 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
     agentVersion: AGENT_VERSION,
     protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
     buildVersion: AGENT_BUILD_VERSION,
+    transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+    capabilities: LOCAL_AGENT_CAPABILITIES,
     error,
     agentId: state.agentId,
     deviceFingerprint: state.deviceFingerprint,
@@ -160,6 +238,7 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
     }),
     capabilitySummary: buildCapabilitySummary(printers, selection.printerId),
     printers,
+    printerDiscoveryDiagnostics: inventory.diagnostics || null,
     calibrationProfile: selectedPrinter ? state.calibrationProfiles[selectedPrinter.printerId] || null : null,
     setupVerification,
   };
@@ -261,6 +340,7 @@ app.get("/printers", async (_req, res) => {
     res.json({
       success: true,
       printers: snapshot.printers,
+      printerDiscoveryDiagnostics: snapshot.printerDiscoveryDiagnostics,
       selectedPrinterId: snapshot.selectedPrinterId,
       selectedPrinterName: snapshot.selectedPrinterName,
       connected: snapshot.connected,
@@ -270,6 +350,31 @@ app.get("/printers", async (_req, res) => {
     res.status(500).json({
       success: false,
       error: error?.message || "Local printer discovery failed.",
+    });
+  }
+});
+
+app.get("/debug/windows-printer-discovery", async (_req, res) => {
+  try {
+    const inventory = await listLocalPrinters();
+    res.json({
+      success: inventory.printers.length > 0,
+      platform: process.platform,
+      agentVersion: AGENT_VERSION,
+      buildVersion: AGENT_BUILD_VERSION,
+      printers: inventory.printers,
+      printerDiscoveryDiagnostics: inventory.diagnostics || null,
+      error: inventory.error || null,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      platform: process.platform,
+      agentVersion: AGENT_VERSION,
+      buildVersion: AGENT_BUILD_VERSION,
+      printers: [],
+      printerDiscoveryDiagnostics: null,
+      error: error?.message || "Windows printer discovery debug failed.",
     });
   }
 });
@@ -370,8 +475,10 @@ app.post("/print", async (_req, res) => {
   });
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);
-  startGatewayWorker();
-  startDirectPrintWorker();
-});
+if (!cliArgs.has("--self-test")) {
+  app.listen(PORT, HOST, () => {
+    console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);
+    startGatewayWorker();
+    startDirectPrintWorker();
+  });
+}

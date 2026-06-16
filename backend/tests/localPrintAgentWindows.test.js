@@ -1,6 +1,8 @@
 const {
   buildSetupVerification,
   extractWindowsJobId,
+  listWindowsLocalPrinters,
+  parseWindowsPrinterDiscovery,
   parseWindowsPrinters,
   resolveSelectedPrinter,
   waitForLocalPrintJobCompletion,
@@ -16,33 +18,46 @@ const assert = (condition, message) => {
 
 const run = async () => {
   const printers = parseWindowsPrinters(
-    JSON.stringify([
-      {
-        Name: "Zebra ZD421",
-        DriverName: "ZDesigner ZD421-203dpi ZPL",
-        PortName: "USB001",
-        WorkOffline: false,
-        Default: true,
-        PrinterStatus: 3,
-        ExtendedPrinterStatus: 2,
-      },
-      {
-        Name: "Canon Office Printer",
-        DriverName: "Canon Generic Plus UFR II",
-        PortName: "WSD-12345",
-        WorkOffline: true,
-        Default: false,
-        PrinterStatus: 7,
-        ExtendedPrinterStatus: 7,
-      },
-    ])
+    JSON.stringify({
+      printers: [
+        {
+          Name: "Zebra ZD421",
+          DriverName: "ZDesigner ZD421-203dpi ZPL",
+          PortName: "USB001",
+          WorkOffline: false,
+          Default: true,
+          PrinterStatus: 3,
+          ExtendedPrinterStatus: 2,
+        },
+        {
+          Name: "MSCQR Zebra ZT410 WiFi",
+          DriverName: "ZDesigner ZT410-300dpi ZPL",
+          PortName: "MSCQR-ZT410-WIFI-9100",
+          WorkOffline: false,
+          Default: false,
+          PrinterStatus: "Error",
+          ExtendedPrinterStatus: 2,
+        },
+      ],
+      ports: [
+        { Name: "MSCQR-ZT410-WIFI-9100", PrinterHostAddress: "10.45.144.9", PortNumber: 9100 },
+        { Name: "USB001", PrinterHostAddress: null, PortNumber: null },
+      ],
+      jobs: [
+        { PrinterName: "MSCQR Zebra ZT410 WiFi", ID: 43, Name: "MSCQR label", JobStatus: "Error, Printing, Retained" },
+        { PrinterName: "MSCQR Zebra ZT410 WiFi", ID: 44, Name: "MSCQR label", JobStatus: "Normal" },
+      ],
+    })
   );
 
   assert(printers.length === 2, "Expected two parsed Windows printers");
   assert(printers[0].name === "Zebra ZD421", "Expected printer name");
   assert(printers[0].online === true, "Online Windows printer should be marked online");
   assert(printers[0].isDefault === true, "Default Windows printer should be preserved");
-  assert(printers[1].online === false, "Offline Windows printer should be marked offline");
+  assert(printers[1].online === false, "Windows queue errors should be marked offline");
+  assert(printers[1].portHost === "10.45.144.9", "TCP/IP port host should be preserved");
+  assert(printers[1].portNumber === 9100, "TCP/IP port number should be preserved");
+  assert(printers[1].stuckJobCount === 1, "Stuck retained MSCQR jobs should be counted");
 
   const localPrinters = printers.map((printer) => ({
     printerId: printer.name,
@@ -55,6 +70,15 @@ const run = async () => {
     languages: [],
     mediaSizes: [],
     dpi: null,
+    portName: printer.portName,
+    windowsPortName: printer.portName,
+    windowsPortHost: printer.portHost,
+    windowsPortNumber: printer.portNumber,
+    queueStatus: printer.queueStatus,
+    queueHasErrors: printer.queueHasErrors,
+    stuckJobCount: printer.stuckJobCount,
+    retainedJobCount: printer.retainedJobCount,
+    usbAvailable: printer.portName === "USB001" && printer.online,
   }));
 
   const noPrintersSelection = resolveSelectedPrinter([], null);
@@ -66,6 +90,161 @@ const run = async () => {
   });
   assert(noPrintersVerification.state === "NO_PRINTERS", "No printers should return NO_PRINTERS");
 
+  const fallbackDiscovery = parseWindowsPrinterDiscovery(
+    JSON.stringify({
+      primaryPrinters: [],
+      fallbackPrinters: [
+        {
+          Name: "ZDesigner ZT410-300dpi ZPL",
+          DriverName: "ZDesigner ZT410-300dpi ZPL",
+          PortName: "USB001",
+          WorkOffline: false,
+          Default: true,
+          PrinterStatus: 3,
+          ExtendedPrinterStatus: 2,
+        },
+        {
+          Name: "MSCQR Zebra ZT410 WiFi",
+          DriverName: "ZDesigner ZT410-300dpi ZPL",
+          PortName: "MSCQR-ZT410-WIFI-9100",
+          WorkOffline: false,
+          Default: false,
+          PrinterStatus: 3,
+          ExtendedPrinterStatus: 2,
+        },
+      ],
+      ports: [{ Name: "USB001", PrinterHostAddress: null, PortNumber: null }],
+      jobs: [],
+      primaryError: null,
+      fallbackError: null,
+    })
+  );
+  assert(fallbackDiscovery.diagnostics.primaryEnumerationCount === 0, "Primary discovery count should be tracked");
+  assert(fallbackDiscovery.diagnostics.fallbackEnumerationCount === 2, "Fallback discovery count should be tracked");
+  assert(fallbackDiscovery.diagnostics.selectedSource === "cim", "CIM should be selected when Get-Printer returns no printers");
+  assert(
+    fallbackDiscovery.rows.some((printer) => printer.name === "ZDesigner ZT410-300dpi ZPL" && printer.portName === "USB001"),
+    "Fallback discovery should include the Zebra USB queue"
+  );
+  const fallbackLocalPrinters = fallbackDiscovery.rows.map((printer) => ({
+    printerId: printer.name,
+    printerName: printer.name,
+    model: printer.driverName,
+    connection: printer.portName === "USB001" ? "usb" : "network",
+    online: printer.portName === "USB001",
+    isDefault: printer.isDefault,
+    protocols: printer.portName === "USB001" ? ["usb"] : ["tcp"],
+    languages: ["ZPL"],
+    mediaSizes: [],
+    dpi: null,
+    portName: printer.portName,
+    windowsPortName: printer.portName,
+    queueStatus: printer.queueStatus,
+    queueHasErrors: printer.portName !== "USB001",
+    discoverySource: printer.discoverySource,
+  }));
+  const fallbackSelection = resolveSelectedPrinter(fallbackLocalPrinters, null);
+  const fallbackVerification = buildSetupVerification({
+    printers: fallbackLocalPrinters,
+    selection: fallbackSelection,
+    connected: fallbackSelection.printer?.online === true,
+  });
+  assert(
+    fallbackSelection.printerId === "ZDesigner ZT410-300dpi ZPL",
+    "Fallback inventory should prefer the real Zebra USB queue over stale WiFi"
+  );
+  assert(fallbackVerification.state !== "NO_PRINTERS", "Fallback USB discovery must not report NO_PRINTERS");
+  assert(fallbackVerification.state === "READY", "Fallback USB discovery should verify READY");
+
+  const toUtf16LeWithBom = (value) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(value, "utf16le")]);
+  const packagedRuntimeDiscovery = await listWindowsLocalPrinters({
+    execPowerShellJsonCommand: async (commandName, command) => {
+      assert(command.includes("ConvertTo-Json"), "Windows discovery commands must use JSON output");
+      if (commandName === "powershell-get-printer") {
+        return {
+          commandPath: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          exitCode: 0,
+          stdout: "[]",
+          stderr: "",
+        };
+      }
+      if (commandName === "cim") {
+        return {
+          commandPath: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          exitCode: 0,
+          stdout: toUtf16LeWithBom(
+            JSON.stringify([
+              {
+                Name: "ZDesigner ZT410-300dpi ZPL",
+                DriverName: "ZDesigner ZT410-300dpi ZPL",
+                PortName: "USB001",
+                WorkOffline: false,
+                Default: true,
+                Local: true,
+                Network: false,
+                PrinterStatus: 3,
+              },
+              {
+                Name: "MSCQR Zebra ZT410 WiFi",
+                DriverName: "ZDesigner ZT410-300dpi ZPL",
+                PortName: "MSCQR-ZT410-WIFI-9100",
+                WorkOffline: false,
+                Default: false,
+                Local: false,
+                Network: true,
+                PrinterStatus: 3,
+              },
+            ])
+          ),
+          stderr: "",
+        };
+      }
+      return {
+        commandPath: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        exitCode: 0,
+        stdout: JSON.stringify([{ Name: "USB001", PrinterHostAddress: null, PortNumber: null }]),
+        stderr: "",
+      };
+    },
+    portProbe: async () => false,
+  });
+  assert(packagedRuntimeDiscovery.error === null, "Mocked packaged discovery should not return an error");
+  assert(
+    packagedRuntimeDiscovery.diagnostics.primaryEnumerationCount === 0,
+    "Mocked Get-Printer empty result should be counted"
+  );
+  assert(
+    packagedRuntimeDiscovery.diagnostics.fallbackEnumerationCount === 2,
+    "Mocked CIM UTF-16 JSON result should be counted"
+  );
+  assert(
+    packagedRuntimeDiscovery.diagnostics.selectedSource === "cim",
+    "Mocked packaged discovery should use CIM when Get-Printer is empty"
+  );
+  assert(
+    packagedRuntimeDiscovery.diagnostics.commands.fallback.stdoutLength > 0 &&
+      packagedRuntimeDiscovery.diagnostics.commands.fallback.rawStdoutSample.includes("ZDesigner ZT410-300dpi ZPL"),
+    "Fallback command diagnostics should expose safe stdout evidence"
+  );
+  assert(
+    packagedRuntimeDiscovery.printers.some(
+      (printer) =>
+        printer.printerName === "ZDesigner ZT410-300dpi ZPL" &&
+        printer.portName === "USB001" &&
+        printer.online === true &&
+        printer.usbAvailable === true
+    ),
+    "Mocked packaged discovery should return the USB Zebra printer"
+  );
+  const mockedWifiQueue = packagedRuntimeDiscovery.printers.find(
+    (printer) => printer.printerName === "MSCQR Zebra ZT410 WiFi"
+  );
+  assert(mockedWifiQueue && mockedWifiQueue.online === false, "Stale WiFi queue must be unavailable without TCP 9100");
+  assert(
+    resolveSelectedPrinter(packagedRuntimeDiscovery.printers, null).printerId === "ZDesigner ZT410-300dpi ZPL",
+    "Packaged discovery should select USB Zebra over stale WiFi"
+  );
+
   const defaultReadySelection = resolveSelectedPrinter(localPrinters, null);
   const defaultReadyVerification = buildSetupVerification({
     printers: localPrinters,
@@ -75,7 +254,7 @@ const run = async () => {
   assert(defaultReadySelection.selectionSource === "default", "Default online printer should win selection");
   assert(defaultReadyVerification.state === "READY", "Online default printer should verify as READY");
 
-  const offlinePersistedSelection = resolveSelectedPrinter(localPrinters, "Canon Office Printer");
+  const offlinePersistedSelection = resolveSelectedPrinter(localPrinters, "MSCQR Zebra ZT410 WiFi");
   const offlinePersistedVerification = buildSetupVerification({
     printers: localPrinters,
     selection: offlinePersistedSelection,
@@ -92,7 +271,7 @@ const run = async () => {
 
   const nonDefaultPrinters = [
     { ...localPrinters[0], isDefault: false, online: false, printerName: "Offline Defaultless", printerId: "Offline Defaultless" },
-    { ...localPrinters[1], printerName: "Brother Ready", printerId: "Brother Ready", online: true, isDefault: false },
+    { ...localPrinters[1], printerName: "Brother Ready", printerId: "Brother Ready", online: true, isDefault: false, queueHasErrors: false },
   ];
   const firstOnlineSelection = resolveSelectedPrinter(nonDefaultPrinters, null);
   const firstOnlineVerification = buildSetupVerification({

@@ -17,6 +17,7 @@ import { getPrinterSseSignSecret } from "../utils/secretConfig";
 import { boundedJsonSchema } from "../utils/boundedJson";
 import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
 import { writeSseRealtimeEnvelope } from "../utils/realtime";
+import { getOrComputeVersionedCache } from "../services/versionedCacheService";
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
   UserRole.MANUFACTURER_ADMIN,
@@ -37,6 +38,8 @@ const heartbeatSchema = z.object({
   agentVersion: z.string().trim().max(80).optional(),
   protocolVersion: z.string().trim().max(80).optional(),
   buildVersion: z.string().trim().max(80).optional(),
+  transportDiagnosticsVersion: z.string().trim().max(80).optional(),
+  capabilities: boundedJsonSchema({ maxDepth: 2, maxKeys: 20, maxArrayLength: 10 }).optional(),
   error: z.string().trim().max(500).optional(),
   agentId: z.string().trim().max(180).optional(),
   deviceFingerprint: z.string().trim().max(256).optional(),
@@ -104,6 +107,11 @@ const buildDegradedHeartbeatStatus = (input: z.infer<typeof heartbeatSchema>, cu
     agentVersion: input.agentVersion || currentStatus?.agentVersion || null,
     protocolVersion: input.protocolVersion || currentStatus?.protocolVersion || null,
     buildVersion: input.buildVersion || currentStatus?.buildVersion || null,
+    transportDiagnosticsVersion: input.transportDiagnosticsVersion || currentStatus?.transportDiagnosticsVersion || null,
+    capabilities:
+      (input.capabilities && typeof input.capabilities === "object" ? input.capabilities : null) ||
+      currentStatus?.capabilities ||
+      null,
     connectorUpdateRequired: Boolean(currentStatus?.connectorUpdateRequired),
     capabilitySummary:
       (input.capabilitySummary && typeof input.capabilitySummary === "object" ? input.capabilitySummary : null) ||
@@ -148,6 +156,8 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
         agentVersion: parsed.data.agentVersion || null,
         protocolVersion: parsed.data.protocolVersion || null,
         buildVersion: parsed.data.buildVersion || null,
+        transportDiagnosticsVersion: parsed.data.transportDiagnosticsVersion || null,
+        capabilities: parsed.data.capabilities || null,
         error: parsed.data.error || null,
         sourceIp: req.ip,
         userAgent: req.get("user-agent") || null,
@@ -313,9 +323,12 @@ export const getPrinterConnectionStatus = async (req: AuthRequest, res: Response
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
+    const scopeKey = [req.user.role, req.user.userId, req.user.licenseeId || "none", req.user.orgId || "none"].join(":");
     return res.json({
       success: true,
-      data: await getPrinterConnectionStatusForUser(req.user.userId),
+      data: await getOrComputeVersionedCache("printer-status", scopeKey, 5, () =>
+        getPrinterConnectionStatusForUser(req.user!.userId)
+      ),
     });
   } catch (error: any) {
     console.error("getPrinterConnectionStatus error:", error);

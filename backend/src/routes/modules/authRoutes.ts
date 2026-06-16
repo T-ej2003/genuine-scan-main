@@ -1,5 +1,4 @@
 import { type RequestHandler, Router } from "express";
-import rateLimit from "express-rate-limit";
 
 import {
   authenticate,
@@ -14,6 +13,7 @@ import {
   buildPublicIpRateLimitKey,
   createPublicActorRateLimiter,
   createPublicIpRateLimiter,
+  createSharedRateLimiter,
   fromAuthorizationBearer,
   fromBodyFields,
   fromParamFields,
@@ -156,7 +156,7 @@ const adminInviteActorLimiter = createPublicActorRateLimiter({
   resourceResolver: composeRequestResolvers(fromBodyFields("email"), fromParamFields("id")),
 });
 
-const sessionReadRouteLimiter = rateLimit({
+const sessionReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 60,
   standardHeaders: true,
@@ -169,7 +169,7 @@ const sessionReadRouteLimiter = rateLimit({
   ),
 });
 
-const sessionReadPreAuthRouteLimiter = rateLimit({
+const sessionReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 70,
   standardHeaders: true,
@@ -179,7 +179,7 @@ const sessionReadPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("auth.session-read:pre-auth", "Too many account session reads. Please wait before retrying."),
 });
 
-const secureSessionRouteLimiter = rateLimit({
+const secureSessionRouteLimiter = createSharedRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -191,7 +191,7 @@ const secureSessionRouteLimiter = rateLimit({
   ),
 });
 
-const secureSessionPreAuthRouteLimiter = rateLimit({
+const secureSessionPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 24,
   standardHeaders: true,
@@ -209,7 +209,7 @@ const secureSessionPreAuthRouteLimiter = rateLimit({
   ),
 });
 
-const mfaRouteLimiter = rateLimit({
+const mfaRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 15,
   standardHeaders: true,
@@ -219,7 +219,7 @@ const mfaRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("admin.mfa", "Too many MFA security actions. Please wait before retrying."),
 });
 
-const mfaPreAuthRouteLimiter = rateLimit({
+const mfaPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 18,
   standardHeaders: true,
@@ -234,7 +234,7 @@ const mfaPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("admin.mfa:pre-auth", "Too many MFA security actions. Please wait before retrying."),
 });
 
-const adminInviteRouteLimiter = rateLimit({
+const adminInviteRouteLimiter = createSharedRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 12,
   standardHeaders: true,
@@ -249,7 +249,7 @@ const adminInviteRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("admin.invite", "Too many invite actions. Please wait before retrying."),
 });
 
-const adminInvitePreAuthRouteLimiter = rateLimit({
+const adminInvitePreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 18,
   standardHeaders: true,

@@ -1,5 +1,4 @@
 import { Request, Router, type RequestHandler } from "express";
-import rateLimit from "express-rate-limit";
 import { authenticate, authenticateSSE, requireRecentAdminMfa } from "../middleware/auth";
 import { requireAuditViewer, requirePlatformAdmin } from "../middleware/rbac";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
@@ -10,13 +9,14 @@ import {
   composeRequestResolvers,
   createPublicActorRateLimiter,
   createPublicIpRateLimiter,
+  createSharedRateLimiter,
   fromAuthorizationBearer,
   fromParamFields,
   fromUserAgent,
 } from "../middleware/publicRateLimit";
 import { createRateLimitJsonHandler } from "../observability/rateLimitMetrics";
 
-const auditReadRouteLimiter: RequestHandler = rateLimit({
+const auditReadRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 30,
   standardHeaders: true,
@@ -25,7 +25,7 @@ const auditReadRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("audit.read", "Too many audit read requests. Please wait before retrying."),
 });
 
-const auditLogsReadPreAuthRouteLimiter: RequestHandler = rateLimit({
+const auditLogsReadPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 45,
   standardHeaders: true,
@@ -35,7 +35,7 @@ const auditLogsReadPreAuthRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("audit.logs-read:pre-auth", "Too many audit read requests. Please wait before retrying."),
 });
 
-const auditExportRouteLimiter: RequestHandler = rateLimit({
+const auditExportRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 10,
   standardHeaders: true,
@@ -44,7 +44,7 @@ const auditExportRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("audit.export", "Too many audit export requests. Please wait before retrying."),
 });
 
-const auditLogsExportPreAuthRouteLimiter: RequestHandler = rateLimit({
+const auditLogsExportPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 18,
   standardHeaders: true,
@@ -54,7 +54,7 @@ const auditLogsExportPreAuthRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("audit.logs-export:pre-auth", "Too many audit export requests. Please wait before retrying."),
 });
 
-const auditFraudReadRouteLimiter: RequestHandler = rateLimit({
+const auditFraudReadRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -63,7 +63,7 @@ const auditFraudReadRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("audit.fraud-read", "Too many fraud review reads. Please wait before retrying."),
 });
 
-const auditFraudReportsReadPreAuthRouteLimiter: RequestHandler = rateLimit({
+const auditFraudReportsReadPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 28,
   standardHeaders: true,
@@ -73,7 +73,7 @@ const auditFraudReportsReadPreAuthRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("audit.fraud-read:pre-auth", "Too many fraud review reads. Please wait before retrying."),
 });
 
-const auditFraudMutationRouteLimiter: RequestHandler = rateLimit({
+const auditFraudMutationRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 10,
   standardHeaders: true,
@@ -82,7 +82,7 @@ const auditFraudMutationRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("audit.fraud-mutation", "Too many fraud review actions. Please wait before retrying."),
 });
 
-const auditFraudReportsRespondPreAuthRouteLimiter: RequestHandler = rateLimit({
+const auditFraudReportsRespondPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 14,
   standardHeaders: true,
@@ -97,7 +97,7 @@ const auditFraudReportsRespondPreAuthRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("audit.fraud-mutation:pre-auth", "Too many fraud review actions. Please wait before retrying."),
 });
 
-const auditStreamPreAuthRouteLimiter: RequestHandler = rateLimit({
+const auditStreamPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 24,
   standardHeaders: true,

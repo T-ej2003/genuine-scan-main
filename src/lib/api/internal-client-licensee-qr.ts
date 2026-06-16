@@ -170,7 +170,10 @@ export const createLicenseeQrApi = (core: ApiClientCore) => ({
     const params = new URLSearchParams();
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
     const query = params.toString() ? `?${params.toString()}` : "";
-    return core.request<any[]>(`/qr/batches${query}`);
+    return controlledDashboardGet(`qr:batches:${query}`, () => core.request<any[]>(`/qr/batches${query}`), {
+      ttlMs: 20_000,
+      minRefreshMs: 10_000,
+    });
   },
 
   async deleteBatch(batchId: string) {

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { APP_PATHS, getRoleDisplayLabel } from "@/app/route-metadata";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,13 +21,16 @@ import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useDashboardAuditLogs, useDashboardStats } from "@/features/dashboard/hooks";
 import { buildOverviewLifecycleSteps } from "@/features/dashboard/presentation";
+import { applyAuditDeltaToCache, applyDashboardSnapshotToCache } from "@/features/dashboard/realtime-cache";
 import apiClient from "@/lib/api-client";
+import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import { ApiResponseError } from "@/lib/api/query-utils";
 import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
+import { canPollVisibleDocument, pollingPolicy } from "@/lib/query-polling-policy";
 
 import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/runtime/dashboard.ts";
 
-const STATS_POLL_MS = 30_000;
+const STATS_POLL_MS = pollingPolicy.dashboardFallbackMs;
 type StatusFocus = "all" | "dormant" | "allocated" | "printed" | "scanned";
 type QrStatsDashboardExtras = QrStatsDTO & {
   suspiciousScans?: number;
@@ -69,6 +73,8 @@ const normalizeLegacyPublicCodeReport = (value: unknown): LegacyPublicCodeReport
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const activePrintSuppressed = useActivePrintSessionSuppression();
   const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
   const canReadAuditFeed = user?.role === "super_admin" || user?.role === "licensee_admin";
   const dashboardQuery = useDashboardStats(scopedLicenseeId);
@@ -101,6 +107,7 @@ export default function Dashboard() {
   }, [auditLogsQuery.data]);
 
   const refreshDashboard = useCallback(async (options?: { bypassCache?: boolean }) => {
+    if (activePrintSuppressed && !options?.bypassCache) return;
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
     if (options?.bypassCache) {
       clearDashboardReadCache(["dashboard:stats", "qr:stats", "audit:logs"]);
@@ -116,7 +123,7 @@ export default function Dashboard() {
     });
 
     return refreshInFlightRef.current;
-  }, [auditLogsRefetch, canReadAuditFeed, dashboardRefetch]);
+  }, [activePrintSuppressed, auditLogsRefetch, canReadAuditFeed, dashboardRefetch]);
 
   useEffect(() => {
     const closeRealtime = () => {
@@ -132,7 +139,7 @@ export default function Dashboard() {
       setSseConnected(false);
     };
 
-    if (!liveUpdates) {
+    if (!liveUpdates || activePrintSuppressed) {
       setLiveSummary(null);
       setLiveQrStats(null);
       setLiveLogs(null);
@@ -145,7 +152,7 @@ export default function Dashboard() {
     // start polling stats (fallback when SSE disconnects)
     closeRealtime();
     pollRef.current = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
+      if (!canPollVisibleDocument()) return;
       if (sseConnectedRef.current) return;
       void refreshDashboard();
     }, STATS_POLL_MS);
@@ -155,21 +162,16 @@ export default function Dashboard() {
       refreshTimerRef.current = window.setTimeout(() => {
         refreshTimerRef.current = null;
         void refreshDashboard();
-      }, 350);
+      }, 30_000);
     };
 
     stopSseRef.current = apiClient.streamDashboardEvents(
       (envelope) => {
         if (envelope?.type === "snapshot") {
           const payload = envelope?.payload || {};
-          const summary = payload.summary && typeof payload.summary === "object" ? (payload.summary as Record<string, unknown>) : {};
-          setLiveSummary({
-            totalQRCodes: Number(summary.totalQRCodes ?? 0),
-            activeLicensees: Number(summary.activeLicensees ?? 0),
-            manufacturers: Number(summary.manufacturers ?? 0),
-            totalBatches: Number(summary.totalBatches ?? 0),
-          });
-          setLiveQrStats((payload.qrStats || {}) as QrStatsDTO);
+          const { summary, qrStats } = applyDashboardSnapshotToCache(queryClient, scopedLicenseeId, payload);
+          setLiveSummary(summary);
+          setLiveQrStats(qrStats);
           setLastUpdated(new Date());
           return;
         }
@@ -177,7 +179,7 @@ export default function Dashboard() {
           const payload = envelope?.payload || {};
           const log = payload.log as AuditLogDTO | undefined;
           if (log) {
-            setLiveLogs((prev) => [log, ...(prev || latestAuditLogsRef.current)].slice(0, 10));
+            setLiveLogs((prev) => applyAuditDeltaToCache(queryClient, log, prev || latestAuditLogsRef.current));
           }
           return;
         }
@@ -198,7 +200,7 @@ export default function Dashboard() {
     return () => {
       closeRealtime();
     };
-  }, [canReadAuditFeed, liveUpdates, refreshDashboard, scopedLicenseeId, user?.role]);
+  }, [activePrintSuppressed, canReadAuditFeed, liveUpdates, queryClient, refreshDashboard, scopedLicenseeId, user?.role]);
 
   useEffect(() => {
     if (dashboardQuery.dataUpdatedAt) {

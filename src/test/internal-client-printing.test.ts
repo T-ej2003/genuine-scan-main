@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createPrintingApi } from "@/lib/api/internal-client-printing";
+import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
 import type { ApiClientCore, ApiResponse } from "@/lib/api/internal-client-core";
 
 type RequestPayload = {
@@ -18,6 +19,11 @@ const createCore = (request: (endpoint: string, options?: RequestInit) => Promis
 });
 
 describe("printing api request control", () => {
+  afterEach(() => {
+    clearRequestCoordinator();
+    vi.clearAllMocks();
+  });
+
   it("sends the print job creation payload with the saved printer profile UUID only", async () => {
     const request = vi.fn(async () => ({ success: true, data: { printJobId: "job-1" } }));
     const api = createPrintingApi(createCore(request));
@@ -81,6 +87,37 @@ describe("printing api request control", () => {
     expect(request).toHaveBeenCalledWith(
       "/manufacturer/printers/62eea666-5a7f-444a-94fb-8fa040396874/test-label",
       expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("suppresses mutation fanout for live print control actions", async () => {
+    const request = vi.fn(async () => ({ success: true, data: { status: "PARTIALLY_COMPLETED" } }));
+    const api = createPrintingApi(createCore(request));
+
+    await api.stopPrintJob("job-stop", "operator stopped this run");
+    await api.pausePrintJob("job-pause", "operator paused this run");
+    await api.resumePrintJob("job-resume");
+
+    expect(request).toHaveBeenCalledWith(
+      "/manufacturer/print-jobs/job-stop/stop",
+      expect.objectContaining({
+        method: "POST",
+        suppressMutationEvent: true,
+      })
+    );
+    expect(request).toHaveBeenCalledWith(
+      "/manufacturer/print-jobs/job-pause/pause",
+      expect.objectContaining({
+        method: "POST",
+        suppressMutationEvent: true,
+      })
+    );
+    expect(request).toHaveBeenCalledWith(
+      "/manufacturer/print-jobs/job-resume/resume",
+      expect.objectContaining({
+        method: "POST",
+        suppressMutationEvent: true,
+      })
     );
   });
 
@@ -205,7 +242,7 @@ describe("printing api request control", () => {
 
     await api.getPrinterConnectionStatus({ force: true });
     const rateLimited = await api.getPrinterConnectionStatus({ force: true });
-    const paused = await api.getPrinterConnectionStatus({ force: true });
+    const paused = await api.getPrinterConnectionStatus();
 
     expect(request).toHaveBeenCalledTimes(2);
     expect(rateLimited.success).toBe(true);

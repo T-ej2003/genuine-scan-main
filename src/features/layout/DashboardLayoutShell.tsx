@@ -64,6 +64,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const printerConnection = useManufacturerPrinterConnection({
     user,
     contextualHelpRoute,
+    currentPath: location.pathname,
     navigate,
     toast,
   });

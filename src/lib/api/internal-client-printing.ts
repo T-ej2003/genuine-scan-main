@@ -211,11 +211,13 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     if (options?.batchId) params.append("batchId", options.batchId);
     if (options?.limit) params.append("limit", String(options.limit));
     const query = params.toString() ? `?${params.toString()}` : "";
-    return core.request<any[]>(`/manufacturer/print-jobs${query}`);
+    return controlledPrinterGet<any[]>(`manufacturer-print-jobs:${query}`, 30_000, () => core.request<any[]>(`/manufacturer/print-jobs${query}`));
   },
 
   async getPrintJobStatus(jobId: string) {
-    return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`);
+    return controlledPrinterGet<any>(`manufacturer-print-job-status:${jobId}`, 30_000, () =>
+      core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`)
+    );
   },
 
   ...createPrintingOperationsApi(core),
@@ -259,6 +261,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     agentVersion?: string;
     protocolVersion?: string;
     buildVersion?: string;
+    transportDiagnosticsVersion?: string; capabilities?: Record<string, unknown> | null;
     error?: string;
     agentId?: string;
     deviceFingerprint?: string;
@@ -323,6 +326,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       agentVersion?: string | null;
       protocolVersion?: string | null;
       buildVersion?: string | null;
+      transportDiagnosticsVersion?: string | null; capabilities?: Record<string, unknown> | null;
       connectorUpdateRequired?: boolean;
       capabilitySummary?: {
         transports: string[];
@@ -386,6 +390,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       agentVersion?: string | null;
       protocolVersion?: string | null;
       buildVersion?: string | null;
+      transportDiagnosticsVersion?: string | null; capabilities?: Record<string, unknown> | null;
       connectorUpdateRequired?: boolean;
       capabilitySummary?: {
         transports: string[];
@@ -460,6 +465,11 @@ export const createPrintingApi = (core: ApiClientCore) => ({
           agentVersion: String((data as any).agentVersion || "").trim() || null,
           protocolVersion: String((data as any).protocolVersion || "").trim() || null,
           buildVersion: String((data as any).buildVersion || "").trim() || null,
+          transportDiagnosticsVersion: String((data as any).transportDiagnosticsVersion || "").trim() || null,
+          capabilities:
+            (data as any).capabilities && typeof (data as any).capabilities === "object"
+              ? ((data as any).capabilities as Record<string, unknown>)
+              : null,
           error: String((data as any).error || "").trim() || null,
           agentId: String((data as any).agentId || "").trim() || null,
           deviceFingerprint: String((data as any).deviceFingerprint || "").trim() || null,

@@ -58,7 +58,8 @@ export const verifyMfaBootstrapToken = (token: string): MfaBootstrapPayload => {
     payload?.stage !== "MFA_BOOTSTRAP" ||
     !payload.userId ||
     !payload.email ||
-    !payload.role
+    !payload.role ||
+    !payload.sessionId
   ) {
     throw new Error("INVALID_MFA_BOOTSTRAP_TOKEN");
   }

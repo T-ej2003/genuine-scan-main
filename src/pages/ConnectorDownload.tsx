@@ -25,20 +25,30 @@ import { ConnectorReleaseDiagnostics } from "@/features/connector/ConnectorRelea
 import { cn } from "@/lib/utils";
 import apiClient from "@/lib/api-client";
 type ConnectorPlatformRelease = {
-  platform: "macos" | "windows";
+  platform: "macos" | "windows" | "windowsUnsignedTest";
   label: string;
   installerKind: "pkg" | "zip" | "exe" | "msi";
-  trustLevel: "trusted" | "unsigned";
+  artifactType?: string | null;
+  trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
   signatureStatus?: "signed" | "unsigned" | "unknown";
+  smartAppControlSafe?: boolean;
   publisherName?: string | null;
   signedAt?: string | null;
+  signatureSubject?: string | null;
+  signatureIssuer?: string | null;
+  certificateThumbprint?: string | null;
+  timestamped?: boolean;
+  timestampAuthority?: string | null;
   windowsTrustMode?: "trusted" | "unsigned-test";
+  internalOnly?: boolean;
   filename: string;
   architecture: string;
   bytes: number;
   sha256: string;
   protocolVersion?: string | null;
   buildVersion?: string | null;
+  legalDocumentsIncluded?: string[];
+  releaseNotesIncluded?: boolean;
   notes: string[];
   contentType: string;
   downloadPath: string;
@@ -59,9 +69,13 @@ type LatestConnectorRelease = {
     minimumBuildVersion?: string | null;
     summary: string;
     notes: string[];
+    productionSignedAvailable?: boolean;
+    productionSignedMessage?: string | null;
+    internalArtifactsAvailable?: boolean;
     platforms: {
       macos: ConnectorPlatformRelease | null;
       windows: ConnectorPlatformRelease | null;
+      windowsUnsignedTest?: ConnectorPlatformRelease | null;
     };
   };
 };
@@ -174,20 +188,25 @@ const platformCopy: Record<
   },
 };
 const formatTrustLabel = (item: ConnectorPlatformRelease) => {
-  if (item.platform !== "windows") {
-    return item.trustLevel === "trusted" ? "Signed release" : "Unsigned release";
+  if (item.trustLevel === "internal-test" || item.internalOnly) {
+    return "Internal validation only";
   }
-  if (item.trustLevel === "trusted") {
+  if (item.platform === "macos") {
+    return item.trustLevel === "production" || item.trustLevel === "trusted" ? "Signed release" : "Unsigned release";
+  }
+  if (item.trustLevel === "production" || item.trustLevel === "trusted") {
     return "Signed Windows installer";
   }
   return item.installerKind === "zip" ? "Unsigned test package" : "Unsigned test installer";
 };
 const formatSignatureLabel = (item: ConnectorPlatformRelease) => {
-  if (item.platform === "windows" && item.signatureStatus === "signed") return "Azure Artifact Signing / signed";
+  if ((item.platform === "windows" || item.platform === "windowsUnsignedTest") && item.signatureStatus === "signed") {
+    return "Azure Trusted Signing / signed";
+  }
   if (item.signatureStatus === "signed") return "Signed";
   if (item.signatureStatus === "unknown") return "Signature not recorded";
   if (item.signatureStatus === "unsigned") return "Unsigned";
-  return item.trustLevel === "trusted" ? "Signed" : "Unsigned";
+  return item.trustLevel === "production" || item.trustLevel === "trusted" ? "Signed" : "Unsigned";
 };
 const getWindowsUnsignedCopy = (
   item: ConnectorPlatformRelease,
@@ -221,7 +240,7 @@ const getDownloadCardCopy = (
   if (item.platform === "macos") {
     return platformCopy.macos;
   }
-  if (item.trustLevel === "unsigned") {
+  if (item.trustLevel === "unsigned" || item.trustLevel === "internal-test" || item.internalOnly) {
     return getWindowsUnsignedCopy(item);
   }
   return platformCopy.windows;
@@ -259,6 +278,7 @@ const automaticBehaviors = [
 export default function ConnectorDownload() {
   const [params] = useSearchParams();
   const inviteToken = useMemo(() => String(params.get("inviteToken") || "").trim(), [params]);
+  const showInternalArtifacts = useMemo(() => ["1", "true"].includes(String(params.get("internal") || "").trim().toLowerCase()), [params]);
   const [release, setRelease] = useState<LatestConnectorRelease | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -278,7 +298,7 @@ export default function ConnectorDownload() {
       setLoading(true);
       setError(null);
       const [releaseRes, previewRes, localRes] = await Promise.all([
-        apiClient.getLatestConnectorRelease(),
+        apiClient.getLatestConnectorRelease({ includeInternal: showInternalArtifacts }),
         inviteToken ? apiClient.getInvitePreview(inviteToken) : Promise.resolve<InvitePreviewResponse | null>(null),
         apiClient.getLocalPrintAgentStatus().catch(() => null),
       ]);
@@ -321,13 +341,19 @@ export default function ConnectorDownload() {
     return () => {
       cancelled = true;
     };
-  }, [inviteToken]);
+  }, [inviteToken, showInternalArtifacts]);
   const downloadCards = useMemo(() => {
     if (!release) return [] as DownloadCard[];
     return (["macos", "windows"] as const)
       .map((platformKey) => {
         const item = release.release.platforms[platformKey];
         if (!item) return null;
+        if (
+          platformKey === "windows" &&
+          (item.internalOnly || item.signatureStatus !== "signed" || item.installerKind === "zip")
+        ) {
+          return null;
+        }
         return {
           ...item,
           ...getDownloadCardCopy(item),
@@ -337,6 +363,16 @@ export default function ConnectorDownload() {
       })
       .filter(Boolean) as DownloadCard[];
   }, [detectedPlatform, release]);
+  const internalWindowsCard = useMemo(() => {
+    if (!release?.release.platforms.windowsUnsignedTest) return null;
+    const item = release.release.platforms.windowsUnsignedTest;
+    return {
+      ...item,
+      ...getDownloadCardCopy(item),
+      recommended: false,
+      href: normalizeDownloadHref(item.downloadUrl, item.downloadPath),
+    } as DownloadCard;
+  }, [release]);
   const detectedCard = useMemo(
     () => (detectedPlatform === "unknown" ? null : downloadCards.find((item) => item.platform === detectedPlatform) || null),
     [detectedPlatform, downloadCards],
@@ -348,6 +384,8 @@ export default function ConnectorDownload() {
   const missingDetectedPlatformRelease = detectedPlatform !== "unknown" && !detectedCard;
   const recommendedCardIsUnsignedWindows = recommendedCard?.platform === "windows" && recommendedCard.trustLevel === "unsigned";
   const recommendedCardIsUnsignedWindowsZip = recommendedCardIsUnsignedWindows && recommendedCard?.installerKind === "zip";
+  const signedWindowsUnavailable =
+    Boolean(release && detectedPlatform === "windows" && !release.release.platforms.windows && release.release.productionSignedAvailable === false);
   const requiredProtocol = release?.requiredProtocolVersion || release?.release.requiredProtocolVersion || "local-agent-direct-v2";
   const availableConnectorVersion = release?.latestVersion || release?.release.version || "";
   const installedConnectorVersion =
@@ -502,16 +540,21 @@ export default function ConnectorDownload() {
                     in after that. Windows setup checks the local printer before it says the computer is ready.
                   </p>
                 </div>
-                {missingDetectedPlatformRelease ? (
+                  {missingDetectedPlatformRelease ? (
                   <Alert className="mt-5 border-amber-200 bg-amber-50 text-amber-950">
                     <AlertCircle className="h-4 w-4 text-amber-700" />
                     <AlertTitle>
-                      {detectedPlatform === "macos"
+                      {signedWindowsUnavailable
+                        ? "Signed Windows connector is not available yet"
+                        : detectedPlatform === "macos"
                         ? "This Mac does not have a published signed installer yet"
                         : "No installer is published for this device yet"}
                     </AlertTitle>
                     <AlertDescription>
-                      {detectedPlatform === "macos"
+                      {signedWindowsUnavailable
+                        ? release?.release.productionSignedMessage ||
+                          "Contact MSCQR support or run the Windows Connector Signed Release workflow before updating factory workstations."
+                        : detectedPlatform === "macos"
                         ? "MSCQR should not send a Windows download to this Mac. If this Mac already has the printer helper and the printer is working, keep using the current helper until the signed Mac update is published."
                         : "Use the setup guide for now and install the helper only when the matching device download is published."}
                     </AlertDescription>
@@ -718,6 +761,12 @@ export default function ConnectorDownload() {
                                     <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Signature</div>
                                     <div className="mt-1 font-medium text-slate-900">{formatSignatureLabel(item)}</div>
                                   </div>
+                                  {item.legalDocumentsIncluded?.length ? (
+                                    <div className="rounded-2xl bg-white px-3 py-2">
+                                      <div className="text-xs uppercase tracking-[0.16em] text-slate-400">Legal</div>
+                                      <div className="mt-1 font-medium text-slate-900">Legal documents included</div>
+                                    </div>
+                                  ) : null}
                                 </div>
                                 {item.publisherName ? (
                                   <div>
@@ -758,7 +807,42 @@ export default function ConnectorDownload() {
                       </article>
                     );
                   })}
+                  {!downloadCards.length ? (
+                    <Alert className="xl:col-span-2 border-amber-200 bg-amber-50 text-amber-950">
+                      <AlertCircle className="h-4 w-4 text-amber-700" />
+                      <AlertTitle>Signed connector release is not available yet</AlertTitle>
+                      <AlertDescription>
+                        {release.release.productionSignedMessage ||
+                          "Production factory users should wait for the signed Windows connector installer before updating workstations."}
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
                 </div>
+                {internalWindowsCard ? (
+                  <details className="mt-6 rounded-[24px] border border-amber-200 bg-amber-50/80 p-5 text-amber-950">
+                    <summary className="cursor-pointer text-sm font-semibold">
+                      Internal validation package
+                    </summary>
+                    <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                      <div className="space-y-2 text-sm leading-6">
+                        <Badge className="bg-amber-100 text-amber-900 hover:bg-amber-100">Internal validation only</Badge>
+                        <p>
+                          Smart App Control can block this unsigned ZIP. Do not use it for production factory rollout.
+                        </p>
+                        <p className="break-all text-xs text-amber-900">
+                          {internalWindowsCard.filename} · {formatBytes(internalWindowsCard.bytes)} · SHA-256{" "}
+                          {shortenChecksum(internalWindowsCard.sha256)}
+                        </p>
+                      </div>
+                      <Button asChild variant="outline">
+                        <a href={internalWindowsCard.href} data-testid="download-printer-helper-windows-internal">
+                          <Download className="h-4 w-4" />
+                          Download internal ZIP
+                        </a>
+                      </Button>
+                    </div>
+                  </details>
+                ) : null}
               </section>
             ) : null}
             {release ? (

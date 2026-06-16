@@ -4,6 +4,7 @@ import apiClient from "@/lib/api-client";
 import { setOptionalLocalStorageItem } from "@/lib/consent";
 import { chooseStablePrinterSelection } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { canPollVisibleDocument, jitterMs, pollingPolicy } from "@/lib/query-polling-policy";
 
 import { defaultPrinterStatus } from "./print-workflow-utils";
 import type {
@@ -28,6 +29,7 @@ type PrintProgressSetters = {
   setPrintProgressRemaining: Dispatch<SetStateAction<number>>;
   setPrintProgressCurrentCode: Dispatch<SetStateAction<string | null>>;
   setPrintProgressError: Dispatch<SetStateAction<string | null>>;
+  setPrintProgressNotice?: Dispatch<SetStateAction<string | null>>;
   setPrintProgressPrinterName: Dispatch<SetStateAction<string | null>>;
   setPrintProgressDispatchMode: Dispatch<SetStateAction<"LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP" | null>>;
   setDirectRemainingToPrint: Dispatch<SetStateAction<number | null>>;
@@ -38,6 +40,52 @@ type AutoReportPrinterFailure = (params: {
   reason: string;
   diagnostics?: Record<string, unknown>;
 }) => Promise<boolean> | boolean;
+
+export const isPrintJobServerSettled = (job: PrintJobRow | null | undefined) => {
+  if (!job) return false;
+  const total = Number(job.session?.totalItems || job.itemCount || job.quantity || 0);
+  const confirmed = Number(job.session?.confirmedItems || 0);
+  const sessionStatus = String(job.session?.status || "").toUpperCase();
+  const pipelineState = String(job.pipelineState || "").toUpperCase();
+  return (
+    job.status === "CONFIRMED" ||
+    job.status === "PARTIALLY_COMPLETED" ||
+    job.status === "FAILED" ||
+    job.status === "CANCELLED" ||
+    job.status === "STOPPED" ||
+    pipelineState === "STOPPED" ||
+    sessionStatus === "COMPLETED" ||
+    sessionStatus === "FAILED" ||
+    sessionStatus === "CANCELLED" ||
+    sessionStatus === "STOPPED" ||
+    Boolean(job.confirmedAt) ||
+    (total > 0 && confirmed >= total)
+  );
+};
+
+export const formatActionablePrintWorkflowError = (
+  response: any,
+  fallback = "Complete the previous step before continuing."
+) => {
+  const code = String(response?.errorCode || response?.code || "").trim();
+  const requiredPreviousStep = String(response?.requiredPreviousStep || "").trim();
+  const userMessage = String(response?.userMessage || response?.message || response?.error || "").trim();
+  const mapped: Record<string, string> = {
+    PHYSICAL_CONFIRMATION_REQUIRED: "Confirm physical printing before scanning or releasing.",
+    SAMPLE_SCAN_REQUIRED: "Scan one printed label before release.",
+    PRINTER_TEST_LABEL_REQUIRED: "Send and confirm a live printer setup test label before production printing.",
+    APPROVAL_REQUIRED: "A different authorized checker must approve this high-value release.",
+    CHECKER_REQUIRED: "A different authorized checker must approve this release.",
+    MAKER_CANNOT_APPROVE: "The release checker must be a different user.",
+    QR_NOT_IN_PRINT_JOB: "Scan a label from this print job.",
+    QR_VERIFY_TOKEN_REQUIRED: "Scan the exact MSCQR verify QR or paste its verify URL.",
+    PRINT_JOB_NOT_CONFIRMED: "Confirm physical printing before release.",
+    BATCH_ALREADY_RELEASED: "This batch has already been released.",
+    INVALID_STATE_TRANSITION: userMessage || "Complete the previous batch step first.",
+  };
+  const base = mapped[code] || userMessage || fallback;
+  return requiredPreviousStep && !base.includes(requiredPreviousStep) ? `${base} Next step: ${requiredPreviousStep}.` : base;
+};
 
 type BatchPrintOperationContext = PrintProgressSetters & {
   toast: ToastLike;
@@ -71,30 +119,48 @@ export const syncProgressFromPrintJob = (
     setPrintProgressPrinterName,
     setPrintProgressPhase,
     setPrintProgressError,
+    setPrintProgressNotice,
   }: PrintProgressSetters
 ) => {
   if (!job) return;
 
-  const total = Number(job.itemCount || job.quantity || 0);
-  const confirmed = Number(job.session?.confirmedItems || 0);
+  const total = Number(job.session?.totalItems || job.itemCount || job.quantity || 0);
+  const confirmed = Math.min(total || Number.MAX_SAFE_INTEGER, Number(job.session?.confirmedItems || 0));
   const remaining =
     typeof job.session?.remainingToPrint === "number"
-      ? job.session.remainingToPrint
+      ? Math.max(0, job.session.remainingToPrint)
       : Math.max(0, total - confirmed);
+  const serverCompleted =
+    job.status === "CONFIRMED" ||
+    String(job.session?.status || "").toUpperCase() === "COMPLETED" ||
+    Boolean(job.confirmedAt) ||
+    (total > 0 && confirmed >= total);
 
   if (total > 0) setPrintProgressTotal(total);
-  setPrintProgressPrinted(confirmed);
-  setPrintProgressRemaining(remaining);
-  setDirectRemainingToPrint(remaining);
+  setPrintProgressPrinted(serverCompleted && total > 0 ? total : confirmed);
+  setPrintProgressRemaining(serverCompleted ? 0 : remaining);
+  setDirectRemainingToPrint(serverCompleted ? 0 : remaining);
   setPrintProgressDispatchMode((previous) => job.printMode || previous || null);
   setPrintProgressPrinterName((previous) => {
     const resolvedName = String(job.printer?.name || "").trim();
     return resolvedName || previous || null;
   });
 
-  if (job.status === "CONFIRMED") {
+  if (serverCompleted) {
     setPrintProgressPhase("Print job completed");
     setPrintProgressError(null);
+    setPrintProgressNotice?.(null);
+    return;
+  }
+  const stoppedOrPartial =
+    job.status === "PARTIALLY_COMPLETED" ||
+    job.status === "STOPPED" ||
+    String(job.pipelineState || "").toUpperCase() === "STOPPED" ||
+    String(job.session?.status || "").toUpperCase() === "STOPPED";
+  if (stoppedOrPartial) {
+    setPrintProgressPhase(job.status === "PARTIALLY_COMPLETED" ? "Partially completed" : "Print run stopped");
+    setPrintProgressError(null);
+    setPrintProgressNotice?.("Unprinted labels remain recoverable through the controlled recovery flow.");
     return;
   }
   if (job.status === "FAILED") {
@@ -112,7 +178,6 @@ export const syncProgressFromPrintJob = (
     setPrintProgressError(sanitizePrinterUiError(job.failureReason, "This print job was cancelled before completion."));
     return;
   }
-
   const awaitingConfirmation =
     Boolean(job.awaitingConfirmation) ||
     Number(job.session?.awaitingConfirmationCount || 0) > 0 ||
@@ -156,6 +221,8 @@ const reportLocalPrinterHeartbeat = async () => {
     agentVersion?: string;
     protocolVersion?: string;
     buildVersion?: string;
+    transportDiagnosticsVersion?: string;
+    capabilities?: Record<string, unknown> | null;
     error?: string;
     agentId?: string;
     deviceFingerprint?: string;
@@ -178,6 +245,8 @@ const reportLocalPrinterHeartbeat = async () => {
     agentVersion: data.agentVersion || undefined,
     protocolVersion: data.protocolVersion || undefined,
     buildVersion: data.buildVersion || undefined,
+    transportDiagnosticsVersion: data.transportDiagnosticsVersion || undefined,
+    capabilities: data.capabilities || undefined,
     error: data.error || undefined,
     agentId: data.agentId || undefined,
     deviceFingerprint: data.deviceFingerprint || undefined,
@@ -214,6 +283,9 @@ export const printJobCreateFailureMessage = (response: {
   }
   if (errorCode === "printer_not_verified") {
     return "Finish printer verification or choose a verified printer before starting this print run.";
+  }
+  if (errorCode === "printer_test_label_required") {
+    return "Send and confirm a live printer setup test label before starting production printing.";
   }
   if (errorCode === "missing_printer_session") {
     return "Refresh the printer connection, then start the print run again.";
@@ -297,11 +369,11 @@ export const pollPrintJobUntilSettled = async (
     if (response.success && response.data) {
       latest = response.data as PrintJobRow;
       syncProgressFromPrintJob(latest, progressSetters);
-      if (latest.status === "CONFIRMED" || latest.status === "FAILED" || latest.status === "CANCELLED") {
+      if (isPrintJobServerSettled(latest)) {
         return { settled: true as const, job: latest };
       }
     }
-    await sleep(1200);
+    await sleep(canPollVisibleDocument() ? jitterMs(pollingPolicy.activePrintJobMs) : pollingPolicy.hiddenTabBackoffMs);
   }
 
   return { settled: false as const, job: latest };
@@ -322,12 +394,11 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     setPrinterStatus,
     buildCalibrationPayload,
     autoReportPrinterFailure,
-    onBatchesChanged,
-    loadRecentPrintJobs,
     setPrintJobId,
     setPrintProgressOpen,
     setPrintProgressPhase,
     setPrintProgressError,
+    setPrintProgressNotice,
     setPrintProgressCurrentCode,
     setPrintProgressPrinted,
     setPrintProgressTotal,
@@ -496,6 +567,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
   setPrintProgressOpen(true);
   setPrintProgressPhase("Creating secure print session");
   setPrintProgressError(null);
+  setPrintProgressNotice?.(null);
   setPrintProgressCurrentCode(null);
   setPrintProgressPrinted(0);
   setPrintProgressTotal(quantity);
@@ -530,30 +602,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
         description: "A live print job already exists for this batch, so MSCQR resumed its current status instead of creating a duplicate run.",
       });
 
-      const pollResult = await pollPrintJobUntilSettled(activePrintJobId, context, 45_000);
-      if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
-        toast({
-          title: "Print job completed",
-          description: `${pollResult.job.session?.confirmedItems || pollResult.job.quantity} labels are confirmed.`,
-        });
-      } else if (pollResult.settled && pollResult.job?.status === "FAILED") {
-        toast({
-          title: "Print job needs attention",
-          description: sanitizePrinterUiError(
-            pollResult.job.failureReason || pollResult.job.session?.failedReason,
-            "The active print job needs attention before it can continue."
-          ),
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Print job still running",
-          description: "The existing print job is still active. The live status panel is tracking it now.",
-        });
-      }
-
-      await onBatchesChanged?.();
-      await loadRecentPrintJobs();
+      setPrintProgressNotice?.("The live status panel is tracking this print run now.");
       return;
     }
 
@@ -635,38 +684,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
         : "Sending to saved factory printer"
     );
 
-    const pollResult = await pollPrintJobUntilSettled(createdJobId, context);
-    if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
-      toast({
-        title: createdMode === "NETWORK_IPP" ? "Shared printer job complete" : "Factory printer job complete",
-        description: `${pollResult.job.session?.confirmedItems || quantity} labels confirmed by the server.`,
-      });
-      setPrintProgressPhase("Completed");
-      setPrintProgressError(null);
-    } else if (pollResult.settled && pollResult.job?.status === "FAILED") {
-      const message = sanitizePrinterUiError(
-        pollResult.job.failureReason || pollResult.job.session?.failedReason,
-        createdMode === "NETWORK_IPP"
-          ? "The shared printer could not complete this job."
-          : "The factory printer could not complete this job."
-      );
-      toast({
-        title: createdMode === "NETWORK_IPP" ? "Network IPP print failed" : "Network print failed",
-        description: message,
-        variant: "destructive",
-      });
-      setPrintProgressError(message);
-      void autoReportPrinterFailure({
-        context: createdMode === "NETWORK_IPP" ? "network_ipp_print" : "network_direct_print",
-        reason: message,
-        diagnostics: { printJobId: createdJobId, printerId: selectedPrinterProfile.id },
-      });
-    } else {
-      toast({
-        title: "Network print continues in background",
-        description: "This print job is still running. Review the live status below.",
-      });
-    }
+    setPrintProgressNotice?.("The live status panel is tracking this print run now.");
   } else {
     toast({
       title: "Print run started",
@@ -676,45 +694,8 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       data.pipelineState === "QUEUED" ? "Waiting for printer helper" : "Print run active on this computer"
     );
 
-    const pollResult = await pollPrintJobUntilSettled(createdJobId, context, 60_000);
-    if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
-      toast({
-        title: "Print run complete",
-        description: `${pollResult.job.session?.confirmedItems || quantity} labels were confirmed after printing finished.`,
-      });
-      setPrintProgressPhase("Completed");
-      setPrintProgressError(null);
-    } else if (pollResult.settled && pollResult.job?.status === "FAILED") {
-      const safeError = sanitizePrinterUiError(
-        pollResult.job.failureReason || pollResult.job.session?.failedReason,
-        "The printer helper or printer could not finish this label run."
-      );
-      toast({
-        title: "Print run needs attention",
-        description: safeError,
-        variant: "destructive",
-      });
-      setPrintProgressError(safeError);
-      void autoReportPrinterFailure({
-        context: "connector_print",
-        reason: safeError,
-        diagnostics: {
-          printJobId: createdJobId,
-          printedCount: pollResult.job.session?.confirmedItems || 0,
-          remainingToPrint: pollResult.job.session?.remainingToPrint ?? null,
-          printerId: selectedPrinterProfile.id,
-        },
-      });
-    } else {
-      toast({
-        title: "Print run continues in background",
-        description: "Printing is still in progress. Refresh the print status to see the latest confirmed count.",
-      });
-    }
+    setPrintProgressNotice?.("Waiting for connector to claim job.");
   }
-
-  await onBatchesChanged?.();
-  await loadRecentPrintJobs();
 };
 
 export const retryPendingDirectPrint = async (context: BatchPrintOperationContext) => {
@@ -724,6 +705,7 @@ export const retryPendingDirectPrint = async (context: BatchPrintOperationContex
     directRemainingToPrint,
     loadRecentPrintJobs,
     setPrintProgressOpen,
+    setPrintProgressNotice,
   } = context;
 
   if (!printJobId) return;
@@ -732,6 +714,11 @@ export const retryPendingDirectPrint = async (context: BatchPrintOperationContex
   const statusResponse = await apiClient.getPrintJobStatus(printJobId);
   if (statusResponse.success && statusResponse.data) {
     syncProgressFromPrintJob(statusResponse.data as PrintJobRow, context);
+    setPrintProgressNotice?.(null);
+  } else if (statusResponse.status === 429 || String(statusResponse.code || "").toUpperCase() === "RATE_LIMITED") {
+    const seconds = Math.max(1, Math.ceil(Number(statusResponse.retryAfterSec || 10)));
+    setPrintProgressNotice?.(`Status refresh paused for ${seconds} seconds. The print run remains active.`);
+    return;
   }
 
   const latestJob = (statusResponse.data as PrintJobRow | undefined) || null;
@@ -757,26 +744,8 @@ export const retryPendingDirectPrint = async (context: BatchPrintOperationContex
   }
 
   const remaining = latestJob?.session?.remainingToPrint ?? directRemainingToPrint ?? latestJob?.quantity ?? 1;
-  const pollResult = await pollPrintJobUntilSettled(printJobId, context, 45_000);
-  if (pollResult.settled && pollResult.job?.status === "CONFIRMED") {
-    toast({
-      title: "Print job completed",
-      description: `${pollResult.job.session?.confirmedItems || pollResult.job.quantity} labels are now confirmed.`,
-    });
-  } else if (pollResult.settled && pollResult.job?.status === "FAILED") {
-    toast({
-      title: "Print job needs attention",
-      description: sanitizePrinterUiError(
-        pollResult.job.failureReason || pollResult.job.session?.failedReason,
-        "The printer helper or printer could not finish the remaining labels."
-      ),
-      variant: "destructive",
-    });
-  } else {
-    toast({
-      title: "Print job still running",
-      description: `There are still ${remaining} label${remaining === 1 ? "" : "s"} waiting for printer confirmation.`,
-    });
-  }
-  await loadRecentPrintJobs();
+  toast({
+    title: "Print job still running",
+    description: `There are still ${remaining} label${remaining === 1 ? "" : "s"} waiting for printer confirmation.`,
+  });
 };

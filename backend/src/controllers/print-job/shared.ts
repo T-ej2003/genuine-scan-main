@@ -24,6 +24,7 @@ import { getRegisteredPrinterForManufacturer } from "../../services/printerRegis
 import { testNetworkPrinterConnectivity } from "../../services/networkPrinterSocketService";
 import { inspectIppPrinter } from "../../printing/ippClient";
 import { resolvePrinterConfirmationMode } from "../../services/printConfirmationService";
+import { assertPrinterTestLabelConfirmed } from "../../services/printerTestLabelGateService";
 import {
   beginIdempotentAction,
   extractIdempotencyKey,
@@ -209,6 +210,7 @@ export const ensureSelectedPrinterReady = async (params: {
     if (resolvedPrinter.nativePrinterId && activePrinterId && resolvedPrinter.nativePrinterId !== activePrinterId) {
       throw Object.assign(new Error("PRINTER_SELECTION_MISMATCH"), { printerStatus, printer });
     }
+    assertPrinterTestLabelConfirmed(resolvedPrinter);
     return {
       printer: resolvedPrinter,
       printerStatus,
@@ -249,6 +251,7 @@ export const ensureSelectedPrinterReady = async (params: {
           printer,
         });
       }
+      assertPrinterTestLabelConfirmed(printer);
       return {
         printer,
         printerStatus: null,
@@ -304,6 +307,7 @@ export const ensureSelectedPrinterReady = async (params: {
       });
     }
 
+    assertPrinterTestLabelConfirmed(printer);
     return {
       printer,
       printerStatus: null,
@@ -329,6 +333,7 @@ export const ensureSelectedPrinterReady = async (params: {
           printer,
         });
       }
+      assertPrinterTestLabelConfirmed(printer);
       return {
         printer,
         printerStatus: null,
@@ -381,6 +386,7 @@ export const ensureSelectedPrinterReady = async (params: {
           } as any,
         },
       });
+      assertPrinterTestLabelConfirmed({ ...printer, printerUri: inspection.printerUri });
       return {
         printer: {
           ...printer,

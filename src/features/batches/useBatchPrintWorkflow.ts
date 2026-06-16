@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import apiClient from "@/lib/api-client";
+import { clearActivePrintSession, updateActivePrintSession } from "@/lib/active-print-session";
 import { getOptionalLocalStorageItem } from "@/lib/consent";
 import {
   chooseStablePrinterSelection,
@@ -20,18 +21,15 @@ import {
   buildManagedNetworkPrinterNotice,
   defaultPrinterStatus,
   formatDispatchModeLabel,
-  isCompletedPrintProgressPhase,
   isTerminalPrintProgressPhase,
   normalizePrinterRows,
   PRINTER_FAILURE_AUTO_REPORT_COOLDOWN_MS,
 } from "./print-workflow-utils";
-import {
-  createPrintJob as executeCreatePrintJob,
-  retryPendingDirectPrint,
-  syncProgressFromPrintJob as syncPrintJobProgress,
-} from "./batch-print-operations";
+import { createPrintJob as executeCreatePrintJob, formatActionablePrintWorkflowError, syncProgressFromPrintJob as syncPrintJobProgress } from "./batch-print-operations";
 import { abandonPrintJobAction, printDiagnosticTestLabelAction, relinkSelectedPrinterAction } from "./print-workflow-recovery-actions";
 import { runSingleFlightAction } from "./singleFlightAction";
+import { useActivePrintJobPolling } from "./useActivePrintJobPolling";
+import { useLivePrintStatusRefresh } from "./useLivePrintStatusRefresh";
 import {
   buildCalibrationPayload as buildBatchCalibrationPayload,
   defaultCalibrationProfileState,
@@ -111,6 +109,7 @@ export function useBatchPrintWorkflow({
   const [printProgressRemaining, setPrintProgressRemaining] = useState(0);
   const [printProgressCurrentCode, setPrintProgressCurrentCode] = useState<string | null>(null);
   const [printProgressError, setPrintProgressError] = useState<string | null>(null);
+  const [printProgressNotice, setPrintProgressNotice] = useState<string | null>(null);
   const [printProgressPrinterName, setPrintProgressPrinterName] = useState<string | null>(null);
   const [printProgressDispatchMode, setPrintProgressDispatchMode] = useState<
     "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP" | null
@@ -127,7 +126,7 @@ export function useBatchPrintWorkflow({
   const actionInFlightRef = useRef(new Map<string, Promise<void>>());
 
   const printJobsQuery = usePrintJobs(printBatch?.id, 8, false);
-  const printerRuntimeQuery = useManufacturerPrinterRuntime(true, false);
+  const printerRuntimeQuery = useManufacturerPrinterRuntime(true, printOpen && !printJobId);
 
   const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
   const printerHasInventory =
@@ -289,7 +288,6 @@ export function useBatchPrintWorkflow({
     const timer = window.setInterval(() => setPrintCooldownNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [printCooldownUntil]);
-
   const cooldownRemainingSeconds = Math.max(0, Math.ceil((printCooldownUntil - printCooldownNow) / 1000));
 
   const recordPrintCooldown = (response: any) => {
@@ -416,11 +414,11 @@ export function useBatchPrintWorkflow({
   }, [printerRuntimeQuery.data]);
 
   useEffect(() => {
-    if (!isManufacturer) return;
+    if (!isManufacturer || !printOpen) return;
     void loadPrinterStatus();
     void loadRecentPrintJobs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isManufacturer, userId]);
+  }, [isManufacturer, printOpen, userId]);
 
   useEffect(() => {
     if (!selectedPrinterId) return;
@@ -462,6 +460,7 @@ export function useBatchPrintWorkflow({
     setPrintProgressRemaining(0);
     setPrintProgressCurrentCode(null);
     setPrintProgressError(null);
+    setPrintProgressNotice(null);
     setPrintProgressPrinterName(null);
     setPrintProgressDispatchMode(null);
     setPrintOpen(true);
@@ -481,19 +480,16 @@ export function useBatchPrintWorkflow({
         !isTerminalPrintProgressPhase(printProgressPhase);
       if (!printing && !keepNetworkDispatchProgress) {
         setPrintProgressOpen(false);
+        clearActivePrintSession(printJobId);
         setPrintProgressPrinterName(null);
         setPrintProgressDispatchMode(null);
       }
     }
   };
   useEffect(() => {
-    if (!printProgressOpen || printing || printProgressError) return;
-    if (!isCompletedPrintProgressPhase(printProgressPhase)) return;
-    const timer = window.setTimeout(() => {
-      setPrintProgressOpen(false);
-    }, 900);
-    return () => window.clearTimeout(timer);
-  }, [printProgressError, printProgressOpen, printProgressPhase, printing]);
+    if (!printJobId || !printProgressOpen) return;
+    setPrintOpen(false);
+  }, [printJobId, printProgressOpen]);
   const switchSelectedPrinter = async () => {
     if (switchingPrinter) return;
     if (!selectedPrinterId) return;
@@ -576,8 +572,24 @@ export function useBatchPrintWorkflow({
           handlePrintControlFailure(response, action === "pause" ? "Print run could not be paused." : "Print run could not be stopped.");
           return;
         }
-        if (response.data) replaceRecentPrintJob(response.data as PrintJobRow);
-        await Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
+        if (response.data) {
+          replaceRecentPrintJob(response.data as PrintJobRow);
+        } else if (action === "stop") {
+          const finalStatus = await apiClient.getPrintJobStatus(job.id);
+          if (finalStatus.success && finalStatus.data) replaceRecentPrintJob(finalStatus.data as PrintJobRow);
+        }
+        if (action === "stop") {
+          updateActivePrintSession({
+            active: false,
+            jobId: job.id,
+            modalOpen: true,
+            terminal: true,
+          });
+          setPrintProgressOpen(true);
+          setPrintProgressNotice("Unprinted labels remain recoverable through the controlled recovery flow.");
+        } else {
+          await Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
+        }
         setPrintControlDialog({ action: null, job: null, reason: "", submitting: false });
         toast({
           title: action === "pause" ? "Print run paused" : "Print run stopped",
@@ -673,7 +685,7 @@ export function useBatchPrintWorkflow({
       if (!response.success) {
         toast({
           title: "Confirmation needs attention",
-          description: sanitizePrinterUiError(response.error || response.message, "MSCQR could not confirm this print run."),
+          description: formatActionablePrintWorkflowError(response, "MSCQR could not confirm this print run."),
           variant: "destructive",
         });
         return;
@@ -729,7 +741,7 @@ export function useBatchPrintWorkflow({
       if (!response.success) {
         toast({
           title: "Sample scan rejected",
-          description: sanitizePrinterUiError(response.error || response.message, "That QR code is not part of this print run."),
+          description: formatActionablePrintWorkflowError(response, "That QR code is not part of this print run."),
           variant: "destructive",
         });
         return;
@@ -764,14 +776,15 @@ export function useBatchPrintWorkflow({
       const response = await apiClient.releaseBatch(batchId);
       if (!response.success) {
         const readiness = response.data?.readiness;
+        const actionableResponse = response as any;
         const firstFailure =
           Array.isArray(readiness?.failures) && readiness.failures.length > 0
             ? String(readiness.failures[0]?.message || "")
             : "";
         toast({
           title: "Batch not ready for release",
-          description: sanitizePrinterUiError(
-            firstFailure || response.error || response.message,
+          description: formatActionablePrintWorkflowError(
+            { ...actionableResponse, userMessage: actionableResponse.userMessage || firstFailure || response.error || response.message },
             "Complete print acknowledgement, physical confirmation, and sample scan proof before release."
           ),
           variant: "destructive",
@@ -831,51 +844,26 @@ export function useBatchPrintWorkflow({
     }),
     []
   );
-  useEffect(() => {
-    if (printing) return;
-    if (!printJobId || (printProgressDispatchMode !== "NETWORK_DIRECT" && printProgressDispatchMode !== "NETWORK_IPP")) {
-      return;
-    }
-    if (isTerminalPrintProgressPhase(printProgressPhase)) return;
 
-    let cancelled = false;
-    let inFlight = false;
-
-    const syncLatest = async () => {
-      if (cancelled || inFlight) return;
-      inFlight = true;
-      try {
-        const response = await apiClient.getPrintJobStatus(printJobId);
-        if (!response.success || !response.data || cancelled) return;
-
-        const job = response.data as PrintJobRow;
-        syncPrintJobProgress(job, progressStateSetters);
-        if (job.status === "CONFIRMED" || job.status === "FAILED" || job.status === "CANCELLED") {
-          void loadRecentPrintJobs();
-          void onBatchesChanged?.();
-        }
-      } finally {
-        inFlight = false;
-      }
-    };
-
-    void syncLatest();
-    const timer = window.setInterval(() => {
-      void syncLatest();
-    }, 3000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [
-    onBatchesChanged,
+  useActivePrintJobPolling({
     printJobId,
-    printProgressDispatchMode,
+    printProgressOpen,
     printProgressPhase,
-    progressStateSetters,
+    printProgressPrinted,
+    printProgressTotal,
     printing,
-  ]);
+    progressStateSetters,
+    setPrintProgressNotice,
+    loadRecentPrintJobs,
+    onBatchesChanged,
+  });
+
+  const livePrintStatusRefresh = useLivePrintStatusRefresh({
+    printJobId,
+    progressStateSetters,
+    replaceRecentPrintJob,
+    setPrintProgressNotice,
+  });
   const createPrintJob = async () => {
     if (printing) return;
     const actionKey = `create-print-job:${printBatch?.id || "none"}:${selectedPrinterProfile?.id || "none"}:${printQuantity}`;
@@ -902,40 +890,7 @@ export function useBatchPrintWorkflow({
         printJobId,
         directRemainingToPrint,
         ...progressStateSetters,
-      });
-    } finally {
-      setPrinting(false);
-    }
-    });
-  };
-
-  const refreshPendingPrintStatus = async () => {
-    if (printing) return;
-    if (!printJobId) return;
-
-    return runSingleFlightAction(actionInFlightRef, `refresh-print-job:${printJobId}`, async () => {
-    setPrinting(true);
-    try {
-      await retryPendingDirectPrint({
-        toast,
-        printBatch,
-        printQuantity,
-        getAvailableInventory,
-        selectedPrinterProfile,
-        selectedPrinterId,
-        detectedPrinters,
-        printerStatus,
-        activeLocalPrinterId,
-        selectedPrinterCanPrint,
-        setPrinterStatus,
-        buildCalibrationPayload,
-        autoReportPrinterFailure,
-        onBatchesChanged,
-        loadRecentPrintJobs,
-        setPrintJobId,
-        printJobId,
-        directRemainingToPrint,
-        ...progressStateSetters,
+        setPrintProgressNotice,
       });
     } finally {
       setPrinting(false);
@@ -978,6 +933,9 @@ export function useBatchPrintWorkflow({
     printJobId,
     printProgressPrinterName,
     printProgressDispatchMode,
+    printProgressPhase,
+    printProgressTotal,
+    printProgressPrinted,
     formatDispatchModeLabel,
     directRemainingToPrint,
     printControlDialog,
@@ -993,7 +951,7 @@ export function useBatchPrintWorkflow({
     onClosePrintReissueDialog: closePrintReissueDialog,
     onPrintReissueReasonChange: (reason: string) => setPrintReissueDialog((current) => ({ ...current, reason })),
     onSubmitPrintReissueRequest: submitPrintReissueRequest,
-    onRefreshPrintStatus: refreshPendingPrintStatus,
+    onRefreshPrintStatus: livePrintStatusRefresh.refresh,
     recentPrintJobs,
     releaseApprovalState,
     sampleScanCodeByJobId,
@@ -1005,6 +963,29 @@ export function useBatchPrintWorkflow({
     onClose: () => setPrintOpen(false),
   };
 
+  const activeProgressJob =
+    (printJobId ? recentPrintJobs.find((job) => job.id === printJobId) : null) ||
+    (printJobId
+      ? ({
+          id: printJobId,
+          status: "SENT",
+          pipelineState: printProgressPhase === "Waiting for printer confirmation" ? "PRINTER_ACKNOWLEDGED" : "QUEUED",
+          printMode: printProgressDispatchMode || "LOCAL_AGENT",
+          quantity: printProgressTotal || Number(printQuantity || 0) || 0,
+          itemCount: printProgressTotal || Number(printQuantity || 0) || 0,
+          createdAt: new Date().toISOString(),
+          printer: { name: printProgressPrinterName || selectedPrinterProfile?.name || "Selected printer" },
+          session: {
+            status: "ACTIVE",
+            totalItems: printProgressTotal || Number(printQuantity || 0) || 0,
+            confirmedItems: printProgressPrinted || 0,
+            remainingToPrint:
+              directRemainingToPrint ??
+              Math.max(0, (printProgressTotal || Number(printQuantity || 0) || 0) - printProgressPrinted),
+          },
+        } as PrintJobRow)
+      : null);
+
   const progressDialogProps = {
     open: printProgressOpen,
     phase: printProgressPhase,
@@ -1015,6 +996,15 @@ export function useBatchPrintWorkflow({
     printerName: printProgressPrinterName,
     modeLabel: formatDispatchModeLabel(printProgressDispatchMode),
     error: printProgressError,
+    notice: printProgressNotice,
+    printJobId,
+    activeJob: activeProgressJob,
+    onStop: (job: PrintJobRow) => openPrintControlDialog("stop", job),
+    onRefresh: livePrintStatusRefresh.refresh,
+    printControlBusyJobId,
+    printControlSubmitting: printControlDialog.submitting,
+    refreshBusy: livePrintStatusRefresh.refreshing,
+    refreshDisabled: livePrintStatusRefresh.cooldownRemainingSeconds > 0,
     onOpenChange: (open: boolean) => {
       if (!printing) setPrintProgressOpen(open);
     },

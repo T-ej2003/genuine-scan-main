@@ -78,8 +78,9 @@ const batchRows = [
 async function mockClientApis(page: Page, role: Role = "LICENSEE_ADMIN") {
   await page.addInitScript((state) => {
     window.localStorage.setItem("mscqr_cookie_consent_state:v1", JSON.stringify(state));
+    document.cookie = "aq_vid=client-visual-device; Max-Age=31536000; Path=/; SameSite=Lax";
     window.sessionStorage.setItem("manufacturer-printer-dialog-opened:v1:manufacturer-visual-user", "shown");
-    window.localStorage.setItem("manufacturer-printer-onboarding:v1:manufacturer-visual-user", "dismissed");
+    window.localStorage.setItem("manufacturer-printer-onboarding:v1:manufacturer-visual-user:client-visual-device", "dismissed");
   }, consentState);
 
   await page.route("**/api/auth/me", (route) => route.fulfill({ json: { success: true, data: userFor(role) } }));

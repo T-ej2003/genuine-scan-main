@@ -9,7 +9,7 @@ import {
 
 const downloadParamsSchema = z.object({
   version: z.string().trim().min(3),
-  platform: z.enum(["macos", "windows"]),
+  platform: z.enum(["macos", "windows", "windowsUnsignedTest"]),
 }).strict();
 
 const normalizeBaseUrl = (value?: string | null) => String(value || "").trim().replace(/\/+$/, "");
@@ -27,10 +27,19 @@ const resolveConnectorBaseUrl = (req: Request) => {
   return `${req.protocol}://${req.get("host") || "localhost"}`;
 };
 
+const isInternalConnectorArtifactAllowed = (req: Request) => {
+  if (process.env.MSCQR_EXPOSE_INTERNAL_CONNECTOR_ARTIFACTS === "true") return true;
+  if (process.env.NODE_ENV === "production") return false;
+  const queryValue = String(req.query.internal || req.query.includeInternal || "").trim().toLowerCase();
+  return queryValue === "1" || queryValue === "true";
+};
+
 export const listConnectorReleasesController = async (req: Request, res: Response) => {
   try {
     const baseUrl = resolveConnectorBaseUrl(req);
-    const manifest = getConnectorReleaseManifest(baseUrl);
+    const manifest = getConnectorReleaseManifest(baseUrl, {
+      includeInternalArtifacts: isInternalConnectorArtifactAllowed(req),
+    });
     return res.json({ success: true, data: manifest });
   } catch (error: any) {
     console.error("listConnectorReleasesController error:", error);
@@ -44,7 +53,9 @@ export const listConnectorReleasesController = async (req: Request, res: Respons
 export const getLatestConnectorReleaseController = async (req: Request, res: Response) => {
   try {
     const baseUrl = resolveConnectorBaseUrl(req);
-    const release = getLatestConnectorRelease(baseUrl);
+    const release = getLatestConnectorRelease(baseUrl, {
+      includeInternalArtifacts: isInternalConnectorArtifactAllowed(req),
+    });
     return res.json({ success: true, data: release });
   } catch (error: any) {
     console.error("getLatestConnectorReleaseController error:", error);
@@ -62,7 +73,9 @@ export const downloadConnectorReleaseController = async (req: Request, res: Resp
   }
 
   try {
-    const artifact = resolveConnectorDownload(parsed.data.version, parsed.data.platform as ConnectorPlatformKey);
+    const artifact = resolveConnectorDownload(parsed.data.version, parsed.data.platform as ConnectorPlatformKey, {
+      allowInternalArtifacts: isInternalConnectorArtifactAllowed(req),
+    });
     res.setHeader("Content-Type", artifact.contentType || "application/octet-stream");
     res.setHeader("Content-Length", String(artifact.bytes));
     res.setHeader("Content-Disposition", `attachment; filename="${artifact.filename}"`);

@@ -14,6 +14,7 @@ import {
   parsePositiveIntEnv,
 } from "./middleware/publicRateLimit";
 import { buildReadyPayload } from "./controllers/healthController";
+import { isRedisConfigured } from "./services/redisService";
 import { logger } from "./utils/logger";
 
 const parseBool = (value: unknown, fallback = false) => {
@@ -35,6 +36,17 @@ type RequestClaimsSnapshot = {
 const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error || "Unknown error"));
 
 export const createBackendApp = () => {
+  const redisRequired =
+    process.env.NODE_ENV === "production" &&
+    String(process.env.REQUIRE_REDIS_FOR_SHARED_STATE || "true").trim().toLowerCase() !== "false";
+  if (redisRequired && !isRedisConfigured()) {
+    logger.error("Redis shared state is required in production but REDIS_URL/REDIS_HOST is not configured", {
+      event: "redis_required_missing",
+      nodeEnv: process.env.NODE_ENV,
+    });
+    throw new Error("REDIS_URL is required for production shared rate-limit/cache state");
+  }
+
   const app = express();
   app.disable("etag");
   app.set("trust proxy", 1);
@@ -188,7 +200,7 @@ export const createBackendApp = () => {
     res.json(healthPayload());
   });
 
-  app.get("/health/live", publicStatusIpLimiter, publicStatusActorLimiter, (_req, res) => {
+  app.get("/health/live", (_req, res) => {
     res.json({
       ...healthPayload(),
       status: "live",
@@ -243,6 +255,24 @@ export const createBackendApp = () => {
       error: detail,
       timestamp: new Date().toISOString(),
     });
+  });
+
+  const scannerProbePattern =
+    /(?:^|\/)(?:\.env(?:\.|$)|\.git(?:\/|$)|actuator(?:\/|$)|phpinfo\.php$|docker-compose\.ya?ml$|secrets\.json$|config\.json$|application\.ya?ml$|aws\.json$|database\.ya?ml$|wp-config\.php$|server-status$)/i;
+
+  app.use("/api", (req, res, next) => {
+    const pathName = req.originalUrl.split("?")[0] || req.path || "/";
+    if (scannerProbePattern.test(pathName)) {
+      logger.warn("Blocked scanner probe", {
+        event: "scanner_probe_blocked",
+        method: req.method,
+        path: pathName,
+        userAgent: req.get("user-agent") || null,
+      });
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(404).json({ success: false, error: "Endpoint not found" });
+    }
+    next();
   });
 
   app.use("/api", (_req, res, next) => {

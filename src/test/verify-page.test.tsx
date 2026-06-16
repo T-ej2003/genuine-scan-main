@@ -1,7 +1,7 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import Verify from "@/pages/Verify";
 import apiClient from "@/lib/api-client";
@@ -74,6 +74,7 @@ function LocationProbe() {
 const buildVerifyPayload = (overrides: Record<string, unknown> = {}) => ({
   isAuthentic: true,
   decisionId: "decision-1",
+  sessionStartToken: "session-start-1",
   decisionVersion: 1,
   code: CODE,
   status: "PRINTED",
@@ -91,7 +92,15 @@ const buildVerifyPayload = (overrides: Record<string, unknown> = {}) => ({
   reasonCodes: ["FIRST_SCAN", "SIGNED_LABEL"],
   customerTrustLevel: "ANONYMOUS",
   replacementStatus: "NONE",
-  licensee: { id: "lic-1", name: "MSCQR Demo", brandName: "MSCQR", prefix: "MSC", supportEmail: "support@mscqr.com" },
+  licensee: {
+    id: "lic-1",
+    name: "MSCQR Demo",
+    brandName: "MSCQR",
+    prefix: "MSC",
+    website: "https://brand.example/verify",
+    supportEmail: "support@mscqr.com",
+    supportPhone: "+44 20 0000 0000",
+  },
   batch: { id: "batch-1", name: "Batch 1", printedAt: "2026-04-05T11:00:00.000Z" },
   ownershipStatus: {
     isClaimed: false,
@@ -132,15 +141,15 @@ describe("Verify page", () => {
     vi.mocked(apiClient.getCustomerAuthProviders).mockResolvedValue({
       success: true,
       data: { items: [] },
-    } as any);
+    } as never);
     vi.mocked(apiClient.getCustomerAuthSession).mockResolvedValue({
       success: true,
       data: { customer: null, auth: { cookieBacked: true, authenticated: false } },
-    } as any);
+    } as never);
     vi.mocked(apiClient.getCustomerPasskeyCredentials).mockResolvedValue({
       success: true,
       data: { items: [] },
-    } as any);
+    } as never);
     Object.defineProperty(globalThis.navigator, "geolocation", {
       configurable: true,
       value: {
@@ -165,16 +174,16 @@ describe("Verify page", () => {
   it("creates a secure verification session and navigates to the canonical signed URL", async () => {
     vi.mocked(apiClient.scanToken).mockResolvedValue({
       success: true,
-      data: buildVerifyPayload(),
-    } as any);
+      data: buildVerifyPayload({ decisionId: undefined, sessionStartToken: "session-start-1" }),
+    } as never);
     vi.mocked(apiClient.startVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession({ sessionProofToken: "session-proof-1", proofBindingRequired: true }),
-    } as any);
+    } as never);
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession(),
-    } as any);
+    } as never);
 
     renderVerifyPage("/scan?t=signed-token");
 
@@ -186,7 +195,7 @@ describe("Verify page", () => {
     });
 
     await waitFor(() => {
-      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("decision-1", "SIGNED_SCAN");
+      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("session-start-1", "SIGNED_SCAN");
     });
 
     await waitFor(() => {
@@ -202,7 +211,7 @@ describe("Verify page", () => {
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession(),
-    } as any);
+    } as never);
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
@@ -214,11 +223,11 @@ describe("Verify page", () => {
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession(),
-    } as any);
+    } as never);
     vi.mocked(apiClient.getCustomerAuthProviders).mockResolvedValue({
       success: true,
       data: { items: [{ id: "google", label: "Google" }] },
-    } as any);
+    } as never);
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
@@ -230,7 +239,7 @@ describe("Verify page", () => {
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession(),
-    } as any);
+    } as never);
     vi.mocked(apiClient.requestVerifyEmailOtp).mockResolvedValue({
       success: true,
       data: {
@@ -238,7 +247,7 @@ describe("Verify page", () => {
         expiresAt: "2026-04-05T12:10:00.000Z",
         maskedEmail: "ab***@example.com",
       },
-    } as any);
+    } as never);
     vi.mocked(apiClient.verifyEmailOtp).mockResolvedValue({
       success: true,
       data: {
@@ -253,18 +262,20 @@ describe("Verify page", () => {
           authStrength: "EMAIL_OTP",
         },
       },
-    } as any);
+    } as never);
     vi.mocked(apiClient.getCustomerPasskeyCredentials).mockResolvedValue({
       success: true,
       data: { items: [] },
-    } as any);
+    } as never);
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
     fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "abhi@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Send code" }));
 
-    await screen.findByText("Code email accepted for ab***@example.com.");
+    await screen.findByText("Code sent. Check your email.");
+    expect(screen.getByText("Sent to ab***@example.com.")).toBeInTheDocument();
+    expect(vi.mocked(apiClient.requestVerifyEmailOtp)).toHaveBeenCalledWith("abhi@example.com");
 
     fireEvent.change(screen.getByLabelText("6-digit code"), { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: "Verify and continue" }));
@@ -272,6 +283,27 @@ describe("Verify page", () => {
     expect(await screen.findByText("Help the brand review this scan")).toBeInTheDocument();
     expect(localStorageStore.has("mscqr_verify_customer_email")).toBe(false);
     expect(localStorageStore.has("authenticqr_verify_customer_email")).toBe(false);
+  });
+
+  it("shows a public-safe inline email error when the OTP request fails", async () => {
+    vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
+      success: true,
+      data: buildSession(),
+    } as never);
+    vi.mocked(apiClient.requestVerifyEmailOtp).mockResolvedValue({
+      success: false,
+      error: "SIGN_IN_AUTH_FAILED",
+    } as never);
+
+    renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
+
+    fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "abhi@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send code" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "We could not send the code right now. Please try again or report a concern."
+    );
+    expect(document.body).not.toHaveTextContent("SIGN_IN_AUTH_FAILED");
   });
 
   it("lets customers skip optional intake questions and still reveal the locked result", async () => {
@@ -282,11 +314,11 @@ describe("Verify page", () => {
         intakeCompleted: false,
         revealed: false,
       }),
-    } as any);
+    } as never);
     vi.mocked(apiClient.submitVerificationIntake).mockResolvedValue({
       success: true,
       data: { sessionId: SESSION_ID },
-    } as any);
+    } as never);
     vi.mocked(apiClient.revealVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession({
@@ -298,7 +330,7 @@ describe("Verify page", () => {
           riskDisposition: "CLEAR",
         }),
       }),
-    } as any);
+    } as never);
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
     expect(await screen.findByText("Help the brand review this scan")).toBeInTheDocument();
@@ -319,8 +351,9 @@ describe("Verify page", () => {
       );
     });
 
-    expect(await screen.findByText("This garment is genuine")).toBeInTheDocument();
-    expect(screen.getByText("Result details")).toBeInTheDocument();
+    expect(await screen.findByText("This garment matches a registered brand record.")).toBeInTheDocument();
+    expect(screen.getByText("Verification summary")).toBeInTheDocument();
+    expect(screen.queryByText("Technical details for support")).toBeNull();
   });
 
   it("reveals the locked result from the server-side session payload", async () => {
@@ -348,29 +381,126 @@ describe("Verify page", () => {
           notes: "",
         },
       }),
-    } as any);
+    } as never);
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
-    expect(await screen.findByText("This garment is genuine")).toBeInTheDocument();
-    expect(screen.getByText("Verified by MSCQR")).toBeInTheDocument();
-    expect(screen.getByText("Result details")).toBeInTheDocument();
+    expect(await screen.findByText("This garment matches a registered brand record.")).toBeInTheDocument();
+    expect(screen.getByText("Verification passed")).toBeInTheDocument();
+    const brandDetails = screen.getByRole("region", { name: "Brand details" });
+    expect(within(brandDetails).getByText("Brand")).toBeInTheDocument();
+    expect(within(brandDetails).getByText("MSCQR")).toBeInTheDocument();
+    expect(within(brandDetails).getByText("Label code")).toBeInTheDocument();
+    expect(within(brandDetails).getByText("AADS-6007")).toBeInTheDocument();
+    const websiteLink = within(brandDetails).getByRole("link", { name: /brand\.example\/verify/i });
+    expect(websiteLink).toHaveAttribute("href", "https://brand.example/verify");
+    expect(websiteLink).toHaveAttribute("target", "_blank");
+    expect(websiteLink).toHaveAttribute("rel", "noreferrer");
+    expect(within(brandDetails).getByRole("link", { name: "support@mscqr.com" })).toHaveAttribute(
+      "href",
+      "mailto:support@mscqr.com"
+    );
+    expect(within(brandDetails).getByRole("link", { name: "+44 20 0000 0000" })).toHaveAttribute(
+      "href",
+      "tel:+442000000000"
+    );
+    expect(screen.getByText("Verification summary")).toBeInTheDocument();
+    expect(screen.getByText("Save verification")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Report a concern" })).toBeInTheDocument();
+    expect(screen.getByText("Email")).toBeInTheDocument();
+    expect(screen.queryByText("Technical details for support")).toBeNull();
+    expect(screen.queryByText("Decision reference")).toBeNull();
+    expect(screen.queryByText("Session reference")).toBeNull();
+    expect(screen.queryByText("Support notes")).toBeNull();
+    expect(document.body).not.toHaveTextContent(/decisionId|classification|riskScore|proofSource|proofTier|decision-1/i);
   });
 
-  it("reports a concern with session and decision ids after reveal", async () => {
-    vi.mocked(apiClient.getCustomerAuthSession).mockResolvedValue({
-      success: true,
-      data: {
-        customer: { userId: "cust-1", email: "abhi@example.com", maskedEmail: "ab***@example.com" },
-        auth: { cookieBacked: true, authenticated: true, authStrength: "EMAIL_OTP" },
-      },
-    } as any);
+  it("omits missing brand contact rows without placeholder text", async () => {
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession({
         authState: "VERIFIED",
         intakeCompleted: true,
         revealed: true,
-        verification: buildVerifyPayload(),
+        verification: buildVerifyPayload({
+          licensee: {
+            name: "Minimal Public Brand",
+            brandName: "Minimal Public Brand",
+          },
+        }),
+      }),
+    } as never);
+
+    renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
+
+    const brandDetails = await screen.findByRole("region", { name: "Brand details" });
+    expect(within(brandDetails).getByText("Brand")).toBeInTheDocument();
+    expect(within(brandDetails).getByText("Minimal Public Brand")).toBeInTheDocument();
+    expect(within(brandDetails).getByText("Label code")).toBeInTheDocument();
+    expect(within(brandDetails).queryByText("Website")).toBeNull();
+    expect(within(brandDetails).queryByText("Support email")).toBeNull();
+    expect(within(brandDetails).queryByText("Support phone")).toBeNull();
+    expect(document.body).not.toHaveTextContent("Not available");
+  });
+
+  it("does not render raw backend verification labels on the public result", async () => {
+    vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
+      success: true,
+      data: buildSession({
+        authState: "VERIFIED",
+        intakeCompleted: true,
+        revealed: true,
+        verification: buildVerifyPayload({
+          proofTier: "MANUAL_REGISTRY_LOOKUP",
+          proofSource: "MANUAL_CODE_LOOKUP",
+          riskDisposition: "CLEAR",
+          publicOutcome: "MANUAL_RECORD_FOUND",
+          classification: "FIRST_SCAN",
+          licensee: {
+            id: "lic-1",
+            name: "A very long brand name that should wrap without breaking the public verification layout",
+            brandName: "A very long brand name that should wrap without breaking the public verification layout",
+            prefix: "MSC",
+            supportEmail: "support@example.com",
+            supportPhone: "+44 20 0000 0000",
+            website: "brand.example",
+          },
+        }),
+      }),
+    } as never);
+
+    renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
+
+    expect(await screen.findByText("This garment matches a registered brand record.")).toBeInTheDocument();
+    const brandDetails = screen.getByRole("region", { name: "Brand details" });
+    expect(within(brandDetails).getByRole("link", { name: "support@example.com" })).toBeInTheDocument();
+    expect(within(brandDetails).getByRole("link", { name: "+44 20 0000 0000" })).toBeInTheDocument();
+    expect(within(brandDetails).getByRole("link", { name: /brand\.example/i })).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("Manual Registry Lookup");
+    expect(document.body).not.toHaveTextContent("Manual Code Lookup");
+    expect(document.body).not.toHaveTextContent("MANUAL_REGISTRY_LOOKUP");
+    expect(document.body).not.toHaveTextContent("MANUAL_CODE_LOOKUP");
+    expect(document.body).not.toHaveTextContent("Decision reference");
+    expect(document.body).not.toHaveTextContent("Session reference");
+    expect(document.body).not.toHaveTextContent("Support notes");
+    expect(document.body).not.toHaveTextContent(/decisionId|classification|riskScore|proofSource|proofTier|decision-1/i);
+  });
+
+  it("opens and submits a concern with public session context after reveal", async () => {
+    vi.mocked(apiClient.getCustomerAuthSession).mockResolvedValue({
+      success: true,
+      data: {
+        customer: { userId: "cust-1", email: "abhi@example.com", maskedEmail: "ab***@example.com" },
+        auth: { cookieBacked: true, authenticated: true, authStrength: "EMAIL_OTP" },
+      },
+    } as never);
+    vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
+      success: true,
+      data: buildSession({
+        decisionId: undefined,
+        authState: "VERIFIED",
+        intakeCompleted: true,
+        revealed: true,
+        verification: buildVerifyPayload({ decisionId: undefined }),
         intake: {
           purchaseChannel: "offline",
           sourceCategory: "retail_store",
@@ -384,15 +514,17 @@ describe("Verify page", () => {
           notes: "Packaging looked slightly off.",
         },
       }),
-    } as any);
+    } as never);
     vi.mocked(apiClient.reportFraud).mockResolvedValue({
       success: true,
       data: { supportTicketRef: "SUP-1001" },
-    } as any);
+    } as never);
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
     fireEvent.click(await screen.findByRole("button", { name: "Report a concern" }));
+    expect(await screen.findByRole("heading", { name: "Report a concern" })).toBeInTheDocument();
+    expect(screen.getByLabelText("What do you want to report?")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Submit concern" }));
 
     await waitFor(() => {
@@ -400,10 +532,11 @@ describe("Verify page", () => {
         expect.objectContaining({
           code: CODE,
           sessionId: SESSION_ID,
-          decisionId: "decision-1",
         })
       );
     });
+    const payload = vi.mocked(apiClient.reportFraud).mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("decisionId");
   });
 
   it("lets a signed-in customer complete a replay review check and refresh the session", async () => {
@@ -416,7 +549,7 @@ describe("Verify page", () => {
           revealed: false,
           intakeCompleted: false,
         }),
-      } as any)
+      } as never)
       .mockResolvedValueOnce({
         success: true,
         data: buildSession({
@@ -427,7 +560,7 @@ describe("Verify page", () => {
           revealed: false,
           intakeCompleted: false,
         }),
-      } as any);
+      } as never);
     vi.mocked(apiClient.verifyQRCode).mockResolvedValue({
       success: true,
       data: buildVerifyPayload({
@@ -440,7 +573,7 @@ describe("Verify page", () => {
           completedBy: "CUSTOMER_IDENTITY",
         },
       }),
-    } as any);
+    } as never);
     vi.mocked(apiClient.startVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession({
@@ -451,7 +584,7 @@ describe("Verify page", () => {
         sessionProofToken: "session-proof-updated",
         proofBindingRequired: true,
       }),
-    } as any);
+    } as never);
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 
     expect(await screen.findByText("Complete one quick check")).toBeInTheDocument();
@@ -466,7 +599,7 @@ describe("Verify page", () => {
     });
 
     await waitFor(() => {
-      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("decision-1", "MANUAL_CODE");
+      expect(vi.mocked(apiClient.startVerificationSession)).toHaveBeenCalledWith("session-start-1", "MANUAL_CODE");
     });
 
     await waitFor(() => {
@@ -484,7 +617,7 @@ describe("Verify page", () => {
     vi.mocked(apiClient.getVerificationSession).mockResolvedValue({
       success: true,
       data: buildSession(),
-    } as any);
+    } as never);
 
     renderVerifyPage(`/verify/${CODE}?session=${SESSION_ID}`);
 

@@ -35,6 +35,11 @@ const toNullableJsonValue = (value: Record<string, unknown> | null | undefined) 
   return value as Prisma.InputJsonValue;
 };
 
+const mergePrinterMetadata = (current: unknown, patch: Record<string, unknown>) => ({
+  ...(current && typeof current === "object" && !Array.isArray(current) ? (current as Record<string, unknown>) : {}),
+  ...patch,
+});
+
 const KNOWN_VENDOR_MARKERS = [
   "Zebra",
   "SATO",
@@ -386,13 +391,19 @@ export const syncLocalAgentPrintersFromHeartbeat = async (params: {
       isDefault: Boolean((raw as any).isDefault),
       online: Boolean((raw as any).online ?? true),
     } as Record<string, unknown>;
-    const printer = await prisma.printer.upsert({
-      where: {
-        printerRegistrationId_nativePrinterId: {
-          printerRegistrationId: params.printerRegistrationId,
-          nativePrinterId,
-        },
+    const where = {
+      printerRegistrationId_nativePrinterId: {
+        printerRegistrationId: params.printerRegistrationId,
+        nativePrinterId,
       },
+    };
+    const existingPrinter = await prisma.printer.findUnique({
+      where,
+      select: { metadata: true },
+    });
+    const mergedMetadata = mergePrinterMetadata(existingPrinter?.metadata, metadata);
+    const printer = await prisma.printer.upsert({
+      where,
       create: {
         name,
         vendor: detectVendor(name, model),
@@ -415,7 +426,7 @@ export const syncLocalAgentPrintersFromHeartbeat = async (params: {
         lastValidationMessage: params.connected ? null : "Local agent reported printer unavailable",
         capabilitySummary: toNullableJsonValue(capabilitySummary),
         calibrationProfile: toNullableJsonValue(params.calibrationProfile || null),
-        metadata: toNullableJsonValue(metadata),
+        metadata: toNullableJsonValue(mergedMetadata),
       },
       update: {
         name,
@@ -435,7 +446,7 @@ export const syncLocalAgentPrintersFromHeartbeat = async (params: {
         lastValidationMessage: params.connected ? null : "Local agent reported printer unavailable",
         capabilitySummary: toNullableJsonValue(capabilitySummary),
         calibrationProfile: toNullableJsonValue(params.calibrationProfile),
-        metadata: toNullableJsonValue(metadata),
+        metadata: toNullableJsonValue(mergedMetadata),
       },
     });
     await ensurePrinterProfileForPrinter(

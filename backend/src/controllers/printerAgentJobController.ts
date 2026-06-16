@@ -19,7 +19,15 @@ import {
   LOCAL_AGENT_NO_WORK_RETRY_MS,
   reserveLocalAgentItem,
 } from "../services/localAgentClaimService";
-import { CONNECTOR_UPDATE_REQUIRED_CODE, CONNECTOR_UPDATE_REQUIRED_MESSAGE, isLocalAgentProtocolCompatible, LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
+import {
+  CONNECTOR_UPDATE_REQUIRED_CODE,
+  CONNECTOR_UPDATE_REQUIRED_MESSAGE,
+  getMissingTransportDiagnosticsCapabilities,
+  isLocalAgentTransportDiagnosticsCurrent,
+  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_MIN_VERSION_HINT,
+  LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+} from "../services/localAgentProtocol";
 import { ensurePrinterProfileForPrinter, resolvePrinterPreflight } from "../printing/registry/printerProfileService";
 import {
   buildLocalAgentValidationErrorPayload,
@@ -35,6 +43,7 @@ import { claimLocalAgentPrinterTestJob } from "../services/printerTestLabelServi
 import { verifyLocalAgentRequest } from "../services/localAgentRequestAuthService";
 
 const noClaimWork = (res: Response, retryAfterMs = LOCAL_AGENT_NO_WORK_RETRY_MS) => res.json({ success: true, data: null, retryAfterMs });
+const LOCAL_AGENT_UPGRADE_RETRY_MS = Math.max(60_000, LOCAL_AGENT_NO_WORK_RETRY_MS);
 
 export const localAgentErrorResponse = (res: Response, error: any) =>
   res.status(error?.statusCode || 500).json({
@@ -47,6 +56,19 @@ export const localAgentErrorResponse = (res: Response, error: any) =>
 const toRecord = (value: unknown) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {} as Record<string, unknown>;
   return value as Record<string, unknown>;
+};
+
+const sampledClaimLogAt = new Map<string, number>();
+const logLocalAgentClaim = (event: string, payload: Record<string, unknown>) => {
+  const noWorkEvent = event === "no_active_job" || event === "no_registered_printer_match" || event === "no_reserved_item";
+  if (noWorkEvent) {
+    const key = `${event}:${String(payload.registrationId || "")}:${String(payload.selectedPrinterId || "")}`;
+    const now = Date.now();
+    if (now - (sampledClaimLogAt.get(key) || 0) < 60_000) return;
+    sampledClaimLogAt.set(key, now);
+  }
+  const log = noWorkEvent ? console.debug : console.info;
+  log("local_agent_claim", { event, ...payload });
 };
 
 const hasQueueConfirmationUnavailable = (value: unknown) => {
@@ -68,15 +90,29 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
     }
 
     const registration = await verifyLocalAgentRequest(parsed.data, "claim");
-    if (!isLocalAgentProtocolCompatible(parsed.data.protocolVersion || null)) {
+    const connectorCurrent = isLocalAgentTransportDiagnosticsCurrent({
+      protocolVersion: parsed.data.protocolVersion || null,
+      buildVersion: parsed.data.buildVersion || null,
+      transportDiagnosticsVersion: parsed.data.transportDiagnosticsVersion || null,
+      capabilities: parsed.data.capabilities || null,
+    });
+    if (!connectorCurrent) {
+      const missingCapabilities = getMissingTransportDiagnosticsCapabilities(parsed.data.capabilities || null);
       console.info("local_agent_claim", {
         event: "connector_update_required", registrationId: registration.id, agentId: registration.agentId,
-        agentVersion: parsed.data.agentVersion || null, protocolVersion: parsed.data.protocolVersion || null,
-        expectedProtocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION, retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS,
+        agentVersion: parsed.data.agentVersion || null, buildVersion: parsed.data.buildVersion || null,
+        protocolVersion: parsed.data.protocolVersion || null,
+        transportDiagnosticsVersion: parsed.data.transportDiagnosticsVersion || null,
+        missingCapabilities,
+        expectedProtocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+        expectedBuildVersion: LOCAL_AGENT_MIN_VERSION_HINT,
+        expectedTransportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+        retryAfterMs: LOCAL_AGENT_UPGRADE_RETRY_MS,
       });
       return res.status(426).json({ success: false, error: CONNECTOR_UPDATE_REQUIRED_MESSAGE, code: CONNECTOR_UPDATE_REQUIRED_CODE,
-        errorCode: CONNECTOR_UPDATE_REQUIRED_CODE, retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS,
-        expectedProtocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION });
+        errorCode: CONNECTOR_UPDATE_REQUIRED_CODE, retryAfterMs: LOCAL_AGENT_UPGRADE_RETRY_MS, upgradeRequired: true,
+        expectedProtocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION, expectedBuildVersion: LOCAL_AGENT_MIN_VERSION_HINT,
+        expectedTransportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION, missingCapabilities });
     }
 
     const selectedPrinterId = String(parsed.data.selectedPrinterId || parsed.data.printerId || "").trim();
@@ -92,14 +128,7 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
 
     const printerIds = candidatePrinters.map((printer) => printer.id);
     if (printerIds.length === 0) {
-      console.info("local_agent_claim", {
-        event: "no_registered_printer_match",
-        registrationId: registration.id,
-        agentId: registration.agentId,
-        selectedPrinterId,
-        candidatePrinterCount: candidatePrinters.length,
-        retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS,
-      });
+      logLocalAgentClaim("no_registered_printer_match", { registrationId: registration.id, agentId: registration.agentId, selectedPrinterId, candidatePrinterCount: candidatePrinters.length, retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS });
       return noClaimWork(res);
     }
 
@@ -119,7 +148,16 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
         },
       },
       include: {
-        batch: { select: { id: true, name: true, licenseeId: true } },
+        batch: {
+          select: {
+            id: true,
+            name: true,
+            licenseeId: true,
+            metadata: true,
+            licensee: { select: { id: true, name: true, prefix: true, location: true, metadata: true } },
+          },
+        },
+        manufacturer: { select: { id: true, name: true, location: true, metadata: true } },
         printer: true,
         printSession: true,
       },
@@ -152,16 +190,7 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
           },
         });
       }
-      console.info("local_agent_claim", {
-        event: "no_active_job",
-        registrationId: registration.id,
-        agentId: registration.agentId,
-        selectedPrinterId,
-        printerIds,
-        availableItemCount,
-        inFlightItemCount,
-        retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS,
-      });
+      logLocalAgentClaim("no_active_job", { registrationId: registration.id, agentId: registration.agentId, selectedPrinterId, printerIds, availableItemCount, inFlightItemCount, retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS });
       return noClaimWork(res, inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS);
     }
 
@@ -221,16 +250,7 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
     });
 
     if (!item) {
-      console.info("local_agent_claim", {
-        event: "no_reserved_item",
-        registrationId: registration.id,
-        agentId: registration.agentId,
-        printJobId: job.id,
-        printSessionId: job.printSession.id,
-        availableItemCount,
-        inFlightItemCount,
-        retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS,
-      });
+      logLocalAgentClaim("no_reserved_item", { registrationId: registration.id, agentId: registration.agentId, selectedPrinterId, printJobId: job.id, printSessionId: job.printSession.id, availableItemCount, inFlightItemCount, retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS });
       return noClaimWork(res, inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS);
     }
 

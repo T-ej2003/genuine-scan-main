@@ -15,6 +15,7 @@ import {
 import { createAuditLog } from "../services/auditService";
 import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import { resolvePrinterConfirmationMode } from "../services/printConfirmationService";
+import { markPrinterTestLabelConfirmed } from "../services/printerTestLabelGateService";
 import { printTestLabelForRegisteredPrinter } from "../services/printerTestLabelService";
 import { sanitizePrinterActionError } from "../utils/printerUserFacingErrors";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
@@ -479,6 +480,9 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       const result = await printTestLabelForRegisteredPrinter({
         printer: printer as any,
         actorUserId: scope.userId,
+      });
+      await markPrinterTestLabelConfirmed({
+        printer, confirmedAt: result.confirmedAt, connectionType: result.connectionType, deviceJobRef: result.deviceJobRef,
       });
 
       await createAuditLog({

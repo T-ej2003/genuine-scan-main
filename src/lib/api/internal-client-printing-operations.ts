@@ -92,6 +92,7 @@ export const createPrintingOperationsApi = (core: ApiClientCore) => ({
         method: "POST",
         headers: { "x-idempotency-key": actionKey },
         body: JSON.stringify({ reason }),
+        suppressMutationEvent: true,
       })
     );
   },
@@ -102,6 +103,7 @@ export const createPrintingOperationsApi = (core: ApiClientCore) => ({
       core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/resume`, {
         method: "POST",
         headers: { "x-idempotency-key": actionKey },
+        suppressMutationEvent: true,
       })
     );
   },
@@ -113,6 +115,7 @@ export const createPrintingOperationsApi = (core: ApiClientCore) => ({
         method: "POST",
         headers: { "x-idempotency-key": actionKey },
         body: JSON.stringify({ reason }),
+        suppressMutationEvent: true,
       })
     );
   },

@@ -8,6 +8,25 @@ import type {
 } from "@/lib/api/internal-client-verify-types";
 import type { WebAuthnAuthenticationOptionsResponse, WebAuthnRegistrationOptionsResponse } from "@/lib/webauthn";
 
+type OwnershipStatusResponse = {
+  isClaimed: boolean;
+  claimedAt: string | null;
+  isOwnedByRequester: boolean;
+  isClaimedByAnother: boolean;
+  canClaim: boolean;
+  state?: string | null;
+};
+
+type OwnershipTransferResponse = Record<string, unknown>;
+
+type DeliveryResponse = {
+  delivered?: boolean;
+  error?: string | null;
+};
+
+type IrActionConfig = Record<string, unknown>;
+type IrPolicyPatchPayload = Record<string, unknown>;
+
 const withVerifySessionHeaders = (sessionProofToken?: string) => {
   const headers: Record<string, string> = {};
   if (sessionProofToken) headers["x-verification-session-proof"] = sessionProofToken;
@@ -63,10 +82,10 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     return core.request(`/verify/${encodeURIComponent(normalizedCode)}${query}`, { method: "GET", headers });
   },
 
-  async startVerificationSession(decisionId: string, entryMethod: VerifyEntryMethod) {
+  async startVerificationSession(sessionStartToken: string, entryMethod: VerifyEntryMethod) {
     return core.request<VerificationSessionResponse>(`/verify/session/start`, {
       method: "POST",
-      body: JSON.stringify({ decisionId, entryMethod }),
+      body: JSON.stringify({ sessionStartToken, entryMethod }),
     });
   },
 
@@ -242,8 +261,8 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       message?: string;
       transferLink: string;
       transferToken: string;
-      ownershipStatus?: any;
-      ownershipTransfer?: any;
+      ownershipStatus?: OwnershipStatusResponse;
+      ownershipTransfer?: OwnershipTransferResponse;
     }>(`/verify/${encodeURIComponent(code)}/transfer`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -253,7 +272,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
   async cancelOwnershipTransfer(code: string, payload: { transferId?: string }) {
     return core.request<{
       message?: string;
-      ownershipTransfer?: any;
+      ownershipTransfer?: OwnershipTransferResponse;
     }>(`/verify/${encodeURIComponent(code)}/transfer/cancel`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -264,8 +283,8 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     return core.request<{
       message?: string;
       code?: string;
-      ownershipStatus?: any;
-      ownershipTransfer?: any;
+      ownershipStatus?: OwnershipStatusResponse;
+      ownershipTransfer?: OwnershipTransferResponse;
     }>(`/verify/transfer/accept`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -370,11 +389,12 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     id: string,
     payload: { subject: string; message: string; senderMode?: "actor" | "system" }
   ) {
-    const normalizeDelivery = <T extends ApiResponse<any>>(response: T): T => {
+    const normalizeDelivery = <T extends ApiResponse<unknown>>(response: T): T => {
       if (!response.success) return response;
-      const delivered = (response.data as any)?.delivered;
+      const data = (response.data || {}) as DeliveryResponse;
+      const delivered = data.delivered;
       if (typeof delivered === "boolean" && !delivered) {
-        const reason = (response.data as any)?.error || response.error || "Email delivery failed";
+        const reason = data.error || response.error || "Email delivery failed";
         return { ...response, success: false, error: String(reason) } as T;
       }
       return response;
@@ -412,12 +432,13 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       body: JSON.stringify(payload),
     });
     if (!response.success) return response;
-    const delivered = (response.data as any)?.delivered;
+    const data = (response.data || {}) as DeliveryResponse;
+    const delivered = data.delivered;
     if (typeof delivered === "boolean" && !delivered) {
       return {
         ...response,
         success: false,
-        error: String((response.data as any)?.error || response.error || "Email delivery failed"),
+        error: String(data.error || response.error || "Email delivery failed"),
       };
     }
     return response;
@@ -609,12 +630,12 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
     incidentPriority?: "P1" | "P2" | "P3" | "P4";
     licenseeId?: string;
     manufacturerId?: string;
-    actionConfig?: any;
+    actionConfig?: IrActionConfig;
   }) {
     return core.request(`/ir/policies`, { method: "POST", body: JSON.stringify(payload) });
   },
 
-  async patchIrPolicy(id: string, payload: any) {
+  async patchIrPolicy(id: string, payload: IrPolicyPatchPayload) {
     return core.request(`/ir/policies/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) });
   },
 

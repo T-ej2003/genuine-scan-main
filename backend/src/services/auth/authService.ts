@@ -12,7 +12,8 @@ import { createAuditLog } from "../auditService";
 import { assessAuthSessionRisk } from "./sessionRiskService";
 import { listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../manufacturerScopeService";
 import { isVerifiedAccount } from "./emailVerificationService";
-import { getAdminMfaStatus } from "./mfaService";
+import { createAdminMfaChallenge, getAdminMfaStatus } from "./mfaService";
+import { randomOpaqueToken } from "../../utils/security";
 import type { AuthAssuranceLevel, AuthSessionStage, StepUpMethod } from "../../types";
 
 const parseIntEnv = (key: string, fallback: number) => {
@@ -206,8 +207,12 @@ type BootstrapSessionResult = {
     mfaVerifiedAt: null;
     stepUpRequired: boolean;
     stepUpMethod: "ADMIN_MFA";
-    sessionId: null;
+    sessionId: string;
     sessionExpiresAt: string;
+    mfaChallenge?: {
+      ticket: string;
+      expiresAt: string;
+    } | null;
   };
 };
 
@@ -228,6 +233,9 @@ const buildBootstrapSessionForUser = async (input: {
   userAgent: string | null;
   now: Date;
   mfaEnrolled: boolean;
+  riskScore?: number;
+  riskLevel?: string | null;
+  reasons?: string[];
 }) => {
   const linkedScope = isManufacturerRole(input.user.role)
     ? await mapLinkedLicenseesForSession(input.user.id)
@@ -239,6 +247,7 @@ const buildBootstrapSessionForUser = async (input: {
     linkedScope.linkedLicensees[0] ||
     null;
 
+  const bootstrapSessionId = randomOpaqueToken(24);
   const accessToken = signMfaBootstrapToken({
     userId: input.user.id,
     email: input.user.email,
@@ -246,7 +255,21 @@ const buildBootstrapSessionForUser = async (input: {
     licenseeId: primaryLicensee?.id || input.user.licenseeId,
     orgId: input.user.orgId || primaryLicensee?.orgId || null,
     linkedLicenseeIds: linkedScope.linkedLicenseeIds,
+    sessionId: bootstrapSessionId,
   });
+  const mfaChallenge = input.mfaEnrolled
+    ? await createAdminMfaChallenge({
+        userId: input.user.id,
+        sessionId: bootstrapSessionId,
+        purpose: "admin_login",
+        riskScore: input.riskScore || 0,
+        riskLevel: input.riskLevel || "LOW",
+        reasons: input.reasons?.length ? input.reasons : ["Admin login requires MFA confirmation."],
+        ipHash: input.ipHash,
+        userAgent: input.userAgent,
+        supersedeOpen: true,
+      })
+    : null;
 
   return {
     sessionStage: "MFA_BOOTSTRAP" as const,
@@ -282,8 +305,14 @@ const buildBootstrapSessionForUser = async (input: {
       mfaVerifiedAt: null,
       stepUpRequired: true,
       stepUpMethod: "ADMIN_MFA" as const,
-      sessionId: null,
+      sessionId: bootstrapSessionId,
       sessionExpiresAt: new Date(input.now.getTime() + getMfaBootstrapTtlMinutes() * 60 * 1000).toISOString(),
+      mfaChallenge: mfaChallenge
+        ? {
+            ticket: mfaChallenge.ticket,
+            expiresAt: mfaChallenge.expiresAt.toISOString(),
+          }
+        : null,
     },
   };
 };
@@ -470,6 +499,9 @@ export const loginWithPassword = async (input: {
       userAgent: input.userAgent,
       now,
       mfaEnrolled: Boolean(mfaStatus.enabled),
+      riskScore: risk.score,
+      riskLevel: risk.riskLevel,
+      reasons: risk.reasons,
     });
 
     await createAuditLog({

@@ -11,7 +11,7 @@
     "check:email:dns": "node scripts/check-email-dns.js",
     "analytics:refresh-rollups": "tsx scripts/refresh-analytics-rollups.ts",
     "data:backfill-batch-lineage": "tsx scripts/backfill-batch-lineage.ts",
-    "data:reconcile-batch-print-lifecycle": "tsx scripts/reconcile-batch-print-lifecycle.ts",
+    "data:reconcile-batch-print-lifecycle": "node scripts/reconcile-batch-print-lifecycle.js",
     "data:backfill-qr-provenance": "tsx scripts/backfill-qr-provenance.ts",
     "data:backfill-trace-events": "tsx scripts/backfill-trace-events.ts",
     "db:partitions:cutover": "tsx scripts/partition-hot-event-tables.ts",
@@ -22,11 +22,11 @@
     "mock:printer": "node mock-printer/server.js",
     "print:agent": "node dist/local-print-agent/index.js",
     "print:agent:dev": "tsx src/local-print-agent/index.ts",
-    "mscqr:print-test": "tsx scripts/mscqr-print-test.ts",
+    "mscqr:print-test": "node scripts/mscqr-print-test.js",
     "mscqr:legacy-report": "tsx scripts/mscqr-legacy-report.ts",
     "start": "node dist/index.js",
     "worker": "node dist/worker.js",
-    "test:trust-critical:compiled": "node tests/helpers/runWithGeneratedTestSecrets.js \"node tests/verificationTruthSemantics.test.js && node tests/verificationTrustMetrics.test.js && node tests/qrTokenSigningProfile.test.js && node tests/qrTokenKeyNormalization.test.js && node tests/qrManagedSignerBridge.test.js && node tests/internalReleaseMetadataSigningProfile.test.js && node tests/verificationReplayService.test.js && node tests/breakGlassGenerateGate.test.js && node tests/verificationProvenanceHardening.test.js && node tests/qrProvenanceBackfillService.test.js && node tests/publicScanReplayHardening.test.js && node tests/customerVerificationSessionSecurity.test.js && node tests/customerVerifyAuthCookieMode.test.js && node tests/customerVerifyCookieSecurity.test.js && node tests/customerOtpDryRunHandoff.test.js && node tests/cookieTokenProtection.test.js && node tests/csrfSecurity.test.js && node tests/routeSecurityContracts.test.js && node tests/accessControlIsolation.test.js && node tests/tenantIsolationExtended.test.js && node tests/securityResponseSurface.test.js && node tests/securityRouteSurface.test.js && node tests/rateLimitEnforcement.test.js && node tests/rateLimitAnalytics.test.js && node tests/objectStorageConfigContract.test.js && node tests/ownershipTransferSecurity.test.js && node tests/verificationForensicExportService.test.js && node tests/authAdminLoginMfaCycle.test.js && node tests/superAdminBootstrap.test.js && node tests/irPaginationQueryRegression.test.js && node tests/governanceComplianceDownloadResilience.test.js && node tests/publicVerifyRateLimit.test.js && node tests/securityHardening.test.js && node tests/publicScanNotReadyNoMutation.test.js && node tests/publicScanStrictFailClosed.test.js && node tests/publicVerifyStrictFailClosed.test.js\"",
+    "test:trust-critical:compiled": "node tests/helpers/runWithGeneratedTestSecrets.js \"node tests/verificationTruthSemantics.test.js && node tests/verificationTrustMetrics.test.js && node tests/qrTokenSigningProfile.test.js && node tests/qrTokenKeyNormalization.test.js && node tests/qrManagedSignerBridge.test.js && node tests/internalReleaseMetadataSigningProfile.test.js && node tests/verificationReplayService.test.js && node tests/breakGlassGenerateGate.test.js && node tests/verificationProvenanceHardening.test.js && node tests/qrProvenanceBackfillService.test.js && node tests/publicScanReplayHardening.test.js && node tests/publicVerificationApiContract.test.js && node tests/publicEgressContract.test.js && node tests/customerVerificationSessionSecurity.test.js && node tests/customerVerifyAuthCookieMode.test.js && node tests/customerVerifyCookieSecurity.test.js && node tests/customerOtpDryRunHandoff.test.js && node tests/cookieTokenProtection.test.js && node tests/csrfSecurity.test.js && node tests/routeSecurityContracts.test.js && node tests/accessControlIsolation.test.js && node tests/tenantIsolationExtended.test.js && node tests/securityResponseSurface.test.js && node tests/securityRouteSurface.test.js && node tests/rateLimitEnforcement.test.js && node tests/rateLimitAnalytics.test.js && node tests/objectStorageConfigContract.test.js && node tests/ownershipTransferSecurity.test.js && node tests/verificationForensicExportService.test.js && node tests/authAdminLoginMfaCycle.test.js && node tests/authMfaChallengeStateMachine.test.js && node tests/superAdminBootstrap.test.js && node tests/irPaginationQueryRegression.test.js && node tests/governanceComplianceDownloadResilience.test.js && node tests/publicVerifyRateLimit.test.js && node tests/securityHardening.test.js && node tests/publicScanNotReadyNoMutation.test.js && node tests/publicScanStrictFailClosed.test.js && node tests/publicVerifyStrictFailClosed.test.js\"",
     "test:trust-critical": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && npm run test:trust-critical:compiled\"",
     "test:p0-authz": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/p0FullstackAuthorization.test.js\"",
     "test:p1:api-authz": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/p1ApiAuthorizationIntegration.test.js && node tests/p1SignedScanTokenIntegration.test.js\"",
@@ -47,15 +47,16 @@
     "test:db:migrate-replay": "export NODE_ENV=test; node tests/p3MigrationReplay.test.js",
     "test:db:drift": "export NODE_ENV=test; node tests/p3MigrationDrift.test.js",
     "test:p3:migration-gate": "npm run test:db:migrate-replay && npm run test:db:drift",
-    "test": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/verificationTruthSemantics.test.js && node tests/verificationTrustMetrics.test.js && node tests/qrTokenSigningProfile.test.js && node tests/qrTokenKeyNormalization.test.js && node tests/qrManagedSignerBridge.test.js && node tests/internalReleaseMetadataSigningProfile.test.js && node tests/verificationReplayService.test.js && node tests/breakGlassGenerateGate.test.js && node tests/verificationProvenanceHardening.test.js && node tests/qrProvenanceBackfillService.test.js && node tests/publicScanReplayHardening.test.js && node tests/customerVerificationSessionSecurity.test.js && node tests/customerVerifyAuthCookieMode.test.js && node tests/customerVerifyCookieSecurity.test.js && node tests/customerOtpDryRunHandoff.test.js && node tests/cookieTokenProtection.test.js && node tests/csrfSecurity.test.js && node tests/routeSecurityContracts.test.js && node tests/accessControlIsolation.test.js && node tests/tenantIsolationExtended.test.js && node tests/securityResponseSurface.test.js && node tests/securityRouteSurface.test.js && node tests/rateLimitEnforcement.test.js && node tests/rateLimitAnalytics.test.js && node tests/objectStorageConfigContract.test.js && node tests/ownershipTransferSecurity.test.js && node tests/verificationForensicExportService.test.js && node tests/authAdminLoginMfaCycle.test.js && node tests/superAdminBootstrap.test.js && node tests/irPaginationQueryRegression.test.js && node tests/governanceComplianceDownloadResilience.test.js && node tests/authSessionMetadata.test.js && node tests/sensitiveAuthMiddleware.test.js && node tests/batchStateMachineService.test.js && node tests/qrService.test.js && node tests/publicVerifyExactLookup.test.js && node tests/zebraSecondHardening.test.js && node tests/legacyQrRiskReportJob.test.js && node tests/printValidationEvidenceService.test.js && node tests/scanSecurity.test.js && node tests/duplicateRiskEngine.test.js && node tests/incidentMvp.test.js && node tests/incidentPdfExport.test.js && node tests/compliancePackService.test.js && node tests/zebraQrSizing.test.js && node tests/printPayloadService.test.js && node tests/printReservationService.test.js && node tests/localAgentAckProtocol.test.js && node tests/networkIppPrinting.test.js && node tests/printJobOperationalView.test.js && node tests/printerProfileDiscovery.test.js && node tests/printerUserFacingErrors.test.js && node tests/localAgentPrintFlow.test.js && node tests/localAgentDirectWorkerProtocol.test.js && node tests/printerHeartbeatStorageFallback.test.js && node tests/printerHeartbeatKeyRotation.test.js && node tests/connectorReleaseMetadataGuard.test.js && node tests/connectorReleaseService.test.js && node tests/windowsConnectorInstallerScript.test.js && node tests/localPrintAgentCups.test.js && node tests/localPrintAgentWindows.test.js && node tests/pdfLabelRender.test.js && node tests/publicVerifyRateLimit.test.js && node tests/securityHardening.test.js && node tests/notificationVisibility.test.js && node tests/publicScanFallback.test.js && node tests/publicScanActorForeignKeyFallback.test.js && node tests/publicScanNotReadyNoMutation.test.js && node tests/publicScanStrictFailClosed.test.js && node tests/publicVerifyStrictFailClosed.test.js && node tests/hotEventPartitionPlan.test.js && node tests/scanLogReportingService.test.js\"",
+    "test": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/verificationTruthSemantics.test.js && node tests/verificationTrustMetrics.test.js && node tests/qrTokenSigningProfile.test.js && node tests/qrTokenKeyNormalization.test.js && node tests/qrManagedSignerBridge.test.js && node tests/internalReleaseMetadataSigningProfile.test.js && node tests/verificationReplayService.test.js && node tests/breakGlassGenerateGate.test.js && node tests/verificationProvenanceHardening.test.js && node tests/qrProvenanceBackfillService.test.js && node tests/publicScanReplayHardening.test.js && node tests/publicVerificationApiContract.test.js && node tests/publicEgressContract.test.js && node tests/customerVerificationSessionSecurity.test.js && node tests/customerVerifyAuthCookieMode.test.js && node tests/customerVerifyCookieSecurity.test.js && node tests/customerOtpDryRunHandoff.test.js && node tests/cookieTokenProtection.test.js && node tests/csrfSecurity.test.js && node tests/routeSecurityContracts.test.js && node tests/accessControlIsolation.test.js && node tests/tenantIsolationExtended.test.js && node tests/securityResponseSurface.test.js && node tests/securityRouteSurface.test.js && node tests/rateLimitEnforcement.test.js && node tests/rateLimitAnalytics.test.js && node tests/objectStorageConfigContract.test.js && node tests/ownershipTransferSecurity.test.js && node tests/verificationForensicExportService.test.js && node tests/authAdminLoginMfaCycle.test.js && node tests/authMfaChallengeStateMachine.test.js && node tests/superAdminBootstrap.test.js && node tests/irPaginationQueryRegression.test.js && node tests/governanceComplianceDownloadResilience.test.js && node tests/authSessionMetadata.test.js && node tests/sensitiveAuthMiddleware.test.js && node tests/batchStateMachineService.test.js && node tests/qrService.test.js && node tests/publicVerifyExactLookup.test.js && node tests/zebraSecondHardening.test.js && node tests/legacyQrRiskReportJob.test.js && node tests/printValidationEvidenceService.test.js && node tests/scanSecurity.test.js && node tests/duplicateRiskEngine.test.js && node tests/incidentMvp.test.js && node tests/incidentPdfExport.test.js && node tests/compliancePackService.test.js && node tests/zebraQrSizing.test.js && node tests/printPayloadService.test.js && node tests/printReservationService.test.js && node tests/localAgentAckProtocol.test.js && node tests/networkIppPrinting.test.js && node tests/printJobOperationalView.test.js && node tests/printerProfileDiscovery.test.js && node tests/printerUserFacingErrors.test.js && node tests/localAgentPrintFlow.test.js && node tests/localAgentDirectWorkerProtocol.test.js && node tests/printerHeartbeatStorageFallback.test.js && node tests/printerHeartbeatKeyRotation.test.js && node tests/connectorReleaseMetadataGuard.test.js && node tests/connectorReleaseService.test.js && node tests/windowsConnectorInstallerScript.test.js && node tests/localPrintAgentCups.test.js && node tests/localPrintAgentWindows.test.js && node tests/pdfLabelRender.test.js && node tests/publicVerifyRateLimit.test.js && node tests/securityHardening.test.js && node tests/notificationVisibility.test.js && node tests/publicScanFallback.test.js && node tests/publicScanActorForeignKeyFallback.test.js && node tests/publicScanNotReadyNoMutation.test.js && node tests/publicScanStrictFailClosed.test.js && node tests/publicVerifyStrictFailClosed.test.js && node tests/hotEventPartitionPlan.test.js && node tests/scanLogReportingService.test.js\"",
     "test:e2e:seed": "tsx scripts/seed-enterprise-e2e.ts",
-    "prisma:generate": "PRISMA_HIDE_UPDATE_MESSAGE=true prisma generate",
+    "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push",
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:studio": "prisma studio",
     "connector:release": "node local-print-agent/packaging/build-connector-release.mjs",
     "connector:windows:publish-signed": "node local-print-agent/packaging/publish-windows-connector-release.mjs",
+    "connector:windows:publish-zip": "node local-print-agent/packaging/publish-windows-connector-zip-release.mjs",
     "connector:windows:build-installer": "node local-print-agent/packaging/build-windows-installer.mjs",
     "connector:windows:verify": "node local-print-agent/packaging/verify-windows-installer.mjs",
     "connector:smoke": "node local-print-agent/packaging/connector-release-smoke.mjs",
@@ -69,6 +70,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1055.0",
     "@aws-sdk/s3-request-presigner": "^3.1055.0",
+    "@opentelemetry/core": "^2.8.0",
     "@prisma/client": "^6.19.3",
     "@sentry/node": "^10.54.0",
     "@types/pdfkit": "^0.17.5",
@@ -95,12 +97,15 @@
     "zod": "^3.22.4"
   },
   "overrides": {
+    "esbuild": "0.28.1",
     "fast-xml-parser": "5.7.1",
     "ip-address": "10.1.1",
     "qs": "6.15.2",
     "minimatch@10.2.5": {
       "brace-expansion": "5.0.6"
-    }
+    },
+    "@opentelemetry/resources": "2.8.0",
+    "@opentelemetry/sdk-trace-base": "2.8.0"
   },
   "devDependencies": {
     "@types/archiver": "^7.0.0",
@@ -113,6 +118,7 @@
     "@types/node": "^24.12.4",
     "@types/nodemailer": "^8.0.0",
     "@yao-pkg/pkg": "^6.20.0",
+    "tar": "^7.5.16",
     "tsx": "^4.22.3",
     "typescript": "^5.9.3"
   },

@@ -200,6 +200,8 @@ export const beginAdminMfaChallengeController = async (req: Request, res: Respon
 
   const challenge = await createAdminMfaChallenge({
     userId: claims.userId,
+    sessionId: claims.sessionStage === "MFA_BOOTSTRAP" ? claims.sessionId || null : null,
+    purpose: claims.sessionStage === "MFA_BOOTSTRAP" ? "admin_login" : "high_risk_action",
     riskScore: 0,
     riskLevel: "LOW",
     reasons: ["Admin login requires MFA confirmation."],
@@ -252,7 +254,10 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
     const userAgent = normalizeUserAgent(req.get("user-agent"));
     const now = new Date();
     const completed = await completeAdminMfaChallenge({
+      userId: claims.userId,
+      sessionId: claims.sessionId || null,
       ticket: parsed.data.ticket,
+      method: parsed.data.method || null,
       code: parsed.data.code,
       ipHash,
       userAgent,
@@ -290,10 +295,23 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
     return res.json({ success: true, data: authResponseData(session) });
   } catch (error: any) {
     const raw = String(error?.message || "");
-    const status = raw === "INVALID_MFA_CODE" ? 400 : raw === "MFA_CHALLENGE_NOT_FOUND" ? 410 : 409;
+    const status =
+      raw === "INVALID_MFA_CODE"
+        ? 400
+        : raw === "MFA_TOO_MANY_ATTEMPTS"
+          ? 429
+          : raw === "MFA_CHALLENGE_FORBIDDEN"
+            ? 403
+            : raw === "MFA_CHALLENGE_NOT_FOUND"
+              ? 410
+              : 409;
     const message =
       raw === "INVALID_MFA_CODE"
         ? "Invalid authentication code."
+        : raw === "MFA_TOO_MANY_ATTEMPTS"
+          ? "Too many MFA attempts. Wait and try again."
+        : raw === "MFA_CHALLENGE_FORBIDDEN"
+          ? "MFA challenge does not match the active bootstrap session."
         : raw === "MFA_CHALLENGE_NOT_FOUND"
           ? "This MFA challenge expired. Start again."
           : "MFA challenge could not be completed.";

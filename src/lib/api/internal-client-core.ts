@@ -250,7 +250,40 @@ export type ApiClientCore = {
 export function createApiClientCore(): ApiClientCore {
   let token: string | null = null;
   const getCache = new Map<string, unknown>();
+  const endpointCooldowns = new Map<string, { until: number; hits: number }>();
   let refreshInFlight: Promise<ApiResponse<{ user: any }>> | null = null;
+
+  const normalizeCooldownEndpoint = (endpoint: string) => {
+    const [path, rawQuery = ""] = String(endpoint || "").split("?");
+    const normalizedPath = path
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi, ":id")
+      .replace(/\/[A-Za-z0-9_-]{16,}(?=\/|$)/g, "/:id");
+    if (normalizedPath === "/manufacturer/printers" && rawQuery.includes("includeInactive=true")) {
+      return "/manufacturer/printers?includeInactive";
+    }
+    if (normalizedPath === "/qr/stats") return "/qr/stats";
+    if (normalizedPath === "/qr/batches") return "/qr/batches";
+    if (normalizedPath === "/dashboard/stats") return "/dashboard/stats";
+    if (normalizedPath === "/dashboard/attention-queue") return "/dashboard/attention-queue";
+    if (normalizedPath === "/notifications") return "/notifications";
+    if (normalizedPath === "/auth/me") return "/auth/me";
+    return normalizedPath;
+  };
+
+  const parseRetryAfterSeconds = (value: string | null) => {
+    const numeric = Number(value || "");
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+    const timestamp = Date.parse(String(value || ""));
+    if (Number.isFinite(timestamp)) return Math.max(1, Math.ceil((timestamp - Date.now()) / 1000));
+    return undefined;
+  };
+
+  const nextFallbackBackoffSeconds = (hits: number) => {
+    if (hits <= 1) return 10;
+    if (hits === 2) return 20;
+    if (hits === 3) return 30;
+    return 60;
+  };
 
   const setToken = (nextToken: string | null) => {
     token = nextToken;
@@ -318,6 +351,18 @@ export function createApiClientCore(): ApiClientCore {
 
     const method = String(options.method || "GET").toUpperCase();
     const cacheKey = `${getToken() || "cookie"}:${endpoint}`;
+    const cooldownKey = `${method}:${normalizeCooldownEndpoint(endpoint)}`;
+    const cooldown = endpointCooldowns.get(cooldownKey);
+    if (cooldown && Date.now() < cooldown.until) {
+      return {
+        success: false,
+        error: "Request paused after rate limit. Please wait before retrying.",
+        status: 429,
+        code: "RATE_LIMITED",
+        errorCode: "RATE_LIMITED",
+        retryAfterSec: Math.ceil((cooldown.until - Date.now()) / 1000),
+      };
+    }
 
     const hasBody = options.body !== undefined && options.body !== null;
     const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -432,7 +477,7 @@ export function createApiClientCore(): ApiClientCore {
             : payload && typeof payload === "object" && typeof (payload as any).errorCode === "string"
               ? String((payload as any).errorCode)
             : undefined;
-        const retryAfterHeader = Number(response.headers.get("retry-after") || "");
+        const retryAfterHeader = parseRetryAfterSeconds(response.headers.get("retry-after"));
         const retryAfterPayload =
           payload && typeof payload === "object" && "retryAfterSec" in payload
             ? Number((payload as any).retryAfterSec)
@@ -442,9 +487,15 @@ export function createApiClientCore(): ApiClientCore {
         const retryAfterSec =
           Number.isFinite(retryAfterPayload) && retryAfterPayload > 0
             ? retryAfterPayload
-            : Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+            : Number.isFinite(retryAfterHeader) && Number(retryAfterHeader) > 0
               ? retryAfterHeader
               : undefined;
+        if (response.status === 429) {
+          const previousHits = endpointCooldowns.get(cooldownKey)?.hits || 0;
+          const hits = previousHits + 1;
+          const seconds = retryAfterSec || nextFallbackBackoffSeconds(hits);
+          endpointCooldowns.set(cooldownKey, { until: Date.now() + Math.max(1, seconds) * 1000, hits });
+        }
         const responseData =
           payload && typeof payload === "object" && "data" in payload ? (payload as any).data : undefined;
         if (response.status === 428 && responseCode === "STEP_UP_REQUIRED") {
@@ -477,6 +528,7 @@ export function createApiClientCore(): ApiClientCore {
       }
 
       pushNetworkLog({ status: response.status, ok: true });
+      endpointCooldowns.delete(cooldownKey);
 
       if (payload && typeof payload === "object" && "success" in payload) {
         if (method === "GET" && payload.success) {

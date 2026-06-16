@@ -37,6 +37,24 @@ const buildResourceKey = (req: Request, resolver?: RequestResolver) => {
   return resource ? `resource:${shortHash(resource.toLowerCase())}` : "resource:global";
 };
 
+const redisRateLimitStore = () =>
+  isRedisConfigured()
+    ? new RedisStore({
+        sendCommand: (async (...args: string[]) => {
+          const redis = await getRedisClient();
+          if (!redis) throw new Error("Redis unavailable");
+          const redisAny = redis as any;
+          return redisAny.call(args[0], ...args.slice(1));
+        }) as any,
+      })
+    : undefined;
+
+export const createSharedRateLimiter = (options: NonNullable<Parameters<typeof rateLimit>[0]>) =>
+  rateLimit({
+    ...options,
+    store: options.store || redisRateLimitStore(),
+  });
+
 export const buildPublicIpRateLimitKey = (req: Request, scope: string, resourceResolver?: RequestResolver) => {
   const ip = normalizeClientIp(req.ip || req.socket?.remoteAddress || "", { fallback: "unknown" }).toLowerCase();
   return `public:${scope}:ip:${shortHash(ip)}:${buildResourceKey(req, resourceResolver)}`;
@@ -60,16 +78,7 @@ export const createPublicIpRateLimiter = ({ scope, windowMs, max, message, resou
     max,
     standardHeaders: true,
     legacyHeaders: false,
-    store: isRedisConfigured()
-      ? new RedisStore({
-          sendCommand: (async (...args: string[]) => {
-            const redis = await getRedisClient();
-            if (!redis) throw new Error("Redis unavailable");
-            const redisAny = redis as any;
-            return redisAny.call(args[0], ...args.slice(1));
-          }) as any,
-        })
-      : undefined,
+    store: redisRateLimitStore(),
     keyGenerator: (req) => buildPublicIpRateLimitKey(req, scope, resourceResolver),
     handler: createRateLimitJsonHandler(scope, message, { includeRetryAfter: true }),
   });
@@ -87,16 +96,7 @@ export const createPublicActorRateLimiter = ({
     max,
     standardHeaders: true,
     legacyHeaders: false,
-    store: isRedisConfigured()
-      ? new RedisStore({
-          sendCommand: (async (...args: string[]) => {
-            const redis = await getRedisClient();
-            if (!redis) throw new Error("Redis unavailable");
-            const redisAny = redis as any;
-            return redisAny.call(args[0], ...args.slice(1));
-          }) as any,
-        })
-      : undefined,
+    store: redisRateLimitStore(),
     keyGenerator: (req) => buildPublicActorRateLimitKey(req, scope, actorResolver, resourceResolver),
     handler: createRateLimitJsonHandler(scope, message, { includeRetryAfter: true }),
   });

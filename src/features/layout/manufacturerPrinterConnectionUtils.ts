@@ -1,7 +1,7 @@
 import type { PrinterConnectionStatusDTO } from "../../../shared/contracts/runtime/printing.ts";
 
 export const PRINTER_FAILURE_REPORT_COOLDOWN_MS = 3 * 60 * 1000;
-export const PRINTER_BACKGROUND_REFRESH_MS = 30_000;
+export const PRINTER_BACKGROUND_REFRESH_MS = 90_000;
 export const DISABLE_E2E_PRINTER_AGENT_POLLING =
   import.meta.env.VITE_E2E_DISABLE_PRINTER_AGENT_POLLING === "true";
 export const PRINTER_DIALOG_SESSION_STORAGE_VERSION = "v1";

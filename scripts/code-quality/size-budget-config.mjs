@@ -36,8 +36,8 @@ export const DEFAULT_BUDGETS = [
 export const LEGACY_FILE_BUDGETS = {
   "backend/src/controllers/qrController.ts": {
     label: "Legacy controller",
-    maxLines: 1775,
-    reason: "QR controller remains above the default while batch-release hardening is stabilized; keep this ratchet tight until route groups are extracted.",
+    maxLines: 1809,
+    reason: "QR controller remains above the default after print-release safety wiring; keep this ratchet tight until QR route groups are extracted.",
   },
   "backend/src/controllers/incidentController.ts": { label: "Legacy controller", maxLines: 900 },
   "backend/src/controllers/userController.ts": { label: "Legacy controller", maxLines: 820 },
@@ -46,11 +46,15 @@ export const LEGACY_FILE_BUDGETS = {
   "backend/src/controllers/irIncidentController.ts": { label: "Legacy controller", maxLines: 760 },
   "backend/src/controllers/printerAgentJobController.ts": {
     label: "Legacy controller",
-    maxLines: 690,
-    reason: "Printer agent job endpoints are intentionally unchanged during CI repair; split agent registration and polling handlers in a focused follow-up.",
+    maxLines: 717,
+    reason: "Printer agent job endpoints remain legacy-sized after full connector capability gating and upgrade backoff; split agent registration and polling handlers in a focused follow-up.",
   },
   "backend/src/controllers/printerController.ts": { label: "Legacy controller", maxLines: 680 },
-  "backend/src/controllers/printerGatewayController.ts": { label: "Legacy controller", maxLines: 1080 },
+  "backend/src/controllers/printerGatewayController.ts": {
+    label: "Legacy controller",
+    maxLines: 1112,
+    reason: "Gateway controller remains legacy-sized after adding site-gateway serial-context safety; extract gateway claim and acknowledgement handlers into services next.",
+  },
   "backend/src/controllers/verify/claimHandlers.ts": { label: "Legacy controller", maxLines: 580 },
   "backend/src/controllers/governanceController.ts": {
     label: "Legacy controller",
@@ -83,12 +87,20 @@ export const LEGACY_FILE_BUDGETS = {
     maxLines: 960,
     reason: "Audit logs still consolidate role-safe event presentation and manufacturer activity filters; split renderer/filter sections in a focused UX module pass.",
   },
-  "src/pages/ConnectorDownload.tsx": { label: "Legacy page", maxLines: 880 },
+  "src/pages/ConnectorDownload.tsx": {
+    label: "Legacy page",
+    maxLines: 900,
+    reason: "Connector download now separates signed production installers from internal validation artifacts; split platform cards and internal release panels next.",
+  },
   "src/pages/Dashboard.tsx": {
     label: "Legacy page",
     maxLines: 830,
     reason: "Dashboard still owns cross-role launch-state routing; architecture notes track extraction into role-specific dashboard modules.",
   },
   "src/pages/PrinterDiagnostics.tsx": { label: "Legacy page", maxLines: 1620 },
-  "src/pages/PrinterSetup.tsx": { label: "Legacy page", maxLines: 980 },
+  "src/pages/PrinterSetup.tsx": {
+    label: "Legacy page",
+    maxLines: 1055,
+    reason: "Printer setup now carries factory remediation guidance plus signed-connector availability blockers; split remediation panels into printer feature components next.",
+  },
 };

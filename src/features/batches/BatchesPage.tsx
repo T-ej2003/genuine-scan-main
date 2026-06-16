@@ -217,7 +217,7 @@ export default function BatchesPage() {
         onPrintFilterChange={operations.setPrintFilter}
         onRefreshPrinterStatus={printWorkflow.dialogProps.onRefreshPrinters}
         onRefreshBatches={() => {
-          void operations.fetchBatches();
+          void operations.fetchBatches({ force: true });
         }}
         onOpenPrintPack={printWorkflow.openPrintPack}
         onOpenWorkspace={(stableWorkspace) => {

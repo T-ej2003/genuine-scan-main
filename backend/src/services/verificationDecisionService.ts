@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import {
   CustomerTrustLevel,
   VerificationDecisionOutcome,
@@ -9,11 +10,41 @@ import {
 
 import prisma from "../config/database";
 import { recordVerificationTrustMetric } from "../observability/verificationTrustMetrics";
+import { buildTokenHashCandidates, hashToken } from "../utils/security";
 
 const DECISION_VERSION = 1;
+const PUBLIC_SESSION_START_TOKEN_TTL_MS = 15 * 60 * 1000;
+const PUBLIC_SESSION_START_TOKEN_DIGITS = 40;
 
-const getDecisionStore = () => (prisma as any).verificationDecision;
-const getEvidenceStore = () => (prisma as any).verificationEvidenceSnapshot;
+type VerificationDecisionStore = {
+  create?: (args: { data: Record<string, unknown> }) => Promise<{ id: string }>;
+};
+
+type VerificationEvidenceRecord = {
+  id: string;
+  verificationDecisionId?: string | null;
+  metadata?: unknown;
+};
+
+type VerificationEvidenceStore = {
+  create?: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+  findFirst?: (args: Record<string, unknown>) => Promise<VerificationEvidenceRecord | null>;
+  update?: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+};
+
+type VerificationPrismaStores = {
+  verificationDecision?: VerificationDecisionStore;
+  verificationEvidenceSnapshot?: VerificationEvidenceStore;
+};
+
+const verificationPrisma = prisma as typeof prisma & VerificationPrismaStores;
+const getDecisionStore = () => verificationPrisma.verificationDecision;
+const getEvidenceStore = () => verificationPrisma.verificationEvidenceSnapshot;
+
+const randomPublicSessionStartToken = () => {
+  const bytes = randomBytes(PUBLIC_SESSION_START_TOKEN_DIGITS);
+  return Array.from(bytes, (byte) => String(byte % 10)).join("");
+};
 
 const toReasonCode = (value: string) =>
   String(value || "")
@@ -301,4 +332,80 @@ export const attachVerificationPresentationSnapshot = async (
     console.warn("verification presentation snapshot skipped:", error);
     return false;
   }
+};
+
+export const issuePublicVerificationSessionStartToken = async (decisionId: string | null | undefined) => {
+  const evidenceStore = getEvidenceStore();
+  const normalizedDecisionId = String(decisionId || "").trim();
+  if (!normalizedDecisionId || !evidenceStore?.findFirst || !evidenceStore?.update) return null;
+
+  try {
+    const existing = await evidenceStore.findFirst({
+      where: { verificationDecisionId: normalizedDecisionId },
+      orderBy: [{ createdAt: "desc" }],
+    });
+    if (!existing?.id) return null;
+
+    const rawToken = randomPublicSessionStartToken();
+    const issuedAt = new Date();
+    const expiresAt = new Date(issuedAt.getTime() + PUBLIC_SESSION_START_TOKEN_TTL_MS);
+    const metadata =
+      existing.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata)
+        ? { ...(existing.metadata as Record<string, unknown>) }
+        : {};
+
+    metadata.publicSessionStart = {
+      tokenHash: hashToken(rawToken),
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    };
+
+    await evidenceStore.update({
+      where: { id: existing.id },
+      data: { metadata },
+    });
+
+    return rawToken;
+  } catch (error) {
+    console.warn("verification session start token issue skipped:", error);
+    return null;
+  }
+};
+
+export const resolvePublicVerificationSessionStartToken = async (token: string | null | undefined) => {
+  const evidenceStore = getEvidenceStore();
+  const normalizedToken = String(token || "").trim();
+  if (!normalizedToken || !evidenceStore?.findFirst) return null;
+
+  try {
+    for (const tokenHash of buildTokenHashCandidates(normalizedToken)) {
+      const evidence = await evidenceStore.findFirst({
+        where: {
+          metadata: {
+            path: ["publicSessionStart", "tokenHash"],
+            equals: tokenHash,
+          },
+        },
+        orderBy: [{ createdAt: "desc" }],
+      });
+      const metadata =
+        evidence?.metadata && typeof evidence.metadata === "object" && !Array.isArray(evidence.metadata)
+          ? (evidence.metadata as Record<string, unknown>)
+          : {};
+      const publicSessionStart =
+        metadata.publicSessionStart &&
+        typeof metadata.publicSessionStart === "object" &&
+        !Array.isArray(metadata.publicSessionStart)
+          ? (metadata.publicSessionStart as Record<string, unknown>)
+          : {};
+      const expiresAt = new Date(String(publicSessionStart.expiresAt || ""));
+      if (!evidence?.verificationDecisionId || !Number.isFinite(expiresAt.getTime())) continue;
+      if (expiresAt.getTime() <= Date.now()) return null;
+      return String(evidence.verificationDecisionId || "").trim() || null;
+    }
+  } catch (error) {
+    console.warn("verification session start token resolution failed:", error);
+  }
+
+  return null;
 };

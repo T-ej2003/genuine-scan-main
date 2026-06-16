@@ -15,7 +15,12 @@ import {
 import { createHash } from "crypto";
 
 import { hashPassword } from "../src/services/auth/passwordService";
-import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION, LOCAL_AGENT_MIN_VERSION_HINT } from "../src/services/localAgentProtocol";
+import {
+  LOCAL_AGENT_CAPABILITIES,
+  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_MIN_VERSION_HINT,
+  LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+} from "../src/services/localAgentProtocol";
 
 const prisma = new PrismaClient();
 
@@ -69,6 +74,22 @@ const printCodes = Array.from({ length: 10 }, (_, index) => `E2E2000000${String(
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const now = () => new Date();
+
+const e2ePrinterTestLabelMetadata = (confirmedAt: Date) => ({
+  lastTestLabelConfirmedAt: confirmedAt.toISOString(),
+  lastTestLabelConnectionType: PrinterConnectionType.LOCAL_AGENT,
+  lastTestLabelDeviceJobRef: "e2e-setup-test-label",
+  lastTestLabelFingerprint: {
+    connectionType: PrinterConnectionType.LOCAL_AGENT,
+    deliveryMode: "DIRECT",
+    nativePrinterId: NATIVE_PRINTER_ID,
+    ipAddress: null,
+    host: null,
+    port: null,
+    printerUri: null,
+    commandLanguage: PrinterCommandLanguage.AUTO,
+  },
+});
 
 const upsertUser = async (params: {
   id: string;
@@ -222,6 +243,8 @@ const seedPrinter = async () => {
         agentVersion: "e2e-ci",
         protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
         buildVersion: `${LOCAL_AGENT_MIN_VERSION_HINT}-e2e`,
+        transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+        capabilities: LOCAL_AGENT_CAPABILITIES,
         capabilitySummary: {
           transports: ["LOCAL_AGENT"],
           protocols: ["DRIVER_QUEUE"],
@@ -239,6 +262,7 @@ const seedPrinter = async () => {
             connection: "LOCAL_AGENT",
             online: true,
             isDefault: true,
+            commandLanguage: "PDF",
             protocols: ["DRIVER_QUEUE"],
             languages: ["PDF"],
             mediaSizes: ["50x30mm"],
@@ -272,6 +296,7 @@ const seedPrinter = async () => {
       lastValidatedAt: heartbeatAt,
       lastValidationStatus: "READY",
       lastValidationMessage: "E2E local agent is ready.",
+      metadata: e2ePrinterTestLabelMetadata(heartbeatAt) as Prisma.InputJsonValue,
     },
     update: {
       name: PRINTER_NAME,
@@ -291,6 +316,7 @@ const seedPrinter = async () => {
       lastValidatedAt: heartbeatAt,
       lastValidationStatus: "READY",
       lastValidationMessage: "E2E local agent is ready.",
+      metadata: e2ePrinterTestLabelMetadata(heartbeatAt) as Prisma.InputJsonValue,
     },
   });
 

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { ApiResponseError } from "@/lib/api/query-utils";
+import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
 import { onMutationEvent } from "@/lib/mutation-events";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -9,7 +10,10 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: (failureCount, error) => {
-        if (error instanceof ApiResponseError && error.code === "RATE_LIMITED") return false;
+        if (error instanceof ApiResponseError) {
+          if (error.code === "RATE_LIMITED") return false;
+          if ([400, 401, 403, 404, 409, 428, 429].includes(Number(error.status || 0))) return false;
+        }
         return failureCount < 1;
       },
       staleTime: 10_000,
@@ -27,6 +31,10 @@ export function MutationEventBridge(): null {
   useEffect(() => {
     return onMutationEvent((detail) => {
       const endpoint = detail.endpoint || "";
+
+      if (isActivePrintSessionSuppressed()) {
+        return;
+      }
 
       if (endpoint.startsWith("/notifications")) {
         void client.invalidateQueries({ queryKey: queryKeys.layout.notifications() });

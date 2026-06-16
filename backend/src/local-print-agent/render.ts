@@ -11,7 +11,7 @@ import {
   renderPdfLabelBuffer,
   renderQrLabelImageBuffer,
 } from "../printing/pdfLabel";
-import { assertZplPayloadSafeForQrLabel, buildKnownGoodDiagnosticZplPayload } from "../services/printPayloadService";
+import { assertZplPayloadSafeForQrLabel, buildKnownGoodDiagnosticZplPayload } from "../printing/printPayloadSafety";
 
 const execFileAsync = promisify(execFile);
 

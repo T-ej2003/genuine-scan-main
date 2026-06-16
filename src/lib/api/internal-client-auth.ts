@@ -1,4 +1,5 @@
 import { type ApiClientCore, type ApiResponse } from "@/lib/api/internal-client-core";
+import { coordinateProtectedRead } from "@/lib/api/request-coordinator";
 
 export const createAuthApi = (core: ApiClientCore) => ({
   async login(email: string, password: string) {
@@ -17,6 +18,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
         stepUpMethod?: "ADMIN_MFA" | "PASSWORD_REAUTH" | null;
         sessionId?: string | null;
         sessionExpiresAt?: string | null;
+        mfaChallenge?: { ticket: string; expiresAt: string } | null;
       };
     }>("/auth/login", {
       method: "POST",
@@ -26,7 +28,15 @@ export const createAuthApi = (core: ApiClientCore) => ({
   },
 
   async getCurrentUser() {
-    return core.request("/auth/me");
+    return coordinateProtectedRead(
+      {
+        family: "auth:me",
+        ttlMs: 60_000,
+        minRefreshMs: 30_000,
+        cooldownMessage: "Session refresh is cooling down. Keeping the current session state.",
+      },
+      () => core.request("/auth/me")
+    );
   },
 
   async refreshSession() {
@@ -128,6 +138,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
         stepUpMethod?: "ADMIN_MFA" | "PASSWORD_REAUTH" | null;
         sessionId?: string | null;
         sessionExpiresAt?: string | null;
+        mfaChallenge?: { ticket: string; expiresAt: string } | null;
       };
     }>("/auth/accept-invite", {
       method: "POST",
@@ -171,15 +182,25 @@ export const createAuthApi = (core: ApiClientCore) => ({
             platform: "macos";
             label: string;
             installerKind: "pkg" | "zip" | "exe" | "msi";
-            trustLevel: "trusted" | "unsigned";
+            artifactType?: string | null;
+            trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
             signatureStatus?: "signed" | "unsigned" | "unknown";
+            smartAppControlSafe?: boolean;
             publisherName?: string | null;
             signedAt?: string | null;
+            signatureSubject?: string | null;
+            signatureIssuer?: string | null;
+            certificateThumbprint?: string | null;
+            timestamped?: boolean;
+            timestampAuthority?: string | null;
             windowsTrustMode?: "trusted" | "unsigned-test";
+            internalOnly?: boolean;
             filename: string;
             architecture: string;
             bytes: number;
             sha256: string;
+            legalDocumentsIncluded?: string[];
+            releaseNotesIncluded?: boolean;
             notes: string[];
             contentType: string;
             downloadPath: string;
@@ -189,15 +210,25 @@ export const createAuthApi = (core: ApiClientCore) => ({
             platform: "windows";
             label: string;
             installerKind: "pkg" | "zip" | "exe" | "msi";
-            trustLevel: "trusted" | "unsigned";
+            artifactType?: string | null;
+            trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
             signatureStatus?: "signed" | "unsigned" | "unknown";
+            smartAppControlSafe?: boolean;
             publisherName?: string | null;
             signedAt?: string | null;
+            signatureSubject?: string | null;
+            signatureIssuer?: string | null;
+            certificateThumbprint?: string | null;
+            timestamped?: boolean;
+            timestampAuthority?: string | null;
             windowsTrustMode?: "trusted" | "unsigned-test";
+            internalOnly?: boolean;
             filename: string;
             architecture: string;
             bytes: number;
             sha256: string;
+            legalDocumentsIncluded?: string[];
+            releaseNotesIncluded?: boolean;
             notes: string[];
             contentType: string;
             downloadPath: string;
@@ -208,7 +239,10 @@ export const createAuthApi = (core: ApiClientCore) => ({
     }>("/public/connector/releases");
   },
 
-  async getLatestConnectorRelease() {
+  async getLatestConnectorRelease(options?: { includeInternal?: boolean }) {
+    const path = options?.includeInternal
+      ? "/public/connector/releases/latest?internal=1"
+      : "/public/connector/releases/latest";
     return core.request<{
       productName: string;
       latestVersion: string;
@@ -225,10 +259,17 @@ export const createAuthApi = (core: ApiClientCore) => ({
             platform: "macos";
             label: string;
             installerKind: "pkg" | "zip" | "exe" | "msi";
-            trustLevel: "trusted" | "unsigned";
+            artifactType?: string | null;
+            trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
             signatureStatus?: "signed" | "unsigned" | "unknown";
+            smartAppControlSafe?: boolean;
             publisherName?: string | null;
             signedAt?: string | null;
+            signatureSubject?: string | null;
+            signatureIssuer?: string | null;
+            certificateThumbprint?: string | null;
+            timestamped?: boolean;
+            timestampAuthority?: string | null;
             windowsTrustMode?: "trusted" | "unsigned-test";
             filename: string;
             architecture: string;
@@ -243,15 +284,53 @@ export const createAuthApi = (core: ApiClientCore) => ({
             platform: "windows";
             label: string;
             installerKind: "pkg" | "zip" | "exe" | "msi";
-            trustLevel: "trusted" | "unsigned";
+            artifactType?: string | null;
+            trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
             signatureStatus?: "signed" | "unsigned" | "unknown";
+            smartAppControlSafe?: boolean;
             publisherName?: string | null;
             signedAt?: string | null;
+            signatureSubject?: string | null;
+            signatureIssuer?: string | null;
+            certificateThumbprint?: string | null;
+            timestamped?: boolean;
+            timestampAuthority?: string | null;
             windowsTrustMode?: "trusted" | "unsigned-test";
+            internalOnly?: boolean;
             filename: string;
             architecture: string;
             bytes: number;
             sha256: string;
+            legalDocumentsIncluded?: string[];
+            releaseNotesIncluded?: boolean;
+            notes: string[];
+            contentType: string;
+            downloadPath: string;
+            downloadUrl: string;
+          };
+          windowsUnsignedTest?: null | {
+            platform: "windowsUnsignedTest";
+            label: string;
+            installerKind: "pkg" | "zip" | "exe" | "msi";
+            artifactType?: string | null;
+            trustLevel: "production" | "internal-test" | "trusted" | "unsigned";
+            signatureStatus?: "signed" | "unsigned" | "unknown";
+            smartAppControlSafe?: boolean;
+            publisherName?: string | null;
+            signedAt?: string | null;
+            signatureSubject?: string | null;
+            signatureIssuer?: string | null;
+            certificateThumbprint?: string | null;
+            timestamped?: boolean;
+            timestampAuthority?: string | null;
+            windowsTrustMode?: "trusted" | "unsigned-test";
+            internalOnly?: boolean;
+            filename: string;
+            architecture: string;
+            bytes: number;
+            sha256: string;
+            legalDocumentsIncluded?: string[];
+            releaseNotesIncluded?: boolean;
             notes: string[];
             contentType: string;
             downloadPath: string;
@@ -259,7 +338,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
           };
         };
       };
-    }>("/public/connector/releases/latest");
+    }>(path);
   },
 
   async inviteUser(payload: {
@@ -322,10 +401,10 @@ export const createAuthApi = (core: ApiClientCore) => ({
     });
   },
 
-  async completeAdminMfaChallenge(ticket: string, code: string) {
+  async completeAdminMfaChallenge(ticket: string, code: string, method?: "totp" | "backup_code") {
     return core.request<{ user?: any; auth?: any }>("/auth/mfa/challenge/complete", {
       method: "POST",
-      body: JSON.stringify({ ticket, code }),
+      body: JSON.stringify({ ticket, code, ...(method ? { method } : {}) }),
     });
   },
 

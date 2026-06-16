@@ -336,10 +336,12 @@ const buildReqRes = (options) => {
   await scanToken(governedReqRes.req, governedReqRes.res);
 
   assert.strictEqual(governedReqRes.res.statusCode, 200, "governed signed verification should succeed");
-  assert.strictEqual(governedReqRes.res.body?.data?.publicOutcome, "SIGNED_LABEL_ACTIVE");
-  assert.strictEqual(governedReqRes.res.body?.data?.printTrustState, "PRINT_CONFIRMED");
-  assert.strictEqual(governedReqRes.res.body?.data?.proofSource, "SIGNED_LABEL");
-  assert.strictEqual(governedReqRes.res.body?.data?.classification, "FIRST_SCAN");
+  assert.strictEqual(governedReqRes.res.body?.data?.publicStatus, "verified");
+  assert.strictEqual(governedReqRes.res.body?.data?.scanStatus, "first_successful_scan");
+  assert.strictEqual(governedReqRes.res.body?.data?.riskSignalStatus, "clear");
+  assert.strictEqual(governedReqRes.res.body?.data?.printTrustState, undefined);
+  assert.strictEqual(governedReqRes.res.body?.data?.proofSource, undefined);
+  assert.strictEqual(governedReqRes.res.body?.data?.classification, undefined);
   assert.strictEqual(transactionCalled, true, "governed signed verification should record the scan");
 
   currentQrRecord = baseSignedQrRecord({
@@ -375,8 +377,8 @@ const buildReqRes = (options) => {
   await verifyQRCode(manualReqRes.req, manualReqRes.res);
 
   assert.strictEqual(manualReqRes.res.statusCode, 200, "manual record checks should return a structured response");
-  assert.strictEqual(manualReqRes.res.body?.data?.publicOutcome, "MANUAL_RECORD_FOUND");
-  assert.strictEqual(manualReqRes.res.body?.data?.proofSource, "MANUAL_CODE_LOOKUP");
+  assert.strictEqual(manualReqRes.res.body?.data?.publicStatus, "verified");
+  assert.strictEqual(manualReqRes.res.body?.data?.proofSource, undefined);
 
   currentQrRecord = baseSignedQrRecord({
     code: "MSC0002A",
@@ -411,20 +413,12 @@ const buildReqRes = (options) => {
   await verifyQRCode(manualSignedHistoryReqRes.req, manualSignedHistoryReqRes.res);
 
   assert.strictEqual(
-    manualSignedHistoryReqRes.res.body?.data?.publicOutcome,
-    "MANUAL_RECORD_FOUND",
+    manualSignedHistoryReqRes.res.body?.data?.publicStatus,
+    "verified",
     "manual fallback after signed history should stay on the limited record outcome"
   );
-  assert.strictEqual(
-    manualSignedHistoryReqRes.res.body?.data?.messageKey,
-    "manual_record_signed_history",
-    "manual fallback after signed history should use signed-history-safe copy"
-  );
-  assert.strictEqual(
-    manualSignedHistoryReqRes.res.body?.data?.nextActionKey,
-    "rescan_label",
-    "manual fallback after signed history should recommend rescanning the original label"
-  );
+  assert.strictEqual(manualSignedHistoryReqRes.res.body?.data?.messageKey, undefined);
+  assert.strictEqual(manualSignedHistoryReqRes.res.body?.data?.nextActionKey, undefined);
 
   currentQrRecord = baseSignedQrRecord({
     code: "MSC0002B",
@@ -466,16 +460,12 @@ const buildReqRes = (options) => {
   await verifyQRCode(riskyManualFallbackReqRes.req, riskyManualFallbackReqRes.res);
 
   assert.strictEqual(
-    riskyManualFallbackReqRes.res.body?.data?.classification,
-    "SUSPICIOUS_DUPLICATE",
+    riskyManualFallbackReqRes.res.body?.data?.publicStatus,
+    "review_needed",
     "manual fallback with risky signed-history signals should be downgraded to suspicious review"
   );
-  assert.strictEqual(riskyManualFallbackReqRes.res.body?.data?.publicOutcome, "REVIEW_REQUIRED");
-  assert(
-    Array.isArray(riskyManualFallbackReqRes.res.body?.data?.reasons) &&
-      riskyManualFallbackReqRes.res.body.data.reasons.some((reason) => /manual entry cannot replace that stronger proof/i.test(reason)),
-    "manual fallback review-required response should explain that manual entry cannot replace prior signed proof"
-  );
+  assert.strictEqual(riskyManualFallbackReqRes.res.body?.data?.riskSignalStatus, "needs_brand_review");
+  assert.strictEqual(riskyManualFallbackReqRes.res.body?.data?.reasons, undefined);
 
   currentQrRecord = baseSignedQrRecord({
     code: "MSC0003",
@@ -515,8 +505,9 @@ const buildReqRes = (options) => {
   await scanToken(breakGlassReqRes.req, breakGlassReqRes.res);
 
   assert.strictEqual(breakGlassReqRes.res.statusCode, 200, "restricted direct issuance should return a safe verification payload");
-  assert.strictEqual(breakGlassReqRes.res.body?.data?.classification, "NOT_READY_FOR_CUSTOMER_USE");
-  assert.strictEqual(breakGlassReqRes.res.body?.data?.printTrustState, "RESTRICTED_DIRECT_ISSUANCE");
+  assert.strictEqual(breakGlassReqRes.res.body?.data?.publicStatus, "not_ready");
+  assert.strictEqual(breakGlassReqRes.res.body?.data?.classification, undefined);
+  assert.strictEqual(breakGlassReqRes.res.body?.data?.printTrustState, undefined);
   assert.strictEqual(transactionCalled, false, "restricted direct issuance should not mutate scan state");
 
   currentQrRecord = baseSignedQrRecord({
@@ -554,14 +545,14 @@ const buildReqRes = (options) => {
   await scanToken(notReadyReqRes.req, notReadyReqRes.res);
 
   assert.strictEqual(
-    notReadyReqRes.res.body?.data?.classification,
-    "NOT_READY_FOR_CUSTOMER_USE",
+    notReadyReqRes.res.body?.data?.publicStatus,
+    "not_ready",
     "customerVerifiableAt should gate customer-ready signed verification"
   );
   assert.strictEqual(
     notReadyReqRes.res.body?.data?.printTrustState,
-    "AWAITING_PRINT_CONFIRMATION",
-    "governed labels without customerVerifiableAt should stay in awaiting-print state"
+    undefined,
+    "governed labels without customerVerifiableAt should not expose print-state internals"
   );
   assert.strictEqual(transactionCalled, false, "customerVerifiableAt not-ready results should not mutate scan state");
 

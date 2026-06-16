@@ -25,6 +25,7 @@ import {
   reissueRequestDecisionSchema,
   reissueRequestIdParamSchema,
 } from "./operationSchemas";
+import { getOrComputeVersionedCache } from "../../services/versionedCacheService";
 
 const isPlatformAdmin = (role: UserRole) =>
   role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
@@ -47,15 +48,22 @@ export const listManufacturerPrintJobs = async (req: AuthRequest, res: Response)
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid query" });
     }
 
-    const rows = await listPrintJobsForManufacturer({
-      scope: {
-        role: user.role,
-        userId: user.userId,
-        licenseeId: getEffectiveLicenseeId(req),
-      },
-      batchId: parsed.data.batchId,
-      limit: parsed.data.limit,
-    });
+    const scope = {
+      role: user.role,
+      userId: user.userId,
+      licenseeId: getEffectiveLicenseeId(req),
+    };
+    const rows = await getOrComputeVersionedCache(
+      "print-jobs",
+      [scope.role, scope.userId, scope.licenseeId || "none", parsed.data.batchId || "all", parsed.data.limit].join(":"),
+      5,
+      () =>
+        listPrintJobsForManufacturer({
+          scope,
+          batchId: parsed.data.batchId,
+          limit: parsed.data.limit,
+        })
+    );
 
     return res.json({ success: true, data: rows });
   } catch (error: any) {
@@ -74,14 +82,21 @@ export const getManufacturerPrintJobStatus = async (req: AuthRequest, res: Respo
       return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
     }
 
-    const view = await getPrintJobOperationalView({
-      jobId: parsedParams.data.id,
-      scope: {
-        role: user.role,
-        userId: user.userId,
-        licenseeId: getEffectiveLicenseeId(req),
-      },
-    });
+    const scope = {
+      role: user.role,
+      userId: user.userId,
+      licenseeId: getEffectiveLicenseeId(req),
+    };
+    const view = await getOrComputeVersionedCache(
+      "print-jobs",
+      [scope.role, scope.userId, scope.licenseeId || "none", "status", parsedParams.data.id].join(":"),
+      3,
+      () =>
+        getPrintJobOperationalView({
+          jobId: parsedParams.data.id,
+          scope,
+        })
+    );
     if (!view) {
       return res.status(404).json({ success: false, error: "Print job not found" });
     }

@@ -86,6 +86,7 @@ const parseAnySessionToken = async (token: string): Promise<AuthenticatedSession
       authAssurance: "PASSWORD",
       authenticatedAt: null,
       mfaVerifiedAt: null,
+      sessionId: decoded.sessionId,
     });
   }
 };

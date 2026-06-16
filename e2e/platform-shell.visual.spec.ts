@@ -56,8 +56,9 @@ const mockPlatformApis = async (page: Page, role: MockRole) => {
 
   if (role === "MANUFACTURER") {
     await page.addInitScript(() => {
+      document.cookie = "aq_vid=visual-device; Max-Age=31536000; Path=/; SameSite=Lax";
       window.sessionStorage.setItem("manufacturer-printer-dialog-opened:v1:manufacturer-visual-user", "shown");
-      window.localStorage.setItem("manufacturer-printer-onboarding:v1:manufacturer-visual-user", "dismissed");
+      window.localStorage.setItem("manufacturer-printer-onboarding:v1:manufacturer-visual-user:visual-device", "dismissed");
     });
   }
 

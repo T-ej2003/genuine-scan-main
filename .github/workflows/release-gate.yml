@@ -26,6 +26,7 @@ permissions:
   contents: read
   actions: read
   deployments: read
+  id-token: write
 
 concurrency:
   group: production-deploy
@@ -83,45 +84,47 @@ jobs:
           REQUIRED_WORKFLOW_FILES: quality-gate.yml,secret-scan.yml,deployment-audit.yml
           MAX_ATTEMPTS: 1
           POLL_SECONDS: 0
-        run: node scripts/github/check-required-workflow-gates.mjs
+        run: |
+          set -euo pipefail
+          node scripts/github/check-required-workflow-gates.mjs
 
       - name: Expert override notice
         if: ${{ inputs.expert_override }}
         run: |
+          set -euo pipefail
+
           echo "::warning::Expert override enabled. Required workflow gate sanity check was skipped."
           echo "Use only for emergency production deployment after human verification."
 
-  deploy-production:
-    name: Deploy production via Ansible
+  deploy-production-ecs:
+    name: Deploy production ECS
     needs: resolve-deploy-target
     if: ${{ needs.resolve-deploy-target.outputs.deploy_sha != '' }}
-    runs-on: [self-hosted, linux, production-deploy]
-    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     environment: production
     env:
-      ANSIBLE_HOST_KEY_CHECKING: "true"
+      AWS_ACCOUNT_ID_EXPECTED: "368992683803"
+      AWS_REGION: eu-west-2
+      BACKEND_ECR_REPO: mscqr-backend
+      FRONTEND_ECR_REPO: mscqr-web
+      CLUSTER_NAME: mscqr-prod-euw2-main
+      BACKEND_SERVICE_NAME: mscqr-backend-servi-euw2
+      FRONTEND_SERVICE_NAME: mscqr-frontend-servi-euw2
+      BACKEND_TASK_DEFINITION: mscqr-backend
+      FRONTEND_TASK_DEFINITION: mscqr-frontend
+      BACKEND_CONTAINER_NAME: backend
+      FRONTEND_CONTAINER_NAME: frontend
+      PLATFORMS: linux/amd64
+      PUBLIC_BASE_URL: https://www.mscqr.com
       DEPLOY_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
       RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
     steps:
-      - name: Checkout deployment tooling
+      - name: Checkout exact deployment target
         uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           fetch-depth: 0
-
-      - name: Verify Ansible on self-hosted runner
-        run: |
-          set -euo pipefail
-
-          if ! command -v ansible-playbook >/dev/null 2>&1; then
-            echo "ansible-playbook is not installed on this self-hosted runner."
-            echo "Install it on the runner with: sudo apt install -y ansible"
-            exit 1
-          fi
-
-          ansible --version
-          ansible-playbook --version
-
 
       - name: Verify production environment requires approval
         env:
@@ -154,115 +157,198 @@ jobs:
           console.log("Production environment required reviewers are configured. Reviewer identities were not printed.");
           NODE
 
-      - name: Validate deployment secrets
+      - name: Validate AWS authentication inputs
+        id: auth-mode
         env:
-          PROD_ANSIBLE_INVENTORY: ${{ secrets.PROD_ANSIBLE_INVENTORY }}
-          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
-          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
-          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
-          QR_SIGN_ACTIVE_KEY_VERSION: ${{ secrets.QR_SIGN_ACTIVE_KEY_VERSION }}
-          QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION: ${{ secrets.QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION }}
-          QR_SIGN_PRIVATE_KEY: ${{ secrets.QR_SIGN_PRIVATE_KEY }}
-          QR_SIGN_PROVIDER: ${{ secrets.QR_SIGN_PROVIDER }}
-          QR_SIGN_PUBLIC_KEY: ${{ secrets.QR_SIGN_PUBLIC_KEY }}
+          AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
+            echo "mode=oidc" >> "$GITHUB_OUTPUT"
+          elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "mode=keys" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Configure repository/environment variable AWS_ROLE_TO_ASSUME for OIDC, or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY as fallback secrets."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials via OIDC
+        if: steps.auth-mode.outputs.mode == 'oidc'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+      - name: Configure AWS credentials via access keys
+        if: steps.auth-mode.outputs.mode == 'keys'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      - name: Verify AWS account
+        run: |
+          set -euo pipefail
+
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          if [ "$account_id" != "$AWS_ACCOUNT_ID_EXPECTED" ]; then
+            echo "::error::AWS role resolved to account ${account_id}; expected ${AWS_ACCOUNT_ID_EXPECTED}."
+            exit 1
+          fi
+          echo "AWS account verified for production deployment."
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Resolve image metadata
+        id: image-meta
+        run: |
+          set -euo pipefail
+
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          images_file="$RUNNER_TEMP/published-images.jsonl"
+          : > "$images_file"
+
+          echo "account_id=$account_id" >> "$GITHUB_OUTPUT"
+          echo "images_file=$images_file" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$DEPLOY_SHA" >> "$GITHUB_OUTPUT"
+          echo "backend_metadata_file=$RUNNER_TEMP/backend-deployment.json" >> "$GITHUB_OUTPUT"
+          echo "frontend_metadata_file=$RUNNER_TEMP/frontend-deployment.json" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce ECR repository controls
+        run: |
+          set -euo pipefail
+          ./scripts/aws/apply-ecr-repository-controls.sh both
+
+      - name: Publish immutable ECS images
+        env:
+          AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
+          IMAGE_TAG: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          OUTPUT_FILE: ${{ steps.image-meta.outputs.images_file }}
+        run: |
+          set -euo pipefail
+          ./scripts/aws/publish-ecs-images.sh both
+
+      - name: Resolve backend and frontend digest refs
+        id: images
+        env:
+          IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
+        run: |
+          set -euo pipefail
+
+          node --input-type=module - "$IMAGES_FILE" "$GITHUB_OUTPUT" <<'NODE'
+          import fs from "node:fs";
+
+          const [imagesPath, outputPath] = process.argv.slice(2);
+          const records = fs.readFileSync(imagesPath, "utf8")
+            .split(/\n+/)
+            .filter(Boolean)
+            .map((line) => JSON.parse(line));
+
+          for (const service of ["backend", "frontend"]) {
+            const record = records.find((item) => item.service === service);
+            if (!record?.image_ref) {
+              throw new Error(`Missing published image record for ${service}.`);
+            }
+            fs.appendFileSync(outputPath, `${service}_image_ref=${record.image_ref}\n`);
+            fs.appendFileSync(outputPath, `${service}_image_uri=${record.image_uri}\n`);
+            fs.appendFileSync(outputPath, `${service}_image_digest=${record.image_digest}\n`);
+          }
+          NODE
+
+      - name: Deploy backend ECS service
+        env:
+          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+          SERVICE_NAME: ${{ env.BACKEND_SERVICE_NAME }}
+          TASK_DEFINITION: ${{ env.BACKEND_TASK_DEFINITION }}
+          CONTAINER_NAME: ${{ env.BACKEND_CONTAINER_NAME }}
+          IMAGE_URI: ${{ steps.images.outputs.backend_image_ref }}
+          METADATA_FILE: ${{ steps.image-meta.outputs.backend_metadata_file }}
+          ENV_UPDATES: GIT_SHA,RELEASE_GIT_SHA
+          GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
         run: |
           set -euo pipefail
+          ./scripts/aws/deploy-ecs-service.sh
 
-          missing=()
-          if [ -n "$PROD_ANSIBLE_INVENTORY" ]; then
-            [ -n "$PROD_SSH_PRIVATE_KEY" ] || missing+=("PROD_SSH_PRIVATE_KEY")
-            [ -n "$PROD_KNOWN_HOSTS" ] || missing+=("PROD_KNOWN_HOSTS")
-          else
-            [ -n "$PROD_SSH_HOST" ] || missing+=("PROD_SSH_HOST")
-            [ -n "$PROD_SSH_USER" ] || missing+=("PROD_SSH_USER")
-            [ -n "$PROD_SSH_PRIVATE_KEY" ] || missing+=("PROD_SSH_PRIVATE_KEY")
-          fi
-          [ -n "$QR_SIGN_ACTIVE_KEY_VERSION" ] || missing+=("QR_SIGN_ACTIVE_KEY_VERSION")
-          [ -n "$QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION" ] || missing+=("QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION")
-          [ -n "$QR_SIGN_PRIVATE_KEY" ] || missing+=("QR_SIGN_PRIVATE_KEY")
-          [ -n "$QR_SIGN_PROVIDER" ] || missing+=("QR_SIGN_PROVIDER")
-          [ -n "$QR_SIGN_PUBLIC_KEY" ] || missing+=("QR_SIGN_PUBLIC_KEY")
-
-          if [ "${#missing[@]}" -gt 0 ]; then
-            printf '::error::Missing required production deployment secret(s): %s\n' "${missing[*]}"
-            exit 1
-          fi
-
-          echo "Required production deployment secret names are configured. Values were not printed."
-
-      - name: Configure SSH and generated inventory
+      - name: Verify backend health
         env:
-          PROD_ANSIBLE_INVENTORY: ${{ secrets.PROD_ANSIBLE_INVENTORY }}
-          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
-          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
-          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
-          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SMOKE_PATHS: /api/health /health/ready
+        run: |
+          set -euo pipefail
+          ./scripts/aws/verify-production-smoke.sh
+
+      - name: Deploy frontend ECS service
+        env:
+          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+          SERVICE_NAME: ${{ env.FRONTEND_SERVICE_NAME }}
+          TASK_DEFINITION: ${{ env.FRONTEND_TASK_DEFINITION }}
+          CONTAINER_NAME: ${{ env.FRONTEND_CONTAINER_NAME }}
+          IMAGE_URI: ${{ steps.images.outputs.frontend_image_ref }}
+          METADATA_FILE: ${{ steps.image-meta.outputs.frontend_metadata_file }}
+          ENV_UPDATES: GIT_SHA
+          GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+        run: |
+          set -euo pipefail
+          ./scripts/aws/deploy-ecs-service.sh
+
+      - name: Verify frontend and public health
+        run: |
+          set -euo pipefail
+          ./scripts/aws/verify-production-smoke.sh
+
+      - name: Summarize ECS production deployment
+        env:
+          BACKEND_METADATA_FILE: ${{ steps.image-meta.outputs.backend_metadata_file }}
+          FRONTEND_METADATA_FILE: ${{ steps.image-meta.outputs.frontend_metadata_file }}
+          BACKEND_IMAGE_REF: ${{ steps.images.outputs.backend_image_ref }}
+          FRONTEND_IMAGE_REF: ${{ steps.images.outputs.frontend_image_ref }}
         run: |
           set -euo pipefail
 
-          install -m 700 -d "$HOME/.ssh"
+          backend_new_task="$(
+            node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.newTaskDefinitionArn || "");' "$BACKEND_METADATA_FILE"
+          )"
+          backend_previous_task="$(
+            node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.previousTaskDefinitionArn || "");' "$BACKEND_METADATA_FILE"
+          )"
+          frontend_new_task="$(
+            node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.newTaskDefinitionArn || "");' "$FRONTEND_METADATA_FILE"
+          )"
+          frontend_previous_task="$(
+            node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.previousTaskDefinitionArn || "");' "$FRONTEND_METADATA_FILE"
+          )"
 
-          ssh_key_file="$HOME/.ssh/prod_deploy_key"
-          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$ssh_key_file"
-          chmod 600 "$ssh_key_file"
-
-          known_hosts_file="$HOME/.ssh/known_hosts"
-          if [ -n "$PROD_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$PROD_KNOWN_HOSTS" > "$known_hosts_file"
-          else
-            prod_ssh_port="${PROD_SSH_PORT:-22}"
-            ssh-keyscan -p "$prod_ssh_port" -H "$PROD_SSH_HOST" 2>/dev/null > "$known_hosts_file"
-          fi
-          chmod 600 "$known_hosts_file"
-
-          if [ ! -s "$known_hosts_file" ]; then
-            echo "::error::Known hosts file is empty. Configure PROD_KNOWN_HOSTS or allow ssh-keyscan for PROD_SSH_HOST."
-            exit 1
-          fi
-
-          if [ -n "$PROD_ANSIBLE_INVENTORY" ]; then
-            printf '%s\n' "$PROD_ANSIBLE_INVENTORY" > ops/deploy/inventory.ini
-          else
-            prod_ssh_port="${PROD_SSH_PORT:-22}"
-            {
-              echo "[active]"
-              printf 'production ansible_host=%s ansible_user=%s ansible_port=%s ansible_ssh_private_key_file=%s ansible_python_interpreter=/usr/bin/python3\n' \
-                "$PROD_SSH_HOST" "$PROD_SSH_USER" "$prod_ssh_port" "$ssh_key_file"
-              echo
-              echo "[mscqr_servers:children]"
-              echo "active"
-            } > ops/deploy/inventory.ini
-          fi
-          chmod 600 ops/deploy/inventory.ini
-
-          echo "Generated production Ansible inventory at ops/deploy/inventory.ini."
-
-      - name: Validate Ansible playbook syntax
-        run: ansible-playbook -i ops/deploy/inventory.ini ops/deploy/deploy.yml --syntax-check
-
-      - name: Deploy gated SHA to production
-        env:
-          QR_SIGN_ACTIVE_KEY_VERSION: ${{ secrets.QR_SIGN_ACTIVE_KEY_VERSION }}
-          QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION: ${{ secrets.QR_SIGN_ENFORCE_ED25519_IN_PRODUCTION }}
-          QR_SIGN_PRIVATE_KEY: ${{ secrets.QR_SIGN_PRIVATE_KEY }}
-          QR_SIGN_PROVIDER: ${{ secrets.QR_SIGN_PROVIDER }}
-          QR_SIGN_PUBLIC_KEY: ${{ secrets.QR_SIGN_PUBLIC_KEY }}
-        run: |
-          set -euo pipefail
-
-          known_hosts_file="${HOME}/.ssh/known_hosts"
-
-          if [ ! -s "$known_hosts_file" ]; then
-            echo "::error::Known hosts file is missing or empty at ${known_hosts_file}."
-            exit 1
-          fi
-
-          export ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=${known_hosts_file} -o StrictHostKeyChecking=yes"
-
-          ansible-playbook \
-            -i ops/deploy/inventory.ini \
-            ops/deploy/deploy.yml \
-            --extra-vars "branch=main deploy_ref=$DEPLOY_SHA"
+          {
+            echo "## Production ECS deployment"
+            echo
+            echo "- Deployed SHA: \`${DEPLOY_SHA}\`"
+            echo "- AWS account: \`${AWS_ACCOUNT_ID_EXPECTED}\`"
+            echo "- AWS region: \`${AWS_REGION}\`"
+            echo "- Cluster: \`${CLUSTER_NAME}\`"
+            echo "- Platform: \`${PLATFORMS}\`"
+            echo
+            echo "### Backend"
+            echo
+            echo "- Service: \`${BACKEND_SERVICE_NAME}\`"
+            echo "- Image: \`${BACKEND_IMAGE_REF}\`"
+            echo "- Previous task definition: \`${backend_previous_task}\`"
+            echo "- New task definition: \`${backend_new_task}\`"
+            echo "- Health: \`/api/health\` and \`/health/ready\` passed"
+            echo
+            echo "### Frontend"
+            echo
+            echo "- Service: \`${FRONTEND_SERVICE_NAME}\`"
+            echo "- Image: \`${FRONTEND_IMAGE_REF}\`"
+            echo "- Previous task definition: \`${frontend_previous_task}\`"
+            echo "- New task definition: \`${frontend_new_task}\`"
+            echo "- Health: \`/\`, \`/login\`, \`/api/health\`, and \`/health/ready\` passed"
+          } >> "$GITHUB_STEP_SUMMARY"

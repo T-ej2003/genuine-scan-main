@@ -388,7 +388,8 @@ let skipped = false;
 
       const unknown = await request("GET", "/api/verify/c_unknown_p2_release_readiness", null);
       assert.strictEqual(unknown.status, 200, unknown.text);
-      assert.strictEqual(unknown.payload.data.classification, "NOT_FOUND", "unknown code should stay not found");
+      assert.strictEqual(unknown.payload.data.publicStatus, "not_found", "unknown code should stay public not found");
+      assert.strictEqual(unknown.payload.data.classification, undefined, "public verify response must not expose raw classification");
 
       process.env.BATCH_RELEASE_DUAL_APPROVAL_ENABLED = "true";
       process.env.BATCH_RELEASE_DUAL_APPROVAL_QUANTITY_THRESHOLD = "2";

@@ -6,6 +6,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 import prisma from "../src/config/database";
 import { ensureSelectedPrinterReady } from "../src/controllers/print-job/shared";
+import { generateHumanLabelSerial } from "../src/services/labelSerialService";
 import { createPrintJobRecords } from "../src/services/printJobCreationTransactionService";
 import { buildApprovedPrintPayload, type PrinterPayloadProfile } from "../src/services/printPayloadService";
 import { startNetworkDirectDispatch } from "../src/services/networkDirectPrintService";
@@ -44,7 +45,15 @@ const main = async () => {
 
   const batch = await prisma.batch.findUnique({
     where: { id: batchId },
-    select: { id: true, name: true, licenseeId: true, manufacturerId: true },
+    select: {
+      id: true,
+      name: true,
+      licenseeId: true,
+      manufacturerId: true,
+      metadata: true,
+      licensee: { select: { id: true, name: true, prefix: true, location: true, metadata: true } },
+      manufacturer: { select: { id: true, name: true, location: true, metadata: true } },
+    },
   });
   if (!batch?.manufacturerId) {
     throw new Error("Batch must exist and be assigned to a manufacturer before manual print validation.");
@@ -109,6 +118,14 @@ const main = async () => {
     printJobId: created.job.id,
     printItemId: firstItem.id,
     jobNumber: created.job.jobNumber,
+    serialContext: {
+      sequence: firstItem.issueSequence || 1,
+      issuedAt: firstItem.issuedAt || new Date(),
+      batch,
+      licensee: batch.licensee,
+      manufacturer: batch.manufacturer,
+      printer: printerSelection.printer as any,
+    },
   });
 
   if (shouldSend) {
@@ -119,7 +136,7 @@ const main = async () => {
     where: { printSessionId: created.session.id },
     take: 5,
     orderBy: [{ code: "asc" }],
-    include: { qrCode: { select: { code: true, displayCode: true } } },
+    include: { qrCode: { select: { id: true, code: true, displayCode: true } } },
   });
 
   console.log(
@@ -139,7 +156,15 @@ const main = async () => {
         payloadHash: samplePayload.payloadHash,
         status: shouldSend ? "dispatch_started" : "created_preview_only",
         sampleVerifyUrls: sampleLabels.map((item) => ({
-          displayCode: item.qrCode.displayCode || item.code,
+          humanSerial: generateHumanLabelSerial({
+            qrId: item.qrCode.id,
+            sequence: item.issueSequence || 1,
+            issuedAt: item.issuedAt || new Date(),
+            batch,
+            licensee: batch.licensee,
+            manufacturer: batch.manufacturer,
+            printer: printerSelection.printer as any,
+          }).humanSerial,
           verifyUrl: `${String(process.env.PUBLIC_VERIFY_WEB_BASE_URL || process.env.CORS_ORIGIN || "http://localhost:8080").replace(/\/+$/, "")}/verify/${encodeURIComponent(item.qrCode.code)}`,
         })),
       },

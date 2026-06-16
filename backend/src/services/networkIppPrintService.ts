@@ -100,7 +100,16 @@ const loadIppDispatchJob = async (jobId: string) =>
   prisma.printJob.findUnique({
     where: { id: jobId },
     include: {
-      batch: { select: { id: true, name: true, licenseeId: true } },
+      batch: {
+        select: {
+          id: true,
+          name: true,
+          licenseeId: true,
+          metadata: true,
+          licensee: { select: { id: true, name: true, prefix: true, location: true, metadata: true } },
+        },
+      },
+      manufacturer: { select: { id: true, name: true, location: true, metadata: true } },
       printer: true,
       printSession: true,
     },
@@ -165,14 +174,15 @@ const reserveNextChunk = async (params: { sessionId: string; actorUserId: string
     const session = await tx.printSession.findUnique({ where: { id: params.sessionId }, select: { issuedItems: true } });
     const startingSequence = Number(session?.issuedItems || 0);
 
-    for (const [index, row] of rows.entries()) {
+    const issuedRows = rows.map((row, index) => ({ ...row, issuedAt: now, issueSequence: startingSequence + index + 1 }));
+    for (const row of issuedRows) {
       const updated = await tx.printItem.updateMany({
         where: { id: row.id, state: PrintItemState.RESERVED },
         data: {
           state: PrintItemState.ISSUED,
           pipelineState: PrintPipelineState.SENT_TO_PRINTER,
           issuedAt: now,
-          issueSequence: startingSequence + index + 1,
+          issueSequence: row.issueSequence,
         },
       });
       if (updated.count === 0) throw new Error("PRINT_ITEM_RESERVE_CONFLICT");
@@ -199,7 +209,7 @@ const reserveNextChunk = async (params: { sessionId: string; actorUserId: string
       },
     });
 
-    return rows;
+    return issuedRows;
   });
 };
 
@@ -380,9 +390,17 @@ const dispatchAndConfirmReservedItem = async (params: {
     qr: params.item.qrCode,
     manufacturerId: params.job.manufacturerId,
     reprintOfJobId: params.job.reprintOfJobId,
+    serialContext: {
+      sequence: params.item.issueSequence,
+      issuedAt: params.item.issuedAt,
+      batch: params.job.batch || null,
+      licensee: params.job.batch?.licensee || null,
+      manufacturer: params.job.manufacturer || null,
+      printer: params.job.printer || null,
+    },
   });
   const pdf = await renderPdfLabelBuffer({
-    code: params.item.code,
+    code: context.humanSerial,
     scanUrl: context.scanUrl,
     previewLabel: context.previewLabel,
     calibrationProfile: (params.job.printer?.calibrationProfile as Record<string, unknown> | null) || null,
@@ -397,7 +415,7 @@ const dispatchAndConfirmReservedItem = async (params: {
       printerUri: params.job.printer?.printerUri,
     },
     pdf,
-    jobName: `${params.job.jobNumber || "MSCQR"}-${params.item.code}`,
+    jobName: `${params.job.jobNumber || "MSCQR"}-${context.humanSerial}`,
     requestingUserName: params.job.manufacturerId,
   });
 

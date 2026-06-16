@@ -124,6 +124,7 @@ const notifyLocalListeners = (event: NotificationRealtimeEvent) => {
 
 const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
   void bumpCacheNamespaceVersion(NOTIFICATION_CACHE_NAMESPACE).catch(() => undefined);
+  void bumpCacheNamespaceVersion("attention-queue").catch(() => undefined);
   notifyLocalListeners(event);
   void publishRedisJson(NOTIFICATION_EVENT_CHANNEL, {
     origin: getRedisInstanceId(),

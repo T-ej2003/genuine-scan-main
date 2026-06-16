@@ -179,6 +179,9 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       },
     });
     if (activeJob) {
+      const activeTotalItems = Number(activeJob.printSession?.totalItems || activeJob.itemCount || activeJob.quantity || 0);
+      const activeConfirmedItems = Number(activeJob.printSession?.confirmedItems || 0);
+      const activeRemainingItems = Math.max(0, activeTotalItems - activeConfirmedItems);
       logPrintJobCreateEvent(req, "request_failed", {
         status: 409,
         errorCode: "active_print_job_exists",
@@ -194,9 +197,17 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
           requestId: getRequestId(req),
           failureStage,
         }),
+        activePrintJobId: activeJob.id,
+        activePrintSessionId: activeJob.printSession?.id || null,
+        confirmedItems: activeConfirmedItems,
+        remainingItems: activeRemainingItems,
+        recoveryAction: "resume_active_print_job",
         data: {
           activePrintJobId: activeJob.id,
           activePrintSessionId: activeJob.printSession?.id || null,
+          confirmedItems: activeConfirmedItems,
+          remainingItems: activeRemainingItems,
+          recoveryAction: "resume_active_print_job",
           job: {
             id: activeJob.id,
             status: activeJob.status,
@@ -205,7 +216,12 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
             quantity: activeJob.quantity,
             itemCount: activeJob.itemCount,
             printer: activeJob.printer,
-            session: activeJob.printSession,
+            session: activeJob.printSession
+              ? {
+                  ...activeJob.printSession,
+                  remainingToPrint: activeRemainingItems,
+                }
+              : null,
           },
         },
       };

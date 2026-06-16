@@ -71,7 +71,7 @@ async function installP1AuthMocks(page: Page) {
         authenticated = true;
         return json(route, { success: true, data: { user: activeUser, auth: activeUser.auth } });
       }
-      return json(route, { success: false, error: "Invalid MFA code" }, 401);
+      return json(route, { success: false, error: "Invalid authentication code." }, 400);
     }
     if (path === "/auth/invite-preview") {
       return json(route, {

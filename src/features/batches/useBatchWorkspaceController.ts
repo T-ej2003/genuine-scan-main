@@ -230,7 +230,7 @@ export function useBatchWorkspaceController({
     if (!workspaceOpen || !workspaceBatch) return;
     const timer = window.setInterval(() => {
       void fetchWorkspaceHistory(workspaceBatch, { silent: true });
-    }, 8_000);
+    }, 60_000);
 
     return () => window.clearInterval(timer);
   }, [workspaceBatch, workspaceOpen]);

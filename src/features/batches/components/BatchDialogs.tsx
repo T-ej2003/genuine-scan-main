@@ -168,6 +168,9 @@ type PrintJobDialogProps = {
   printJobId: string | null;
   printProgressPrinterName: string | null;
   printProgressDispatchMode: string | null;
+  printProgressPhase?: string | null;
+  printProgressTotal?: number;
+  printProgressPrinted?: number;
   formatDispatchModeLabel: (mode?: string | null) => string;
   directRemainingToPrint: number | null;
   printControlDialog?: {
@@ -311,6 +314,9 @@ export function BatchPrintJobDialog({
   printJobId,
   printProgressPrinterName,
   printProgressDispatchMode,
+  printProgressPhase = null,
+  printProgressTotal = 0,
+  printProgressPrinted = 0,
   formatDispatchModeLabel,
   directRemainingToPrint,
   printControlDialog = { action: null, job: null, reason: "", submitting: false },
@@ -354,9 +360,10 @@ export function BatchPrintJobDialog({
     "Complete the previous batch step first.";
   const isJobActive = (job: PrintJobRow) =>
     ["PENDING", "SENT"].includes(job.status) ||
-    ["ACTIVE", "RESUME_PENDING", "RETRY_WAITING"].includes(String(job.session?.status || ""));
+    ["ACTIVE", "RESUME_PENDING", "RETRY_WAITING"].includes(String(job.session?.status || "").toUpperCase()) ||
+    ["PRINT_CONFIRMED", "PRINTER_ACKNOWLEDGED", "QUEUED"].includes(String(job.pipelineState || "").toUpperCase());
   const isJobPaused = (job: PrintJobRow) =>
-    job.status === "PAUSED" || String(job.session?.status || "") === "PAUSED";
+    job.status === "PAUSED" || String(job.session?.status || "").toUpperCase() === "PAUSED";
   const canStopJob = (job: PrintJobRow) =>
     isJobActive(job) || isJobPaused(job);
   const canRequestReissue = (job: PrintJobRow) =>
@@ -367,6 +374,67 @@ export function BatchPrintJobDialog({
     printControlDialog.action === "stop"
       ? "Stopping prevents any new label dispatch. Already confirmed labels stay printed and the remaining labels stay visible for controlled recovery."
       : "Pausing stops new label dispatch while preserving labels already confirmed by MSCQR.";
+  const activePrintJob =
+    (printJobId ? recentPrintJobs.find((job) => job.id === printJobId) : null) ||
+    (printJobId
+      ? ({
+          id: printJobId,
+          status: "SENT",
+          printMode: printProgressDispatchMode || selectedPrinterProfile?.connectionType || "LOCAL_AGENT",
+          quantity: printProgressTotal || directRemainingToPrint || Number(printQuantity || 0) || 0,
+          itemCount: printProgressTotal || directRemainingToPrint || Number(printQuantity || 0) || 0,
+          createdAt: new Date().toISOString(),
+          printer: { name: printProgressPrinterName || selectedPrinterProfile?.name || "Selected printer" },
+          session: {
+            status: "ACTIVE",
+            totalItems: printProgressTotal || directRemainingToPrint || Number(printQuantity || 0) || 0,
+            confirmedItems: printProgressPrinted || 0,
+            remainingToPrint:
+              directRemainingToPrint ??
+              Math.max(0, (printProgressTotal || Number(printQuantity || 0) || 0) - (printProgressPrinted || 0)),
+          },
+        } as PrintJobRow)
+      : null);
+  const activeTotal = Number(activePrintJob?.session?.totalItems || activePrintJob?.itemCount || activePrintJob?.quantity || printProgressTotal || 0);
+  const activeConfirmed = Number(activePrintJob?.session?.confirmedItems ?? printProgressPrinted ?? 0);
+  const activeRemaining =
+    typeof activePrintJob?.session?.remainingToPrint === "number"
+      ? Math.max(0, activePrintJob.session.remainingToPrint)
+      : activeTotal > 0
+        ? Math.max(0, activeTotal - activeConfirmed)
+        : Math.max(0, Number(directRemainingToPrint || 0));
+  const activeSessionStatus = String(activePrintJob?.session?.status || "").toUpperCase();
+  const activePipelineState = String(activePrintJob?.pipelineState || "").toUpperCase();
+  const activeStoppedOrPartial =
+    activePrintJob?.status === "PARTIALLY_COMPLETED" ||
+    activePrintJob?.status === "STOPPED" ||
+    activePipelineState === "STOPPED" ||
+    activeSessionStatus === "STOPPED";
+  const activeCompleted =
+    !activeStoppedOrPartial &&
+    (activePrintJob?.status === "CONFIRMED" ||
+      activeSessionStatus === "COMPLETED" ||
+      (activeTotal > 0 && activeConfirmed >= activeTotal));
+  const activeWaitingForConfirmation =
+    Boolean(activePrintJob?.awaitingConfirmation) ||
+    /waiting for printer confirmation/i.test(String(printProgressPhase || "")) ||
+    Number(activePrintJob?.session?.awaitingConfirmationCount || 0) > 0;
+  const showActivePrintControls = Boolean(
+    activePrintJob &&
+      !activeStoppedOrPartial &&
+      !activeCompleted &&
+      (activePrintJob.status === "SENT" ||
+        activePrintJob.status === "PAUSED" ||
+        activePrintJob.status === "PENDING" ||
+        activeSessionStatus === "ACTIVE" ||
+        activeSessionStatus === "PAUSED" ||
+        activeSessionStatus === "RETRY_WAITING" ||
+        activePipelineState === "PRINT_CONFIRMED" ||
+        activePipelineState === "PRINTER_ACKNOWLEDGED" ||
+        /local print session active/i.test(String(printProgressPhase || "")) ||
+        activeWaitingForConfirmation ||
+        (activeTotal > 0 && activeConfirmed < activeTotal))
+  );
 
   return (
     <>
@@ -620,35 +688,92 @@ export function BatchPrintJobDialog({
                 state={
                   printing
                     ? createUiActionState("pending", "Starting the print run now.")
-                    : !selectedPrinterProfile
-                      ? createUiActionState("disabled", "Choose a saved printer before you start this run.")
+                      : printJobId
+                        ? createUiActionState("disabled", "Finish or stop the current print run before starting another one.")
+                      : !selectedPrinterProfile
+                        ? createUiActionState("disabled", "Choose a saved printer before you start this run.")
                       : batchLifecycleBlocked
                         ? createUiActionState("disabled", batchLifecycleBlockReason)
                       : !selectedPrinterCanPrint
                         ? createUiActionState("disabled", selectedPrinterNotice.detail || "This printer needs attention before it can print.")
                         : createUiActionState("enabled")
                 }
-                idleLabel={printJobId ? "Resume print run" : "Start print run"}
+                idleLabel={printJobId ? "Print run active" : "Start print run"}
                 pendingLabel="Starting..."
               />
             </div>
 
+            {!printJobId ? (
+              <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+                Stop and refresh appear after a print run starts.
+              </div>
+            ) : null}
+
             {printJobId ? (
               <div className="space-y-2 rounded-md border p-3 text-sm">
                 <div className="text-xs text-muted-foreground">Current print run</div>
-                <div className="font-medium">Printing in progress</div>
+                <div className="font-medium">
+                  {activeStoppedOrPartial ? "Print run stopped" : activeCompleted ? "Print run completed" : "Printing in progress"}
+                </div>
                 <div className="text-xs text-muted-foreground">
                   Using {printProgressPrinterName || selectedPrinterProfile?.name || "—"} ·{" "}
                   {formatDispatchModeLabel(printProgressDispatchMode || selectedPrinterProfile?.connectionType || null)}
                 </div>
-                {directRemainingToPrint != null ? (
-                  <div className="text-xs text-muted-foreground">Remaining to print: {directRemainingToPrint}</div>
+                {activeTotal > 0 ? (
+                  <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                    <div>{Math.min(activeTotal, activeCompleted ? activeTotal : activeConfirmed).toLocaleString()} printed</div>
+                    <div>{(activeCompleted ? 0 : activeRemaining).toLocaleString()} remaining</div>
+                    <div>{activeTotal.toLocaleString()} total labels</div>
+                  </div>
                 ) : null}
-                <div className="text-xs text-muted-foreground">MSCQR waits for final printer confirmation before marking these labels printed.</div>
+                {directRemainingToPrint != null ? (
+                  <div className="text-xs text-muted-foreground">Remaining to print: {activeCompleted ? 0 : directRemainingToPrint}</div>
+                ) : null}
+                <div className="text-xs text-muted-foreground">
+                  {activeStoppedOrPartial
+                    ? "Confirmed labels stay printed. Unprinted labels remain recoverable through the controlled recovery flow."
+                    : activeCompleted
+                    ? "MSCQR received backend confirmation for this print run."
+                    : activeWaitingForConfirmation
+                      ? "MSCQR is waiting for printer confirmation before marking the remaining labels printed."
+                      : "MSCQR waits for final printer confirmation before marking these labels printed."}
+                </div>
+                {showActivePrintControls && activePrintJob ? (
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    {canStopJob(activePrintJob) ? (
+                      <ActionButton
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onOpenPrintControlDialog("stop", activePrintJob)}
+                        state={
+                          printControlBusyJobId === activePrintJob.id || printControlDialog.submitting
+                            ? createUiActionState("pending", "Stopping the print run.")
+                            : createUiActionState("enabled")
+                        }
+                        idleLabel="Stop print run"
+                        pendingLabel="Stopping..."
+                        showReasonBelow={false}
+                      />
+                    ) : null}
+                    <ActionButton
+                      variant="outline"
+                      size="sm"
+                      onClick={onRefreshPrintStatus}
+                      state={
+                        printing
+                          ? createUiActionState("pending", "Refreshing the live print progress.")
+                          : createUiActionState("enabled")
+                      }
+                      idleLabel="Refresh status"
+                      pendingLabel="Refreshing..."
+                      showReasonBelow={false}
+                    />
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
-            {printJobId && selectedPrinterProfile?.connectionType === "LOCAL_AGENT" && directRemainingToPrint !== 0 ? (
+            {printJobId && selectedPrinterProfile?.connectionType === "LOCAL_AGENT" && directRemainingToPrint !== 0 && !showActivePrintControls ? (
               <div className="space-y-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm">
                 <div className="font-medium text-emerald-900">Printer helper is finishing this run</div>
                 <div className="text-xs text-emerald-900">

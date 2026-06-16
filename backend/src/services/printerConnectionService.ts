@@ -10,9 +10,14 @@ import prisma from "../config/database";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
 import {
   CONNECTOR_UPDATE_REQUIRED_MESSAGE,
-  isLocalAgentProtocolCompatible,
+  getMissingTransportDiagnosticsCapabilities,
+  isLocalAgentTransportDiagnosticsCurrent,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_MIN_VERSION_HINT,
+  LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "./localAgentProtocol";
+import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
+import { bumpCacheNamespaceVersion } from "./versionedCacheService";
 
 export type { PrinterCapabilitySummary, PrinterConnectionStatus, PrinterInventoryDevice };
 
@@ -49,6 +54,8 @@ export type PrinterConnectionRealtimeEvent = {
 };
 
 const listeners = new Set<(event: PrinterConnectionRealtimeEvent) => void>();
+const PRINTER_CONNECTION_EVENT_CHANNEL = "mscqr:realtime:printer-connection";
+let printerConnectionChannelReady = false;
 
 const parsePositiveIntEnv = (name: string, fallback: number, min = 5, max = 3600) => {
   const raw = Number(String(process.env[name] || "").trim());
@@ -240,6 +247,18 @@ const normalizePrinterInventory = (value: unknown): PrinterInventoryDevice[] => 
       languages: toCleanStringArray((raw as any).languages, 12, 60),
       mediaSizes: toCleanStringArray((raw as any).mediaSizes, 12, 60),
       dpi: Number.isFinite(Number((raw as any).dpi)) ? Number((raw as any).dpi) : null,
+      deviceUri: toCleanString((raw as any).deviceUri, 512) || null,
+      portName: toCleanString((raw as any).portName, 180) || null,
+      windowsPortName: toCleanString((raw as any).windowsPortName, 180) || null,
+      windowsPortHost: toCleanString((raw as any).windowsPortHost, 180) || null,
+      windowsPortNumber: Number.isFinite(Number((raw as any).windowsPortNumber))
+        ? Number((raw as any).windowsPortNumber)
+        : null,
+      queueStatus: toCleanString((raw as any).queueStatus, 120) || null,
+      queueHasErrors: Boolean((raw as any).queueHasErrors),
+      stuckJobCount: Number.isFinite(Number((raw as any).stuckJobCount)) ? Number((raw as any).stuckJobCount) : 0,
+      retainedJobCount: Number.isFinite(Number((raw as any).retainedJobCount)) ? Number((raw as any).retainedJobCount) : 0,
+      usbAvailable: Boolean((raw as any).usbAvailable),
     });
     if (rows.length >= 40) break;
   }
@@ -248,6 +267,9 @@ const normalizePrinterInventory = (value: unknown): PrinterInventoryDevice[] => 
 
 const normalizeStatusPayload = (metadata: any) => {
   const source = metadata && typeof metadata === "object" ? metadata : {};
+  const capabilities = source.capabilities && typeof source.capabilities === "object"
+    ? (source.capabilities as Record<string, unknown>)
+    : null;
   return {
     connected: Boolean(source.connected),
     printerName: toCleanString(source.printerName, 180) || null,
@@ -256,6 +278,8 @@ const normalizeStatusPayload = (metadata: any) => {
     agentVersion: toCleanString(source.agentVersion, 80) || null,
     protocolVersion: toCleanString(source.protocolVersion, 80) || null,
     buildVersion: toCleanString(source.buildVersion, 80) || null,
+    transportDiagnosticsVersion: toCleanString(source.transportDiagnosticsVersion, 80) || null,
+    capabilities,
     error: toCleanString(source.error, 500) || null,
     selectedPrinterId: toCleanString(source.selectedPrinterId, 180) || null,
     selectedPrinterName: toCleanString(source.selectedPrinterName, 180) || null,
@@ -305,7 +329,16 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
 
   const latestAttestation = registration.attestations[0] || null;
   const payload = normalizeStatusPayload(latestAttestation?.metadata || {});
-  const connectorUpdateRequired = Boolean(payload.connected && !isLocalAgentProtocolCompatible(payload.protocolVersion));
+  const missingCapabilities = getMissingTransportDiagnosticsCapabilities(payload.capabilities);
+  const connectorUpdateRequired = Boolean(
+    payload.connected &&
+      !isLocalAgentTransportDiagnosticsCurrent({
+        protocolVersion: payload.protocolVersion,
+        buildVersion: payload.buildVersion,
+        transportDiagnosticsVersion: payload.transportDiagnosticsVersion,
+        capabilities: payload.capabilities,
+      })
+  );
   const nowMs = Date.now();
   const attestedMs = latestAttestation?.attestedAt ? new Date(latestAttestation.attestedAt).getTime() : NaN;
   const ageMs = Number.isFinite(attestedMs) ? Math.max(0, nowMs - attestedMs) : null;
@@ -340,7 +373,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     : connected && compatibilityMode
       ? `Compatibility mode active: ${compatibilityReason}`
       : connectorUpdateRequired
-        ? `${CONNECTOR_UPDATE_REQUIRED_MESSAGE} Expected protocol ${LOCAL_AGENT_DIRECT_PROTOCOL_VERSION}.`
+        ? `${CONNECTOR_UPDATE_REQUIRED_MESSAGE} Expected protocol ${LOCAL_AGENT_DIRECT_PROTOCOL_VERSION}, build ${LOCAL_AGENT_MIN_VERSION_HINT}, and transport diagnostics ${LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION}.`
       : payload.error ||
         (stale
           ? "Printer attestation stale"
@@ -380,6 +413,9 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     agentVersion: payload.agentVersion,
     protocolVersion: payload.protocolVersion,
     buildVersion: payload.buildVersion,
+    transportDiagnosticsVersion: payload.transportDiagnosticsVersion,
+    capabilities: payload.capabilities,
+    missingCapabilities,
     connectorUpdateRequired,
     selectedPrinterId: payload.selectedPrinterId || payload.printerId || null,
     selectedPrinterName: payload.selectedPrinterName || payload.printerName || null,
@@ -403,7 +439,7 @@ const loadLatestRegistrationForUser = async (userId: string): Promise<PrinterReg
   }) as Promise<PrinterRegistrationWithLatest | null>;
 };
 
-const emitConnectionEvent = (event: PrinterConnectionRealtimeEvent) => {
+const notifyConnectionListeners = (event: PrinterConnectionRealtimeEvent) => {
   for (const listener of listeners) {
     try {
       listener(event);
@@ -411,6 +447,14 @@ const emitConnectionEvent = (event: PrinterConnectionRealtimeEvent) => {
       // ignore listener failures
     }
   }
+};
+
+const emitConnectionEvent = (event: PrinterConnectionRealtimeEvent) => {
+  notifyConnectionListeners(event);
+  void publishRedisJson(PRINTER_CONNECTION_EVENT_CHANNEL, {
+    origin: getRedisInstanceId(),
+    event,
+  }).catch(() => undefined);
 };
 
 const statusChanged = (a: PrinterConnectionStatus, b: PrinterConnectionStatus) => {
@@ -426,6 +470,8 @@ const statusChanged = (a: PrinterConnectionStatus, b: PrinterConnectionStatus) =
     String(a.deviceName || "") !== String(b.deviceName || "") ||
     String(a.agentVersion || "") !== String(b.agentVersion || "") ||
     String((a as any).protocolVersion || "") !== String((b as any).protocolVersion || "") ||
+    String((a as any).buildVersion || "") !== String((b as any).buildVersion || "") ||
+    String((a as any).transportDiagnosticsVersion || "") !== String((b as any).transportDiagnosticsVersion || "") ||
     Boolean((a as any).connectorUpdateRequired) !== Boolean((b as any).connectorUpdateRequired) ||
     String(a.selectedPrinterId || "") !== String(b.selectedPrinterId || "") ||
     String(a.selectedPrinterName || "") !== String(b.selectedPrinterName || "")
@@ -433,6 +479,13 @@ const statusChanged = (a: PrinterConnectionStatus, b: PrinterConnectionStatus) =
 };
 
 export const onPrinterConnectionEvent = (listener: (event: PrinterConnectionRealtimeEvent) => void) => {
+  if (!printerConnectionChannelReady) {
+    printerConnectionChannelReady = true;
+    void subscribeRedisJson(PRINTER_CONNECTION_EVENT_CHANNEL, (payload) => {
+      if (!payload || payload.origin === getRedisInstanceId()) return;
+      if (payload.event) notifyConnectionListeners(payload.event as PrinterConnectionRealtimeEvent);
+    });
+  }
   listeners.add(listener);
   return () => listeners.delete(listener);
 };
@@ -459,6 +512,8 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   agentVersion?: string | null;
   protocolVersion?: string | null;
   buildVersion?: string | null;
+  transportDiagnosticsVersion?: string | null;
+  capabilities?: any;
   error?: string | null;
   sourceIp?: string | null;
   userAgent?: string | null;
@@ -508,6 +563,8 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     agentVersion: String(input.agentVersion || "").trim() || null,
     protocolVersion: String(input.protocolVersion || "").trim() || null,
     buildVersion: String(input.buildVersion || "").trim() || null,
+    transportDiagnosticsVersion: String(input.transportDiagnosticsVersion || "").trim() || null,
+    capabilities: input.capabilities && typeof input.capabilities === "object" ? input.capabilities : null,
     error: String(input.error || "").trim() || null,
     selectedPrinterId: toCleanString(input.selectedPrinterId, 180) || null,
     selectedPrinterName: toCleanString(input.selectedPrinterName, 180) || null,
@@ -729,6 +786,7 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   const changed = statusChanged(previousStatus, nextStatus);
 
   if (changed) {
+    void bumpCacheNamespaceVersion("printer-status").catch(() => undefined);
     emitConnectionEvent({
       userId: input.userId,
       status: nextStatus,

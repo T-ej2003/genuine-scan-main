@@ -181,16 +181,12 @@ const res = {
 
   assert.strictEqual(res.statusCode, 200, "not-ready signed scans should return a normal verification response");
   assert.strictEqual(res.body?.success, true, "not-ready signed scans should still return a structured payload");
-  assert.strictEqual(
-    res.body?.data?.classification,
-    "NOT_READY_FOR_CUSTOMER_USE",
-    "not-ready signed scans should be classified consistently"
-  );
-  assert.strictEqual(res.body?.data?.status, "ACTIVATED", "the public response should preserve the underlying label status");
-  assert.strictEqual(res.body?.data?.proofSource, "SIGNED_LABEL", "signed scan responses should preserve their proof source");
-  assert.strictEqual(res.body?.data?.proofTier, "SIGNED_LABEL", "signed scans should expose the signed proof tier");
-  assert.strictEqual(res.body?.data?.printTrustState, "AWAITING_PRINT_CONFIRMATION", "not-ready scans should expose the print trust state");
-  assert.strictEqual(res.body?.data?.decisionVersion, 1, "not-ready scans should expose the decision contract version");
+  assert.strictEqual(res.body?.data?.publicStatus, "not_ready", "not-ready signed scans should be classified consistently");
+  assert.strictEqual(res.body?.data?.status, "not_ready", "the public response should not expose the underlying label status");
+  assert.strictEqual(res.body?.data?.proofSource, undefined, "signed scan responses must not expose proof source internals");
+  assert.strictEqual(res.body?.data?.proofTier, undefined, "signed scans must not expose proof tier internals");
+  assert.strictEqual(res.body?.data?.printTrustState, undefined, "not-ready scans must not expose print trust internals");
+  assert.strictEqual(res.body?.data?.decisionVersion, undefined, "not-ready scans must not expose decision contract internals");
   assert.strictEqual(transactionCalled, false, "not-ready signed scans should not mutate scan or redemption state");
 
   console.log("public scan not-ready no-mutation test passed");

@@ -85,6 +85,7 @@ export const mfaCodeSchema = z.object({
 
 export const mfaChallengeCompleteSchema = z.object({
   ticket: z.string().trim().min(10),
+  method: z.enum(["totp", "backup_code"]).optional(),
   code: z.string().trim().min(6).max(32),
 }).strict();
 
@@ -291,7 +292,7 @@ export const buildAuthState = async (
     mfaVerifiedAt: claims.mfaVerifiedAt || null,
     stepUpRequired: mfaRequired ? !adminFreshEnough : !passwordFreshEnough,
     stepUpMethod,
-    sessionId: currentSession?.id || null,
+    sessionId: currentSession?.id || claims.sessionId || null,
     sessionExpiresAt: currentSession?.expiresAt?.toISOString?.() || null,
   };
 };

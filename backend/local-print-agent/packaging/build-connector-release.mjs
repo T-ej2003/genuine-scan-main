@@ -3,14 +3,16 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import archiver from "archiver";
 import { readConnectorSourceVersion } from "./source-version.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 const backendRoot = path.resolve(__dirname, "../..");
+const JSZip = require("jszip");
 const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const buildRoot = path.join(backendRoot, ".connector-build");
 const defaultVersion = readConnectorSourceVersion(backendRoot);
@@ -23,7 +25,19 @@ const readExportedString = (name) => {
   return match[1];
 };
 const requiredProtocolVersion = readExportedString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION");
+const transportDiagnosticsVersion = readExportedString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION");
 const minimumBuildVersion = version;
+const connectorCapabilities = {
+  supportsPrinterQueueSnapshot: true,
+  supportsWindowsTcpPortInspection: true,
+  supportsRawTcpConnectTest: true,
+  supportsRawTcpZplSend: true,
+  supportsUsbRawSpooler: true,
+  supportsSpoolJobCancel: true,
+  supportsSpoolJobStatus: true,
+  supportsTransportDiagnostics: true,
+  supportsTestLabel: true,
+};
 const pkgBinary = process.platform === "win32"
   ? path.join(backendRoot, "node_modules", ".bin", "pkg.cmd")
   : path.join(backendRoot, "node_modules", ".bin", "pkg");
@@ -32,6 +46,9 @@ const macReleaseDir = path.join(releaseVersionRoot, "macos");
 const windowsReleaseDir = path.join(releaseVersionRoot, "windows");
 const macPackageName = `MSCQR-Connector-macOS-${version}.pkg`;
 const windowsPackageName = `MSCQR-Connector-Windows-${version}.zip`;
+const connectorPkgTargets = String(
+  process.env.CONNECTOR_PKG_TARGETS || "node24-macos-arm64,node24-macos-x64,node24-win-x64"
+).trim();
 const normalizeEnv = (value) => String(value || "").trim();
 const isTruthy = (value) => /^(1|true|yes|on)$/i.test(normalizeEnv(value));
 const hasEnvOverride = (name) => Object.prototype.hasOwnProperty.call(process.env, name);
@@ -157,17 +174,30 @@ const sha256ForFile = (filePath) =>
     .update(fs.readFileSync(filePath))
     .digest("hex");
 
-const archiveDirectory = async (sourceDir, outputFile) =>
-  new Promise((resolve, reject) => {
-    const output = fs.createWriteStream(outputFile);
-    const archive = archiver("zip", { zlib: { level: 9 } });
+const addDirectoryToZip = (zip, sourceDir, baseDir = sourceDir) => {
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const fullPath = path.join(sourceDir, entry.name);
+    if (entry.isDirectory()) {
+      addDirectoryToZip(zip, fullPath, baseDir);
+      continue;
+    }
+    if (entry.isFile()) {
+      const relativePath = path.relative(baseDir, fullPath).replace(/\\/g, "/");
+      zip.file(relativePath, fs.readFileSync(fullPath));
+    }
+  }
+};
 
-    output.on("close", resolve);
-    archive.on("error", reject);
-    archive.pipe(output);
-    archive.directory(sourceDir, false);
-    archive.finalize();
+const archiveDirectory = async (sourceDir, outputFile) => {
+  const zip = new JSZip();
+  addDirectoryToZip(zip, sourceDir);
+  const buffer = await zip.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE",
+    compressionOptions: { level: 9 },
   });
+  fs.writeFileSync(outputFile, buffer);
+};
 
 const resolveWindowsInstallerKind = (filePath) => {
   const ext = path.extname(filePath).toLowerCase();
@@ -366,7 +396,8 @@ const buildSelfContainedBinaries = (binariesDir) => {
   const outputBase = path.join(binariesDir, "mscqr-local-print-agent");
   run(pkgBinary, [
     "--targets",
-    "node20-macos-arm64,node20-macos-x64,node20-win-x64",
+    connectorPkgTargets,
+    "--fallback-to-source",
     "--output",
     outputBase,
     entry,
@@ -635,6 +666,8 @@ const updateManifest = (macArtifact, windowsArtifact) => {
       sha256: sha256ForFile(windowsArtifact.artifactPath),
       protocolVersion: requiredProtocolVersion,
       buildVersion: version,
+      transportDiagnosticsVersion,
+      capabilities: connectorCapabilities,
       notes: windowsArtifact.notes,
     },
   };
@@ -662,6 +695,8 @@ const updateManifest = (macArtifact, windowsArtifact) => {
     publishedAt,
     requiredProtocolVersion,
     minimumBuildVersion,
+    transportDiagnosticsVersion,
+    capabilities: connectorCapabilities,
     summary: "Install once on the printing computer, then the MSCQR Connector starts automatically in the background.",
     notes: [
       "Use the Mac package on the Mac that is connected to the printer.",
@@ -691,6 +726,8 @@ const updateManifest = (macArtifact, windowsArtifact) => {
     latestVersion: version,
     requiredProtocolVersion,
     minimumBuildVersion,
+    transportDiagnosticsVersion,
+    capabilities: connectorCapabilities,
     supportPath: existing.supportPath || "/help/manufacturer",
     helpPath: existing.helpPath || "/connector-download",
     setupGuidePath: existing.setupGuidePath || "/help/manufacturer",

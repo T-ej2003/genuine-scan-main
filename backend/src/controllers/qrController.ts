@@ -11,7 +11,7 @@ import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../
 import { createUserNotification } from "../services/notificationService";
 import {
   buildLineageSuccessMessage,
-  enrichBatchSummaries,
+  listCachedBatchOperationalSummaries,
   getBatchAllocationMap as loadBatchAllocationMap,
 } from "../services/batchAllocationService";
 import { buildScopedWhere, findScopedBatch } from "../services/accessControlService";
@@ -1263,30 +1263,18 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
     const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
     const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
 
-    const [batches, total] = await Promise.all([
-      prisma.batch.findMany({
-        where,
-        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-        include: {
-          licensee: { select: { id: true, name: true, prefix: true } },
-          manufacturer: { select: { id: true, name: true, email: true } },
-          parentBatch: { select: { id: true, name: true } },
-          rootBatch: { select: { id: true, name: true } },
-          _count: { select: { qrCodes: true } },
-        },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.batch.count({ where }),
-    ]);
+    const scopeKey = [
+      req.user.role,
+      req.user.userId,
+      req.user.licenseeId || "none",
+      req.user.orgId || "none",
+      String(req.query.licenseeId || "all"),
+      limit,
+      offset,
+    ].join(":");
+    const payload = await listCachedBatchOperationalSummaries({ where, scopeKey, limit, offset });
 
-    if (!batches.length) {
-      return res.json({ success: true, data: batches, meta: { total, limit, offset } });
-    }
-
-    const enriched = await enrichBatchSummaries(batches as any);
-
-    return res.json({ success: true, data: enriched, meta: { total, limit, offset } });
+    return res.json({ success: true, data: payload.rows, meta: { total: payload.total, limit, offset } });
   } catch (e) {
     if (isScopeError(e)) {
       return res.status(404).json({ success: false, error: "Batches not found" });
@@ -1619,10 +1607,50 @@ export const releaseBatch = async (req: AuthRequest, res: Response) => {
     const statusCode = typeof (e as { statusCode?: unknown })?.statusCode === "number" ? Number((e as { statusCode: number }).statusCode) : 500;
     const readiness = (e as { readiness?: unknown })?.readiness || null;
     if (statusCode === 409) {
+      const readinessObj =
+        readiness && typeof readiness === "object" && !Array.isArray(readiness)
+          ? (readiness as { failures?: Array<{ code?: string; message?: string }> })
+          : null;
+      const firstFailure = readinessObj?.failures?.[0] || null;
+      const rawCode = typeof (e as { code?: unknown })?.code === "string" ? String((e as { code: string }).code) : firstFailure?.code || "";
+      const codeByFailure: Record<string, string> = {
+        already_released: "BATCH_ALREADY_RELEASED",
+        print_job_missing: "PRINT_JOB_NOT_CONFIRMED",
+        latest_print_job_failed: "PRINT_JOB_NOT_CONFIRMED",
+        physical_print_not_confirmed: "PHYSICAL_CONFIRMATION_REQUIRED",
+        sample_scan_policy_incomplete: "SAMPLE_SCAN_REQUIRED",
+        qr_mutation_locked: "INVALID_STATE_TRANSITION",
+        public_code_missing: "QR_VERIFY_TOKEN_REQUIRED",
+        unsafe_public_code_shape: "QR_VERIFY_TOKEN_REQUIRED",
+      };
+      const code = codeByFailure[rawCode] || rawCode || "INVALID_STATE_TRANSITION";
+      const message = (e as Error)?.message || firstFailure?.message || "Batch is not ready for release.";
+      const requiredPreviousStepByCode: Record<string, string> = {
+        BATCH_ALREADY_RELEASED: "Batch already released",
+        PRINT_JOB_NOT_CONFIRMED: "Confirm physical printing",
+        PHYSICAL_CONFIRMATION_REQUIRED: "Confirm physical printing",
+        SAMPLE_SCAN_REQUIRED: "Scan one printed label",
+        QR_VERIFY_TOKEN_REQUIRED: "Repair public QR token issuance",
+        INVALID_STATE_TRANSITION: "Complete the previous batch step",
+      };
+      const recoveryActionByCode: Record<string, string> = {
+        BATCH_ALREADY_RELEASED: "refresh_batch",
+        PRINT_JOB_NOT_CONFIRMED: "confirm_physical_print",
+        PHYSICAL_CONFIRMATION_REQUIRED: "confirm_physical_print",
+        SAMPLE_SCAN_REQUIRED: "scan_sample_label",
+        QR_VERIFY_TOKEN_REQUIRED: "open_support_or_admin_repair",
+        INVALID_STATE_TRANSITION: "complete_previous_step",
+      };
       return res.status(409).json({
         success: false,
-        error: (e as Error)?.message || "Batch is not ready for release.",
-        code: typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : undefined,
+        error: message,
+        message,
+        code,
+        errorCode: code,
+        userMessage: message,
+        requiredPreviousStep: requiredPreviousStepByCode[code] || "Complete the previous batch step",
+        recoveryAction: recoveryActionByCode[code] || "refresh_and_retry",
+        canRetry: code !== "BATCH_ALREADY_RELEASED",
         data: readiness ? { readiness } : undefined,
       });
     }

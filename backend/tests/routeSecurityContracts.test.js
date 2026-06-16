@@ -62,16 +62,16 @@ assert(
 
 assert(!auditRoutesSource.includes("...auditExportLimiters"), "audit routes should not use spread-applied audit export limiters");
 
-assert(authRoutesSource.includes("const sessionReadPreAuthRouteLimiter = rateLimit("), "auth routes should define a pre-auth session limiter");
-assert(authRoutesSource.includes("const secureSessionPreAuthRouteLimiter = rateLimit("), "auth routes should define a pre-auth secure-session limiter");
-assert(authRoutesSource.includes("const mfaPreAuthRouteLimiter = rateLimit("), "auth routes should define a pre-auth MFA limiter");
-assert(authRoutesSource.includes("const adminInvitePreAuthRouteLimiter = rateLimit("), "auth routes should define a pre-auth invite limiter");
-assert(realtimeRoutesSource.includes("const dashboardReadPreAuthRouteLimiter: RequestHandler = rateLimit("), "realtime routes should define a pre-auth dashboard read limiter");
-assert(realtimeRoutesSource.includes("const printerAgentHeartbeatPreAuthRouteLimiter: RequestHandler = rateLimit("), "realtime routes should define a pre-auth printer heartbeat limiter");
-assert(governanceRoutesSource.includes("const governanceReadPreAuthRouteLimiter: RequestHandler = rateLimit("), "governance routes should define a pre-auth governance read limiter");
-assert(governanceRoutesSource.includes("const governanceApprovalMutationPreAuthRouteLimiter: RequestHandler = rateLimit("), "governance routes should define a pre-auth approval limiter");
-assert(auditRoutesSource.includes("const auditLogsReadPreAuthRouteLimiter: RequestHandler = rateLimit("), "audit routes should define a pre-auth audit read limiter");
-assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLimiter: RequestHandler = rateLimit("), "audit routes should define a pre-auth audit fraud mutation limiter");
+assert(authRoutesSource.includes("const sessionReadPreAuthRouteLimiter = createSharedRateLimiter("), "auth routes should define a shared pre-auth session limiter");
+assert(authRoutesSource.includes("const secureSessionPreAuthRouteLimiter = createSharedRateLimiter("), "auth routes should define a shared pre-auth secure-session limiter");
+assert(authRoutesSource.includes("const mfaPreAuthRouteLimiter = createSharedRateLimiter("), "auth routes should define a shared pre-auth MFA limiter");
+assert(authRoutesSource.includes("const adminInvitePreAuthRouteLimiter = createSharedRateLimiter("), "auth routes should define a shared pre-auth invite limiter");
+assert(realtimeRoutesSource.includes("const dashboardReadPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter("), "realtime routes should define a shared pre-auth dashboard read limiter");
+assert(realtimeRoutesSource.includes("const printerAgentHeartbeatPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter("), "realtime routes should define a shared pre-auth printer heartbeat limiter");
+assert(governanceRoutesSource.includes("const governanceReadPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter("), "governance routes should define a shared pre-auth governance read limiter");
+assert(governanceRoutesSource.includes("const governanceApprovalMutationPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter("), "governance routes should define a shared pre-auth approval limiter");
+assert(auditRoutesSource.includes("const auditLogsReadPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter("), "audit routes should define a shared pre-auth audit read limiter");
+assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter("), "audit routes should define a shared pre-auth audit fraud mutation limiter");
 
 [
   'router.get("/auth/sessions", sessionReadPreAuthRouteLimiter, authenticate, sessionReadRouteLimiter, listSessions);',

@@ -128,7 +128,12 @@ export const createAuditLog = async (data: AuditLogInput) => {
     origin: getRedisInstanceId(),
     log,
   }).catch(() => undefined);
-  void bumpCacheNamespaceVersion("dashboard-snapshot").catch(() => undefined);
+  void Promise.allSettled([
+    bumpCacheNamespaceVersion("dashboard-snapshot"),
+    bumpCacheNamespaceVersion("attention-queue"),
+    bumpCacheNamespaceVersion("qr-batches"),
+    bumpCacheNamespaceVersion("print-jobs"),
+  ]).catch(() => undefined);
   await queueSecurityEvent("AUDIT_LOG", {
     id: log.id,
     action: log.action,

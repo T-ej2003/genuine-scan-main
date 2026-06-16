@@ -12,6 +12,7 @@ import { AuthRequest } from "../middleware/auth";
 import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
 import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "./manufacturerScopeService";
 import { listNotificationsForUser } from "./notificationService";
+import { getOrComputeVersionedCache } from "./versionedCacheService";
 
 export type AttentionQueueItemTone = "neutral" | "verified" | "review" | "blocked" | "audit" | "support" | "print";
 
@@ -215,7 +216,16 @@ const notificationRoute = (data: Prisma.JsonValue | null | undefined, role: User
   return safeRouteForRole(route, role);
 };
 
-export const getAttentionQueueSnapshot = async (req: AuthRequest): Promise<AttentionQueueSnapshot> => {
+const attentionQueueScopeKey = (req: AuthRequest) =>
+  [
+    req.user?.role || "anonymous",
+    req.user?.userId || "none",
+    req.user?.licenseeId || "none",
+    req.user?.orgId || "none",
+    getEffectiveLicenseeId(req) || "all",
+  ].join(":");
+
+const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<AttentionQueueSnapshot> => {
   if (!req.user) throw new Error("Not authenticated");
 
   const canOpenIncidentRoute = isPlatformRole(req.user.role);
@@ -372,3 +382,8 @@ export const getAttentionQueueSnapshot = async (req: AuthRequest): Promise<Atten
     items: items.slice(0, 6),
   };
 };
+
+export const getAttentionQueueSnapshot = async (req: AuthRequest): Promise<AttentionQueueSnapshot> =>
+  getOrComputeVersionedCache("attention-queue", attentionQueueScopeKey(req), 20, () =>
+    getAttentionQueueSnapshotUncached(req)
+  );

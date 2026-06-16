@@ -104,14 +104,7 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
     const off = onNotificationEvent(async (event) => {
       try {
         if (!shouldDeliver(event, req.user!, accessibleLicenseeIds)) return;
-        writeSseRealtimeEnvelope(res, {
-          channel: "notifications",
-          type: "version.bump",
-          payload: {
-            reason: event.type,
-            serverTime: new Date().toISOString(),
-          },
-        });
+        await sendSnapshot(event.type);
       } catch {
         // ignore per-event failures
       }
