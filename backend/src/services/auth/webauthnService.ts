@@ -2,6 +2,12 @@ import { createHash, createPublicKey, randomBytes, verify as cryptoVerify } from
 
 import prisma from "../../config/database";
 import { buildTokenHashCandidates, hashToken, normalizeUserAgent, randomOpaqueToken } from "../../utils/security";
+import {
+  beginWebAuthnFactorAuthentication,
+  beginWebAuthnFactorRegistration,
+  completeWebAuthnFactorAuthentication,
+  completeWebAuthnFactorRegistration,
+} from "./webauthnMfaProvider";
 
 type WebAuthnChallengePurpose = "ENROLLMENT" | "LOGIN" | "STEP_UP";
 
@@ -164,23 +170,38 @@ const consumeChallenge = async (id: string) => {
 };
 
 export const listAdminWebAuthnCredentials = async (userId: string) => {
-  const rows = await prisma.adminWebAuthnCredential.findMany({
-    where: { userId },
-    orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
-    select: {
-      id: true,
-      label: true,
-      credentialId: true,
-      transports: true,
-      lastUsedAt: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
+  const [factors, rows] = await Promise.all([
+    prisma.userMfaFactor.findMany({
+      where: { userId, type: "WEBAUTHN", disabledAt: null },
+      orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
+      select: {
+        id: true,
+        label: true,
+        credentialId: true,
+        transports: true,
+        lastUsedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+    prisma.adminWebAuthnCredential.findMany({
+      where: { userId },
+      orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
+      select: {
+        id: true,
+        label: true,
+        credentialId: true,
+        transports: true,
+        lastUsedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+  ]);
 
-  return rows.map((row) => ({
+  return [...factors, ...rows].map((row) => ({
     id: row.id,
-    label: row.label || "Security key",
+    label: row.label || "Passkey",
     credentialId: row.credentialId,
     transports: row.transports,
     lastUsedAt: row.lastUsedAt,
@@ -196,61 +217,7 @@ export const beginAdminWebAuthnRegistration = async (params: {
   ipHash?: string | null;
   userAgent?: string | null;
 }) => {
-  const ticket = randomOpaqueToken(36);
-  const challenge = toBase64Url(randomBytes(32));
-  const rpId = deriveRpId();
-  const origin = deriveAllowedOrigins()[0] || null;
-  const expiresAt = new Date(Date.now() + challengeTtlMinutes() * 60_000);
-  const existingCredentials = await prisma.adminWebAuthnCredential.findMany({
-    where: { userId: params.userId },
-    select: { credentialId: true },
-  });
-
-  await prisma.authWebAuthnChallenge.create({
-    data: {
-      userId: params.userId,
-      purpose: "ENROLLMENT",
-      ticketHash: hashToken(ticket),
-      challengeHash: hashToken(challenge),
-      credentialIds: existingCredentials.map((row) => row.credentialId),
-      createdIpHash: params.ipHash || null,
-      createdUserAgentHash: params.userAgent ? hashToken(normalizeUserAgent(params.userAgent) || params.userAgent) : null,
-      origin,
-      rpId,
-      expiresAt,
-    },
-  });
-
-  return {
-    ticket,
-    options: {
-      rp: {
-        name: webAuthnRpName(),
-        id: rpId,
-      },
-      user: {
-        id: buildUserHandle(params.userId),
-        name: params.email,
-        displayName: params.displayName || params.email,
-      },
-      challenge,
-      timeout: challengeTtlMinutes() * 60_000,
-      attestation: "none" as const,
-      authenticatorSelection: {
-        residentKey: "preferred" as const,
-        userVerification: "preferred" as const,
-      },
-      pubKeyCredParams: [
-        { alg: -7, type: "public-key" as const },
-        { alg: -257, type: "public-key" as const },
-      ],
-      excludeCredentials: existingCredentials.map((row) => ({
-        id: row.credentialId,
-        type: "public-key" as const,
-      })),
-    },
-    expiresAt,
-  };
+  return beginWebAuthnFactorRegistration(params);
 };
 
 export const completeAdminWebAuthnRegistration = async (params: {
@@ -264,13 +231,29 @@ export const completeAdminWebAuthnRegistration = async (params: {
     response: {
       clientDataJSON: string;
       attestationObject: string;
-      authenticatorData: string;
-      publicKey: string;
-      publicKeyAlgorithm: number;
+      authenticatorData?: string;
+      publicKey?: string;
+      publicKeyAlgorithm?: number;
       transports?: string[];
     };
   };
 }) => {
+  try {
+    return await completeWebAuthnFactorRegistration({
+      ...params,
+      credential: params.credential as any,
+    });
+  } catch (error) {
+    if (!(error instanceof Error) || !["WEBAUTHN_CHALLENGE_NOT_FOUND", "WEBAUTHN_CHALLENGE_USER_MISMATCH"].includes(error.message)) {
+      throw error;
+    }
+  }
+
+  const legacyResponse = params.credential.response;
+  if (!legacyResponse.authenticatorData || !legacyResponse.publicKey) {
+    throw new Error("WEBAUTHN_LEGACY_REGISTRATION_PAYLOAD_UNSUPPORTED");
+  }
+
   const challenge = await loadChallengeByTicket(params.ticket, "ENROLLMENT");
   if (challenge.userId !== params.userId) {
     throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
@@ -287,7 +270,7 @@ export const completeAdminWebAuthnRegistration = async (params: {
     throw new Error("INVALID_WEBAUTHN_CHALLENGE");
   }
 
-  const authenticatorData = parseAuthenticatorData(params.credential.response.authenticatorData);
+  const authenticatorData = parseAuthenticatorData(legacyResponse.authenticatorData);
   if (!verifyRpIdHash(authenticatorData.rpIdHash, challenge.rpId || null)) {
     throw new Error("INVALID_WEBAUTHN_RP_ID");
   }
@@ -301,8 +284,8 @@ export const completeAdminWebAuthnRegistration = async (params: {
     update: {
       userId: params.userId,
       label: String(params.label || "").trim() || "Security key",
-      publicKeySpki: params.credential.response.publicKey,
-      publicKeyAlgorithm: Number(params.credential.response.publicKeyAlgorithm || -7),
+      publicKeySpki: legacyResponse.publicKey,
+      publicKeyAlgorithm: Number(legacyResponse.publicKeyAlgorithm || -7),
       counter: authenticatorData.signCount,
       transports: Array.isArray(params.credential.response.transports)
         ? params.credential.response.transports.map((value) => String(value || "").trim()).filter(Boolean)
@@ -313,8 +296,8 @@ export const completeAdminWebAuthnRegistration = async (params: {
       userId: params.userId,
       label: String(params.label || "").trim() || "Security key",
       credentialId,
-      publicKeySpki: params.credential.response.publicKey,
-      publicKeyAlgorithm: Number(params.credential.response.publicKeyAlgorithm || -7),
+      publicKeySpki: legacyResponse.publicKey,
+      publicKeyAlgorithm: Number(legacyResponse.publicKeyAlgorithm || -7),
       counter: authenticatorData.signCount,
       transports: Array.isArray(params.credential.response.transports)
         ? params.credential.response.transports.map((value) => String(value || "").trim()).filter(Boolean)
@@ -337,6 +320,14 @@ export const beginAdminWebAuthnChallenge = async (params: {
   ipHash?: string | null;
   userAgent?: string | null;
 }) => {
+  try {
+    return await beginWebAuthnFactorAuthentication(params);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "WEBAUTHN_NOT_ENROLLED") {
+      throw error;
+    }
+  }
+
   const credentials = await prisma.adminWebAuthnCredential.findMany({
     where: { userId: params.userId },
     select: {
@@ -417,6 +408,20 @@ export const completeAdminWebAuthnChallenge = async (params: {
     };
   };
 }) => {
+  try {
+    return await completeWebAuthnFactorAuthentication({
+      ...params,
+      credential: params.credential as any,
+    });
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !["WEBAUTHN_CREDENTIAL_NOT_FOUND", "WEBAUTHN_CHALLENGE_NOT_FOUND", "WEBAUTHN_CHALLENGE_USER_MISMATCH"].includes(error.message)
+    ) {
+      throw error;
+    }
+  }
+
   const challenge = await loadChallengeByTicket(params.ticket);
   if (challenge.userId !== params.userId) {
     throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
@@ -489,14 +494,20 @@ export const deleteAdminWebAuthnCredential = async (params: {
   userId: string;
   credentialId: string;
 }) => {
-  const deleted = await prisma.adminWebAuthnCredential.deleteMany({
-    where: {
-      id: params.credentialId,
-      userId: params.userId,
-    },
-  });
+  const [factorDeleted, legacyDeleted] = await prisma.$transaction([
+    prisma.userMfaFactor.updateMany({
+      where: { id: params.credentialId, userId: params.userId, type: "WEBAUTHN", disabledAt: null },
+      data: { disabledAt: new Date() },
+    }),
+    prisma.adminWebAuthnCredential.deleteMany({
+      where: {
+        id: params.credentialId,
+        userId: params.userId,
+      },
+    }),
+  ]);
 
   return {
-    deleted: deleted.count > 0,
+    deleted: factorDeleted.count > 0 || legacyDeleted.count > 0,
   };
 };

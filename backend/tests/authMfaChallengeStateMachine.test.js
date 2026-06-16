@@ -59,9 +59,13 @@ const totp = (secretBase32) => hotp(base32Decode(secretBase32), Math.floor(Date.
 
 let credential = null;
 let challenges = [];
+let legacyChallenges = [];
+let factors = [];
+let backupCodeRows = [];
 let auditEvents = [];
 
 const prismaMock = {
+  $transaction: async (operations) => Promise.all(operations),
   adminMfaCredential: {
     upsert: async ({ create, update }) => {
       credential = credential ? { ...credential, ...update, updatedAt: new Date() } : { id: "cred-1", ...create, createdAt: new Date(), updatedAt: new Date() };
@@ -79,10 +83,147 @@ const prismaMock = {
       return { count: 1 };
     },
   },
+  adminWebAuthnCredential: {
+    findMany: async () => [],
+  },
+  userMfaFactor: {
+    deleteMany: async ({ where }) => {
+      const before = factors.length;
+      factors = factors.filter((row) => {
+        if (where.userId && row.userId !== where.userId) return true;
+        if (where.type && row.type !== where.type) return true;
+        if (where.disabledAt === null && row.disabledAt) return true;
+        return false;
+      });
+      return { count: before - factors.length };
+    },
+    create: async ({ data }) => {
+      const row = {
+        id: data.id || `factor-${factors.length + 1}`,
+        ...data,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastUsedAt: data.lastUsedAt || null,
+        disabledAt: data.disabledAt || null,
+      };
+      factors.push(row);
+      return { ...row };
+    },
+    findFirst: async ({ where }) => {
+      const rows = await prismaMock.userMfaFactor.findMany({ where, orderBy: [{ createdAt: "desc" }] });
+      return rows[0] || null;
+    },
+    findMany: async ({ where }) => {
+      return factors
+        .filter((row) => {
+          if (where.userId && row.userId !== where.userId) return false;
+          if (where.type && row.type !== where.type) return false;
+          if (where.disabledAt === null && row.disabledAt) return false;
+          if (where.secretCiphertext?.not === null && !row.secretCiphertext) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          const aTime = (a.lastUsedAt || a.createdAt || new Date(0)).getTime();
+          const bTime = (b.lastUsedAt || b.createdAt || new Date(0)).getTime();
+          return bTime - aTime;
+        })
+        .map((row) => ({ ...row }));
+    },
+    update: async ({ where, data }) => {
+      const row = factors.find((entry) => entry.id === where.id);
+      if (!row) throw new Error("factor not found");
+      Object.assign(row, data, { updatedAt: new Date() });
+      return { ...row };
+    },
+    upsert: async ({ where, update, create }) => {
+      const existing = factors.find((entry) => entry.id === where.id);
+      if (existing) {
+        Object.assign(existing, update, { updatedAt: new Date() });
+        return { ...existing };
+      }
+      const row = {
+        ...create,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        disabledAt: create.disabledAt || null,
+      };
+      factors.push(row);
+      return { ...row };
+    },
+  },
+  userBackupCode: {
+    deleteMany: async ({ where }) => {
+      const before = backupCodeRows.length;
+      backupCodeRows = backupCodeRows.filter((row) => {
+        if (where.userId && row.userId !== where.userId) return true;
+        if (where.usedAt === null && row.usedAt === null) return false;
+        return true;
+      });
+      return { count: before - backupCodeRows.length };
+    },
+    createMany: async ({ data }) => {
+      for (const entry of data) {
+        backupCodeRows.push({
+          id: `backup-${backupCodeRows.length + 1}`,
+          ...entry,
+          usedAt: null,
+          createdAt: new Date(),
+        });
+      }
+      return { count: data.length };
+    },
+    count: async ({ where }) => backupCodeRows.filter((row) => row.userId === where.userId && (where.usedAt !== null || row.usedAt === null)).length,
+    updateMany: async ({ where, data }) => {
+      let count = 0;
+      const hashes = where.codeHash?.in || [];
+      for (const row of backupCodeRows) {
+        if (where.userId && row.userId !== where.userId) continue;
+        if (where.usedAt === null && row.usedAt) continue;
+        if (hashes.length && !hashes.includes(row.codeHash)) continue;
+        Object.assign(row, data);
+        count += 1;
+      }
+      return { count };
+    },
+  },
+  mfaLoginChallenge: {
+    create: async ({ data }) => {
+      const row = {
+        id: `login-challenge-${challenges.length + 1}`,
+        ...data,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        consumedAt: data.consumedAt || null,
+        retryAfterSeconds: data.retryAfterSeconds || null,
+      };
+      challenges.push(row);
+      return { ...row };
+    },
+    findFirst: async ({ where }) => {
+      const hashes = where.ticketHash?.in || [];
+      const row = challenges.find((entry) => hashes.includes(entry.ticketHash));
+      return row ? { ...row } : null;
+    },
+    updateMany: async ({ where, data }) => {
+      let count = 0;
+      for (const row of challenges) {
+        if (where.id && row.id !== where.id) continue;
+        if (where.userId && row.userId !== where.userId) continue;
+        if (where.consumedAt === null && row.consumedAt) continue;
+        if (where.expiresAt?.gt && row.expiresAt.getTime() <= where.expiresAt.gt.getTime()) continue;
+        if (data.attempts?.increment) row.attempts += data.attempts.increment;
+        if ("retryAfterSeconds" in data) row.retryAfterSeconds = data.retryAfterSeconds;
+        if ("consumedAt" in data) row.consumedAt = data.consumedAt;
+        row.updatedAt = new Date();
+        count += 1;
+      }
+      return { count };
+    },
+  },
   authMfaChallenge: {
     create: async ({ data }) => {
       const row = {
-        id: `challenge-${challenges.length + 1}`,
+        id: `legacy-challenge-${legacyChallenges.length + 1}`,
         ...data,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -90,17 +231,17 @@ const prismaMock = {
         supersededAt: data.supersededAt || null,
         user: { id: data.userId },
       };
-      challenges.push(row);
+      legacyChallenges.push(row);
       return row;
     },
     findFirst: async ({ where }) => {
       const hashes = where.ticketHash?.in || [];
-      const row = challenges.find((entry) => hashes.includes(entry.ticketHash));
+      const row = legacyChallenges.find((entry) => hashes.includes(entry.ticketHash));
       return row ? { ...row, user: { id: row.userId } } : null;
     },
     updateMany: async ({ where, data }) => {
       let count = 0;
-      for (const row of challenges) {
+      for (const row of legacyChallenges) {
         if (where.id && row.id !== where.id) continue;
         if (where.userId && row.userId !== where.userId) continue;
         if (where.purpose && row.purpose !== where.purpose) continue;
@@ -138,6 +279,9 @@ const {
 const reset = async () => {
   credential = null;
   challenges = [];
+  legacyChallenges = [];
+  factors = [];
+  backupCodeRows = [];
   auditEvents = [];
   const setup = await beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com" });
   credential = { ...credential, isEnabled: true, verifiedAt: new Date() };
@@ -162,6 +306,15 @@ const rejectCode = async (promise) => {
     await promise;
   } catch (error) {
     return String(error?.message || "");
+  }
+  throw new Error("Expected promise to reject");
+};
+
+const rejectError = async (promise) => {
+  try {
+    await promise;
+  } catch (error) {
+    return error;
   }
   throw new Error("Expected promise to reject");
 };
@@ -213,27 +366,48 @@ const run = async () => {
   assert.strictEqual(consumedError, "MFA_CHALLENGE_NOT_FOUND");
 
   await reset();
+  const stableSessionSetup = await beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com" });
+  credential = { ...credential, isEnabled: true, verifiedAt: new Date() };
   const boundChallenge = await makeChallenge();
-  const wrongSessionError = await rejectCode(completeAdminMfaChallenge({
+  const stableSession = await completeAdminMfaChallenge({
     userId: "admin-1",
     sessionId: "other-bootstrap-session",
     ticket: boundChallenge.ticket,
     method: "totp",
-    code: "000000",
-  }));
-  assert.strictEqual(wrongSessionError, "MFA_CHALLENGE_NOT_FOUND");
-  assert.strictEqual(challenges[0].attempts, 0);
+    code: totp(stableSessionSetup.secret),
+  });
+  assert.strictEqual(stableSession.method, "TOTP");
+  assert(challenges[0].consumedAt, "ordinary login MFA should not 410 because browser session state refreshed");
+
+  await reset();
+  const duplicateSetup = await beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com" });
+  credential = { ...credential, isEnabled: true, verifiedAt: new Date() };
+  const firstChallenge = await makeChallenge();
+  await makeChallenge();
+  assert.strictEqual(challenges.length, 2);
+  assert.strictEqual(challenges[0].consumedAt, null);
+  const firstValidAfterDuplicateBegin = await completeAdminMfaChallenge({
+    userId: "admin-1",
+    sessionId: "bootstrap-session-1",
+    ticket: firstChallenge.ticket,
+    method: "totp",
+    code: totp(duplicateSetup.secret),
+  });
+  assert.strictEqual(firstValidAfterDuplicateBegin.method, "TOTP");
+  assert(challenges[0].consumedAt, "duplicate begin must not supersede the first fresh challenge");
+  assert.strictEqual(challenges[1].consumedAt, null);
 
   await reset();
   const lockedChallenge = await makeChallenge({ maxAttempts: 1 });
-  const tooManyError = await rejectCode(completeAdminMfaChallenge({
+  const tooMany = await rejectError(completeAdminMfaChallenge({
     userId: "admin-1",
     sessionId: "bootstrap-session-1",
     ticket: lockedChallenge.ticket,
     method: "totp",
     code: "000000",
   }));
-  assert.strictEqual(tooManyError, "MFA_TOO_MANY_ATTEMPTS");
+  assert.strictEqual(String(tooMany?.message || ""), "MFA_TOO_MANY_ATTEMPTS");
+  assert.strictEqual(tooMany.retryAfterSeconds, 60);
 
   const backupSetup = await reset();
   const backupChallenge = await makeChallenge();

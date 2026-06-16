@@ -34,6 +34,8 @@ export default function Login() {
   const [mfaBackupCodesRevealed, setMfaBackupCodesRevealed] = useState(true);
   const [mfaChallengeExpired, setMfaChallengeExpired] = useState(false);
   const mfaSubmitInFlightRef = useRef(false);
+  const mfaBeginInFlightRef = useRef(false);
+  const webauthnInFlightRef = useRef(false);
   const webauthnSupported = isWebAuthnSupported();
 
   const { login, logout, pendingAuth, completeMfaSession } = useAuth();
@@ -62,7 +64,7 @@ export default function Login() {
     return value || "Login failed";
   }, []);
 
-  const mfaStatusMessage = useCallback((response: { status?: number; error?: string }) => {
+  const mfaStatusMessage = useCallback((response: { status?: number; error?: string; retryAfterSec?: number }) => {
     if (response.status === 400) {
       return "The security code could not be verified. Check the code and try again.";
     }
@@ -70,7 +72,10 @@ export default function Login() {
       return "This verification session expired. Start sign-in again.";
     }
     if (response.status === 429) {
-      return "Too many attempts. Wait and try again.";
+      const seconds = Number(response.retryAfterSec || 0);
+      return seconds > 0
+        ? `Too many attempts. Please wait ${seconds} seconds.`
+        : "Too many attempts. Please wait a moment.";
     }
     if (response.status === 401) {
       return "Your sign-in session expired. Sign in again.";
@@ -124,8 +129,9 @@ export default function Login() {
   }, [mfaSetup?.otpauthUri]);
 
   useEffect(() => {
-    if (!pendingAuth || mfaLoading) return;
+    if (!pendingAuth || mfaLoading || mfaBeginInFlightRef.current) return;
     if (mfaMode === "setup" && !mfaSetup) {
+      mfaBeginInFlightRef.current = true;
       setMfaLoading(true);
       void apiClient.beginAdminMfaSetup()
         .then((response) => {
@@ -138,24 +144,32 @@ export default function Login() {
         .catch((err: unknown) => {
           setError(humanizeAuthError(err instanceof Error ? err.message : "Could not start MFA setup."));
         })
-        .finally(() => setMfaLoading(false));
+        .finally(() => {
+          mfaBeginInFlightRef.current = false;
+          setMfaLoading(false);
+        });
     }
 
     if (mfaMode === "challenge" && !mfaTicket && !mfaChallengeExpired) {
+      mfaBeginInFlightRef.current = true;
       setMfaLoading(true);
       void apiClient.beginAdminMfaChallenge()
         .then((response) => {
           if (!response.success || !response.data?.ticket) {
-            throw new Error(response.error || "Could not start MFA challenge.");
+            setError(mfaStatusMessage(response));
+            return;
           }
           setMfaTicket(response.data.ticket);
         })
         .catch((err: unknown) => {
           setError(humanizeAuthError(err instanceof Error ? err.message : "Could not start MFA challenge."));
         })
-        .finally(() => setMfaLoading(false));
+        .finally(() => {
+          mfaBeginInFlightRef.current = false;
+          setMfaLoading(false);
+        });
     }
-  }, [humanizeAuthError, mfaChallengeExpired, mfaLoading, mfaMode, mfaSetup, mfaTicket, pendingAuth]);
+  }, [humanizeAuthError, mfaChallengeExpired, mfaLoading, mfaMode, mfaSetup, mfaStatusMessage, mfaTicket, pendingAuth]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -250,19 +264,24 @@ export default function Login() {
   };
 
   const handleCompleteWebAuthnChallenge = async () => {
+    if (webauthnInFlightRef.current) return;
     setError("");
+    webauthnInFlightRef.current = true;
     setMfaLoading(true);
     try {
       const beginResponse = await apiClient.beginAdminWebAuthnChallenge();
       if (!beginResponse.success || !beginResponse.data) {
-        setError(humanizeAuthError(beginResponse.error || "Could not start WebAuthn verification."));
+        setError(mfaStatusMessage(beginResponse));
         return;
       }
 
       const assertion = await startAdminWebAuthnAuthentication(beginResponse.data);
       const response = await apiClient.completeAdminWebAuthnChallenge(assertion);
       if (!response.success || !response.data?.user) {
-        setError(humanizeAuthError(response.error || "Could not complete WebAuthn verification."));
+        setError(mfaStatusMessage(response));
+        if (response.status === 410 || response.status === 401) {
+          setMfaChallengeExpired(true);
+        }
         return;
       }
 
@@ -271,6 +290,7 @@ export default function Login() {
     } catch (error: unknown) {
       setError(humanizeAuthError(error instanceof Error ? error.message : "Could not verify the security key."));
     } finally {
+      webauthnInFlightRef.current = false;
       setMfaLoading(false);
     }
   };

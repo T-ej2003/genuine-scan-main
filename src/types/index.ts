@@ -2,7 +2,7 @@ export type UserRole = "super_admin" | "licensee_admin" | "manufacturer";
 export type AuthSessionStage = "ACTIVE" | "MFA_BOOTSTRAP";
 export type AuthAssuranceLevel = "PASSWORD" | "ADMIN_MFA";
 export type StepUpMethod = "ADMIN_MFA" | "PASSWORD_REAUTH";
-export type AdminMfaMethod = "TOTP" | "WEBAUTHN";
+export type AdminMfaMethod = "TOTP" | "WEBAUTHN" | "BACKUP_CODE";
 
 export interface AuthState {
   sessionStage: AuthSessionStage;

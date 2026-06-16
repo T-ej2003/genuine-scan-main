@@ -7,8 +7,8 @@ export type AdminMfaStatus = {
   enabled: boolean;
   totpEnabled?: boolean;
   hasWebAuthn?: boolean;
-  methods?: Array<"TOTP" | "WEBAUTHN">;
-  preferredMethod?: "TOTP" | "WEBAUTHN" | null;
+  methods?: Array<"TOTP" | "WEBAUTHN" | "BACKUP_CODE">;
+  preferredMethod?: "TOTP" | "WEBAUTHN" | "BACKUP_CODE" | null;
   backupCodesRemaining?: number;
   verifiedAt?: string | null;
   lastUsedAt?: string | null;

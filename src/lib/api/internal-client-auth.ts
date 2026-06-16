@@ -10,7 +10,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
         authAssurance: "PASSWORD" | "ADMIN_MFA";
         mfaRequired: boolean;
         mfaEnrolled: boolean;
-        availableMfaMethods?: Array<"TOTP" | "WEBAUTHN">;
+        availableMfaMethods?: Array<"TOTP" | "WEBAUTHN" | "BACKUP_CODE">;
         preferredMfaMethod?: "TOTP" | "WEBAUTHN" | null;
         authenticatedAt?: string | null;
         mfaVerifiedAt?: string | null;
@@ -130,7 +130,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
         authAssurance: "PASSWORD" | "ADMIN_MFA";
         mfaRequired: boolean;
         mfaEnrolled: boolean;
-        availableMfaMethods?: Array<"TOTP" | "WEBAUTHN">;
+        availableMfaMethods?: Array<"TOTP" | "WEBAUTHN" | "BACKUP_CODE">;
         preferredMfaMethod?: "TOTP" | "WEBAUTHN" | null;
         authenticatedAt?: string | null;
         mfaVerifiedAt?: string | null;
@@ -360,8 +360,8 @@ export const createAuthApi = (core: ApiClientCore) => ({
       enabled: boolean;
       totpEnabled?: boolean;
       hasWebAuthn?: boolean;
-      methods?: Array<"TOTP" | "WEBAUTHN">;
-      preferredMethod?: "TOTP" | "WEBAUTHN" | null;
+      methods?: Array<"TOTP" | "WEBAUTHN" | "BACKUP_CODE">;
+      preferredMethod?: "TOTP" | "WEBAUTHN" | "BACKUP_CODE" | null;
       backupCodesRemaining?: number;
       verifiedAt?: string | null;
       lastUsedAt?: string | null;
@@ -436,9 +436,9 @@ export const createAuthApi = (core: ApiClientCore) => ({
       response: {
         clientDataJSON: string;
         attestationObject: string;
-        authenticatorData: string;
-        publicKey: string;
-        publicKeyAlgorithm: number;
+            authenticatorData?: string;
+            publicKey?: string;
+            publicKeyAlgorithm?: number;
         transports?: string[];
       };
     };
