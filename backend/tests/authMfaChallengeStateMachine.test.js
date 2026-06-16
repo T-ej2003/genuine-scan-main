@@ -63,6 +63,7 @@ let legacyChallenges = [];
 let factors = [];
 let backupCodeRows = [];
 let auditEvents = [];
+let loggerEvents = [];
 
 const prismaMock = {
   $transaction: async (operations) => Promise.all(operations),
@@ -269,12 +270,21 @@ mockModule("services/auditService.js", {
     return { persisted: true };
   },
 });
+mockModule("utils/logger.js", {
+  logger: {
+    debug: (message, meta) => loggerEvents.push({ level: "debug", message, meta }),
+    info: (message, meta) => loggerEvents.push({ level: "info", message, meta }),
+    warn: (message, meta) => loggerEvents.push({ level: "warn", message, meta }),
+    error: (message, meta) => loggerEvents.push({ level: "error", message, meta }),
+  },
+});
 
 const {
   beginAdminMfaSetup,
   completeAdminMfaChallenge,
   createAdminMfaChallenge,
 } = require("../dist/services/auth/mfaService");
+const { verifyTotpToken } = require("../dist/services/auth/totpMfaProvider");
 
 const reset = async () => {
   credential = null;
@@ -283,6 +293,7 @@ const reset = async () => {
   factors = [];
   backupCodeRows = [];
   auditEvents = [];
+  loggerEvents = [];
   const setup = await beginAdminMfaSetup({ userId: "admin-1", email: "admin@example.com" });
   credential = { ...credential, isEnabled: true, verifiedAt: new Date() };
   return setup;
@@ -345,6 +356,13 @@ const assertSafeFutureExpiry = (expiresAt, beforeMs, label) => {
 
 const run = async () => {
   await reset();
+  const providerSetup = await reset();
+  assert.strictEqual(
+    await verifyTotpToken({ secret: providerSetup.secret, token: totp(providerSetup.secret) }),
+    true,
+    "verifyTotpToken should accept otplib boolean true results"
+  );
+
   for (const [value, label] of [
     [undefined, "unset env"],
     ["5", "integer env"],
@@ -416,6 +434,59 @@ const run = async () => {
   assert.strictEqual(invalid.status, 400);
   assert.strictEqual(challenges[0].attempts, 1);
   assert.strictEqual(challenges[0].consumedAt, null);
+
+  const newFactorSetup = await reset();
+  credential = { ...credential, isEnabled: false };
+  const newFactorChallenge = await makeChallenge();
+  const newFactorValid = await completeAdminMfaChallenge({
+    userId: "admin-1",
+    sessionId: "bootstrap-session-1",
+    ticket: newFactorChallenge.ticket,
+    method: "totp",
+    code: totp(newFactorSetup.secret),
+  });
+  assert.strictEqual(newFactorValid.method, "TOTP");
+  assert(challenges[0].consumedAt, "new UserMfaFactor TOTP should consume challenge");
+  assert(factors.some((factor) => factor.type === "TOTP" && factor.lastUsedAt), "new TOTP factor should record last use");
+
+  const legacyOnlySetup = await reset();
+  factors = [];
+  const legacyOnlyChallenge = await makeChallenge();
+  const legacyOnlyValid = await completeAdminMfaChallenge({
+    userId: "admin-1",
+    sessionId: "bootstrap-session-1",
+    ticket: legacyOnlyChallenge.ticket,
+    method: "totp",
+    code: totp(legacyOnlySetup.secret),
+  });
+  assert.strictEqual(legacyOnlyValid.method, "TOTP");
+  assert(challenges[0].consumedAt, "legacy AdminMfaCredential TOTP should consume challenge");
+  assert(
+    factors.some((factor) => factor.id === "legacy-totp-admin-1" && factor.legacySource === "AdminMfaCredential"),
+    "legacy AdminMfaCredential TOTP should promote to UserMfaFactor"
+  );
+
+  const decryptFailureSetup = await reset();
+  credential = { ...credential, isEnabled: false };
+  const decryptFailureChallenge = await makeChallenge();
+  const decryptCode = totp(decryptFailureSetup.secret);
+  factors[0].secretTag = Buffer.alloc(16, 9).toString("base64");
+  const decryptFailure = await rejectError(completeAdminMfaChallenge({
+    userId: "admin-1",
+    sessionId: "bootstrap-session-1",
+    ticket: decryptFailureChallenge.ticket,
+    method: "totp",
+    code: decryptCode,
+  }));
+  assert.strictEqual(String(decryptFailure?.message || ""), "MFA_VERIFICATION_UNAVAILABLE");
+  assert.strictEqual(decryptFailure.status, 409);
+  const safeLogBlob = JSON.stringify(loggerEvents);
+  assert(safeLogBlob.includes("new_factor"), "decrypt failure log should include safe factor path");
+  assert(safeLogBlob.includes("TOTP_SECRET_DECRYPT_FAILED"), "decrypt failure log should include safe category");
+  assert(!safeLogBlob.includes(decryptFailureSetup.secret), "logs must not contain raw TOTP secret");
+  assert(!safeLogBlob.includes(decryptCode), "logs must not contain submitted TOTP code");
+  assert(!safeLogBlob.includes(factors[0].secretCiphertext), "logs must not contain encrypted TOTP secret");
+  assert(!safeLogBlob.includes(decryptFailureChallenge.ticket), "logs must not contain MFA ticket");
 
   await reset();
   const expiredChallenge = await makeChallenge();

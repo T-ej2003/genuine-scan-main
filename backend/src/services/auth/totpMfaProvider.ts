@@ -69,5 +69,6 @@ export const verifyTotpToken = async (params: { secret: string; token: string })
     token,
     window: getTotpWindow(),
   } as any);
-  return Boolean(result?.valid);
+  if (typeof result === "boolean") return result;
+  return Boolean((result as { valid?: unknown } | null | undefined)?.valid);
 };
