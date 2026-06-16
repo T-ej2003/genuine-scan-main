@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 
+import { logger } from "../utils/logger";
 import {
   beginAdminWebAuthnChallenge,
   beginAdminWebAuthnRegistration,
@@ -296,26 +297,23 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
   } catch (error: any) {
     const raw = String(error?.message || "");
     const retryAfterSeconds = Number(error?.retryAfterSeconds || 0);
-    const status =
-      raw === "INVALID_MFA_CODE"
-        ? 400
-        : raw === "MFA_TOO_MANY_ATTEMPTS"
-          ? 429
-          : raw === "MFA_CHALLENGE_FORBIDDEN"
-            ? 403
-            : raw === "MFA_CHALLENGE_NOT_FOUND"
-              ? 410
-              : 409;
-    const message =
-      raw === "INVALID_MFA_CODE"
-        ? "Invalid authentication code."
-        : raw === "MFA_TOO_MANY_ATTEMPTS"
-          ? "Too many MFA attempts. Wait and try again."
-        : raw === "MFA_CHALLENGE_FORBIDDEN"
-          ? "MFA challenge does not match the active bootstrap session."
-        : raw === "MFA_CHALLENGE_NOT_FOUND"
-          ? "This MFA challenge expired. Start again."
-          : "MFA challenge could not be completed.";
+    const [status, message] = ({
+      INVALID_MFA_CODE: [400, "Invalid authentication code."],
+      MFA_TOO_MANY_ATTEMPTS: [429, "Too many MFA attempts. Wait and try again."],
+      MFA_CHALLENGE_FORBIDDEN: [403, "MFA challenge does not match the active bootstrap session."],
+      MFA_CHALLENGE_NOT_FOUND: [410, "This MFA challenge expired. Start again."],
+    } as Record<string, [number, string]>)[raw] || [409, "MFA challenge could not be completed."];
+    const requestId = String((req as Request & { requestId?: string }).requestId || req.get("x-request-id") || "").trim() || null;
+    const known = ["INVALID_MFA_CODE", "MFA_TOO_MANY_ATTEMPTS", "MFA_CHALLENGE_FORBIDDEN", "MFA_CHALLENGE_NOT_FOUND", "MFA_VERIFICATION_UNAVAILABLE"];
+    const safeCategory = known.includes(raw) ? raw : "MFA_COMPLETION_UNEXPECTED_ERROR";
+    logger.warn("auth_mfa_challenge_complete_failed", {
+      requestId,
+      userId: claims.userId,
+      status,
+      errorCategory: safeCategory,
+      errorName: error instanceof Error ? error.name : typeof error,
+      retryAfterSeconds: retryAfterSeconds > 0 ? retryAfterSeconds : null,
+    });
     if (status === 429 && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) res.setHeader("Retry-After", String(Math.ceil(retryAfterSeconds)));
     return res.status(status).json({ success: false, error: message });
   }

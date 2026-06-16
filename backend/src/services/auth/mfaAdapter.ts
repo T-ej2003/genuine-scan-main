@@ -47,6 +47,37 @@ export class MfaAdapterError extends Error {
   }
 }
 
+const safeMfaErrorCategory = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (/AUTH_MFA_ENCRYPTION_KEY|JWT_SECRET|secret/i.test(message)) return "TOTP_SECRET_DECRYPT_FAILED";
+  if (/decrypt|Unsupported state|authenticate|bad decrypt|auth tag/i.test(message)) return "TOTP_SECRET_DECRYPT_FAILED";
+  if (/database|prisma|transaction|constraint|unique/i.test(message)) return "MFA_FACTOR_STORE_FAILED";
+  return "MFA_VERIFIER_INTERNAL_ERROR";
+};
+
+const logTotpPathFailure = (params: {
+  level?: "warn" | "error";
+  userId: string;
+  factorPath: "new_factor" | "legacy_credential";
+  factorId?: string | null;
+  error: unknown;
+}) => {
+  const error = params.error instanceof Error ? params.error : null;
+  logger[params.level || "warn"]("auth_mfa_totp_factor_verification_failed", {
+    userId: params.userId,
+    factorPath: params.factorPath,
+    factorId: params.factorId || null,
+    errorCategory: safeMfaErrorCategory(params.error),
+    errorName: error?.name || typeof params.error,
+  });
+};
+
+type TotpVerificationPathResult = {
+  verified: boolean;
+  attempted: number;
+  operationalFailures: number;
+};
+
 const auditMfaEvent = async (input: {
   userId?: string | null;
   action: string;
@@ -236,28 +267,38 @@ export const confirmTotpMfaEnrollment = async (params: { userId: string; code: s
   return { enabled: true };
 };
 
-const verifyTotpAgainstNewFactor = async (params: { userId: string; code: string }) => {
+const verifyTotpAgainstNewFactor = async (params: { userId: string; code: string }): Promise<TotpVerificationPathResult> => {
   const factors = await prisma.userMfaFactor.findMany({
     where: { userId: params.userId, type: "TOTP", disabledAt: null, secretCiphertext: { not: null } },
     orderBy: { createdAt: "desc" },
     select: { id: true, secretCiphertext: true, secretIv: true, secretTag: true },
   });
 
+  let attempted = 0;
+  let operationalFailures = 0;
   for (const factor of factors) {
     if (!factor.secretCiphertext || !factor.secretIv || !factor.secretTag) continue;
-    const verified = await verifyTotpToken({
-      secret: decryptTotpSecret(factor as EncryptedTotpSecret),
-      token: params.code,
-    });
+    let verified = false;
+    try {
+      attempted += 1;
+      verified = await verifyTotpToken({
+        secret: decryptTotpSecret(factor as EncryptedTotpSecret),
+        token: params.code,
+      });
+    } catch (error) {
+      operationalFailures += 1;
+      logTotpPathFailure({ userId: params.userId, factorPath: "new_factor", factorId: factor.id, error });
+      continue;
+    }
     if (verified) {
       await prisma.userMfaFactor.update({ where: { id: factor.id }, data: { lastUsedAt: new Date() } });
-      return true;
+      return { verified: true, attempted, operationalFailures };
     }
   }
-  return false;
+  return { verified: false, attempted, operationalFailures };
 };
 
-const verifyTotpAgainstLegacyCredential = async (params: { userId: string; code: string }) => {
+const verifyTotpAgainstLegacyCredential = async (params: { userId: string; code: string }): Promise<TotpVerificationPathResult> => {
   const legacy = await prisma.adminMfaCredential.findUnique({
     where: { userId: params.userId },
     select: {
@@ -268,40 +309,53 @@ const verifyTotpAgainstLegacyCredential = async (params: { userId: string; code:
       secretTag: true,
     },
   });
-  if (!legacy?.isEnabled) return false;
+  if (!legacy?.isEnabled) return { verified: false, attempted: 0, operationalFailures: 0 };
 
-  const verified = await verifyTotpToken({ secret: decryptTotpSecret(legacy), token: params.code });
-  if (!verified) return false;
-  await prisma.$transaction([
-    prisma.adminMfaCredential.update({ where: { userId: params.userId }, data: { lastUsedAt: new Date() } }),
-    prisma.userMfaFactor.upsert({
-      where: { id: `legacy-totp-${params.userId}` },
-      update: {
-        type: "TOTP",
-        label: "Authenticator app",
-        secretCiphertext: legacy.secretCiphertext,
-        secretIv: legacy.secretIv,
-        secretTag: legacy.secretTag,
-        legacySource: "AdminMfaCredential",
-        legacyCredentialId: params.userId,
-        disabledAt: null,
-        lastUsedAt: new Date(),
-      },
-      create: {
-        id: `legacy-totp-${params.userId}`,
-        userId: params.userId,
-        type: "TOTP",
-        label: "Authenticator app",
-        secretCiphertext: legacy.secretCiphertext,
-        secretIv: legacy.secretIv,
-        secretTag: legacy.secretTag,
-        legacySource: "AdminMfaCredential",
-        legacyCredentialId: params.userId,
-        lastUsedAt: new Date(),
-      },
-    }),
-  ]);
-  return true;
+  let verified = false;
+  try {
+    verified = await verifyTotpToken({ secret: decryptTotpSecret(legacy), token: params.code });
+  } catch (error) {
+    logTotpPathFailure({ userId: params.userId, factorPath: "legacy_credential", factorId: params.userId, error });
+    return { verified: false, attempted: 1, operationalFailures: 1 };
+  }
+  if (!verified) return { verified: false, attempted: 1, operationalFailures: 0 };
+
+  const usedAt = new Date();
+  try {
+    await prisma.$transaction([
+      prisma.adminMfaCredential.update({ where: { userId: params.userId }, data: { lastUsedAt: usedAt } }),
+      prisma.userMfaFactor.upsert({
+        where: { id: `legacy-totp-${params.userId}` },
+        update: {
+          type: "TOTP",
+          label: "Authenticator app",
+          secretCiphertext: legacy.secretCiphertext,
+          secretIv: legacy.secretIv,
+          secretTag: legacy.secretTag,
+          legacySource: "AdminMfaCredential",
+          legacyCredentialId: params.userId,
+          disabledAt: null,
+          lastUsedAt: usedAt,
+        },
+        create: {
+          id: `legacy-totp-${params.userId}`,
+          userId: params.userId,
+          type: "TOTP",
+          label: "Authenticator app",
+          secretCiphertext: legacy.secretCiphertext,
+          secretIv: legacy.secretIv,
+          secretTag: legacy.secretTag,
+          legacySource: "AdminMfaCredential",
+          legacyCredentialId: params.userId,
+          lastUsedAt: usedAt,
+        },
+      }),
+    ]);
+  } catch (error) {
+    logTotpPathFailure({ level: "error", userId: params.userId, factorPath: "legacy_credential", factorId: params.userId, error });
+    throw new MfaAdapterError("MFA_VERIFICATION_UNAVAILABLE", { status: 409 });
+  }
+  return { verified: true, attempted: 1, operationalFailures: 0 };
 };
 
 export const verifyMfaCodeWithAdapter = async (params: { userId: string; code: string }) => {
@@ -330,10 +384,38 @@ export const verifyMfaCodeWithAdapter = async (params: { userId: string; code: s
     }
   }
 
-  const totpVerified = await verifyTotpAgainstNewFactor({ userId: params.userId, code: normalizedCode }) ||
-    await verifyTotpAgainstLegacyCredential({ userId: params.userId, code: normalizedCode });
-  if (!totpVerified) throw new Error("INVALID_MFA_CODE");
-  return { ok: true as const, method: "TOTP" as const };
+  const newFactorResult = await verifyTotpAgainstNewFactor({ userId: params.userId, code: normalizedCode });
+  if (newFactorResult.verified) return { ok: true as const, method: "TOTP" as const };
+
+  const legacyResult = await verifyTotpAgainstLegacyCredential({ userId: params.userId, code: normalizedCode });
+  if (legacyResult.verified) return { ok: true as const, method: "TOTP" as const };
+
+  const attempted = newFactorResult.attempted + legacyResult.attempted;
+  const operationalFailures = newFactorResult.operationalFailures + legacyResult.operationalFailures;
+  if (attempted > 0 && attempted === operationalFailures) {
+    logger.error("auth_mfa_totp_verification_unavailable", {
+      userId: params.userId,
+      factorPathsAttempted: [
+        ...(newFactorResult.attempted > 0 ? ["new_factor"] : []),
+        ...(legacyResult.attempted > 0 ? ["legacy_credential"] : []),
+      ],
+      errorCategory: "MFA_VERIFICATION_UNAVAILABLE",
+    });
+    throw new MfaAdapterError("MFA_VERIFICATION_UNAVAILABLE", { status: 409 });
+  }
+
+  if (operationalFailures > 0) {
+    logger.warn("auth_mfa_totp_verification_completed_with_factor_errors", {
+      userId: params.userId,
+      factorPathsAttempted: [
+        ...(newFactorResult.attempted > 0 ? ["new_factor"] : []),
+        ...(legacyResult.attempted > 0 ? ["legacy_credential"] : []),
+      ],
+      operationalFailures,
+    });
+  }
+
+  throw new Error("INVALID_MFA_CODE");
 };
 
 export const rotateMfaBackupCodesWithAdapter = async (params: { userId: string; code: string }) => {
@@ -476,6 +558,14 @@ export const completeStableMfaLoginChallenge = async (params: {
     verification = await verifyMfaCodeWithAdapter({ userId: challenge.userId, code: normalizedCode });
   } catch (error) {
     if (error instanceof Error && error.message === "INVALID_MFA_CODE") await recordFailure();
+    logger.warn("auth_mfa_challenge_verifier_error", {
+      userId: challenge.userId,
+      challengeId: challenge.id,
+      purpose: challenge.purpose,
+      requestedMethod,
+      errorCategory: error instanceof MfaAdapterError ? error.message : safeMfaErrorCategory(error),
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
     throw error;
   }
 
