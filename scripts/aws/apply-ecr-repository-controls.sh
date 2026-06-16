@@ -3,16 +3,17 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/aws/apply-ecr-repository-controls.sh <backend|worker|both>
+Usage: scripts/aws/apply-ecr-repository-controls.sh <backend|frontend|both>
 
 Apply production ECR hardening controls for the MSCQR ECS images:
 - immutable tags
+- scan on push
 - lifecycle policy for stale images
 
 Environment:
   AWS_REGION          Required AWS region for ECR.
   BACKEND_ECR_REPO    Optional. Default: mscqr-backend
-  WORKER_ECR_REPO     Optional. Default: mscqr-worker
+  FRONTEND_ECR_REPO   Optional. Default: mscqr-web
   KEEP_TAGGED_COUNT   Optional. Default: 120
   UNTAGGED_DAYS       Optional. Default: 7
 
@@ -33,9 +34,9 @@ if [[ -z "$SERVICE_SCOPE" ]]; then
 fi
 
 case "$SERVICE_SCOPE" in
-  backend|worker|both) ;;
+  backend|frontend|both) ;;
   *)
-    echo "Expected backend, worker, or both. Got: $SERVICE_SCOPE" >&2
+    echo "Expected backend, frontend, or both. Got: $SERVICE_SCOPE" >&2
     exit 1
     ;;
 esac
@@ -52,15 +53,15 @@ if [[ -z "$AWS_REGION" ]]; then
 fi
 
 BACKEND_ECR_REPO="${BACKEND_ECR_REPO:-mscqr-backend}"
-WORKER_ECR_REPO="${WORKER_ECR_REPO:-mscqr-worker}"
+FRONTEND_ECR_REPO="${FRONTEND_ECR_REPO:-mscqr-web}"
 KEEP_TAGGED_COUNT="${KEEP_TAGGED_COUNT:-120}"
 UNTAGGED_DAYS="${UNTAGGED_DAYS:-7}"
 
 declare -a REPOSITORIES=()
 case "$SERVICE_SCOPE" in
   backend) REPOSITORIES=("$BACKEND_ECR_REPO") ;;
-  worker) REPOSITORIES=("$WORKER_ECR_REPO") ;;
-  both) REPOSITORIES=("$BACKEND_ECR_REPO" "$WORKER_ECR_REPO") ;;
+  frontend) REPOSITORIES=("$FRONTEND_ECR_REPO") ;;
+  both) REPOSITORIES=("$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO") ;;
 esac
 
 POLICY_FILE="$(mktemp)"
@@ -115,6 +116,13 @@ for repository_name in "${REPOSITORIES[@]}"; do
     --image-tag-mutability IMMUTABLE \
     >/dev/null
 
+  echo "Applying scan-on-push policy to ${repository_name}"
+  aws ecr put-image-scanning-configuration \
+    --region "$AWS_REGION" \
+    --repository-name "$repository_name" \
+    --image-scanning-configuration scanOnPush=true \
+    >/dev/null
+
   echo "Applying lifecycle policy to ${repository_name}"
   aws ecr put-lifecycle-policy \
     --region "$AWS_REGION" \
@@ -126,4 +134,5 @@ done
 echo "Applied ECR controls in ${AWS_REGION}:"
 printf '  - %s\n' "${REPOSITORIES[@]}"
 echo "  - imageTagMutability=IMMUTABLE"
+echo "  - scanOnPush=true"
 echo "  - lifecycle keeps the newest ${KEEP_TAGGED_COUNT} release images and expires untagged images older than ${UNTAGGED_DAYS} days"

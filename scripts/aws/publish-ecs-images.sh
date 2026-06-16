@@ -3,20 +3,24 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/aws/publish-ecs-images.sh <backend|worker|both>
+Usage: scripts/aws/publish-ecs-images.sh <backend|frontend|both>
 
-Build and push the production backend/worker runtime image to ECR with docker
-buildx. The default output is a multi-arch manifest list for linux/amd64 and
-linux/arm64, tagged with the immutable current git SHA.
+Build and push the production backend/frontend runtime images to ECR with
+docker buildx. The default output is an ECS/Fargate-ready linux/amd64 manifest
+tagged with the immutable current git SHA.
 
 Environment:
   AWS_REGION         Required AWS region for ECR.
   AWS_ACCOUNT_ID     Optional. Auto-detected via STS when omitted.
   ECR_REGISTRY       Optional. Overrides the computed ECR registry hostname.
   IMAGE_TAG          Optional. Defaults to git rev-parse HEAD.
-  PLATFORMS          Optional. Defaults to linux/amd64,linux/arm64.
+  PLATFORMS          Optional. Defaults to linux/amd64.
   BACKEND_ECR_REPO   Optional. Defaults to mscqr-backend.
-  WORKER_ECR_REPO    Optional. Defaults to mscqr-worker.
+  FRONTEND_ECR_REPO  Optional. Defaults to mscqr-web.
+  BACKEND_DOCKERFILE Optional. Defaults to backend/Dockerfile.
+  FRONTEND_DOCKERFILE Optional. Defaults to Dockerfile.ecs-frontend.
+  BACKEND_BUILD_CONTEXT Optional. Defaults to .
+  FRONTEND_BUILD_CONTEXT Optional. Defaults to .
   BUILDER_NAME       Optional. Defaults to mscqr-multiarch.
   OUTPUT_FILE        Optional JSON Lines output file with published image refs.
 
@@ -38,9 +42,9 @@ if [[ -z "$SERVICE_SCOPE" ]]; then
 fi
 
 case "$SERVICE_SCOPE" in
-  backend|worker|both) ;;
+  backend|frontend|both) ;;
   *)
-    echo "Expected backend, worker, or both. Got: $SERVICE_SCOPE" >&2
+    echo "Expected backend, frontend, or both. Got: $SERVICE_SCOPE" >&2
     exit 1
     ;;
 esac
@@ -63,12 +67,14 @@ if [[ -z "$AWS_REGION" ]]; then
 fi
 
 IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse HEAD)}"
-PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
+PLATFORMS="${PLATFORMS:-linux/amd64}"
 BACKEND_ECR_REPO="${BACKEND_ECR_REPO:-mscqr-backend}"
-WORKER_ECR_REPO="${WORKER_ECR_REPO:-mscqr-worker}"
+FRONTEND_ECR_REPO="${FRONTEND_ECR_REPO:-mscqr-web}"
 BUILDER_NAME="${BUILDER_NAME:-mscqr-multiarch}"
-DOCKERFILE="${DOCKERFILE:-backend/Dockerfile}"
-BUILD_CONTEXT="${BUILD_CONTEXT:-.}"
+BACKEND_DOCKERFILE="${BACKEND_DOCKERFILE:-backend/Dockerfile}"
+FRONTEND_DOCKERFILE="${FRONTEND_DOCKERFILE:-Dockerfile.ecs-frontend}"
+BACKEND_BUILD_CONTEXT="${BACKEND_BUILD_CONTEXT:-.}"
+FRONTEND_BUILD_CONTEXT="${FRONTEND_BUILD_CONTEXT:-.}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERIFY_SCRIPT="$REPO_ROOT/scripts/aws/verify-image-manifest.sh"
 
@@ -77,16 +83,20 @@ if [[ -z "${ECR_REGISTRY:-}" ]]; then
   ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 fi
 
+declare -a SERVICES=()
 declare -a REPOSITORIES=()
 case "$SERVICE_SCOPE" in
   backend)
+    SERVICES=("backend")
     REPOSITORIES=("$BACKEND_ECR_REPO")
     ;;
-  worker)
-    REPOSITORIES=("$WORKER_ECR_REPO")
+  frontend)
+    SERVICES=("frontend")
+    REPOSITORIES=("$FRONTEND_ECR_REPO")
     ;;
   both)
-    REPOSITORIES=("$BACKEND_ECR_REPO" "$WORKER_ECR_REPO")
+    SERVICES=("backend" "frontend")
+    REPOSITORIES=("$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO")
     ;;
 esac
 
@@ -103,34 +113,66 @@ else
 fi
 docker buildx inspect --builder "$BUILDER_NAME" --bootstrap >/dev/null
 
-declare -a TAG_ARGS=()
-declare -a IMAGE_URIS=()
-for repo_name in "${REPOSITORIES[@]}"; do
-  image_uri="${ECR_REGISTRY}/${repo_name}:${IMAGE_TAG}"
-  TAG_ARGS+=(--tag "$image_uri")
-  IMAGE_URIS+=("$image_uri")
-done
-
 REMOTE_URL="$(git remote get-url origin 2>/dev/null || true)"
 
 echo "Publishing ${SERVICE_SCOPE} image(s)"
 echo "  Tag: ${IMAGE_TAG}"
 echo "  Platforms: ${PLATFORMS}"
 
-docker buildx build \
-  --builder "$BUILDER_NAME" \
-  --platform "$PLATFORMS" \
-  --file "$DOCKERFILE" \
-  --build-arg "GIT_SHA=${IMAGE_TAG}" \
-  --build-arg "RELEASE_GIT_SHA=${IMAGE_TAG}" \
-  --label "org.opencontainers.image.revision=${IMAGE_TAG}" \
-  --label "org.opencontainers.image.source=${REMOTE_URL}" \
-  --push \
-  "${TAG_ARGS[@]}" \
-  "$BUILD_CONTEXT"
+image_uri_for_service() {
+  local service="$1"
+  case "$service" in
+    backend) printf '%s/%s:%s' "$ECR_REGISTRY" "$BACKEND_ECR_REPO" "$IMAGE_TAG" ;;
+    frontend) printf '%s/%s:%s' "$ECR_REGISTRY" "$FRONTEND_ECR_REPO" "$IMAGE_TAG" ;;
+    *) echo "Unsupported service: $service" >&2; return 1 ;;
+  esac
+}
 
-echo
-for image_uri in "${IMAGE_URIS[@]}"; do
+dockerfile_for_service() {
+  local service="$1"
+  case "$service" in
+    backend) printf '%s' "$BACKEND_DOCKERFILE" ;;
+    frontend) printf '%s' "$FRONTEND_DOCKERFILE" ;;
+    *) echo "Unsupported service: $service" >&2; return 1 ;;
+  esac
+}
+
+context_for_service() {
+  local service="$1"
+  case "$service" in
+    backend) printf '%s' "$BACKEND_BUILD_CONTEXT" ;;
+    frontend) printf '%s' "$FRONTEND_BUILD_CONTEXT" ;;
+    *) echo "Unsupported service: $service" >&2; return 1 ;;
+  esac
+}
+
+declare -a IMAGE_URIS=()
+
+for service in "${SERVICES[@]}"; do
+  image_uri="$(image_uri_for_service "$service")"
+  dockerfile="$(dockerfile_for_service "$service")"
+  build_context="$(context_for_service "$service")"
+  IMAGE_URIS+=("$image_uri")
+
+  echo
+  echo "Building ${service}"
+  echo "  Dockerfile: ${dockerfile}"
+  echo "  Context: ${build_context}"
+  echo "  Image: ${image_uri}"
+
+  docker buildx build \
+    --builder "$BUILDER_NAME" \
+    --platform "$PLATFORMS" \
+    --file "$dockerfile" \
+    --build-arg "GIT_SHA=${IMAGE_TAG}" \
+    --build-arg "RELEASE_GIT_SHA=${IMAGE_TAG}" \
+    --label "org.opencontainers.image.revision=${IMAGE_TAG}" \
+    --label "org.opencontainers.image.source=${REMOTE_URL}" \
+    --label "org.opencontainers.image.title=mscqr-${service}" \
+    --push \
+    --tag "$image_uri" \
+    "$build_context"
+
   REQUIRED_PLATFORMS="$PLATFORMS" "$VERIFY_SCRIPT" "$image_uri"
 
   repository_name="${image_uri#${ECR_REGISTRY}/}"
@@ -145,11 +187,12 @@ for image_uri in "${IMAGE_URIS[@]}"; do
         --query 'imageDetails[0].imageDigest' \
         --output text
     )"
-    node --input-type=module - "$OUTPUT_FILE" "$repository_name" "$image_uri" "$IMAGE_TAG" "$image_digest" <<'NODE'
+    node --input-type=module - "$OUTPUT_FILE" "$service" "$repository_name" "$image_uri" "$IMAGE_TAG" "$image_digest" <<'NODE'
 import fs from "node:fs";
 
-const [outputPath, repositoryName, imageUri, imageTag, imageDigest] = process.argv.slice(2);
+const [outputPath, service, repositoryName, imageUri, imageTag, imageDigest] = process.argv.slice(2);
 const record = {
+  service,
   repository: repositoryName,
   image_uri: imageUri,
   image_tag: imageTag,

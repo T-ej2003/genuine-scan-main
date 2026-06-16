@@ -23,6 +23,10 @@ Optional environment:
   METADATA_FILE     Optional path to write deployment metadata JSON.
   VERSION_URL       Backend /version URL for post-deploy verification.
   EXPECTED_GIT_SHA  Full expected git SHA for VERSION_URL verification and runtime RELEASE_GIT_SHA.
+  ENV_UPDATES       Comma-separated container env names to set. Default:
+                    GIT_SHA,RELEASE_GIT_SHA when EXPECTED_GIT_SHA is set.
+  GIT_SHA           Value used when ENV_UPDATES includes GIT_SHA.
+  RELEASE_GIT_SHA   Value used when ENV_UPDATES includes RELEASE_GIT_SHA.
 
 Example:
   AWS_REGION=eu-west-2 \
@@ -83,10 +87,17 @@ aws ecs describe-task-definition \
   --include TAGS \
   >"$RAW_FILE"
 
-node --input-type=module - "$RAW_FILE" "$PAYLOAD_FILE" "$CONTAINER_NAME" "$IMAGE_URI" "${EXPECTED_GIT_SHA:-}" <<'NODE'
+ENV_UPDATES="${ENV_UPDATES:-}"
+if [[ -z "$ENV_UPDATES" && -n "${EXPECTED_GIT_SHA:-}" ]]; then
+  ENV_UPDATES="GIT_SHA,RELEASE_GIT_SHA"
+fi
+GIT_SHA="${GIT_SHA:-${EXPECTED_GIT_SHA:-}}"
+RELEASE_GIT_SHA="${RELEASE_GIT_SHA:-${EXPECTED_GIT_SHA:-}}"
+
+node --input-type=module - "$RAW_FILE" "$PAYLOAD_FILE" "$CONTAINER_NAME" "$IMAGE_URI" "$ENV_UPDATES" "$GIT_SHA" "$RELEASE_GIT_SHA" <<'NODE'
 import fs from "node:fs";
 
-const [rawPath, payloadPath, containerName, imageUri, expectedGitSha] = process.argv.slice(2);
+const [rawPath, payloadPath, containerName, imageUri, envUpdatesText, gitSha, releaseGitSha] = process.argv.slice(2);
 const raw = JSON.parse(fs.readFileSync(rawPath, "utf8"));
 const taskDefinition = raw.taskDefinition;
 
@@ -95,15 +106,32 @@ if (!taskDefinition) {
 }
 
 let containerFound = false;
+const envValues = new Map([
+  ["GIT_SHA", gitSha],
+  ["RELEASE_GIT_SHA", releaseGitSha],
+]);
+const envUpdates = envUpdatesText
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+for (const envName of envUpdates) {
+  if (!envValues.has(envName)) {
+    throw new Error(`Unsupported ENV_UPDATES entry: ${envName}. Supported: GIT_SHA, RELEASE_GIT_SHA.`);
+  }
+  if (!envValues.get(envName)) {
+    throw new Error(`ENV_UPDATES requested ${envName}, but no value was provided for it.`);
+  }
+}
+
 const containerDefinitions = (taskDefinition.containerDefinitions || []).map((container) => {
   if (container.name !== containerName) return container;
   containerFound = true;
   const environment = Array.isArray(container.environment)
-    ? container.environment.filter((entry) => entry?.name !== "GIT_SHA" && entry?.name !== "RELEASE_GIT_SHA")
+    ? container.environment.filter((entry) => !envUpdates.includes(entry?.name))
     : [];
-  if (expectedGitSha) {
-    environment.push({ name: "RELEASE_GIT_SHA", value: expectedGitSha });
-    environment.push({ name: "GIT_SHA", value: expectedGitSha });
+  for (const envName of envUpdates) {
+    environment.push({ name: envName, value: envValues.get(envName) });
   }
   return { ...container, image: imageUri, environment };
 });

@@ -10,7 +10,7 @@ on:
         default: both
         options:
           - backend
-          - worker
+          - frontend
           - both
       git_ref:
         description: "Git ref, branch, or SHA to publish. Defaults to the branch the workflow runs from."
@@ -25,17 +25,17 @@ on:
         description: "Comma-separated target platforms. Keep linux/amd64 for ECS/Fargate."
         required: true
         type: string
-        default: linux/amd64,linux/arm64
+        default: linux/amd64
       backend_ecr_repo:
         description: "ECR repository for the backend service image"
         required: true
         type: string
         default: mscqr-backend
-      worker_ecr_repo:
-        description: "ECR repository for the worker service image"
+      frontend_ecr_repo:
+        description: "ECR repository for the frontend service image"
         required: true
         type: string
-        default: mscqr-worker
+        default: mscqr-web
 
 permissions:
   contents: read
@@ -48,7 +48,7 @@ jobs:
       AWS_REGION: ${{ inputs.aws_region }}
       PLATFORMS: ${{ inputs.platforms }}
       BACKEND_ECR_REPO: ${{ inputs.backend_ecr_repo }}
-      WORKER_ECR_REPO: ${{ inputs.worker_ecr_repo }}
+      FRONTEND_ECR_REPO: ${{ inputs.frontend_ecr_repo }}
       SERVICES: ${{ inputs.services }}
       COSIGN_EXPERIMENTAL: "1"
     steps:
@@ -65,6 +65,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
+          set -euo pipefail
+
           if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
             echo "mode=oidc" >> "$GITHUB_OUTPUT"
           elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
@@ -104,6 +106,8 @@ jobs:
 
       - name: Install syft
         run: |
+          set -euo pipefail
+
           mkdir -p "$RUNNER_TEMP/bin"
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
@@ -111,6 +115,8 @@ jobs:
       - name: Resolve immutable image metadata
         id: image-meta
         run: |
+          set -euo pipefail
+
           echo "image_tag=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
           echo "resolved_ref=${{ inputs.git_ref != '' && inputs.git_ref || github.ref_name }}" >> "$GITHUB_OUTPUT"
@@ -118,20 +124,26 @@ jobs:
           : > "$RUNNER_TEMP/published-images.jsonl"
 
       - name: Enforce ECR repository controls
-        run: ./scripts/aws/apply-ecr-repository-controls.sh "$SERVICES"
+        run: |
+          set -euo pipefail
+          ./scripts/aws/apply-ecr-repository-controls.sh "$SERVICES"
 
       - name: Publish ECS images
         env:
           IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
           AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
           OUTPUT_FILE: ${{ steps.image-meta.outputs.images_file }}
-        run: ./scripts/aws/publish-ecs-images.sh "$SERVICES"
+        run: |
+          set -euo pipefail
+          ./scripts/aws/publish-ecs-images.sh "$SERVICES"
 
       - name: Generate SBOMs, provenance, and signatures
         env:
           IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
           IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
         run: |
+          set -euo pipefail
+
           mkdir -p "$RUNNER_TEMP/release-artifacts"
           while IFS= read -r record; do
             [ -n "$record" ] || continue
@@ -155,6 +167,8 @@ jobs:
           IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
           COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/publish-ecs-images.yml@.*$"
         run: |
+          set -euo pipefail
+
           while IFS= read -r record; do
             [ -n "$record" ] || continue
             image_ref="$(node --input-type=module -e 'const record = JSON.parse(process.argv[1]); process.stdout.write(record.image_ref);' "$record")"
@@ -169,6 +183,8 @@ jobs:
           RESOLVED_REF: ${{ steps.image-meta.outputs.resolved_ref }}
           IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
         run: |
+          set -euo pipefail
+
           REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
           {

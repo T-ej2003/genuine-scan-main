@@ -21,7 +21,7 @@ on:
         description: "Comma-separated manifest platforms"
         required: true
         type: string
-        default: linux/amd64,linux/arm64
+        default: linux/amd64
       release_environment:
         description: "Protected GitHub environment for release/image promotion approval"
         required: true
@@ -32,21 +32,21 @@ on:
         required: true
         type: string
         default: production-canary
-      worker_environment:
-        description: "Protected GitHub environment for worker rollout approval"
+      frontend_environment:
+        description: "Protected GitHub environment for frontend rollout approval"
         required: true
         type: string
-        default: production-worker
+        default: production-frontend
       backend_ecr_repo:
         description: "Backend ECR repository"
         required: true
         type: string
         default: mscqr-backend
-      worker_ecr_repo:
-        description: "Worker ECR repository"
+      frontend_ecr_repo:
+        description: "Frontend ECR repository"
         required: true
         type: string
-        default: mscqr-worker
+        default: mscqr-web
       backend_cluster:
         description: "Backend ECS cluster"
         required: true
@@ -73,7 +73,7 @@ on:
         required: true
         type: string
       backend_canary_attempts:
-        description: "How many backend canary verification rounds to run before promoting worker"
+        description: "How many backend canary verification rounds to run before promoting frontend"
         required: true
         type: number
         default: 5
@@ -82,23 +82,23 @@ on:
         required: true
         type: number
         default: 30
-      worker_cluster:
-        description: "Worker ECS cluster"
+      frontend_cluster:
+        description: "Frontend ECS cluster"
         required: true
         type: string
-      worker_service:
-        description: "Worker ECS service"
+      frontend_service:
+        description: "Frontend ECS service"
         required: true
         type: string
-      worker_task_definition:
-        description: "Worker task definition family or ARN"
+      frontend_task_definition:
+        description: "Frontend task definition family or ARN"
         required: true
         type: string
-      worker_container_name:
-        description: "Worker task container name to update"
+      frontend_container_name:
+        description: "Frontend task container name to update"
         required: true
         type: string
-        default: worker
+        default: frontend
 
 permissions:
   contents: read
@@ -115,7 +115,7 @@ jobs:
       AWS_REGION: ${{ inputs.aws_region }}
       PLATFORMS: ${{ inputs.platforms }}
       BACKEND_ECR_REPO: ${{ inputs.backend_ecr_repo }}
-      WORKER_ECR_REPO: ${{ inputs.worker_ecr_repo }}
+      FRONTEND_ECR_REPO: ${{ inputs.frontend_ecr_repo }}
       COSIGN_EXPERIMENTAL: "1"
     steps:
       - name: Checkout target ref
@@ -131,6 +131,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
+          set -euo pipefail
+
           if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
             echo "mode=oidc" >> "$GITHUB_OUTPUT"
           elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
@@ -172,6 +174,8 @@ jobs:
       - name: Install syft
         if: inputs.publish_images
         run: |
+          set -euo pipefail
+
           mkdir -p "$RUNNER_TEMP/bin"
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
@@ -179,18 +183,24 @@ jobs:
       - name: Resolve release metadata
         id: image-meta
         run: |
+          set -euo pipefail
+
           echo "image_tag=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "account_id=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_OUTPUT"
 
       - name: Enforce ECR repository controls
-        run: ./scripts/aws/apply-ecr-repository-controls.sh both
+        run: |
+          set -euo pipefail
+          ./scripts/aws/apply-ecr-repository-controls.sh both
 
       - name: Publish images for this release
         if: inputs.publish_images
         env:
           IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
           AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
-        run: ./scripts/aws/publish-ecs-images.sh both
+        run: |
+          set -euo pipefail
+          ./scripts/aws/publish-ecs-images.sh both
 
       - name: Generate SBOMs, provenance, and signatures
         if: inputs.publish_images
@@ -198,9 +208,11 @@ jobs:
           IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
           AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
         run: |
+          set -euo pipefail
+
           REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           mkdir -p "$RUNNER_TEMP/release-artifacts"
-          for repo in "$BACKEND_ECR_REPO" "$WORKER_ECR_REPO"; do
+          for repo in "$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO"; do
             image_digest="$(
               aws ecr describe-images \
                 --region "$AWS_REGION" \
@@ -226,8 +238,10 @@ jobs:
           AWS_ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
           COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/(publish-ecs-images|deploy-ecs-release).yml@.*$"
         run: |
+          set -euo pipefail
+
           REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-          for repo in "$BACKEND_ECR_REPO" "$WORKER_ECR_REPO"; do
+          for repo in "$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO"; do
             image_digest="$(
               aws ecr describe-images \
                 --region "$AWS_REGION" \
@@ -245,6 +259,8 @@ jobs:
           IMAGE_TAG: ${{ steps.image-meta.outputs.image_tag }}
           ACCOUNT_ID: ${{ steps.image-meta.outputs.account_id }}
         run: |
+          set -euo pipefail
+
           REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           {
             echo "## Release prepared"
@@ -252,7 +268,7 @@ jobs:
             echo "- Immutable git SHA: \`$IMAGE_TAG\`"
             echo "- Release approval environment: \`${{ inputs.release_environment }}\`"
             echo
-            for repo in "$BACKEND_ECR_REPO" "$WORKER_ECR_REPO"; do
+            for repo in "$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO"; do
               image_digest="$(
                 aws ecr describe-images \
                   --region "$AWS_REGION" \
@@ -286,6 +302,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
+          set -euo pipefail
+
           if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
             echo "mode=oidc" >> "$GITHUB_OUTPUT"
           elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
@@ -327,6 +345,8 @@ jobs:
           ACCOUNT_ID: ${{ needs.prepare_release.outputs.account_id }}
           COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/(publish-ecs-images|deploy-ecs-release).yml@.*$"
         run: |
+          set -euo pipefail
+
           image_digest="$(
             aws ecr describe-images \
               --region "$AWS_REGION" \
@@ -351,7 +371,9 @@ jobs:
           RELEASE_GIT_SHA: ${{ needs.prepare_release.outputs.image_tag }}
           EXPECTED_GIT_SHA: ${{ needs.prepare_release.outputs.image_tag }}
           METADATA_FILE: ${{ runner.temp }}/backend-deployment.json
-        run: ./scripts/aws/deploy-ecs-service.sh
+        run: |
+          set -euo pipefail
+          ./scripts/aws/deploy-ecs-service.sh
 
       - name: Run backend canary verification window
         env:
@@ -362,6 +384,8 @@ jobs:
           CANARY_ATTEMPTS: ${{ inputs.backend_canary_attempts }}
           CANARY_DELAY_SECONDS: ${{ inputs.backend_canary_delay_seconds }}
         run: |
+          set -euo pipefail
+
           attempts="${CANARY_ATTEMPTS}"
           delay_seconds="${CANARY_DELAY_SECONDS}"
           for attempt in $(seq 1 "$attempts"); do
@@ -378,6 +402,8 @@ jobs:
           CLUSTER_NAME: ${{ inputs.backend_cluster }}
           SERVICE_NAME: ${{ inputs.backend_service }}
         run: |
+          set -euo pipefail
+
           metadata_file="${{ runner.temp }}/backend-deployment.json"
           if [[ ! -f "$metadata_file" ]]; then
             echo "No backend deployment metadata file found; nothing to roll back."
@@ -396,6 +422,8 @@ jobs:
         env:
           IMAGE_REF: ${{ steps.backend-image.outputs.image_ref }}
         run: |
+          set -euo pipefail
+
           {
             echo "## Backend canary passed"
             echo
@@ -405,13 +433,13 @@ jobs:
             echo "- Ready URL: \`${{ inputs.backend_ready_url }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  worker_rollout:
+  frontend_rollout:
     needs: [prepare_release, backend_canary]
     runs-on: ubuntu-latest
-    environment: ${{ inputs.worker_environment }}
+    environment: ${{ inputs.frontend_environment }}
     env:
       AWS_REGION: ${{ inputs.aws_region }}
-      WORKER_ECR_REPO: ${{ inputs.worker_ecr_repo }}
+      FRONTEND_ECR_REPO: ${{ inputs.frontend_ecr_repo }}
     steps:
       - name: Checkout target ref
         uses: actions/checkout@v6
@@ -426,6 +454,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
+          set -euo pipefail
+
           if [ -n "$AWS_ROLE_TO_ASSUME" ]; then
             echo "mode=oidc" >> "$GITHUB_OUTPUT"
           elif [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
@@ -460,41 +490,49 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Resolve worker image ref
-        id: worker-image
+      - name: Resolve frontend image ref
+        id: frontend-image
         env:
           IMAGE_TAG: ${{ needs.prepare_release.outputs.image_tag }}
           ACCOUNT_ID: ${{ needs.prepare_release.outputs.account_id }}
           COSIGN_CERT_IDENTITY_REGEXP: "^https://github.com/${{ github.repository }}/.github/workflows/(publish-ecs-images|deploy-ecs-release).yml@.*$"
         run: |
+          set -euo pipefail
+
           image_digest="$(
             aws ecr describe-images \
               --region "$AWS_REGION" \
-              --repository-name "$WORKER_ECR_REPO" \
+              --repository-name "$FRONTEND_ECR_REPO" \
               --image-ids imageTag="$IMAGE_TAG" \
               --query 'imageDetails[0].imageDigest' \
               --output text
           )"
-          image_ref="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPO}@${image_digest}"
+          image_ref="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${FRONTEND_ECR_REPO}@${image_digest}"
           echo "image_ref=${image_ref}" >> "$GITHUB_OUTPUT"
           REQUIRED_PLATFORMS="${{ inputs.platforms }}" ./scripts/aws/verify-release-artifacts.sh "$image_ref"
 
-      - name: Deploy worker service
+      - name: Deploy frontend service
         env:
-          CLUSTER_NAME: ${{ inputs.worker_cluster }}
-          SERVICE_NAME: ${{ inputs.worker_service }}
-          TASK_DEFINITION: ${{ inputs.worker_task_definition }}
-          CONTAINER_NAME: ${{ inputs.worker_container_name }}
-          IMAGE_URI: ${{ steps.worker-image.outputs.image_ref }}
-        run: ./scripts/aws/deploy-ecs-service.sh
-
-      - name: Summarize worker rollout
-        env:
-          IMAGE_REF: ${{ steps.worker-image.outputs.image_ref }}
+          CLUSTER_NAME: ${{ inputs.frontend_cluster }}
+          SERVICE_NAME: ${{ inputs.frontend_service }}
+          TASK_DEFINITION: ${{ inputs.frontend_task_definition }}
+          CONTAINER_NAME: ${{ inputs.frontend_container_name }}
+          IMAGE_URI: ${{ steps.frontend-image.outputs.image_ref }}
+          ENV_UPDATES: GIT_SHA
+          GIT_SHA: ${{ needs.prepare_release.outputs.image_tag }}
         run: |
+          set -euo pipefail
+          ./scripts/aws/deploy-ecs-service.sh
+
+      - name: Summarize frontend rollout
+        env:
+          IMAGE_REF: ${{ steps.frontend-image.outputs.image_ref }}
+        run: |
+          set -euo pipefail
+
           {
-            echo "## Worker rollout passed"
+            echo "## Frontend rollout passed"
             echo
-            echo "- Worker approval environment: \`${{ inputs.worker_environment }}\`"
-            echo "- Worker image: \`${IMAGE_REF}\`"
+            echo "- Frontend approval environment: \`${{ inputs.frontend_environment }}\`"
+            echo "- Frontend image: \`${IMAGE_REF}\`"
           } >> "$GITHUB_STEP_SUMMARY"
