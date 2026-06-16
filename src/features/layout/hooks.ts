@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 
 import apiClient from "@/lib/api-client";
@@ -84,6 +84,7 @@ export function useDashboardNotifications(enabled: boolean, limit = 24, unreadOn
 
 export function useDashboardNotificationCenter(userId?: string | null, limit = 24) {
   const activePrintSuppressed = useActivePrintSessionSuppression();
+  const queryClient = useQueryClient();
   const notificationsQuery = useDashboardNotifications(false, limit);
   const [notifications, setNotifications] = useState<DashboardNotificationDTO[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
@@ -95,10 +96,15 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   const clearNotificationsTimerRef = useRef<number | null>(null);
   const loadNotificationsInFlightRef = useRef<Promise<void> | null>(null);
   const lastNotificationsLoadAtRef = useRef(0);
+  const notificationsLiveRef = useRef(false);
 
   const applyNotificationSnapshot = (rows: DashboardNotificationDTO[], unread: number) => {
     setNotifications(rows);
     setUnreadNotifications(Number.isFinite(unread) ? unread : 0);
+    queryClient.setQueryData(queryKeys.layout.notifications(limit, false), {
+      notifications: rows,
+      unread: Number.isFinite(unread) ? unread : 0,
+    });
 
     const rowIds = new Set(rows.map((row) => String(row?.id || "")).filter(Boolean));
     setDismissedNotificationIds((prev) => prev.filter((id) => rowIds.has(id)));
@@ -152,10 +158,15 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   }, [notificationsQuery.data]);
 
   useEffect(() => {
+    notificationsLiveRef.current = notificationsLive;
+  }, [notificationsLive]);
+
+  useEffect(() => {
     if (!userId) return;
     if (activePrintSuppressed) return;
     const timer = window.setInterval(() => {
       if (!canPollVisibleDocument()) return;
+      if (notificationsLiveRef.current) return;
       void loadNotifications();
     }, pollingPolicy.notificationsMs);
     return () => window.clearInterval(timer);
@@ -173,7 +184,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
     const stop = apiClient.streamNotifications(
       (payload) => {
         if (payload.kind === "version") {
-          void loadNotifications();
+          if (!notificationsLiveRef.current) void loadNotifications();
           return;
         }
         const parsed = parseWithSchema(notificationsResponseSchema, payload, "Failed to stream notifications");

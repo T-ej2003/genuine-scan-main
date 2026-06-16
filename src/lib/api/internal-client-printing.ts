@@ -211,11 +211,13 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     if (options?.batchId) params.append("batchId", options.batchId);
     if (options?.limit) params.append("limit", String(options.limit));
     const query = params.toString() ? `?${params.toString()}` : "";
-    return core.request<any[]>(`/manufacturer/print-jobs${query}`);
+    return controlledPrinterGet<any[]>(`manufacturer-print-jobs:${query}`, 30_000, () => core.request<any[]>(`/manufacturer/print-jobs${query}`));
   },
 
   async getPrintJobStatus(jobId: string) {
-    return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`);
+    return controlledPrinterGet<any>(`manufacturer-print-job-status:${jobId}`, 30_000, () =>
+      core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`)
+    );
   },
 
   ...createPrintingOperationsApi(core),

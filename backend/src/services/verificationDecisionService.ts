@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import {
   CustomerTrustLevel,
   VerificationDecisionOutcome,
@@ -9,10 +10,11 @@ import {
 
 import prisma from "../config/database";
 import { recordVerificationTrustMetric } from "../observability/verificationTrustMetrics";
-import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../utils/security";
+import { buildTokenHashCandidates, hashToken } from "../utils/security";
 
 const DECISION_VERSION = 1;
 const PUBLIC_SESSION_START_TOKEN_TTL_MS = 15 * 60 * 1000;
+const PUBLIC_SESSION_START_TOKEN_DIGITS = 40;
 
 type VerificationDecisionStore = {
   create?: (args: { data: Record<string, unknown> }) => Promise<{ id: string }>;
@@ -38,6 +40,11 @@ type VerificationPrismaStores = {
 const verificationPrisma = prisma as typeof prisma & VerificationPrismaStores;
 const getDecisionStore = () => verificationPrisma.verificationDecision;
 const getEvidenceStore = () => verificationPrisma.verificationEvidenceSnapshot;
+
+const randomPublicSessionStartToken = () => {
+  const bytes = randomBytes(PUBLIC_SESSION_START_TOKEN_DIGITS);
+  return Array.from(bytes, (byte) => String(byte % 10)).join("");
+};
 
 const toReasonCode = (value: string) =>
   String(value || "")
@@ -339,7 +346,7 @@ export const issuePublicVerificationSessionStartToken = async (decisionId: strin
     });
     if (!existing?.id) return null;
 
-    const rawToken = randomOpaqueToken(24);
+    const rawToken = randomPublicSessionStartToken();
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + PUBLIC_SESSION_START_TOKEN_TTL_MS);
     const metadata =

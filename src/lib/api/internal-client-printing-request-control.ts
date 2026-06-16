@@ -1,4 +1,5 @@
 import { type ApiResponse } from "@/lib/api/internal-client-core";
+import { coordinateProtectedRead } from "@/lib/api/request-coordinator";
 
 export type ControlledPrinterGetOptions = {
   force?: boolean;
@@ -64,6 +65,28 @@ const withPrinterRefreshMeta = <T>(data: T, response: ApiResponse<unknown>): T &
 };
 
 export const controlledPrinterGet = async <T>(
+  cacheKey: string,
+  minIntervalMs: number,
+  request: () => Promise<ApiResponse<T>>,
+  options?: ControlledPrinterGetOptions
+): Promise<ApiResponse<T>> => {
+  const response = await coordinateProtectedRead(
+    {
+      family: cacheKey,
+      ttlMs: options?.minIntervalMs ?? minIntervalMs,
+      minRefreshMs: options?.minIntervalMs ?? minIntervalMs,
+      force: Boolean(options?.force),
+      cooldownMessage: PRINTER_RATE_LIMIT_NOTICE,
+      staleMessage: "Printer status is temporarily unavailable. Showing the latest known printer state.",
+    },
+    request
+  );
+  return response.success && isRateLimitedResponse(response) && response.data !== undefined
+    ? { ...response, data: withPrinterRefreshMeta(response.data, response) }
+    : response;
+};
+
+export const controlledPrinterGetLegacy = async <T>(
   cacheKey: string,
   minIntervalMs: number,
   request: () => Promise<ApiResponse<T>>,

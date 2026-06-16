@@ -1,5 +1,4 @@
 import { Request, type RequestHandler, Router } from "express";
-import rateLimit from "express-rate-limit";
 import {
   authenticate,
   authenticateAnySession,
@@ -25,6 +24,7 @@ import {
   buildPublicIpRateLimitKey,
   createPublicActorRateLimiter,
   createPublicIpRateLimiter,
+  createSharedRateLimiter,
   fromAuthorizationBearer,
   fromBodyFields,
   fromHeaderFields,
@@ -352,7 +352,7 @@ const publicClientActor = composeRequestResolvers(
 );
 const protectedPreAuthActor = composeRequestResolvers(fromAuthorizationBearer, fromUserAgent);
 
-const protectedReadRouteLimiter = rateLimit({
+const protectedReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 60,
   standardHeaders: true,
@@ -361,7 +361,7 @@ const protectedReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("protected.read", "Too many authenticated read requests. Please wait before retrying."),
 });
 
-const protectedMutationRouteLimiter = rateLimit({
+const protectedMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 30,
   standardHeaders: true,
@@ -370,7 +370,7 @@ const protectedMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("protected.mutation", "Too many authenticated write requests. Please wait before retrying."),
 });
 
-const verifySessionRouteLimiter = rateLimit({
+const verifySessionRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -379,7 +379,7 @@ const verifySessionRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.customer-session", "Too many customer session checks. Please wait before retrying."),
 });
 
-const verifyCustomerMutationRouteLimiter = rateLimit({
+const verifyCustomerMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -388,7 +388,7 @@ const verifyCustomerMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.customer-auth", "Too many customer authentication actions. Please wait before retrying."),
 });
 
-const verifyCustomerCookieRouteLimiter = rateLimit({
+const verifyCustomerCookieRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -398,7 +398,7 @@ const verifyCustomerCookieRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.customer-cookie", "Too many customer account actions. Please wait before retrying."),
 });
 
-const verifyClaimRouteLimiter = rateLimit({
+const verifyClaimRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 15,
   standardHeaders: true,
@@ -413,7 +413,7 @@ const verifyClaimRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.claim", "Too many ownership actions. Please wait before retrying."),
 });
 
-const telemetryRouteLimiter = rateLimit({
+const telemetryRouteLimiter = createSharedRateLimiter({
   windowMs: 5 * 60 * 1000,
   max: 60,
   standardHeaders: true,
@@ -422,7 +422,7 @@ const telemetryRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("telemetry", "Too many telemetry submissions. Please wait before retrying."),
 });
 
-const internalReleaseRouteLimiter = rateLimit({
+const internalReleaseRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -431,7 +431,7 @@ const internalReleaseRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("internal.release", "Too many release metadata lookups. Please wait before retrying."),
 });
 
-const securityOpsReadRouteLimiter = rateLimit({
+const securityOpsReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 18,
   standardHeaders: true,
@@ -440,7 +440,7 @@ const securityOpsReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("security-ops.read", "Too many security analytics requests. Please wait before retrying."),
 });
 
-const gatewayHeartbeatRouteLimiter = rateLimit({
+const gatewayHeartbeatRouteLimiter = createSharedRateLimiter({
   windowMs: 60 * 1000,
   max: 120,
   standardHeaders: true,
@@ -449,7 +449,7 @@ const gatewayHeartbeatRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("gateway.heartbeat", "Too many gateway heartbeat requests. Please wait before retrying."),
 });
 
-const gatewayJobRouteLimiter = rateLimit({
+const gatewayJobRouteLimiter = createSharedRateLimiter({
   windowMs: 60 * 1000,
   max: 90,
   standardHeaders: true,
@@ -458,7 +458,7 @@ const gatewayJobRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("gateway.jobs", "Too many gateway job requests. Please wait before retrying."),
 });
 
-const printLifecycleRouteLimiter = rateLimit({
+const printLifecycleRouteLimiter = createSharedRateLimiter({
   windowMs: 60 * 1000,
   max: parsePositiveIntEnv("PRINT_LIFECYCLE_RATE_LIMIT_PER_MIN", 1800, 300, 10000),
   standardHeaders: true,
@@ -470,7 +470,7 @@ const printLifecycleRouteLimiter = rateLimit({
   ),
 });
 
-const printMutationRouteLimiter = rateLimit({
+const printMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 5 * 60 * 1000,
   max: 40,
   standardHeaders: true,
@@ -479,7 +479,7 @@ const printMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("print.mutation", "Too many printing actions. Please wait before retrying."),
 });
 
-const exportReadRouteLimiter = rateLimit({
+const exportReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -488,7 +488,7 @@ const exportReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("exports.downloads", "Too many export or download requests. Please wait before retrying."),
 });
 
-const auditPackageExportRouteLimiter = rateLimit({
+const auditPackageExportRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 10,
   standardHeaders: true,
@@ -497,7 +497,7 @@ const auditPackageExportRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("audit.package-export", "Too many audit package export requests. Please wait before retrying."),
 });
 
-const printReadRouteLimiter = rateLimit({
+const printReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 90,
   standardHeaders: true,
@@ -506,7 +506,7 @@ const printReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("print.read", "Too many print status reads. Please wait before retrying."),
 });
 
-const printExportRouteLimiter = rateLimit({
+const printExportRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 12,
   standardHeaders: true,
@@ -515,7 +515,7 @@ const printExportRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("print.export", "Too many print export requests. Please wait before retrying."),
 });
 
-const telemetryMutationRouteLimiter = rateLimit({
+const telemetryMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 60 * 1000,
   max: 80,
   standardHeaders: true,
@@ -524,7 +524,7 @@ const telemetryMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("telemetry.mutation", "Too many telemetry submissions. Please wait before retrying."),
 });
 
-const cspTelemetryRouteLimiter = rateLimit({
+const cspTelemetryRouteLimiter = createSharedRateLimiter({
   windowMs: 60 * 1000,
   max: 80,
   standardHeaders: true,
@@ -533,7 +533,7 @@ const cspTelemetryRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("telemetry.csp", "Too many CSP reports. Please wait before retrying."),
 });
 
-const licenseeReadRouteLimiter = rateLimit({
+const licenseeReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 40,
   standardHeaders: true,
@@ -542,7 +542,7 @@ const licenseeReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("licensees.read", "Too many licensee reads. Please wait before retrying."),
 });
 
-const licenseeExportRouteLimiter = rateLimit({
+const licenseeExportRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 12,
   standardHeaders: true,
@@ -551,7 +551,7 @@ const licenseeExportRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("licensees.export", "Too many licensee export requests. Please wait before retrying."),
 });
 
-const licenseeMutationRouteLimiter = rateLimit({
+const licenseeMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 16,
   standardHeaders: true,
@@ -560,7 +560,7 @@ const licenseeMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("licensees.mutation", "Too many licensee changes. Please wait before retrying."),
 });
 
-const adminDirectoryReadRouteLimiter = rateLimit({
+const adminDirectoryReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 60,
   standardHeaders: true,
@@ -569,7 +569,7 @@ const adminDirectoryReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("admin.directory.read", "Too many admin directory reads. Please wait before retrying."),
 });
 
-const adminDirectoryMutationRouteLimiter = rateLimit({
+const adminDirectoryMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -578,7 +578,7 @@ const adminDirectoryMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("admin.directory.mutation", "Too many admin directory changes. Please wait before retrying."),
 });
 
-const qrReadRouteLimiter = rateLimit({
+const qrReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 60,
   standardHeaders: true,
@@ -587,7 +587,7 @@ const qrReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.read", "Too many QR read requests. Please wait before retrying."),
 });
 
-const qrExportRouteLimiter = rateLimit({
+const qrExportRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 12,
   standardHeaders: true,
@@ -596,7 +596,7 @@ const qrExportRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.export", "Too many QR export requests. Please wait before retrying."),
 });
 
-const qrMutationRouteLimiter = rateLimit({
+const qrMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -605,7 +605,7 @@ const qrMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.mutation", "Too many QR changes. Please wait before retrying."),
 });
 
-const qrRequestReadRouteLimiter = rateLimit({
+const qrRequestReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 30,
   standardHeaders: true,
@@ -614,7 +614,7 @@ const qrRequestReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.requests.read", "Too many QR request reads. Please wait before retrying."),
 });
 
-const qrRequestMutationRouteLimiter = rateLimit({
+const qrRequestMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 12,
   standardHeaders: true,
@@ -623,7 +623,7 @@ const qrRequestMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.requests.mutation", "Too many QR request actions. Please wait before retrying."),
 });
 
-const policyReadRouteLimiter = rateLimit({
+const policyReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 40,
   standardHeaders: true,
@@ -632,7 +632,7 @@ const policyReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("policy.read", "Too many policy and analytics reads. Please wait before retrying."),
 });
 
-const policyMutationRouteLimiter = rateLimit({
+const policyMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 12,
   standardHeaders: true,
@@ -641,7 +641,7 @@ const policyMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("policy.mutation", "Too many policy and analytics changes. Please wait before retrying."),
 });
 
-const supportReadRouteLimiter = rateLimit({
+const supportReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 40,
   standardHeaders: true,
@@ -650,7 +650,7 @@ const supportReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("support.read", "Too many support reads. Please wait before retrying."),
 });
 
-const supportMutationRouteLimiter = rateLimit({
+const supportMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 16,
   standardHeaders: true,
@@ -659,7 +659,7 @@ const supportMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("support.mutation", "Too many support changes. Please wait before retrying."),
 });
 
-const incidentReadRouteLimiter = rateLimit({
+const incidentReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 30,
   standardHeaders: true,
@@ -668,7 +668,7 @@ const incidentReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("incidents.read", "Too many incident reads. Please wait before retrying."),
 });
 
-const incidentMutationRouteLimiter = rateLimit({
+const incidentMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 12,
   standardHeaders: true,
@@ -677,7 +677,7 @@ const incidentMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("incidents.mutation", "Too many incident changes. Please wait before retrying."),
 });
 
-const incidentExportRouteLimiter = rateLimit({
+const incidentExportRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 10,
   standardHeaders: true,
@@ -686,7 +686,7 @@ const incidentExportRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("incidents.export", "Too many incident export requests. Please wait before retrying."),
 });
 
-const irReadRouteLimiter = rateLimit({
+const irReadRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 30,
   standardHeaders: true,
@@ -695,7 +695,7 @@ const irReadRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("ir.read", "Too many incident response reads. Please wait before retrying."),
 });
 
-const irMutationRouteLimiter = rateLimit({
+const irMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 10,
   standardHeaders: true,
@@ -704,7 +704,7 @@ const irMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("ir.mutation", "Too many incident response changes. Please wait before retrying."),
 });
 
-const accountMutationRouteLimiter = rateLimit({
+const accountMutationRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 10,
   standardHeaders: true,
@@ -713,7 +713,7 @@ const accountMutationRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("account.mutation", "Too many account security changes. Please wait before retrying."),
 });
 
-const verifySessionPreAuthRouteLimiter = rateLimit({
+const verifySessionPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 24,
   standardHeaders: true,
@@ -722,7 +722,7 @@ const verifySessionPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.customer-session:pre-auth", "Too many customer session checks. Please wait before retrying."),
 });
 
-const verifyCustomerCookiePreAuthRouteLimiter = rateLimit({
+const verifyCustomerCookiePreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 24,
   standardHeaders: true,
@@ -732,7 +732,7 @@ const verifyCustomerCookiePreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.customer-cookie:pre-auth", "Too many customer account actions. Please wait before retrying."),
 });
 
-const verifySessionMutationPreAuthRouteLimiter = rateLimit({
+const verifySessionMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -750,7 +750,7 @@ const verifySessionMutationPreAuthRouteLimiter = rateLimit({
   ),
 });
 
-const verifyCustomerMutationPreAuthRouteLimiter = rateLimit({
+const verifyCustomerMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 24,
   standardHeaders: true,
@@ -759,7 +759,7 @@ const verifyCustomerMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.customer-auth:pre-auth", "Too many customer authentication actions. Please wait before retrying."),
 });
 
-const verifyClaimPreAuthRouteLimiter = rateLimit({
+const verifyClaimPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 18,
   standardHeaders: true,
@@ -774,7 +774,7 @@ const verifyClaimPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.claim:pre-auth", "Too many ownership actions. Please wait before retrying."),
 });
 
-const telemetryMutationPreAuthRouteLimiter = rateLimit({
+const telemetryMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 60 * 1000,
   max: 90,
   standardHeaders: true,
@@ -783,7 +783,7 @@ const telemetryMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("telemetry.mutation:pre-auth", "Too many telemetry submissions. Please wait before retrying."),
 });
 
-const cspTelemetryPreAuthRouteLimiter = rateLimit({
+const cspTelemetryPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 60 * 1000,
   max: 90,
   standardHeaders: true,
@@ -792,7 +792,7 @@ const cspTelemetryPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("telemetry.csp:pre-auth", "Too many CSP reports. Please wait before retrying."),
 });
 
-const internalReleasePreAuthRouteLimiter = rateLimit({
+const internalReleasePreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 24,
   standardHeaders: true,
@@ -801,7 +801,7 @@ const internalReleasePreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("internal.release:pre-auth", "Too many release metadata lookups. Please wait before retrying."),
 });
 
-const securityOpsReadPreAuthRouteLimiter = rateLimit({
+const securityOpsReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 26,
   standardHeaders: true,
@@ -811,7 +811,7 @@ const securityOpsReadPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("security-ops.read:pre-auth", "Too many security analytics requests. Please wait before retrying."),
 });
 
-const licenseeReadPreAuthRouteLimiter = rateLimit({
+const licenseeReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 48,
   standardHeaders: true,
@@ -821,7 +821,7 @@ const licenseeReadPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("licensees.read:pre-auth", "Too many licensee reads. Please wait before retrying."),
 });
 
-const licenseeExportPreAuthRouteLimiter = rateLimit({
+const licenseeExportPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 16,
   standardHeaders: true,
@@ -830,7 +830,7 @@ const licenseeExportPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("licensees.export:pre-auth", "Too many licensee export requests. Please wait before retrying."),
 });
 
-const licenseeMutationPreAuthRouteLimiter = rateLimit({
+const licenseeMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -840,7 +840,7 @@ const licenseeMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("licensees.mutation:pre-auth", "Too many licensee changes. Please wait before retrying."),
 });
 
-const adminDirectoryReadPreAuthRouteLimiter = rateLimit({
+const adminDirectoryReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 70,
   standardHeaders: true,
@@ -850,7 +850,7 @@ const adminDirectoryReadPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("admin.directory.read:pre-auth", "Too many admin directory reads. Please wait before retrying."),
 });
 
-const adminDirectoryMutationPreAuthRouteLimiter = rateLimit({
+const adminDirectoryMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 24,
   standardHeaders: true,
@@ -860,7 +860,7 @@ const adminDirectoryMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("admin.directory.mutation:pre-auth", "Too many admin directory changes. Please wait before retrying."),
 });
 
-const qrReadPreAuthRouteLimiter = rateLimit({
+const qrReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 70,
   standardHeaders: true,
@@ -870,7 +870,7 @@ const qrReadPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.read:pre-auth", "Too many QR read requests. Please wait before retrying."),
 });
 
-const qrExportPreAuthRouteLimiter = rateLimit({
+const qrExportPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 16,
   standardHeaders: true,
@@ -879,7 +879,7 @@ const qrExportPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.export:pre-auth", "Too many QR export requests. Please wait before retrying."),
 });
 
-const qrMutationPreAuthRouteLimiter = rateLimit({
+const qrMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 24,
   standardHeaders: true,
@@ -889,7 +889,7 @@ const qrMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.mutation:pre-auth", "Too many QR changes. Please wait before retrying."),
 });
 
-const printMutationPreAuthRouteLimiter = rateLimit({
+const printMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 5 * 60 * 1000,
   max: 40,
   standardHeaders: true,
@@ -899,7 +899,7 @@ const printMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("print.mutation:pre-auth", "Too many printing actions. Please wait before retrying."),
 });
 
-const qrRequestReadPreAuthRouteLimiter = rateLimit({
+const qrRequestReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 36,
   standardHeaders: true,
@@ -908,7 +908,7 @@ const qrRequestReadPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.requests.read:pre-auth", "Too many QR request reads. Please wait before retrying."),
 });
 
-const qrRequestMutationPreAuthRouteLimiter = rateLimit({
+const qrRequestMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 16,
   standardHeaders: true,
@@ -917,7 +917,7 @@ const qrRequestMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("qr.requests.mutation:pre-auth", "Too many QR request actions. Please wait before retrying."),
 });
 
-const policyReadPreAuthRouteLimiter = rateLimit({
+const policyReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 48,
   standardHeaders: true,
@@ -926,7 +926,7 @@ const policyReadPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("policy.read:pre-auth", "Too many policy and analytics reads. Please wait before retrying."),
 });
 
-const policyMutationPreAuthRouteLimiter = rateLimit({
+const policyMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 16,
   standardHeaders: true,
@@ -935,7 +935,7 @@ const policyMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("policy.mutation:pre-auth", "Too many policy and analytics changes. Please wait before retrying."),
 });
 
-const supportReadPreAuthRouteLimiter = rateLimit({
+const supportReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 48,
   standardHeaders: true,
@@ -944,7 +944,7 @@ const supportReadPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("support.read:pre-auth", "Too many support reads. Please wait before retrying."),
 });
 
-const supportMutationPreAuthRouteLimiter = rateLimit({
+const supportMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -953,7 +953,7 @@ const supportMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("support.mutation:pre-auth", "Too many support changes. Please wait before retrying."),
 });
 
-const incidentReadPreAuthRouteLimiter = rateLimit({
+const incidentReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 36,
   standardHeaders: true,
@@ -962,7 +962,7 @@ const incidentReadPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("incidents.read:pre-auth", "Too many incident reads. Please wait before retrying."),
 });
 
-const incidentMutationPreAuthRouteLimiter = rateLimit({
+const incidentMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 16,
   standardHeaders: true,
@@ -971,7 +971,7 @@ const incidentMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("incidents.mutation:pre-auth", "Too many incident changes. Please wait before retrying."),
 });
 
-const incidentExportPreAuthRouteLimiter = rateLimit({
+const incidentExportPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 14,
   standardHeaders: true,
@@ -980,7 +980,7 @@ const incidentExportPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("incidents.export:pre-auth", "Too many incident export requests. Please wait before retrying."),
 });
 
-const irReadPreAuthRouteLimiter = rateLimit({
+const irReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 36,
   standardHeaders: true,
@@ -989,7 +989,7 @@ const irReadPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("ir.read:pre-auth", "Too many incident response reads. Please wait before retrying."),
 });
 
-const irMutationPreAuthRouteLimiter = rateLimit({
+const irMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 14,
   standardHeaders: true,
@@ -998,7 +998,7 @@ const irMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("ir.mutation:pre-auth", "Too many incident response changes. Please wait before retrying."),
 });
 
-const accountMutationPreAuthRouteLimiter = rateLimit({
+const accountMutationPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 14,
   standardHeaders: true,
@@ -1007,7 +1007,7 @@ const accountMutationPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("account.mutation:pre-auth", "Too many account security changes. Please wait before retrying."),
 });
 
-const auditPackageExportPreAuthRouteLimiter = rateLimit({
+const auditPackageExportPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 14,
   standardHeaders: true,
@@ -1016,7 +1016,7 @@ const auditPackageExportPreAuthRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("audit.package-export:pre-auth", "Too many audit package export requests. Please wait before retrying."),
 });
 
-const verifyLookupRouteLimiter = rateLimit({
+const verifyLookupRouteLimiter = createSharedRateLimiter({
   windowMs: 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -1031,7 +1031,7 @@ const verifyLookupRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.lookup", "Too many verification lookups. Please wait before retrying."),
 });
 
-const verifyProviderRouteLimiter = rateLimit({
+const verifyProviderRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -1040,7 +1040,7 @@ const verifyProviderRouteLimiter = rateLimit({
   handler: createRateLimitJsonHandler("verify.providers", "Too many verification auth provider requests. Please wait before retrying."),
 });
 
-const verifyOtpRequestRouteLimiter = rateLimit({
+const verifyOtpRequestRouteLimiter = createSharedRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 10,
   standardHeaders: true,

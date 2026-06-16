@@ -138,6 +138,7 @@ const licenseeAdmin = {
   mockModule("services/batchAllocationService.js", {
     buildLineageSuccessMessage: () => "ok",
     enrichBatchSummaries: async (rows) => rows,
+    listCachedBatchOperationalSummaries: async () => ({ rows: [], total: 0 }),
     getBatchAllocationMap: async () => null,
   });
   mockModule("services/sensitiveActionApprovalService.js", {

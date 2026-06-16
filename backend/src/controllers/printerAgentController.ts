@@ -17,6 +17,7 @@ import { getPrinterSseSignSecret } from "../utils/secretConfig";
 import { boundedJsonSchema } from "../utils/boundedJson";
 import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
 import { writeSseRealtimeEnvelope } from "../utils/realtime";
+import { getOrComputeVersionedCache } from "../services/versionedCacheService";
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
   UserRole.MANUFACTURER_ADMIN,
@@ -322,9 +323,12 @@ export const getPrinterConnectionStatus = async (req: AuthRequest, res: Response
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
+    const scopeKey = [req.user.role, req.user.userId, req.user.licenseeId || "none", req.user.orgId || "none"].join(":");
     return res.json({
       success: true,
-      data: await getPrinterConnectionStatusForUser(req.user.userId),
+      data: await getOrComputeVersionedCache("printer-status", scopeKey, 5, () =>
+        getPrinterConnectionStatusForUser(req.user!.userId)
+      ),
     });
   } catch (error: any) {
     console.error("getPrinterConnectionStatus error:", error);

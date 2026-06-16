@@ -7,7 +7,7 @@ import { summarizeQrStatusCounts } from "./qrStatusMetrics";
 import { getOrComputeVersionedCache } from "./versionedCacheService";
 
 const DASHBOARD_CACHE_NAMESPACE = "dashboard-snapshot";
-const DASHBOARD_CACHE_TTL_SEC = 5;
+const DASHBOARD_CACHE_TTL_SEC = 20;
 
 type DashboardSnapshot = {
   totalQRCodes: number;

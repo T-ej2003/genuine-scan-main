@@ -542,6 +542,11 @@ mockModule("services/qrService.js", {
 mockModule("services/batchAllocationService.js", {
   buildLineageSuccessMessage: () => "P1 allocation updated.",
   enrichBatchSummaries: async (rows) => rows,
+  listCachedBatchOperationalSummaries: async ({ where, limit, offset }) => {
+    const rows = await fakePrisma.batch.findMany({ where, take: limit, skip: offset });
+    const total = await fakePrisma.batch.count({ where });
+    return { rows, total };
+  },
   getBatchAllocationMap: async () => ({ nodes: [], edges: [] }),
 });
 mockModule("services/verificationDecisionReadService.js", {

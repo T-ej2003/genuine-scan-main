@@ -1,4 +1,5 @@
 import { type ApiClientCore, type ApiResponse } from "@/lib/api/internal-client-core";
+import { coordinateProtectedRead } from "@/lib/api/request-coordinator";
 
 export const createAuthApi = (core: ApiClientCore) => ({
   async login(email: string, password: string) {
@@ -27,7 +28,15 @@ export const createAuthApi = (core: ApiClientCore) => ({
   },
 
   async getCurrentUser() {
-    return core.request("/auth/me");
+    return coordinateProtectedRead(
+      {
+        family: "auth:me",
+        ttlMs: 60_000,
+        minRefreshMs: 30_000,
+        cooldownMessage: "Session refresh is cooling down. Keeping the current session state.",
+      },
+      () => core.request("/auth/me")
+    );
   },
 
   async refreshSession() {

@@ -11,7 +11,7 @@ import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../
 import { createUserNotification } from "../services/notificationService";
 import {
   buildLineageSuccessMessage,
-  enrichBatchSummaries,
+  listCachedBatchOperationalSummaries,
   getBatchAllocationMap as loadBatchAllocationMap,
 } from "../services/batchAllocationService";
 import { buildScopedWhere, findScopedBatch } from "../services/accessControlService";
@@ -1263,30 +1263,18 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
     const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
     const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
 
-    const [batches, total] = await Promise.all([
-      prisma.batch.findMany({
-        where,
-        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-        include: {
-          licensee: { select: { id: true, name: true, prefix: true } },
-          manufacturer: { select: { id: true, name: true, email: true } },
-          parentBatch: { select: { id: true, name: true } },
-          rootBatch: { select: { id: true, name: true } },
-          _count: { select: { qrCodes: true } },
-        },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.batch.count({ where }),
-    ]);
+    const scopeKey = [
+      req.user.role,
+      req.user.userId,
+      req.user.licenseeId || "none",
+      req.user.orgId || "none",
+      String(req.query.licenseeId || "all"),
+      limit,
+      offset,
+    ].join(":");
+    const payload = await listCachedBatchOperationalSummaries({ where, scopeKey, limit, offset });
 
-    if (!batches.length) {
-      return res.json({ success: true, data: batches, meta: { total, limit, offset } });
-    }
-
-    const enriched = await enrichBatchSummaries(batches as any);
-
-    return res.json({ success: true, data: enriched, meta: { total, limit, offset } });
+    return res.json({ success: true, data: payload.rows, meta: { total: payload.total, limit, offset } });
   } catch (e) {
     if (isScopeError(e)) {
       return res.status(404).json({ success: false, error: "Batches not found" });

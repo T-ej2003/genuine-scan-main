@@ -1,4 +1,4 @@
-export const LIVE_PRINT_STATUS_REFRESH_MIN_MS = 10_000;
+export const LIVE_PRINT_STATUS_REFRESH_MIN_MS = 30_000;
 export const LIVE_PRINT_STATUS_429_FALLBACK_MS = 30_000;
 
 export const getLivePrintStatusRefreshDecision = (

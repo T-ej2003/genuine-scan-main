@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createPrintingApi } from "@/lib/api/internal-client-printing";
+import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
 import type { ApiClientCore, ApiResponse } from "@/lib/api/internal-client-core";
 
 type RequestPayload = {
@@ -18,6 +19,11 @@ const createCore = (request: (endpoint: string, options?: RequestInit) => Promis
 });
 
 describe("printing api request control", () => {
+  afterEach(() => {
+    clearRequestCoordinator();
+    vi.clearAllMocks();
+  });
+
   it("sends the print job creation payload with the saved printer profile UUID only", async () => {
     const request = vi.fn(async () => ({ success: true, data: { printJobId: "job-1" } }));
     const api = createPrintingApi(createCore(request));
@@ -236,7 +242,7 @@ describe("printing api request control", () => {
 
     await api.getPrinterConnectionStatus({ force: true });
     const rateLimited = await api.getPrinterConnectionStatus({ force: true });
-    const paused = await api.getPrinterConnectionStatus({ force: true });
+    const paused = await api.getPrinterConnectionStatus();
 
     expect(request).toHaveBeenCalledTimes(2);
     expect(rateLimited.success).toBe(true);

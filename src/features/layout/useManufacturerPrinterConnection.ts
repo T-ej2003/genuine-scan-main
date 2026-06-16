@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_PATHS } from "@/app/route-metadata";
 import apiClient from "@/lib/api-client";
 import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
+import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
 import {
-  getOptionalLocalStorageItem,
   removeOptionalLocalStorageItem,
   removeOptionalSessionStorageItem,
   setOptionalLocalStorageItem,
@@ -18,6 +18,7 @@ import {
   type LocalPrinterAgentSnapshot,
 } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { canPollVisibleDocument } from "@/lib/query-polling-policy";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 import { normalizeLocalPrinterRows } from "@/features/printing/hooks";
 import {
@@ -37,6 +38,7 @@ import {
   PRINTER_FAILURE_REPORT_COOLDOWN_MS,
   PRINTER_ONBOARDING_STORAGE_VERSION,
 } from "@/features/layout/manufacturerPrinterConnectionUtils";
+import { usePrinterOnboardingAutoOpen } from "@/features/layout/usePrinterOnboardingAutoOpen";
 import type { User } from "@/types";
 import type { PrinterConnectionStatusDTO } from "../../../shared/contracts/runtime/printing.ts";
 
@@ -91,7 +93,7 @@ export function useManufacturerPrinterConnection({
       : null;
   const printerOnboardingStorageKey =
     user?.role === "manufacturer" && user?.id
-      ? `manufacturer-printer-onboarding:${PRINTER_ONBOARDING_STORAGE_VERSION}:${user.id}`
+      ? `manufacturer-printer-onboarding:${PRINTER_ONBOARDING_STORAGE_VERSION}:${user.id}:${getOrCreateAnonDeviceId()}`
       : null;
 
   const clearPrinterDialogSession = () => {
@@ -447,10 +449,20 @@ export function useManufacturerPrinterConnection({
 
   useEffect(() => {
     if (!user || user.role !== "manufacturer") return;
-    if (activePrintSuppressed) return;
-    void syncManufacturerPrinterStatus({ silent: true });
+    void loadManagedPrinterProfiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.role, activePrintSuppressed]);
+  }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!user || user.role !== "manufacturer") return;
+    if (activePrintSuppressed || printerStatusLive) return;
+    const timer = window.setInterval(() => {
+      if (!canPollVisibleDocument()) return;
+      void syncManufacturerPrinterStatus({ silent: true });
+    }, 60_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.role, activePrintSuppressed, printerStatusLive]);
 
   useEffect(() => {
     detectedPrintersRef.current = detectedPrinters;
@@ -610,39 +622,14 @@ export function useManufacturerPrinterConnection({
     void syncManufacturerPrinterStatus({ silent: true, force: true });
   };
 
-  useEffect(() => {
-    if (!printerOnboardingStorageKey) return;
-    if (!managedPrinterProfilesLoaded) return;
-    if (printerReady || managedPrinterDiagnostics?.tone === "success") {
-      try {
-        setOptionalLocalStorageItem("functional", printerOnboardingStorageKey, "completed");
-      } catch {
-        // Ignore storage failures.
-      }
-      setPrinterOnboardingOpen(false);
-      return;
-    }
-    if (managedNetworkPrinters.length > 0) {
-      setPrinterOnboardingOpen(false);
-      return;
-    }
-
-    let stored = "";
-    try {
-      stored = String(getOptionalLocalStorageItem("functional", printerOnboardingStorageKey) || "").trim().toLowerCase();
-    } catch {
-      stored = "";
-    }
-    if (!stored) {
-      setPrinterOnboardingOpen(true);
-    }
-  }, [
-    managedNetworkPrinters.length,
-    managedPrinterDiagnostics?.tone,
-    managedPrinterProfilesLoaded,
-    printerOnboardingStorageKey,
+  usePrinterOnboardingAutoOpen({
+    storageKey: printerOnboardingStorageKey,
+    managedProfilesLoaded: managedPrinterProfilesLoaded,
     printerReady,
-  ]);
+    managedPrinterReady: managedPrinterDiagnostics?.tone === "success",
+    managedNetworkPrinterCount: managedNetworkPrinters.length,
+    setOpen: setPrinterOnboardingOpen,
+  });
 
   const dismissPrinterOnboarding = () => {
     if (printerOnboardingStorageKey) {

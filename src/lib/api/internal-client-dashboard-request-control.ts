@@ -1,4 +1,9 @@
 import type { ApiResponse } from "@/lib/api/internal-client-core";
+import {
+  clearRequestCoordinator,
+  coordinateProtectedRead,
+  getRequestCoordinatorState,
+} from "@/lib/api/request-coordinator";
 
 const DEFAULT_TTL_MS = 30_000;
 const DEFAULT_MIN_REFRESH_MS = 10_000;
@@ -68,6 +73,24 @@ export const controlledDashboardGet = async <T>(
   fetcher: () => Promise<ApiResponse<T>>,
   options: ControlledGetOptions = {}
 ): Promise<ApiResponse<T>> => {
+  return coordinateProtectedRead(
+    {
+      family: key,
+      ttlMs: options.ttlMs ?? DEFAULT_TTL_MS,
+      minRefreshMs: options.minRefreshMs ?? DEFAULT_MIN_REFRESH_MS,
+      force: Boolean(options.bypassCache),
+      cooldownMessage: PAUSED_MESSAGE,
+      staleMessage: "Activity is temporarily unavailable. Showing the latest saved view.",
+    },
+    fetcher
+  );
+};
+
+export const controlledDashboardGetLegacy = async <T>(
+  key: string,
+  fetcher: () => Promise<ApiResponse<T>>,
+  options: ControlledGetOptions = {}
+): Promise<ApiResponse<T>> => {
   const timestamp = now();
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
   const minRefreshMs = options.minRefreshMs ?? DEFAULT_MIN_REFRESH_MS;
@@ -133,6 +156,7 @@ export const controlledDashboardGet = async <T>(
 };
 
 export const clearDashboardReadCache = (prefixes?: string[]) => {
+  clearRequestCoordinator(prefixes);
   if (!prefixes?.length) {
     entries.clear();
     return;
@@ -146,13 +170,15 @@ export const clearDashboardReadCache = (prefixes?: string[]) => {
 };
 
 export const getDashboardRequestControlState = () =>
-  Array.from(entries.entries()).map(([key, entry]) => ({
-    key,
-    hasLastGood: Boolean(entry.lastGood?.success),
-    cooldownUntil: entry.cooldownUntil,
-    rateLimitHits: entry.rateLimitHits,
-    inFlight: Boolean(entry.inFlight),
-  }));
+  getRequestCoordinatorState().concat(
+    Array.from(entries.entries()).map(([key, entry]) => ({
+      key,
+      hasLastGood: Boolean(entry.lastGood?.success),
+      cooldownUntil: entry.cooldownUntil,
+      rateLimitHits: entry.rateLimitHits,
+      inFlight: Boolean(entry.inFlight),
+    }))
+  );
 
 if (typeof window !== "undefined") {
   window.addEventListener("auth:logout", () => clearDashboardReadCache());

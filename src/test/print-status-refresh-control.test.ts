@@ -6,14 +6,14 @@ import {
 } from "@/features/batches/print-status-refresh-control";
 
 describe("live print status refresh control", () => {
-  it("throttles manual refresh for 10 seconds", () => {
-    const firstDecision = getLivePrintStatusRefreshDecision(20_000, 0, 0);
-    const throttled = getLivePrintStatusRefreshDecision(25_000, 20_000, 0);
-    const allowedAgain = getLivePrintStatusRefreshDecision(30_000, 20_000, 0);
+  it("throttles manual refresh for 30 seconds", () => {
+    const firstDecision = getLivePrintStatusRefreshDecision(30_000, 0, 0);
+    const throttled = getLivePrintStatusRefreshDecision(45_000, 30_000, 0);
+    const allowedAgain = getLivePrintStatusRefreshDecision(60_000, 30_000, 0);
 
     expect(firstDecision.allowed).toBe(true);
     expect(throttled.allowed).toBe(false);
-    expect(throttled.waitSeconds).toBe(5);
+    expect(throttled.waitSeconds).toBe(15);
     expect(allowedAgain.allowed).toBe(true);
   });
 

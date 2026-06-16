@@ -1,7 +1,8 @@
-import { BatchLifecycleState, QRStatus } from "@prisma/client";
+import { BatchLifecycleState, Prisma, QRStatus } from "@prisma/client";
 
 import prisma from "../config/database";
 import { listReservableQrCodeSummaries } from "./printReservationService";
+import { getOrComputeVersionedCache } from "./versionedCacheService";
 import {
   buildBatchPrintReadinessFromSummary,
   type BatchPrintReadiness,
@@ -284,6 +285,32 @@ export const enrichBatchSummaries = async (batches: BatchWithScope[]): Promise<B
     };
   });
 };
+
+export const listCachedBatchOperationalSummaries = async (params: {
+  where: Prisma.BatchWhereInput;
+  scopeKey: string;
+  limit: number;
+  offset: number;
+}) =>
+  getOrComputeVersionedCache("qr-batches", params.scopeKey, 20, async () => {
+    const [batches, total] = await Promise.all([
+      prisma.batch.findMany({
+        where: params.where,
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        include: {
+          licensee: { select: { id: true, name: true, prefix: true } },
+          manufacturer: { select: { id: true, name: true, email: true } },
+          parentBatch: { select: { id: true, name: true } },
+          rootBatch: { select: { id: true, name: true } },
+          _count: { select: { qrCodes: true } },
+        },
+        take: params.limit,
+        skip: params.offset,
+      }),
+      prisma.batch.count({ where: params.where }),
+    ]);
+    return { rows: batches.length ? await enrichBatchSummaries(batches as BatchWithScope[]) : batches, total };
+  });
 
 export const getBatchAllocationMap = async (batchId: string, opts?: { licenseeId?: string }) => {
   const focusBatch = await prisma.batch.findFirst({

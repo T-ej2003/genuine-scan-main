@@ -1,5 +1,4 @@
 import { Router, type RequestHandler } from "express";
-import rateLimit from "express-rate-limit";
 
 import { authenticate, requireRecentAdminMfa, requireRecentSensitiveAuth } from "../../middleware/auth";
 import { requireCsrf } from "../../middleware/csrf";
@@ -26,13 +25,14 @@ import {
   composeRequestResolvers,
   createPublicActorRateLimiter,
   createPublicIpRateLimiter,
+  createSharedRateLimiter,
   fromAuthorizationBearer,
   fromParamFields,
   fromUserAgent,
 } from "../../middleware/publicRateLimit";
 import { createRateLimitJsonHandler } from "../../observability/rateLimitMetrics";
 
-const governanceReadRouteLimiter: RequestHandler = rateLimit({
+const governanceReadRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 30,
   standardHeaders: true,
@@ -41,7 +41,7 @@ const governanceReadRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("governance.read", "Too many governance read requests. Please wait before retrying."),
 });
 
-const governanceReadPreAuthRouteLimiter: RequestHandler = rateLimit({
+const governanceReadPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 40,
   standardHeaders: true,
@@ -51,7 +51,7 @@ const governanceReadPreAuthRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("governance.read:pre-auth", "Too many governance read requests. Please wait before retrying."),
 });
 
-const governanceExportRouteLimiter: RequestHandler = rateLimit({
+const governanceExportRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 10,
   standardHeaders: true,
@@ -60,7 +60,7 @@ const governanceExportRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("governance.export", "Too many governance export requests. Please wait before retrying."),
 });
 
-const governanceExportPreAuthRouteLimiter: RequestHandler = rateLimit({
+const governanceExportPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 16,
   standardHeaders: true,
@@ -75,7 +75,7 @@ const governanceExportPreAuthRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("governance.export:pre-auth", "Too many governance export requests. Please wait before retrying."),
 });
 
-const governanceMutationRouteLimiter: RequestHandler = rateLimit({
+const governanceMutationRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 15,
   standardHeaders: true,
@@ -84,7 +84,7 @@ const governanceMutationRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("governance.mutation", "Too many governance changes. Please wait before retrying."),
 });
 
-const governanceMutationPreAuthRouteLimiter: RequestHandler = rateLimit({
+const governanceMutationPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -94,7 +94,7 @@ const governanceMutationPreAuthRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("governance.mutation:pre-auth", "Too many governance changes. Please wait before retrying."),
 });
 
-const governanceApprovalMutationRouteLimiter: RequestHandler = rateLimit({
+const governanceApprovalMutationRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 8,
   standardHeaders: true,
@@ -104,7 +104,7 @@ const governanceApprovalMutationRouteLimiter: RequestHandler = rateLimit({
   handler: createRateLimitJsonHandler("governance.approval-mutation", "Too many approval decisions. Please wait before retrying."),
 });
 
-const governanceApprovalMutationPreAuthRouteLimiter: RequestHandler = rateLimit({
+const governanceApprovalMutationPreAuthRouteLimiter: RequestHandler = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 12,
   standardHeaders: true,

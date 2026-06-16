@@ -47,7 +47,6 @@ mockModule("observability/verificationTrustMetrics.js", {
 });
 
 mockModule("utils/security.js", {
-  randomOpaqueToken: () => "public-start-token",
   hashToken: (value) => `hash:${value}`,
   buildTokenHashCandidates: (value) => [`hash:${value}`],
 });
@@ -59,11 +58,11 @@ mockModule("utils/security.js", {
   } = require("../dist/services/verificationDecisionService");
 
   const token = await issuePublicVerificationSessionStartToken("decision-1");
-  assert.strictEqual(token, "public-start-token");
-  assert.strictEqual(evidence.metadata.publicSessionStart.tokenHash, "hash:public-start-token");
-  assert.doesNotMatch(JSON.stringify(evidence), /"public-start-token"/, "raw public session-start token must not be persisted");
+  assert.match(token, /^\d{40}$/);
+  assert.strictEqual(evidence.metadata.publicSessionStart.tokenHash, `hash:${token}`);
+  assert(!JSON.stringify(evidence).includes(token), "raw public session-start token must not be persisted");
 
-  const decisionId = await resolvePublicVerificationSessionStartToken("public-start-token");
+  const decisionId = await resolvePublicVerificationSessionStartToken(token);
   assert.strictEqual(decisionId, "decision-1");
 
   const missing = await resolvePublicVerificationSessionStartToken("wrong-token");

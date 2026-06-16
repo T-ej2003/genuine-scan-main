@@ -16,6 +16,8 @@ import {
   LOCAL_AGENT_MIN_VERSION_HINT,
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "./localAgentProtocol";
+import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
+import { bumpCacheNamespaceVersion } from "./versionedCacheService";
 
 export type { PrinterCapabilitySummary, PrinterConnectionStatus, PrinterInventoryDevice };
 
@@ -52,6 +54,8 @@ export type PrinterConnectionRealtimeEvent = {
 };
 
 const listeners = new Set<(event: PrinterConnectionRealtimeEvent) => void>();
+const PRINTER_CONNECTION_EVENT_CHANNEL = "mscqr:realtime:printer-connection";
+let printerConnectionChannelReady = false;
 
 const parsePositiveIntEnv = (name: string, fallback: number, min = 5, max = 3600) => {
   const raw = Number(String(process.env[name] || "").trim());
@@ -435,7 +439,7 @@ const loadLatestRegistrationForUser = async (userId: string): Promise<PrinterReg
   }) as Promise<PrinterRegistrationWithLatest | null>;
 };
 
-const emitConnectionEvent = (event: PrinterConnectionRealtimeEvent) => {
+const notifyConnectionListeners = (event: PrinterConnectionRealtimeEvent) => {
   for (const listener of listeners) {
     try {
       listener(event);
@@ -443,6 +447,14 @@ const emitConnectionEvent = (event: PrinterConnectionRealtimeEvent) => {
       // ignore listener failures
     }
   }
+};
+
+const emitConnectionEvent = (event: PrinterConnectionRealtimeEvent) => {
+  notifyConnectionListeners(event);
+  void publishRedisJson(PRINTER_CONNECTION_EVENT_CHANNEL, {
+    origin: getRedisInstanceId(),
+    event,
+  }).catch(() => undefined);
 };
 
 const statusChanged = (a: PrinterConnectionStatus, b: PrinterConnectionStatus) => {
@@ -467,6 +479,13 @@ const statusChanged = (a: PrinterConnectionStatus, b: PrinterConnectionStatus) =
 };
 
 export const onPrinterConnectionEvent = (listener: (event: PrinterConnectionRealtimeEvent) => void) => {
+  if (!printerConnectionChannelReady) {
+    printerConnectionChannelReady = true;
+    void subscribeRedisJson(PRINTER_CONNECTION_EVENT_CHANNEL, (payload) => {
+      if (!payload || payload.origin === getRedisInstanceId()) return;
+      if (payload.event) notifyConnectionListeners(payload.event as PrinterConnectionRealtimeEvent);
+    });
+  }
   listeners.add(listener);
   return () => listeners.delete(listener);
 };
@@ -767,6 +786,7 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   const changed = statusChanged(previousStatus, nextStatus);
 
   if (changed) {
+    void bumpCacheNamespaceVersion("printer-status").catch(() => undefined);
     emitConnectionEvent({
       userId: input.userId,
       status: nextStatus,

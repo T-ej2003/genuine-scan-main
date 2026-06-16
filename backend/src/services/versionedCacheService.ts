@@ -1,4 +1,5 @@
 import { getRedisClient, isRedisConfigured } from "./redisService";
+import { logger } from "../utils/logger";
 
 type LocalCacheEntry = {
   expiresAt: number;
@@ -7,6 +8,7 @@ type LocalCacheEntry = {
 
 const localCache = new Map<string, LocalCacheEntry>();
 const localVersions = new Map<string, number>();
+const inFlight = new Map<string, Promise<unknown>>();
 
 const cacheKeyFor = (namespace: string, version: number, scopeKey: string) =>
   `cache:${namespace}:v${version}:${scopeKey}`;
@@ -73,35 +75,67 @@ export const getOrComputeVersionedCache = async <T>(
 ): Promise<T> => {
   const version = await getCacheNamespaceVersion(namespace);
   const cacheKey = cacheKeyFor(namespace, version, scopeKey);
+  const storeType = isRedisConfigured() ? "redis" : "memory";
 
   if (!isRedisConfigured()) {
     const localHit = readLocal<T>(cacheKey);
-    if (localHit !== null) return localHit;
+    if (localHit !== null) {
+      logger.debug("read_cache_hit", { namespace, scopeKey, storeType });
+      return localHit;
+    }
 
-    const computed = await compute();
-    writeLocal(cacheKey, computed, ttlSec);
-    return computed;
+    const existing = inFlight.get(cacheKey) as Promise<T> | undefined;
+    if (existing) {
+      logger.debug("read_cache_coalesced", { namespace, scopeKey, storeType });
+      return existing;
+    }
+    logger.debug("read_cache_miss", { namespace, scopeKey, storeType });
+    const computed = (async () => compute())().finally(() => inFlight.delete(cacheKey));
+    inFlight.set(cacheKey, computed);
+    const value = await computed;
+    writeLocal(cacheKey, value, ttlSec);
+    return value;
   }
 
   const redis = await getRedisClient();
   if (!redis) {
     const localHit = readLocal<T>(cacheKey);
-    if (localHit !== null) return localHit;
-    const computed = await compute();
-    writeLocal(cacheKey, computed, ttlSec);
-    return computed;
+    if (localHit !== null) {
+      logger.debug("read_cache_hit", { namespace, scopeKey, storeType: "memory" });
+      return localHit;
+    }
+    const existing = inFlight.get(cacheKey) as Promise<T> | undefined;
+    if (existing) {
+      logger.debug("read_cache_coalesced", { namespace, scopeKey, storeType: "memory" });
+      return existing;
+    }
+    logger.debug("read_cache_miss", { namespace, scopeKey, storeType: "memory" });
+    const computed = (async () => compute())().finally(() => inFlight.delete(cacheKey));
+    inFlight.set(cacheKey, computed);
+    const value = await computed;
+    writeLocal(cacheKey, value, ttlSec);
+    return value;
   }
 
   const cached = await redis.get(cacheKey);
   if (cached) {
     try {
+      logger.debug("read_cache_hit", { namespace, scopeKey, storeType });
       return JSON.parse(cached) as T;
     } catch {
       await redis.del(cacheKey);
     }
   }
 
-  const computed = await compute();
-  await redis.set(cacheKey, JSON.stringify(computed), "EX", Math.max(1, ttlSec));
-  return computed;
+  const existing = inFlight.get(cacheKey) as Promise<T> | undefined;
+  if (existing) {
+    logger.debug("read_cache_coalesced", { namespace, scopeKey, storeType });
+    return existing;
+  }
+  logger.debug("read_cache_miss", { namespace, scopeKey, storeType });
+  const computed = (async () => compute())().finally(() => inFlight.delete(cacheKey));
+  inFlight.set(cacheKey, computed);
+  const value = await computed;
+  await redis.set(cacheKey, JSON.stringify(value), "EX", Math.max(1, ttlSec));
+  return value;
 };

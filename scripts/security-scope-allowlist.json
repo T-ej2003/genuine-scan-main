@@ -591,6 +591,7 @@
       "path": "backend/src/services/batchAllocationService.ts",
       "model": "batch",
       "methods": [
+        "count",
         "findFirst",
         "findMany",
         "findUnique",

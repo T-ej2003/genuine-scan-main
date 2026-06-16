@@ -2,12 +2,13 @@ export const pollingPolicy = {
   printerIdleHeartbeatMs: 90_000,
   printerSetupRefreshMs: 45_000,
   printerRuntimeRefreshMs: 60_000,
-  activePrintJobMs: 3_000,
+  activePrintJobMs: 45_000,
   hiddenTabBackoffMs: 30_000,
   dashboardFallbackMs: 120_000,
   notificationsMs: 180_000,
   attentionQueueMs: 180_000,
-  telemetryRouteDebounceMs: 1_000,
+  telemetryRouteDebounceMs: 60_000,
+  telemetryRouteSampleRate: 0.25,
 } as const;
 
 export const isBrowserDocumentVisible = () =>

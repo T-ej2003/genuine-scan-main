@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
+import os from "os";
 
 import { logger } from "../utils/logger";
+import { isRedisConfigured } from "../services/redisService";
 import { normalizeClientIp } from "../utils/ipAddress";
 import { hashToken } from "../utils/security";
 
@@ -21,6 +23,9 @@ type RateLimitMetric = {
   resourceRef: string | null;
   userRole: string | null;
   retryAfterSec: number;
+  taskId: string;
+  hostname: string;
+  storeType: "redis" | "memory";
 };
 
 type RateLimitHandlerOptions = {
@@ -180,6 +185,9 @@ export const recordRateLimitMetric = (req: Request, scope: string) => {
     resourceRef: detectResourceRef(req),
     userRole: normalizeValue((req as any).user?.role) || null,
     retryAfterSec,
+    taskId: normalizeValue(process.env.ECS_CONTAINER_METADATA_URI_V4 || process.env.HOSTNAME || os.hostname(), 512),
+    hostname: os.hostname(),
+    storeType: isRedisConfigured() ? "redis" : "memory",
   };
 
   pushBounded(rateLimitMetrics, entry, MAX_RATE_LIMIT_METRICS);

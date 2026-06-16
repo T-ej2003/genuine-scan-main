@@ -17,6 +17,27 @@ const getNetworkType = () => {
   return String(conn?.effectiveType || conn?.type || "unknown");
 };
 
+const TELEMETRY_STORAGE_PREFIX = "mscqr:route-transition:v1:";
+
+const recentlySentRouteTransition = (signature: string, ttlMs: number) => {
+  try {
+    const key = `${TELEMETRY_STORAGE_PREFIX}${signature}`;
+    const previous = Number(window.localStorage.getItem(key) || "0");
+    if (Number.isFinite(previous) && Date.now() - previous < ttlMs) return true;
+    window.localStorage.setItem(key, String(Date.now()));
+    return false;
+  } catch {
+    return false;
+  }
+};
+
+const shouldSampleRouteTransition = (routeFrom: string, routeTo: string) => {
+  if (routeFrom.startsWith("/verify") || routeTo.startsWith("/verify") || routeFrom.startsWith("/scan") || routeTo.startsWith("/scan")) {
+    return true;
+  }
+  return Math.random() < pollingPolicy.telemetryRouteSampleRate;
+};
+
 export default function RouteMetricsTracker() {
   const location = useLocation();
   const route = `${location.pathname}${location.search}`;
@@ -50,6 +71,8 @@ export default function RouteMetricsTracker() {
         payload.routeFrom.length <= 300 &&
         Number.isInteger(payload.transitionMs) &&
         payload.transitionMs <= 120_000 &&
+        shouldSampleRouteTransition(payload.routeFrom, payload.routeTo) &&
+        !recentlySentRouteTransition(signature, pollingPolicy.telemetryRouteDebounceMs) &&
         !(
           lastSentRef.current.signature === signature &&
           Date.now() - lastSentRef.current.at < pollingPolicy.telemetryRouteDebounceMs
