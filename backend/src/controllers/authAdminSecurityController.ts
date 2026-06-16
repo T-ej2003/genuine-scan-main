@@ -295,6 +295,7 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
     return res.json({ success: true, data: authResponseData(session) });
   } catch (error: any) {
     const raw = String(error?.message || "");
+    const retryAfterSeconds = Number(error?.retryAfterSeconds || 0);
     const status =
       raw === "INVALID_MFA_CODE"
         ? 400
@@ -315,6 +316,7 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
         : raw === "MFA_CHALLENGE_NOT_FOUND"
           ? "This MFA challenge expired. Start again."
           : "MFA challenge could not be completed.";
+    if (status === 429 && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) res.setHeader("Retry-After", String(Math.ceil(retryAfterSeconds)));
     return res.status(status).json({ success: false, error: message });
   }
 };

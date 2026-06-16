@@ -559,6 +559,9 @@ model User {
   refreshTokens RefreshToken[]
   adminMfaCredential AdminMfaCredential?
   adminWebAuthnCredentials AdminWebAuthnCredential[]
+  mfaFactors UserMfaFactor[]
+  backupCodes UserBackupCode[]
+  mfaLoginChallenges MfaLoginChallenge[]
   authMfaChallenges AuthMfaChallenge[]
   authWebAuthnChallenges AuthWebAuthnChallenge[]
   authSessionRiskSignals AuthSessionRiskSignal[]
@@ -1808,6 +1811,79 @@ model AdminWebAuthnCredential {
 
   @@index([userId, createdAt])
   @@index([lastUsedAt])
+}
+
+model UserMfaFactor {
+  id String @id @default(uuid())
+
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type String
+  label String?
+
+  credentialId String? @unique
+  publicKey String?
+  counter Int @default(0)
+  transports String[]
+  credentialDeviceType String?
+  credentialBackedUp Boolean?
+
+  secretCiphertext String?
+  secretIv String?
+  secretTag String?
+
+  legacySource String?
+  legacyCredentialId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lastUsedAt DateTime?
+  disabledAt DateTime?
+
+  @@index([userId, type, disabledAt])
+  @@index([lastUsedAt])
+  @@index([legacySource, legacyCredentialId])
+}
+
+model UserBackupCode {
+  id String @id @default(uuid())
+
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  codeHash String @unique
+  usedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, usedAt])
+}
+
+model MfaLoginChallenge {
+  id String @id @default(uuid())
+
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  ticketHash String @unique
+  purpose String @default("admin_login")
+  riskScore Int @default(0)
+  riskLevel AuthRiskLevel @default(LOW)
+  reasons String[]
+  createdIpHash String?
+  createdUserAgentHash String?
+  attempts Int @default(0)
+  maxAttempts Int @default(5)
+  retryAfterSeconds Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  expiresAt DateTime
+  consumedAt DateTime?
+
+  @@index([userId, purpose, createdAt])
+  @@index([expiresAt])
+  @@index([consumedAt])
 }
 
 model AuthMfaChallenge {

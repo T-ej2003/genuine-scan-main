@@ -99,9 +99,9 @@ export const webAuthnRegistrationCompleteSchema = z.object({
     response: z.object({
       clientDataJSON: z.string().trim().min(8),
       attestationObject: z.string().trim().min(8),
-      authenticatorData: z.string().trim().min(8),
-      publicKey: z.string().trim().min(8),
-      publicKeyAlgorithm: z.number().int(),
+      authenticatorData: z.string().trim().min(8).optional(),
+      publicKey: z.string().trim().min(8).optional(),
+      publicKeyAlgorithm: z.number().int().optional(),
       transports: z.array(z.string().trim().min(1).max(40)).max(12).optional(),
     }).strict(),
   }).strict(),

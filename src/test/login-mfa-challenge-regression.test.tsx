@@ -142,6 +142,35 @@ describe("Login MFA challenge regression", () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/dashboard"));
   });
 
+  it("single-flights MFA challenge begin under StrictMode double effects", async () => {
+    let resolveBegin: (value: unknown) => void = () => undefined;
+    beginChallengeMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveBegin = resolve;
+      })
+    );
+
+    render(
+      <React.StrictMode>
+        <MemoryRouter>
+          <Login />
+        </MemoryRouter>
+      </React.StrictMode>
+    );
+
+    await waitFor(() => expect(beginChallengeMock).toHaveBeenCalledTimes(1));
+
+    resolveBegin({
+      success: true,
+      data: {
+        ticket: "ticket-1",
+        expiresAt: "2026-04-10T10:00:00.000Z",
+      },
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Authenticator code")).toBeInTheDocument());
+  });
+
   it("shows invalid-code copy for 400 without expiring the current challenge", async () => {
     completeChallengeMock.mockResolvedValue({
       success: false,
@@ -162,6 +191,30 @@ describe("Login MFA challenge regression", () => {
 
     expect(await screen.findByText("The security code could not be verified. Check the code and try again.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open secure session" })).not.toBeDisabled();
+  });
+
+  it("shows Retry-After copy for 429 without starting a new challenge loop", async () => {
+    completeChallengeMock.mockResolvedValue({
+      success: false,
+      status: 429,
+      retryAfterSec: 60,
+      error: "Too many attempts.",
+    });
+
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(beginChallengeMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open secure session" }));
+
+    expect(await screen.findByText("Too many attempts. Please wait 60 seconds.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open secure session" })).not.toBeDisabled();
+    expect(beginChallengeMock).toHaveBeenCalledTimes(1);
   });
 
   it("shows expired-session copy for 410 and stops stale challenge retries", async () => {
