@@ -2,7 +2,9 @@ import { AuthRiskLevel } from "@prisma/client";
 
 import prisma from "../../config/database";
 import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
+import { logger } from "../../utils/logger";
 import { createAuditLogSafely, type AuditLogInput } from "../auditService";
+import { buildAdminMfaChallengeExpiry, buildAdminMfaChallengeTtlAuditDetails } from "./authDurationConfig";
 import {
   consumeLegacyBackupCode,
   consumeUserBackupCode,
@@ -362,7 +364,7 @@ export const createStableMfaLoginChallenge = async (params: {
 }) => {
   const ticket = randomOpaqueToken(36);
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + parseIntEnv("AUTH_MFA_CHALLENGE_TTL_MINUTES", 5) * 60_000);
+  const { expiresAt, config: ttlConfig } = buildAdminMfaChallengeExpiry(now);
   const purpose = String(params.purpose || "admin_login").trim() || "admin_login";
   const maxAttempts = Math.max(1, Math.min(10, params.maxAttempts || getMaxChallengeAttempts()));
 
@@ -381,12 +383,19 @@ export const createStableMfaLoginChallenge = async (params: {
       expiresAt,
     },
   });
+  const ttlDetails = buildAdminMfaChallengeTtlAuditDetails(ttlConfig, now, expiresAt);
+
+  logger.info("auth_mfa_challenge_issued", {
+    challengeId: challenge.id,
+    purpose,
+    ...ttlDetails,
+  });
 
   await auditMfaEvent({
     userId: params.userId,
     action: "AUTH_MFA_CHALLENGE_ISSUED",
     entityId: challenge.id,
-    details: { purpose, riskScore: challenge.riskScore, riskLevel: challenge.riskLevel, expiresAt: expiresAt.toISOString() },
+    details: { purpose, riskScore: challenge.riskScore, riskLevel: challenge.riskLevel, ...ttlDetails },
     ipHash: params.ipHash,
     userAgent: params.userAgent,
   });
