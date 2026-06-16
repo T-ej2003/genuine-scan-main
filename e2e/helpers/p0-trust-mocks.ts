@@ -218,8 +218,9 @@ export async function installP0TrustMocks(page: Page, options: TrustMockOptions 
 
   await page.addInitScript((state) => {
     window.localStorage.setItem("mscqr_cookie_consent_state:v1", JSON.stringify(state));
+    document.cookie = "aq_vid=p0-device; Max-Age=31536000; Path=/; SameSite=Lax";
     window.sessionStorage.setItem("manufacturer-printer-dialog-opened:v1:manufacturer-p0-user", "shown");
-    window.localStorage.setItem("manufacturer-printer-onboarding:v1:manufacturer-p0-user", "dismissed");
+    window.localStorage.setItem("manufacturer-printer-onboarding:v1:manufacturer-p0-user:p0-device", "dismissed");
   }, consentState);
 
   const handleRoute = async (route: Route) => {

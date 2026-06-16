@@ -130,6 +130,23 @@ const broadcastState = (key: string) => {
   }
 };
 
+const clearPersisted = (prefixes?: string[]) => {
+  if (!canUseStorage()) return;
+  try {
+    const storage = window.localStorage;
+    for (let index = storage.length - 1; index >= 0; index -= 1) {
+      const storageKey = storage.key(index);
+      if (!storageKey?.startsWith(STORAGE_PREFIX)) continue;
+      const familyKey = storageKey.slice(STORAGE_PREFIX.length);
+      if (!prefixes?.length || prefixes.some((prefix) => familyKey.startsWith(prefix))) {
+        storage.removeItem(storageKey);
+      }
+    }
+  } catch {
+    // Best effort cache only.
+  }
+};
+
 const hydrateState = (key: string, state: ReadState<unknown>) => {
   const persisted = readPersisted(key);
   if (!persisted) return state;
@@ -267,6 +284,7 @@ export const coordinateProtectedRead = async <T>(
 };
 
 export const clearRequestCoordinator = (prefixes?: string[]) => {
+  clearPersisted(prefixes);
   if (!prefixes?.length) {
     states.clear();
     return;

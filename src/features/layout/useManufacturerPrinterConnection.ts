@@ -51,6 +51,7 @@ type ToastLike = (options: {
 type UseManufacturerPrinterConnectionParams = {
   user: User | null;
   contextualHelpRoute: string;
+  currentPath: string;
   navigate: (to: string) => void;
   toast: ToastLike;
 };
@@ -58,6 +59,7 @@ type UseManufacturerPrinterConnectionParams = {
 export function useManufacturerPrinterConnection({
   user,
   contextualHelpRoute,
+  currentPath,
   navigate,
   toast,
 }: UseManufacturerPrinterConnectionParams) {
@@ -624,6 +626,7 @@ export function useManufacturerPrinterConnection({
 
   usePrinterOnboardingAutoOpen({
     storageKey: printerOnboardingStorageKey,
+    enabled: currentPath === APP_PATHS.batches,
     managedProfilesLoaded: managedPrinterProfilesLoaded,
     printerReady,
     managedPrinterReady: managedPrinterDiagnostics?.tone === "success",

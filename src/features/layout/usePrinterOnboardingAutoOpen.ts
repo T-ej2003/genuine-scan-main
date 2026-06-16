@@ -4,6 +4,7 @@ import { getOptionalLocalStorageItem, setOptionalLocalStorageItem } from "@/lib/
 
 type PrinterOnboardingAutoOpenParams = {
   storageKey: string | null;
+  enabled: boolean;
   managedProfilesLoaded: boolean;
   printerReady: boolean;
   managedPrinterReady: boolean;
@@ -13,6 +14,7 @@ type PrinterOnboardingAutoOpenParams = {
 
 export const usePrinterOnboardingAutoOpen = ({
   storageKey,
+  enabled,
   managedProfilesLoaded,
   printerReady,
   managedPrinterReady,
@@ -20,6 +22,7 @@ export const usePrinterOnboardingAutoOpen = ({
   setOpen,
 }: PrinterOnboardingAutoOpenParams) => {
   useEffect(() => {
+    if (!enabled) return;
     if (!storageKey || !managedProfilesLoaded) return;
     if (printerReady || managedPrinterReady) {
       try {
@@ -42,5 +45,5 @@ export const usePrinterOnboardingAutoOpen = ({
     } catch {
       // Ignore storage failures.
     }
-  }, [managedNetworkPrinterCount, managedPrinterReady, managedProfilesLoaded, printerReady, setOpen, storageKey]);
+  }, [enabled, managedNetworkPrinterCount, managedPrinterReady, managedProfilesLoaded, printerReady, setOpen, storageKey]);
 };

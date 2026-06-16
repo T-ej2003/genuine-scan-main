@@ -256,9 +256,9 @@ describe("DashboardLayout printer connection dialog", () => {
 
   it("shows first-run printer onboarding for manufacturers", async () => {
     renderWithQueryClient(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/batches"]}>
         <DashboardLayout>
-          <div>Dashboard content</div>
+          <div>Batches content</div>
         </DashboardLayout>
       </MemoryRouter>
     );
@@ -271,6 +271,23 @@ describe("DashboardLayout printer connection dialog", () => {
     expect(screen.getByText(/If the computer can see the printer, MSCQR will pick it up automatically/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /install printer helper/i })).toBeInTheDocument();
     expect(screen.getByText(/download the Mac or Windows installer for this computer/i)).toBeInTheDocument();
+  });
+
+  it("does not auto-open printer onboarding away from Batches", async () => {
+    renderWithQueryClient(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <DashboardLayout>
+          <div>Dashboard content</div>
+        </DashboardLayout>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(apiClient.listRegisteredPrinters)).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByText("Set up printing on this computer")).not.toBeInTheDocument();
+    expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).not.toHaveBeenCalled();
   });
 
   it("keeps saved network printers visible instead of pushing helper install when a saved route is ready", async () => {

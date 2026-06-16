@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import { shouldBootstrapCurrentUser } from "@/contexts/auth-bootstrap";
 import apiClient from "@/lib/api-client";
 import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
+import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
 import type { AuthState, PendingAuthSession, User } from "@/types";
 
 interface AuthContextType {
@@ -83,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setPendingAuth(null);
     apiClient.logout();
+    clearRequestCoordinator();
   };
 
   const completeMfaSession = (payload: { user?: any; auth?: AuthState | null }) => {
@@ -189,7 +191,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
-    apiClient.logoutSession().finally(() => clearSession());
+    clearSession();
+    void apiClient.logoutSession().catch(() => {
+      // Local session state is already cleared; server logout is best effort.
+    });
   };
 
   const value = useMemo<AuthContextType>(
