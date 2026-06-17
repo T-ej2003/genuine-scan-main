@@ -1,0 +1,18 @@
+{
+  "artifactFilename": "MSCQR-Connector-Windows-2026.6.16.exe",
+  "status": "Valid",
+  "statusMessage": "Signature verified.",
+  "signerSubject": "CN=L&D Health Ltd, O=L&D Health Ltd, L=London, S=Surrey, C=GB",
+  "issuer": "CN=Microsoft ID Verified CS AOC CA 03, O=Microsoft Corporation, C=US",
+  "thumbprint": "0B901653A4B3DB6878EBBA996EA2D6C18445ACB3",
+  "notBefore": "2026-06-15T23:21:03.0000000Z",
+  "notAfter": "2026-06-18T23:21:03.0000000Z",
+  "timestamped": true,
+  "timestampAuthority": "http://timestamp.acs.microsoft.com",
+  "signedAt": "2026-06-17T22:26:05.9589930Z",
+  "publisherName": "L&D Health Ltd",
+  "azureSigningEndpoint": "https://weu.codesigning.azure.net/",
+  "azureSigningAccount": "mscqrsigning",
+  "azureSigningProfile": "mscqr-certification",
+  "verificationSummary": "Get-AuthenticodeSignature returned Valid for the normalized Windows connector installer."
+}
