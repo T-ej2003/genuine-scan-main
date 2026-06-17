@@ -137,6 +137,7 @@ services:
         condition: service_healthy
     environment:
       SSL_ENABLED: ${SSL_ENABLED:-auto}
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:4000}
     ports:
       - "${FRONTEND_PORT:-80}:80"
       - "${FRONTEND_SSL_PORT:-443}:443"

@@ -39,9 +39,32 @@ test("nginx HTTPS template serves ALB-forwarded HTTPS on port 80", () => {
   assert.match(contents, /location\s+=\s+\/healthz\s*\{[\s\S]*return\s+200\s+"ok\\n";/, "healthz must remain direct");
   assert.match(
     contents,
-    /location\s+~\s+\^\/api\/health\/\?\(\.\*\)\$\s*\{[\s\S]*proxy_pass\s+http:\/\/backend:4000\/health\/\$1;/,
+    /location\s+~\s+\^\/api\/health\/\?\(\.\*\)\$\s*\{[\s\S]*rewrite\s+\^\/api\/health\/\?\(\.\*\)\$\s+\/health\/\$1\s+break;[\s\S]*proxy_pass\s+\$backend_upstream;/,
     "API readiness proxy must remain reachable"
   );
+});
+
+test("nginx backend upstream is runtime-templated for ECS", () => {
+  for (const filePath of ["nginx.conf", "nginx.https.conf", "nginx.ecs-frontend.conf"]) {
+    const contents = readRepoFile(filePath);
+
+    assert.doesNotMatch(
+      contents,
+      /proxy_pass\s+http:\/\/backend:4000/,
+      `${filePath} must not hardcode backend DNS in proxy_pass`
+    );
+    assert.match(contents, /resolver\s+__NGINX_RESOLVER__\s+valid=30s\s+ipv6=off;/, `${filePath} must template resolver`);
+    assert.match(contents, /set\s+\$backend_upstream\s+"__BACKEND_UPSTREAM__";/, `${filePath} must template backend upstream`);
+    assert.match(contents, /proxy_pass\s+\$backend_upstream;/, `${filePath} must proxy through runtime upstream`);
+  }
+
+  const entrypoint = readRepoFile("docker/nginx-entrypoint.sh");
+  const ecsDockerfile = readRepoFile("Dockerfile.ecs-frontend");
+  assert.match(entrypoint, /BACKEND_UPSTREAM_RAW="\$\{BACKEND_UPSTREAM:-http:\/\/backend:4000\}"/);
+  assert.match(entrypoint, /nginx -t/);
+  assert.match(ecsDockerfile, /COPY\s+nginx\.ecs-frontend\.conf\s+\/etc\/nginx\/templates\/default\.http\.conf/);
+  assert.match(ecsDockerfile, /COPY\s+docker\/nginx-entrypoint\.sh\s+\/usr\/local\/bin\/nginx-entrypoint\.sh/);
+  assert.match(ecsDockerfile, /CMD\s+\["\/usr\/local\/bin\/nginx-entrypoint\.sh"\]/);
 });
 
 test("release deploy verifier fails homepage redirects with evidence", () => {
