@@ -6,6 +6,7 @@ type RoleCredentials = {
   email: string;
   password: string;
   displayName: string;
+  mfaBackupCode?: string;
 };
 
 type AuthenticatedFixtures = {
@@ -30,6 +31,10 @@ const seededCredentials: Record<SeededRole, RoleCredentials> = {
     email: String(process.env.E2E_MANUFACTURER_EMAIL || "factory1@acme.com").trim(),
     password: process.env.E2E_MANUFACTURER_PASSWORD?.trim() ?? "fake-password",
     displayName: "Manufacturer",
+    mfaBackupCode: String(process.env.E2E_MANUFACTURER_MFA_BACKUP_CODES || "")
+      .split(",")
+      .map((code) => code.trim())
+      .filter(Boolean)[0],
   },
 };
 
@@ -63,6 +68,14 @@ export const loginAsSeededRole = async (page: Page, role: SeededRole) => {
   await page.locator("#email").fill(credentials.email);
   await page.locator("#password").fill(credentials.password);
   await page.getByRole("button", { name: /^sign in$/i }).click();
+  if (credentials.mfaBackupCode) {
+    const backupTab = page.getByRole("button", { name: /^backup code$/i });
+    if (await backupTab.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await backupTab.click();
+      await page.locator("#mfa-backup-code").fill(credentials.mfaBackupCode);
+      await page.getByRole("button", { name: /^open secure session$/i }).click();
+    }
+  }
   await page
     .waitForFunction(
       () => !["/login", "/forgot-password", "/reset-password", "/accept-invite"].includes(window.location.pathname),

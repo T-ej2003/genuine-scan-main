@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -9,6 +9,10 @@ const env = {
   licenseeAdminPassword: String(process.env.E2E_LICENSEE_ADMIN_PASSWORD || "").trim(),
   manufacturerEmail: String(process.env.E2E_MANUFACTURER_EMAIL || "").trim(),
   manufacturerPassword: String(process.env.E2E_MANUFACTURER_PASSWORD || "").trim(),
+  manufacturerMfaBackupCodes: String(process.env.E2E_MANUFACTURER_MFA_BACKUP_CODES || "")
+    .split(",")
+    .map((code) => code.trim())
+    .filter(Boolean),
   licenseeBatchQuery: String(process.env.E2E_LICENSEE_BATCH_QUERY || "").trim(),
   assignManufacturerName: String(process.env.E2E_ASSIGN_MANUFACTURER_NAME || "").trim(),
   assignQuantity: String(process.env.E2E_ASSIGN_QUANTITY || "1").trim(),
@@ -85,11 +89,24 @@ const goto = async (page: Page, path: string) => {
   await page.waitForLoadState("networkidle", { timeout: 2_500 }).catch(() => undefined);
 };
 
-const login = async (page: Page, email: string, password: string) => {
+const backupCodeForRetry = (codes: string[], testInfo: TestInfo) =>
+  codes[Math.min(testInfo.retry, Math.max(codes.length - 1, 0))] || "";
+
+const login = async (page: Page, email: string, password: string, options: { mfaBackupCode?: string } = {}) => {
   await goto(page, "/login");
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: /^sign in$/i }).click();
+
+  if (options.mfaBackupCode) {
+    const backupTab = page.getByRole("button", { name: /^backup code$/i });
+    if (await backupTab.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await backupTab.click();
+      await page.locator("#mfa-backup-code").fill(options.mfaBackupCode);
+      await page.getByRole("button", { name: /^open secure session$/i }).click();
+    }
+  }
+
   await page.waitForFunction(
     () => !["/login", "/forgot-password", "/reset-password", "/accept-invite"].includes(window.location.pathname),
     undefined,
@@ -276,17 +293,20 @@ test.describe.serial("Enterprise smoke flows", () => {
     await expect(page.getByTestId("batch-workspace-assign-quantity")).toHaveValue("");
   });
 
-  test("manufacturer can start a print job from the controlled print dialog", async ({ page }) => {
+  test("manufacturer can start a print job from the controlled print dialog", async ({ page }, testInfo) => {
     requireEnterpriseEnv(
       ["E2E_MANUFACTURER_EMAIL", env.manufacturerEmail],
       ["E2E_MANUFACTURER_PASSWORD", env.manufacturerPassword],
+      ["E2E_MANUFACTURER_MFA_BACKUP_CODES", env.manufacturerMfaBackupCodes.join(",")],
       ["E2E_MANUFACTURER_BATCH_QUERY", env.manufacturerBatchQuery],
       ["E2E_PRINTER_PROFILE_NAME", env.printerProfileName],
       ["E2E_PRINT_QUANTITY", env.printQuantity]
     );
 
     await installLocalPrintAgentMock(page);
-    await login(page, env.manufacturerEmail, env.manufacturerPassword);
+    await login(page, env.manufacturerEmail, env.manufacturerPassword, {
+      mfaBackupCode: backupCodeForRetry(env.manufacturerMfaBackupCodes, testInfo),
+    });
     await refreshE2EPrinterHeartbeat(page);
     await goto(page, "/batches");
 

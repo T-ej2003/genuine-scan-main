@@ -15,6 +15,7 @@ import {
 import { createHash } from "crypto";
 
 import { hashPassword } from "../src/services/auth/passwordService";
+import { hashToken } from "../src/utils/security";
 import {
   LOCAL_AGENT_CAPABILITIES,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
@@ -50,6 +51,11 @@ const PASSWORDS = {
   manufacturer: String(process.env.E2E_MANUFACTURER_PASSWORD || ""),
 };
 
+const MANUFACTURER_MFA_BACKUP_CODES = String(process.env.E2E_MANUFACTURER_MFA_BACKUP_CODES || "")
+  .split(",")
+  .map((code) => code.trim().toUpperCase())
+  .filter(Boolean);
+
 const BATCH_NAMES = {
   source: String(process.env.E2E_LICENSEE_BATCH_QUERY || "E2E Source Batch").trim() || "E2E Source Batch",
   print: String(process.env.E2E_MANUFACTURER_BATCH_QUERY || "E2E Manufacturer Print Batch").trim() || "E2E Manufacturer Print Batch",
@@ -74,6 +80,8 @@ const printCodes = Array.from({ length: 10 }, (_, index) => `E2E2000000${String(
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const now = () => new Date();
+const backupCodeShapeOk = (code: string) => /^[A-Za-z0-9]{4,8}-[A-Za-z0-9]{4,8}$/.test(code);
+const hashBackupCode = (code: string) => hashToken(code.trim().toUpperCase());
 
 const e2ePrinterTestLabelMetadata = (confirmedAt: Date) => ({
   lastTestLabelConfirmedAt: confirmedAt.toISOString(),
@@ -156,6 +164,27 @@ const upsertFreshAdminMfa = async (userId: string) => {
       lastUsedAt: current,
       backupCodesHash: [],
     },
+  });
+};
+
+const seedManufacturerMfaBackupCodes = async () => {
+  if (MANUFACTURER_MFA_BACKUP_CODES.length === 0) {
+    throw new Error("E2E_MANUFACTURER_MFA_BACKUP_CODES is required for manufacturer MFA enterprise smoke.");
+  }
+  for (const code of MANUFACTURER_MFA_BACKUP_CODES) {
+    if (!backupCodeShapeOk(code)) {
+      throw new Error("E2E_MANUFACTURER_MFA_BACKUP_CODES contains an invalid backup-code shape.");
+    }
+  }
+
+  await prisma.userBackupCode.deleteMany({
+    where: { userId: IDS.manufacturer, usedAt: null },
+  });
+  await prisma.userBackupCode.createMany({
+    data: MANUFACTURER_MFA_BACKUP_CODES.map((code) => ({
+      userId: IDS.manufacturer,
+      codeHash: hashBackupCode(code),
+    })),
   });
 };
 
@@ -412,6 +441,8 @@ const seed = async () => {
 
   await upsertFreshAdminMfa(IDS.superAdmin);
   await upsertFreshAdminMfa(IDS.licenseeAdmin);
+  await upsertFreshAdminMfa(IDS.manufacturer);
+  await seedManufacturerMfaBackupCodes();
 
   await prisma.manufacturerLicenseeLink.upsert({
     where: {
