@@ -3,6 +3,7 @@ import path from "node:path";
 
 const repoRoot = process.cwd();
 const nginxFiles = ["nginx.conf", "nginx.https.conf"].map((file) => path.join(repoRoot, file));
+const ecsNginxFile = path.join(repoRoot, "nginx.ecs-frontend.conf");
 
 const requiredPatterns = [
   { name: "limit_conn_zone", pattern: /limit_conn_zone\s+\$binary_remote_addr/i },
@@ -12,6 +13,9 @@ const requiredPatterns = [
   { name: "verify location", pattern: /location\s+~\s+\^\/api\/verify/i },
   { name: "scan location", pattern: /location\s+~\s+\^\/api\/scan/i },
   { name: "incidents location", pattern: /location\s+~\s+\^\/api\/incidents/i },
+  { name: "runtime backend upstream", pattern: /set\s+\$backend_upstream\s+"__BACKEND_UPSTREAM__"/i },
+  { name: "runtime DNS resolver", pattern: /resolver\s+__NGINX_RESOLVER__\s+valid=30s\s+ipv6=off/i },
+  { name: "runtime proxy pass", pattern: /proxy_pass\s+\$backend_upstream/i },
   { name: "forwarded host header", pattern: /proxy_set_header\s+X-Forwarded-Host\s+\$host/i },
   { name: "external scheme map", pattern: /map\s+\$http_x_forwarded_proto\s+\$external_scheme\s*\{[\s\S]*~\*\^https\$\s+https;[\s\S]*\}/i },
   { name: "forwarded proto header preserves external scheme", pattern: /proxy_set_header\s+X-Forwarded-Proto\s+\$external_scheme/i },
@@ -64,6 +68,12 @@ for (const filePath of nginxFiles) {
   if (/Report-To[\s\S]*http:\/\/www\.mscqr\.com/i.test(contents)) {
     failures.push(`${relative}: Report-To endpoint must stay HTTPS canonical`);
   }
+  if (/proxy_pass\s+http:\/\/backend:4000/i.test(contents)) {
+    failures.push(`${relative}: proxy_pass must use runtime BACKEND_UPSTREAM, not hardcoded backend:4000`);
+  }
+  if (!/location\s+~\s+\^\/api\/health\/\?\(\.\*\)\$[\s\S]*rewrite\s+\^\/api\/health\/\?\(\.\*\)\$\s+\/health\/\$1\s+break;[\s\S]*proxy_pass\s+\$backend_upstream/i.test(contents)) {
+    failures.push(`${relative}: /api/health/* must rewrite to backend /health/* through runtime upstream`);
+  }
 }
 
 const httpConfig = readFileSync(path.join(repoRoot, "nginx.conf"), "utf8");
@@ -77,6 +87,22 @@ if (/server_name\s+mscqr\.com\s+www\.mscqr\.com\s+_/i.test(httpsConfig)) {
 }
 if (!/listen\s+80\s+default_server;[\s\S]*listen\s+443\s+ssl;[\s\S]*server_name\s+www\.mscqr\.com\s+_/i.test(httpsConfig)) {
   failures.push("nginx.https.conf: canonical www app server must serve ALB-forwarded HTTPS on port 80 and direct TLS on port 443");
+}
+
+const ecsConfig = readFileSync(ecsNginxFile, "utf8");
+for (const check of [
+  { name: "runtime backend upstream", pattern: /set\s+\$backend_upstream\s+"__BACKEND_UPSTREAM__"/i },
+  { name: "runtime DNS resolver", pattern: /resolver\s+__NGINX_RESOLVER__\s+valid=30s\s+ipv6=off/i },
+  { name: "runtime proxy pass", pattern: /proxy_pass\s+\$backend_upstream/i },
+  { name: "direct healthz", pattern: /location\s+=\s+\/healthz[\s\S]*return\s+200\s+"ok\\n"/i },
+]) {
+  if (!check.pattern.test(ecsConfig)) failures.push(`nginx.ecs-frontend.conf: missing ${check.name}`);
+}
+if (/proxy_pass\s+http:\/\/backend:4000/i.test(ecsConfig)) {
+  failures.push("nginx.ecs-frontend.conf: proxy_pass must use runtime BACKEND_UPSTREAM, not hardcoded backend:4000");
+}
+if (!/location\s+~\s+\^\/api\/health\/\?\(\.\*\)\$[\s\S]*rewrite\s+\^\/api\/health\/\?\(\.\*\)\$\s+\/health\/\$1\s+break;[\s\S]*proxy_pass\s+\$backend_upstream/i.test(ecsConfig)) {
+  failures.push("nginx.ecs-frontend.conf: /api/health/* must rewrite to backend /health/* through runtime upstream");
 }
 
 if (failures.length > 0) {

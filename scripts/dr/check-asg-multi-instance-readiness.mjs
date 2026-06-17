@@ -28,6 +28,7 @@ const compose = requireFile("docker-compose.yml");
 const localCompose = requireFile("docker-compose.local.yml");
 const asgWebCompose = requireFile("docker-compose.asg-web.yml");
 const asgBootstrap = requireFile("scripts/dr/bootstrap-asg-web-node.sh");
+const nginxEntrypoint = requireFile("docker/nginx-entrypoint.sh");
 const asgComposeInterpolationCheck = requireFile("scripts/dr/check-asg-compose-interpolation.mjs");
 const asgSsmManifestRaw = requireFile("documents/ops/aws-asg-web-ssm-parameter-manifest.json");
 const asgInstancePolicyRaw = requireFile("ops/aws/iam/dr/asg-web-instance-profile-policy.template.json");
@@ -250,8 +251,14 @@ for (const [label, source] of [
   ["nginx HTTPS config", nginxHttpsConf],
 ]) {
   requireMatch(label, source, /location = \/healthz[\s\S]*return 200 "ok\\n"/, "frontend Nginx must serve /healthz directly without backend dependency.");
-  requireMatch(label, source, /location ~ \^\/api\/health\/\?\(\.\*\)\$[\s\S]*proxy_pass http:\/\/backend:4000\/health\/\$1/, "frontend Nginx must proxy /api/health/* to backend /health/*.");
+  requireMatch(label, source, /resolver __NGINX_RESOLVER__ valid=30s ipv6=off;/, "frontend Nginx must template DNS resolver for runtime upstream resolution.");
+  requireMatch(label, source, /set \$backend_upstream "__BACKEND_UPSTREAM__";/, "frontend Nginx must template backend upstream instead of hardcoding backend DNS.");
+  requireMatch(label, source, /location ~ \^\/api\/health\/\?\(\.\*\)\$[\s\S]*rewrite \^\/api\/health\/\?\(\.\*\)\$ \/health\/\$1 break;[\s\S]*proxy_pass \$backend_upstream;/, "frontend Nginx must proxy /api/health/* to backend /health/* through runtime upstream.");
+  if (/proxy_pass\s+http:\/\/backend:4000/.test(source)) {
+    failures.push(`${label}: frontend Nginx must not hardcode proxy_pass http://backend:4000.`);
+  }
 }
+requireMatch("nginx entrypoint", nginxEntrypoint, /BACKEND_UPSTREAM_RAW="\$\{BACKEND_UPSTREAM:-http:\/\/backend:4000\}"/, "frontend Nginx entrypoint must default local upstream to http://backend:4000.");
 requireMatch("ASG bootstrap", asgBootstrap, /aws ssm get-parameters-by-path/, "bootstrap must fetch parameters from SSM by path.");
 requireMatch("ASG bootstrap", asgBootstrap, /--with-decryption/, "bootstrap must decrypt SecureString parameters.");
 requireMatch("ASG bootstrap", asgBootstrap, /\$\{ssmPrefix\}\$\{key\}/, "bootstrap missing-parameter diagnostics must include full SSM parameter paths.");
