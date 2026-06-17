@@ -10,10 +10,10 @@ import {
   sendMailSafely,
   type EmailErrorCode,
 } from "../mailTransportService";
+import { normalizeEmailAddress } from "../../utils/email";
 
 const normalizeEmail = (value: unknown) => {
-  const email = String(value || "").trim().toLowerCase();
-  return email || null;
+  return normalizeEmailAddress(value);
 };
 
 const getPrimarySuperadminEmail = async () => {
@@ -41,6 +41,9 @@ export const sendAuthEmail = async (input: {
   orgId?: string | null;
   licenseeId?: string | null;
   actorUserId?: string | null;
+  actorEmail?: string | null;
+  actorDisplayName?: string | null;
+  replyToMode?: "actor" | "system";
   ipHash?: string | null;
   userAgent?: string | null;
 }): Promise<{
@@ -59,13 +62,16 @@ export const sendAuthEmail = async (input: {
   acceptedRecipients?: string[];
   rejectedRecipients?: string[];
   pendingRecipients?: string[];
+  actorEmail?: string | null;
 }> => {
-  const primarySuperadminEmail = await getPrimarySuperadminEmail();
   const configuredFrom = getConfiguredMailFrom();
   const smtpUserEmail = getMailTransportState().smtpUser;
-  const attemptedFrom = configuredFrom || primarySuperadminEmail || smtpUserEmail;
-  const usedFrom = configuredFrom || smtpUserEmail || attemptedFrom;
-  const replyTo = primarySuperadminEmail || configuredFrom || null;
+  const attemptedFrom = configuredFrom || smtpUserEmail;
+  const usedFrom = configuredFrom || smtpUserEmail || null;
+  const actorEmail = normalizeEmail(input.actorEmail);
+  const replyToMode = input.replyToMode || "system";
+  const primarySuperadminEmail = replyToMode === "system" && !actorEmail ? await getPrimarySuperadminEmail() : null;
+  const replyTo = replyToMode === "actor" ? actorEmail : actorEmail || primarySuperadminEmail || configuredFrom || null;
 
   const delivery = await sendMailSafely({
     toAddress: input.toAddress,
@@ -88,6 +94,9 @@ export const sendAuthEmail = async (input: {
       entityId: null,
       details: {
         template: input.template,
+        actorUserId: input.actorUserId || null,
+        actorEmail: maskEmailForLog(actorEmail),
+        actorDisplayName: input.actorDisplayName || null,
         toAddress: maskEmailForLog(input.toAddress),
         subject: input.subject,
         attemptedFrom: maskEmailForLog(delivery.attemptedFrom || attemptedFrom),
@@ -130,6 +139,7 @@ export const sendAuthEmail = async (input: {
     acceptedRecipients: delivery.acceptedRecipients || [],
     rejectedRecipients: delivery.rejectedRecipients || [],
     pendingRecipients: delivery.pending || [],
+    actorEmail,
   };
 };
 

@@ -3,6 +3,7 @@ const assert = require("assert");
 const {
   __resetMailTransporterForTests,
   __summarizeMailInfoForTests,
+  getConfiguredMailFrom,
   getMailTransportDiagnostics,
   maskEmailForLog,
   sendMailSafely,
@@ -18,6 +19,9 @@ const SMTP_ENV_KEYS = [
   "SMTP_USER",
   "SMTP_PASS",
   "SMTP_FROM",
+  "AUTH_EMAIL_FROM",
+  "EMAIL_FROM",
+  "MAIL_FROM",
   "SMTP_USERNAME",
   "SMTP_PASSWORD",
   "EMAIL_USER",
@@ -70,12 +74,25 @@ const resetEnv = () => {
       subject: "Invite",
       text: "Body",
       fromAddress: "mailer@example.test",
+      replyTo: "BrandAdmin@Gmail.com",
       template: "unit-test",
     });
     assert.strictEqual(result.delivered, false);
     assert.strictEqual(result.sent, false);
     assert.strictEqual(result.errorCode, "EMAIL_DRY_RUN");
+    assert.strictEqual(result.usedFrom, "mailer@example.test");
+    assert.strictEqual(result.replyTo, "brandadmin@gmail.com");
     assert.strictEqual(maskEmailForLog("administrator@example.test"), "ad***@example.test");
+
+    result = await sendMailSafely({
+      toAddress: "admin@example.test",
+      subject: "Invite",
+      text: "Body",
+      fromAddress: "mailer@example.test",
+      replyTo: "bad\nreply@example.test",
+      template: "unit-test",
+    });
+    assert.strictEqual(result.replyTo, null);
 
     let summary = __summarizeMailInfoForTests(
       { accepted: ["admin@example.test"], rejected: [], pending: [], messageId: "msg-1" },
@@ -108,6 +125,10 @@ const resetEnv = () => {
     const diagnostics = getMailTransportDiagnostics();
     assert.strictEqual(diagnostics.requireTLS, true);
     assert.deepStrictEqual(diagnostics.warnings, []);
+
+    for (const key of SMTP_ENV_KEYS) delete process.env[key];
+    process.env.SMTP_USER = "administration@mscqr.com";
+    assert.strictEqual(getConfiguredMailFrom(), "administration@mscqr.com");
   } finally {
     resetEnv();
   }

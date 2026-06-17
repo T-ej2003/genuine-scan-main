@@ -1,4 +1,4 @@
-import { HELP_COMPLIANCE_COPY, HELP_SITE_CONFIG } from "@/help/site-config";
+import { HELP_COMPLIANCE_COPY } from "@/help/site-config";
 
 export type HelpKbRole = "all" | "super_admin" | "licensee" | "manufacturer" | "customer";
 
@@ -316,20 +316,18 @@ export const HELP_KB: HelpKbEntry[] = [
       "hosting disclaimer",
       "compliance statements",
     ],
-    title: "Mandatory compliance statements",
+    title: "Compliance, privacy, and security statements",
     answer: [
-      "All manuals and help docs include the following active compliance statements for this deployment.",
+      "Compliance, privacy, retention, hosting, and security details are maintained in the Privacy Notice and Trust & Security pages rather than repeated inside role-specific help pages.",
       "",
-      `1. UK GDPR & Data Protection: ${HELP_COMPLIANCE_COPY.ukGdpr}`,
-      `2. Security & Access Control: ${HELP_COMPLIANCE_COPY.security}`,
-      `3. Incident Response & Fraud Reporting process: ${HELP_COMPLIANCE_COPY.incidentResponse}`,
-      `4. QR Code Usage & Non-Duplication policy: ${HELP_COMPLIANCE_COPY.qrUsage}`,
-      `5. Audit Logging notice: ${HELP_COMPLIANCE_COPY.auditRetention}`,
-      `6. Acceptable Use clause: ${HELP_COMPLIANCE_COPY.acceptableUse}`,
-      `7. Hosting & Disclaimer: ${HELP_COMPLIANCE_COPY.hosting}`,
+      `Privacy and data handling: ${HELP_COMPLIANCE_COPY.ukGdpr}`,
       "",
-      `Deployment reference: ${HELP_SITE_CONFIG.appName}, ${HELP_SITE_CONFIG.dpoEmail}, ${HELP_SITE_CONFIG.superAdminEmail}, ${HELP_SITE_CONFIG.retentionDays} day retention, hosted on ${HELP_SITE_CONFIG.hostingProvider}.`,
+      `Security and access: ${HELP_COMPLIANCE_COPY.security}`,
+      "",
+      `Audit and retention: ${HELP_COMPLIANCE_COPY.auditRetention}`,
+      "",
+      `Hosting: ${HELP_COMPLIANCE_COPY.hosting}`,
     ].join("\n"),
-    linksToRoutes: ["/help", "/help/auth-overview"],
+    linksToRoutes: ["/privacy", "/trust", "/help"],
   },
 ];

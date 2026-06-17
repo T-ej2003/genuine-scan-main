@@ -33,7 +33,8 @@ describe("launch legal and trust surface", () => {
     expect(screen.getAllByRole("link", { name: /cookie notice/i })[0]).toHaveAttribute("href", "/cookies");
     expect(screen.getAllByRole("link", { name: /terms of use/i })[0]).toHaveAttribute("href", "/terms");
     expect(screen.getAllByRole("link", { name: /privacy notice/i })[0]).toHaveAttribute("href", "/privacy");
-    expect(screen.getAllByText(/Version 1.0/i).length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText(/Version 1.1/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Version 1.0/i).length).toBeGreaterThanOrEqual(2);
   });
 
   it("renders the branded 404 recovery page with trusted entry points", () => {

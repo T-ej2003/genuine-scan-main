@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowRight, ClipboardCheck, History, QrCode, ScanLine, S
 
 import { PublicShell } from "@/components/public/PublicShell";
 import { Button } from "@/components/ui/button";
+import { HELP_COMPLIANCE_COPY } from "@/help/site-config";
 
 const trustChecks = [
   {
@@ -120,6 +121,34 @@ export default function TrustCenter() {
         </section>
 
         <section className="bg-mscqr-background">
+          <div className="mx-auto grid w-full max-w-7xl gap-8 border-b border-border px-4 py-16 lg:grid-cols-3 lg:py-20">
+            <div className="lg:col-span-1">
+              <h2 className="text-3xl font-semibold leading-tight text-foreground lg:text-4xl">
+                Security and governance posture.
+              </h2>
+              <p className="mt-4 text-base leading-7 text-muted-foreground">
+                MSCQR keeps operational details cautious and reviewable, with legal and privacy specifics maintained in
+                the public notices.
+              </p>
+              <Button asChild variant="outline" className="mt-6 bg-white">
+                <Link to="/privacy">Read Privacy Notice</Link>
+              </Button>
+            </div>
+            <div className="grid gap-4 lg:col-span-2 md:grid-cols-2">
+              {[
+                ["Access controls", HELP_COMPLIANCE_COPY.security],
+                ["Audit and retention", HELP_COMPLIANCE_COPY.auditRetention],
+                ["Hosting", HELP_COMPLIANCE_COPY.hosting],
+                ["Incident handling", HELP_COMPLIANCE_COPY.incidentResponse],
+              ].map(([title, body]) => (
+                <article key={title} className="rounded-2xl border border-border bg-white p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+                  <p className="mt-3 text-sm leading-7 text-muted-foreground">{body}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+
           <div className="mx-auto w-full max-w-4xl px-4 py-16 text-center lg:py-20">
             <h2 className="text-3xl font-semibold leading-tight text-foreground lg:text-5xl">
               Build customer trust without overclaiming security.

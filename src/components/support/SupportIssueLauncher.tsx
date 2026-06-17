@@ -8,10 +8,14 @@ import {
   buildSupportDiagnosticsPayload,
   captureSupportScreenshot,
   formatSupportIssueSubmissionError,
+  getSanitizedSupportPageUrl,
+  getSanitizedSupportSourcePath,
   getSupportNetworkLogs,
   getSupportRuntimeIssues,
   onSupportIssue,
   reportSupportRuntimeIssue,
+  serializeSupportDiagnosticsPayload,
+  SUPPORT_SCREENSHOT_MAX_BYTES,
   type SupportRuntimeIssue,
 } from "@/lib/support-diagnostics";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -151,11 +155,11 @@ export function SupportIssueLauncher() {
       const form = new FormData();
       form.append("title", summary);
       form.append("description", description.trim());
-      form.append("sourcePath", `${window.location.pathname}${window.location.search}`);
-      form.append("pageUrl", window.location.href);
+      form.append("sourcePath", getSanitizedSupportSourcePath());
+      form.append("pageUrl", getSanitizedSupportPageUrl());
       form.append("autoDetected", String(!manualMode));
-      form.append("diagnostics", JSON.stringify(diagnostics));
-      if (screenshotFile) {
+      form.append("diagnostics", serializeSupportDiagnosticsPayload(diagnostics));
+      if (screenshotFile && screenshotFile.size <= SUPPORT_SCREENSHOT_MAX_BYTES) {
         form.append("screenshot", screenshotFile);
       }
 
@@ -163,9 +167,27 @@ export function SupportIssueLauncher() {
       if (!res.success) {
         toast({
           title: "Could not submit report",
-          description: formatSupportIssueSubmissionError(res.error),
+          description: formatSupportIssueSubmissionError(res.error, {
+            status: res.status,
+            code: res.code,
+            unknownOutcome: res.unknownOutcome,
+          }),
           variant: "destructive",
         });
+        return;
+      }
+
+      const responseData = res.data as
+        | { emailDeliveryStatus?: unknown; notificationEmailStatus?: unknown }
+        | undefined;
+      const emailDeliveryStatus = String(responseData?.emailDeliveryStatus || responseData?.notificationEmailStatus || "").toUpperCase();
+      if (emailDeliveryStatus === "FAILED") {
+        toast({
+          title: "Report saved",
+          description: "Report was saved but email notification could not be sent.",
+        });
+        setOpen(false);
+        resetDialog();
         return;
       }
 
@@ -175,6 +197,12 @@ export function SupportIssueLauncher() {
       });
       setOpen(false);
       resetDialog();
+    } catch {
+      toast({
+        title: "Could not submit report",
+        description: formatSupportIssueSubmissionError(null, { status: 0 }),
+        variant: "destructive",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -199,7 +227,7 @@ export function SupportIssueLauncher() {
             <DialogTitle>Report an issue</DialogTitle>
             <DialogDescription>
               {manualMode
-                ? "Send this directly to super admin. We will attach logs automatically."
+                ? "Send this directly to super admin. We will attach redacted diagnostics automatically."
                 : "We detected an error and prefilled diagnostics for you."}
             </DialogDescription>
           </DialogHeader>
@@ -208,8 +236,8 @@ export function SupportIssueLauncher() {
             <Alert className="border-slate-200 bg-slate-50">
               <AlertTitle>Privacy notice for support evidence</AlertTitle>
               <AlertDescription>
-                MSCQR attaches recent diagnostics automatically and can capture a screenshot to help super admin
-                investigate faster. Review the current handling summary in the{" "}
+                MSCQR attaches recent redacted diagnostics automatically and can capture a screenshot to help super
+                admin investigate faster. Review the current handling summary in the{" "}
                 <a href="/privacy" className="font-medium underline underline-offset-4">
                   Privacy Notice
                 </a>
@@ -259,7 +287,8 @@ export function SupportIssueLauncher() {
 
               <div className="flex items-center justify-between gap-3">
                 <div className="text-xs text-muted-foreground">
-                  Screenshot capture, runtime diagnostics, and recent network logs are included to speed up troubleshooting.
+                  Screenshot capture, runtime diagnostics, and recent redacted network summaries are included to speed
+                  up troubleshooting.
                 </div>
                 <Button
                   type="button"

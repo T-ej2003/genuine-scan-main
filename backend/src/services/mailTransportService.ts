@@ -100,8 +100,23 @@ export const maskEmailForLog = (value: unknown) => {
 export const getMailFromDisplayName = () =>
   String(getFirstEnv("MAIL_FROM_NAME", "EMAIL_FROM_NAME", "APP_NAME") || "MSCQR").trim() || "MSCQR";
 
-export const getConfiguredMailFrom = () =>
+export const getExplicitConfiguredMailFrom = () =>
   normalizeEmail(getFirstEnv("SMTP_FROM", "AUTH_EMAIL_FROM", "EMAIL_FROM", "MAIL_FROM", "SUPERADMIN_FROM_EMAIL"));
+
+export const getConfiguredMailFrom = () =>
+  normalizeEmail(
+    getFirstEnv(
+      "SMTP_FROM",
+      "AUTH_EMAIL_FROM",
+      "EMAIL_FROM",
+      "MAIL_FROM",
+      "SUPERADMIN_FROM_EMAIL",
+      "SMTP_USER",
+      "SMTP_USERNAME",
+      "EMAIL_USER",
+      "MAIL_USER"
+    )
+  );
 
 export const getPreferredSuperadminEmailFromEnv = () =>
   normalizeEmail(
@@ -133,7 +148,8 @@ const resolveSmtpConfig = (): { config: ResolvedSmtpConfig | null; errorCode?: E
   const user = getFirstEnv("SMTP_USER", "SMTP_USERNAME", "EMAIL_USER", "MAIL_USER");
   const pass = getFirstEnv("SMTP_PASS", "SMTP_PASSWORD", "EMAIL_PASS", "MAIL_PASS", "MAIL_PASSWORD");
   const explicitHost = getFirstEnv("SMTP_HOST", "EMAIL_HOST", "MAIL_HOST");
-  const from = getConfiguredMailFrom();
+  const explicitFrom = getExplicitConfiguredMailFrom();
+  const from = explicitFrom || normalizeEmail(user);
 
   if (!user || !pass) return { config: null, errorCode: "SMTP_CONFIG_MISSING" };
   if (!normalizeEmail(user) || !getEmailDomain(user)) return { config: null, errorCode: "SMTP_CONFIG_MISSING" };
@@ -151,7 +167,7 @@ const resolveSmtpConfig = (): { config: ResolvedSmtpConfig | null; errorCode?: E
   const fromDomain = getEmailDomain(from);
   const warnings: string[] = [];
 
-  if (!from) warnings.push("SMTP_FROM is not configured; the authenticated SMTP mailbox will be used as the From address.");
+  if (!explicitFrom) warnings.push("SMTP_FROM is not configured; the authenticated SMTP mailbox will be used as the From address.");
   if (userDomain && expectedDomain && userDomain !== expectedDomain) {
     warnings.push(`SMTP_USER domain does not match ${expectedDomain}; verify SPF/DKIM/DMARC alignment before production sends.`);
   }

@@ -66,6 +66,57 @@ const resolveWebAppBaseUrl = () => {
   return "http://localhost:8080";
 };
 
+type InviteActorContext = {
+  userId: string | null;
+  email: string | null;
+  displayName: string | null;
+};
+
+const displayActor = (actor: InviteActorContext | null) => {
+  if (!actor) return null;
+  return actor.displayName || actor.email || null;
+};
+
+const resolveInviteActorContext = async (userId: string): Promise<InviteActorContext> => {
+  const actorUserId = String(userId || "").trim();
+  if (!actorUserId) return { userId: null, email: null, displayName: null };
+
+  const actor = await prisma.user.findUnique({
+    where: { id: actorUserId },
+    select: { id: true, email: true, name: true, isActive: true, deletedAt: true },
+  });
+
+  if (!actor || actor.deletedAt || actor.isActive === false) {
+    return { userId: actorUserId, email: null, displayName: null };
+  }
+
+  return {
+    userId: actor.id,
+    email: normalizeEmailAddress(actor.email),
+    displayName: String(actor.name || "").trim() || normalizeEmailAddress(actor.email),
+  };
+};
+
+const buildInviteIntro = (params: {
+  isManufacturerInvite: boolean;
+  actor: InviteActorContext | null;
+  workspaceName?: string | null;
+}) => {
+  const actorLabel = displayActor(params.actor);
+  const workspace = String(params.workspaceName || "").trim();
+  const targetContext = workspace ? `${workspace} on MSCQR` : "MSCQR";
+
+  if (actorLabel) {
+    return params.isManufacturerInvite
+      ? `You were invited by ${actorLabel} to join ${targetContext} as a manufacturer admin for printing and product verification.`
+      : `You were invited by ${actorLabel} to join ${targetContext} for secure product verification.`;
+  }
+
+  return params.isManufacturerInvite
+    ? "A brand workspace has invited you to activate a manufacturer account for MSCQR printing and product verification."
+    : "You have been invited to activate an MSCQR account for secure product verification.";
+};
+
 const inviteHtmlTemplate = (params: {
   acceptUrl: string;
   connectorUrl: string | null;
@@ -390,17 +441,25 @@ export const createInvite = async (input: {
   const connectorDistribution = isManufacturerRole(role) ? buildConnectorDownloadUrls(baseUrl) : null;
 
   const isManufacturerInvite = isManufacturerRole(role);
+  const inviteActor = await resolveInviteActorContext(input.createdByUserId);
   const subject = isManufacturerInvite ? "Set up your MSCQR manufacturer account" : "Activate your MSCQR account";
   const emailBody = renderActionEmail({
     heading: subject,
-    intro: isManufacturerInvite
-      ? "A brand workspace has invited you to activate a manufacturer account for MSCQR printing and product verification."
-      : "You have been invited to activate an MSCQR account for secure product verification.",
+    intro: buildInviteIntro({
+      isManufacturerInvite,
+      actor: inviteActor,
+      workspaceName: org.licenseeName,
+    }),
     actionLabel: "Activate account",
     actionUrl: acceptUrl,
     expiryText: "in 24 hours",
     workspaceName: org.licenseeName,
-    reason: "An MSCQR administrator created this invite for your email address.",
+    invitedByDisplay: inviteActor.displayName,
+    invitedByEmail: inviteActor.email,
+    replyToNotice: Boolean(inviteActor.email),
+    reason: inviteActor.email
+      ? "An MSCQR administrator created this invite for your email address. Replying to this email will contact the inviting admin when available."
+      : "An MSCQR administrator created this invite for your email address.",
     extraText: isManufacturerInvite && connectorLandingUrl
       ? `After activating your account, install MSCQR Connector on the computer connected to the printer: ${connectorLandingUrl}`
       : null,
@@ -415,6 +474,9 @@ export const createInvite = async (input: {
     orgId: result.createdUser.orgId,
     licenseeId: result.createdUser.licenseeId,
     actorUserId: input.createdByUserId,
+    actorEmail: inviteActor.email,
+    actorDisplayName: inviteActor.displayName,
+    replyToMode: "actor",
     ipHash: input.ipHash,
     userAgent: input.userAgent,
   });
@@ -427,11 +489,17 @@ export const createInvite = async (input: {
     entityType: "Invite",
     entityId: result.invite.id,
     details: {
-      email,
+      email: maskEmailForLog(email),
       role: result.invite.role,
       expiresAt: result.invite.expiresAt,
       manufacturerId,
       linkAction: result.linkAction,
+      actorUserId: inviteActor.userId || input.createdByUserId,
+      actorEmail: maskEmailForLog(inviteActor.email),
+      effectiveSmtpFrom: maskEmailForLog(delivery.usedFrom),
+      replyTo: maskEmailForLog(delivery.replyTo),
+      recipient: maskEmailForLog(email),
+      template: "invite",
       emailDelivered: delivery.delivered,
       emailAttempted: delivery.attempted,
       emailErrorCode: delivery.errorCode || delivery.error || null,
@@ -463,6 +531,10 @@ export const createInvite = async (input: {
     providerMessageId: delivery.providerMessageId || null,
     providerResponseCode: delivery.providerResponseCode || null,
     providerResponse: null,
+    usedFrom: delivery.usedFrom || null,
+    replyTo: delivery.replyTo || null,
+    actorEmail: inviteActor.email,
+    actorUserId: inviteActor.userId || input.createdByUserId,
     acceptedRecipients: delivery.acceptedRecipients || [],
     rejectedRecipients: delivery.rejectedRecipients || [],
     pendingRecipients: delivery.pendingRecipients || [],
