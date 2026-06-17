@@ -44,6 +44,7 @@ export default function PrivacyPolicy() {
       children: (
         <ul>
           <li>Account data, including name, email address, role, organization, licensee, manufacturer, and access status.</li>
+          <li>Invite data, including invite recipient details, inviter context, invitation status, expiry, and acceptance records.</li>
           <li>Authentication and security data, including cookie-backed sessions, CSRF tokens, login events, device signals, rate-limit signals, and audit logs.</li>
           <li>Inventory and QR data, including QR label codes, batch records, allocation history, status, scan events, and verification outcomes.</li>
           <li>Public verification data, including scan or lookup details, verification session identifiers, customer email when supplied, proof/session tokens, and ownership or claim continuity where used.</li>
@@ -62,7 +63,7 @@ export default function PrivacyPolicy() {
           <li>To show public verifiers the current product verification status and collect reports where appropriate.</li>
           <li>To investigate suspicious scans, product concerns, support issues, and operational incidents.</li>
           <li>To operate manufacturer connector and printer-readiness workflows.</li>
-          <li>To maintain auditability, security monitoring, service reliability, and customer support.</li>
+          <li>To maintain auditability, security monitoring, fraud prevention, troubleshooting, service reliability, and customer support.</li>
         </ul>
       ),
     },
@@ -90,11 +91,12 @@ export default function PrivacyPolicy() {
       title: "Service providers and external services",
       children: (
         <p>
-          Current implementation evidence shows AWS-hosted infrastructure and object storage for core service delivery.
-          MSCQR may also use configured SMTP/email providers for account, incident, and notification email delivery.
-          Sentry frontend or backend monitoring may be used when DSNs are configured; frontend Sentry starts only after
-          analytics/performance consent. Google may be used when a public verifier chooses Google sign-in, and reCAPTCHA
-          server verification may be used for suspicious public verification or incident-reporting activity when enabled.
+          MSCQR is hosted on AWS-managed infrastructure, including application hosting, database, storage, monitoring,
+          and security services. MSCQR may also use configured SMTP/email providers for account, invite, incident, and
+          notification email delivery. Sentry frontend or backend monitoring may be used when DSNs are configured;
+          frontend Sentry starts only after analytics/performance consent. Google may be used when a public verifier
+          chooses Google sign-in, and reCAPTCHA server verification may be used for suspicious public verification or
+          incident-reporting activity when enabled.
         </p>
       ),
     },
@@ -103,10 +105,12 @@ export default function PrivacyPolicy() {
       title: "Support and incident evidence",
       children: (
         <p>
-          Support and incident workflows can include screenshots, diagnostics, runtime errors, recent network summaries,
-          uploaded evidence, and contact details. Users should avoid submitting unnecessary personal data in free-text
-          support fields or screenshots. MSCQR uses this evidence to diagnose issues, investigate reports, and
-          communicate with users who have provided contact details or consent to contact.
+          Support and incident workflows can include issue descriptions, screenshots, uploaded evidence, runtime errors,
+          recent redacted network summaries, browser context, and contact details where supplied or consented. MSCQR is
+          designed to avoid collecting cookies, session IDs, CSRF tokens, JWTs, invite tokens, and other secrets in
+          support diagnostics. Users should avoid submitting unnecessary personal data in free-text support fields or
+          screenshots. MSCQR uses this evidence to diagnose issues, investigate reports, and communicate with users who
+          have provided contact details or consent to contact.
         </p>
       ),
     },
@@ -115,9 +119,11 @@ export default function PrivacyPolicy() {
       title: "Retention and deletion",
       children: (
         <p>
-          Retention depends on the record type and the applicable organization agreement. Security, audit, verification,
-          support, incident, and operational records may need different retention periods. Browser-side optional
-          preference storage can be withdrawn from cookie preferences or cleared in the browser.
+          Retention depends on the record type and the applicable organization agreement. Account, invite, scan, QR
+          allocation, audit, support, incident, and operational diagnostic records may be retained for up to{" "}
+          {HELP_SITE_CONFIG.retentionDays} days unless a longer period is required for security, legal, operational, or
+          dispute-resolution reasons. Browser-side optional preference storage can be withdrawn from cookie preferences
+          or cleared in the browser.
         </p>
       ),
     },
@@ -160,12 +166,13 @@ export default function PrivacyPolicy() {
     <LegalDocumentLayout
       title="Privacy Notice"
       tagline="Your trust matters. Here is how MSCQR handles personal data."
-      updatedAt="5 May 2026"
-      version="1.0"
+      updatedAt="17 June 2026"
+      version="1.1"
       summary="This notice explains how MSCQR handles personal data for platform operators, brand and licensee administrators, manufacturer users, public product verifiers, and support or incident-reporting users."
       sections={sections}
       primaryAction={{ label: "Manage cookie preferences", onClick: openCookiePreferences, icon: Cookie }}
       relatedLinks={[
+        { to: "/trust", label: "Trust & Security", icon: ShieldCheck },
         { to: "/cookies", label: "Cookie Notice", icon: Cookie },
         { to: "/terms", label: "Terms of Use", icon: FileText },
       ]}

@@ -10,38 +10,57 @@ Recommended Namecheap Private Email configuration:
 
 ```text
 SMTP_HOST=mail.privateemail.com
-SMTP_PORT=465
-SMTP_SECURE=true
+SMTP_PORT=587
+SMTP_SECURE=false
 SMTP_REQUIRE_TLS=true
 SMTP_USER=administration@mscqr.com
 SMTP_PASS=[REDACTED]
 SMTP_FROM=administration@mscqr.com
+AUTH_EMAIL_FROM=administration@mscqr.com
 EMAIL_DOMAIN=mscqr.com
 ```
 
-Port `587` is supported for STARTTLS troubleshooting:
+Port `465` is supported when the provider requires implicit TLS:
 
 ```text
 SMTP_HOST=mail.privateemail.com
-SMTP_PORT=587
-SMTP_SECURE=false
+SMTP_PORT=465
+SMTP_SECURE=true
 SMTP_REQUIRE_TLS=true
 ```
 
 `SMTP_USER` must be the full mailbox. `SMTP_FROM` must be a sender authorized for `mscqr.com`. Never commit credentials.
+
+## Invite Sender Policy
+
+Invite and auth onboarding emails must use the authenticated MSCQR sender as the actual SMTP `From`.
+
+```text
+Actual SMTP auth user: administration@mscqr.com
+Actual SMTP From: MSCQR <administration@mscqr.com>
+Reply-To: logged-in inviting admin email when valid
+```
+
+The configured sender fallback order is:
+
+```text
+SMTP_FROM -> AUTH_EMAIL_FROM -> EMAIL_FROM -> MAIL_FROM -> SMTP_USER
+```
+
+Do not use arbitrary logged-in user mailboxes as SMTP `From`. Logged-in actor email belongs in `Reply-To` only after validation. If MSCQR ever needs true per-user `From`, build a future per-user SMTP/OAuth mailbox connection flow with explicit consent, token storage, revocation, and audit controls.
 
 ## Traceable SMTP Diagnostic
 
 Run a traceable diagnostic from the production server or container:
 
 ```bash
-SMTP_TEST_TO=abhiramtejak@gmail.com npm --prefix backend run check:smtp
+SMTP_TEST_TO="$CONTROLLED_SMTP_TEST_INBOX" npm --prefix backend run check:smtp
 ```
 
 Run with a manual trace ID:
 
 ```bash
-SMTP_TEST_TO=abhiramtejak@gmail.com SMTP_TEST_TRACE_ID=manual-YYYYMMDD-HHMM npm --prefix backend run check:smtp
+SMTP_TEST_TO="$CONTROLLED_SMTP_TEST_INBOX" SMTP_TEST_TRACE_ID=manual-YYYYMMDD-HHMM npm --prefix backend run check:smtp
 ```
 
 The script prints the trace ID, subject, message ID, accepted count, rejected count, pending count, safe error code, and safe diagnostic. It never prints SMTP passwords.

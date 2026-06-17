@@ -13,6 +13,7 @@ import HelpAssistantWidget from "@/components/help/HelpAssistantWidget";
 import { CookieConsentBanner } from "@/components/trust/CookieConsentBanner";
 import { getRoleHelpHome } from "@/help/contextual-help";
 import RouteMetricsTracker from "@/components/RouteMetricsTracker";
+import { RouteScrollReset } from "@/components/RouteScrollReset";
 import { SeoController } from "@/components/seo/SeoController";
 import { MutationEventBridge, queryClient } from "@/lib/query-client";
 
@@ -579,6 +580,7 @@ export default function App() {
             <Sonner />
             <StepUpRecoveryDialog />
             <SeoController />
+            <RouteScrollReset />
             <CanonicalPathRedirects />
             <AppRoutes />
             <RouteMetricsTracker />

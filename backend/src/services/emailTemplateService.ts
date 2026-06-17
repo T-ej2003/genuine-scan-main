@@ -30,15 +30,28 @@ export const renderActionEmail = (params: {
   actionUrl: string;
   expiryText?: string | null;
   workspaceName?: string | null;
+  invitedByDisplay?: string | null;
+  invitedByEmail?: string | null;
+  replyToNotice?: boolean;
   extraText?: string | null;
   reason?: string | null;
 }) => {
   const reason = params.reason || "You received this email because an MSCQR account or product-protection workflow was started for this address.";
   const expiry = params.expiryText ? `\n\nThis link expires ${params.expiryText}.` : "";
   const workspace = params.workspaceName ? `\n\nWorkspace: ${params.workspaceName}.` : "";
+  const invitedByName = String(params.invitedByDisplay || "").trim();
+  const invitedByEmail = String(params.invitedByEmail || "").trim();
+  const invitedByLabel =
+    invitedByName && invitedByEmail
+      ? `${invitedByName} <${invitedByEmail}>`
+      : invitedByName || invitedByEmail;
+  const invitedBy = invitedByLabel ? `\n\nInvited by: ${invitedByLabel}.` : "";
+  const replyTo = params.replyToNotice
+    ? "\n\nReplying to this email will contact the inviting admin when available."
+    : "";
   const extra = params.extraText ? `\n\n${params.extraText.trim()}` : "";
   const text = appendMscqrIdentityToText(
-    `${params.intro.trim()}${workspace}\n\n${ctaText(params.actionLabel, params.actionUrl)}${expiry}${extra}\n\n${reason}\n\nIf you were not expecting this, you can ignore this email.`
+    `${params.intro.trim()}${workspace}${invitedBy}${replyTo}\n\n${ctaText(params.actionLabel, params.actionUrl)}${expiry}${extra}\n\n${reason}\n\nIf you were not expecting this, you can ignore this email.`
   );
 
   const html = `
@@ -49,6 +62,8 @@ export const renderActionEmail = (params: {
           <h1 style="margin:0 0 16px;font-size:24px;line-height:1.25;color:#0f172a;">${escapeHtml(params.heading)}</h1>
           <p style="margin:0 0 16px;line-height:1.65;color:#334155;">${escapeHtml(params.intro)}</p>
           ${params.workspaceName ? `<p style="margin:0 0 16px;line-height:1.65;color:#334155;"><strong>Workspace:</strong> ${escapeHtml(params.workspaceName)}</p>` : ""}
+          ${invitedByLabel ? `<p style="margin:0 0 16px;line-height:1.65;color:#334155;"><strong>Invited by:</strong> ${escapeHtml(invitedByLabel)}</p>` : ""}
+          ${params.replyToNotice ? `<p style="margin:0 0 16px;line-height:1.65;color:#334155;">Replying to this email will contact the inviting admin when available.</p>` : ""}
           <p style="margin:0 0 20px;"><a href="${escapeHtml(params.actionUrl)}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:700;border-radius:8px;padding:12px 18px;">${escapeHtml(params.actionLabel)}</a></p>
           <p style="margin:0 0 16px;line-height:1.65;color:#334155;word-break:break-word;">If the button does not open, copy and paste this link:<br><a href="${escapeHtml(params.actionUrl)}" style="color:#0f766e;">${escapeHtml(params.actionUrl)}</a></p>
           ${params.expiryText ? `<p style="margin:0 0 16px;line-height:1.65;color:#334155;">This link expires ${escapeHtml(params.expiryText)}.</p>` : ""}
