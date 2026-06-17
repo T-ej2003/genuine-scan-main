@@ -401,6 +401,7 @@ let skipped = false;
         orgId: ids.orgA,
         licenseeId: ids.licenseeA,
         linkLicenseeId: ids.licenseeA,
+        assurance: "ADMIN_MFA",
       });
       const normalOperator = await createUserWithToken(prisma, {
         emailPrefix: "p2-normal-operator",
@@ -409,6 +410,7 @@ let skipped = false;
         orgId: ids.orgA,
         licenseeId: ids.licenseeA,
         linkLicenseeId: ids.licenseeA,
+        assurance: "ADMIN_MFA",
       });
 
       const high = await createHighValueApprovalRequest({

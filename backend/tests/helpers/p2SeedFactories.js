@@ -273,8 +273,8 @@ const issueBearerTokens = async (userIds = ids) => {
     superAdmin: await issue(userIds.superAdmin, "ADMIN_MFA"),
     licenseeAdminA: await issue(userIds.licenseeAdminA, "ADMIN_MFA"),
     licenseeAdminB: await issue(userIds.licenseeAdminB, "ADMIN_MFA"),
-    manufacturerA: await issue(userIds.manufacturerA),
-    manufacturerB: await issue(userIds.manufacturerB),
+    manufacturerA: await issue(userIds.manufacturerA, "ADMIN_MFA"),
+    manufacturerB: await issue(userIds.manufacturerB, "ADMIN_MFA"),
   };
 };
 
