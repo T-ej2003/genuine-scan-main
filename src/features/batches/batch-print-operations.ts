@@ -190,6 +190,21 @@ export const syncProgressFromPrintJob = (
     return;
   }
 
+  if (job.printMode === "LOCAL_AGENT") {
+    if (job.pipelineState === "QUEUED" || job.status === "PENDING") {
+      setPrintProgressPhase("Waiting for connector");
+      setPrintProgressError(null);
+      setPrintProgressNotice?.("The connector has not claimed this job yet.");
+      return;
+    }
+    if (job.pipelineState === "SENT_TO_PRINTER" || job.status === "SENT") {
+      setPrintProgressPhase(confirmed > 0 ? "Sent to printer" : "Connector claimed");
+      setPrintProgressError(null);
+      setPrintProgressNotice?.(confirmed > 0 ? "Connector has started confirming printed labels." : "Connector claimed the job and is preparing spool submission.");
+      return;
+    }
+  }
+
   if (job.printMode === "NETWORK_DIRECT" || job.printMode === "NETWORK_IPP") {
     setPrintProgressPhase(
       job.printMode === "NETWORK_IPP"
@@ -207,6 +222,10 @@ export const syncProgressFromPrintJob = (
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const logPrintTiming = (event: string, details: Record<string, unknown>) => {
+  console.info(event, details);
+};
 
 const reportLocalPrinterHeartbeat = async () => {
   const local = await apiClient.getLocalPrintAgentStatus();
@@ -365,7 +384,10 @@ export const pollPrintJobUntilSettled = async (
   let latest: PrintJobRow | null = null;
 
   while (Date.now() - startedAt < timeoutMs) {
-    const response = await apiClient.getPrintJobStatus(jobId);
+    const response = await apiClient.getPrintJobStatus(jobId, {
+      force: true,
+      minIntervalMs: pollingPolicy.activePrintJobStatusMinRefreshMs,
+    });
     if (response.success && response.data) {
       latest = response.data as PrintJobRow;
       syncProgressFromPrintJob(latest, progressSetters);
@@ -582,6 +604,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     }
   }
 
+  const createStartedAt = Date.now();
   const response = await apiClient.createPrintJob({
     batchId: printBatch.id,
     printerId: selectedPrinterProfile.id,
@@ -645,6 +668,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     pipelineState?: string;
     printer?: { name?: string };
   };
+  const createCompletedAt = Date.now();
   setPrintJobId(data.printJobId || "");
   setDirectRemainingToPrint(typeof data.tokenCount === "number" ? data.tokenCount : null);
   setPrintProgressTotal(typeof data.tokenCount === "number" ? data.tokenCount : quantity);
@@ -686,15 +710,39 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
 
     setPrintProgressNotice?.("The live status panel is tracking this print run now.");
   } else {
+    logPrintTiming("print.job.created", {
+      printJobId: createdJobId,
+      mode: createdMode || "LOCAL_AGENT",
+      tokenCount: typeof data.tokenCount === "number" ? data.tokenCount : null,
+      durationMs: createCompletedAt - createStartedAt,
+    });
+    setPrintProgressPhase("Connector wake sent");
+    setPrintProgressNotice?.("Asking the connector on this computer to claim the queued labels.");
+    const wakeStartedAt = Date.now();
+    const wakeResponse = await apiClient.wakeLocalPrintAgent("user_print_job_created");
+    logPrintTiming("print.connector.wake.sent", {
+      printJobId: createdJobId,
+      success: Boolean(wakeResponse.success),
+      durationMs: Date.now() - wakeStartedAt,
+      status: wakeResponse.status || null,
+    });
     toast({
       title: "Print run started",
       description: `MSCQR queued approved labels for ${selectedPrinterProfile.name}. The printer helper will pick them up and print them securely.`,
     });
     setPrintProgressPhase(
-      data.pipelineState === "QUEUED" ? "Waiting for printer helper" : "Print run active on this computer"
+      wakeResponse.success
+        ? "Waiting for connector to claim job"
+        : data.pipelineState === "QUEUED"
+          ? "Waiting for printer helper"
+          : "Print run active on this computer"
     );
 
-    setPrintProgressNotice?.("Waiting for connector to claim job.");
+    setPrintProgressNotice?.(
+      wakeResponse.success
+        ? "Connector wake sent. Waiting for backend-confirmed printer progress."
+        : "Connector wake failed. Safe fallback polling remains active."
+    );
   }
 };
 

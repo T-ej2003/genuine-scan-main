@@ -110,7 +110,8 @@ const run = async () => {
 
   assert.strictEqual(session.sessionId, "session-1");
   assert.strictEqual(session.auth.sessionId, "session-1");
-  assert.strictEqual(session.auth.stepUpMethod, "PASSWORD_REAUTH");
+  assert.strictEqual(session.auth.stepUpMethod, "ADMIN_MFA");
+  assert.strictEqual(session.auth.mfaRequired, true);
   assert.strictEqual(session.auth.sessionExpiresAt, "2026-04-01T12:00:00.000Z");
 
   prismaUser = {

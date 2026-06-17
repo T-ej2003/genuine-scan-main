@@ -195,7 +195,7 @@ export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: Nex
 
   if (req.user.sessionStage !== "ACTIVE") {
     return stepUpRequired(res, {
-      message: "Admin MFA verification is required before continuing.",
+      message: "MFA verification is required before continuing.",
       method: "ADMIN_MFA",
     });
   }
@@ -203,7 +203,7 @@ export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: Nex
   const verifiedAt = req.user.mfaVerifiedAt ? new Date(req.user.mfaVerifiedAt) : null;
   if (!verifiedAt || Number.isNaN(verifiedAt.getTime())) {
     return stepUpRequired(res, {
-      message: "Admin MFA verification is required before continuing.",
+      message: "MFA verification is required before continuing.",
       method: "ADMIN_MFA",
     });
   }
@@ -211,7 +211,7 @@ export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: Nex
   const maxAgeMs = getAdminStepUpWindowMinutes() * 60_000;
   if (Date.now() - verifiedAt.getTime() > maxAgeMs) {
     return stepUpRequired(res, {
-      message: "Your admin verification is no longer fresh enough for this action. Confirm your authenticator code to continue.",
+      message: "Your MFA verification is no longer fresh enough for this action. Confirm your authenticator code to continue.",
       method: "ADMIN_MFA",
     });
   }

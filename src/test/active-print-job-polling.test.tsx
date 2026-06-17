@@ -82,4 +82,21 @@ describe("active print job polling", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
   });
+
+  it("backs active polling off after the bounded observation window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T21:14:32.000Z"));
+    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValue({ success: true, data: baseJob } as any);
+
+    render(<PollingProbe job={baseJob} />);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(190_000);
+    const callsAfterTimeout = vi.mocked(apiClient.getPrintJobStatus).mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(callsAfterTimeout);
+    expect(callsAfterTimeout).toBeLessThanOrEqual(38);
+  });
 });

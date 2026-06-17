@@ -10,6 +10,7 @@ vi.mock("@/lib/api-client", () => ({
     reportPrinterHeartbeat: vi.fn(),
     getPrinterConnectionStatus: vi.fn(),
     configureLocalPrintAgentBackend: vi.fn(),
+    wakeLocalPrintAgent: vi.fn(),
     createPrintJob: vi.fn(),
     getPrintJobStatus: vi.fn(),
   },
@@ -50,6 +51,7 @@ describe("batch print operations", () => {
       },
     } as any);
     vi.mocked(apiClient.configureLocalPrintAgentBackend).mockResolvedValue({ success: true, data: {} } as any);
+    vi.mocked(apiClient.wakeLocalPrintAgent).mockResolvedValue({ success: true, data: { accepted: true } } as any);
     vi.mocked(apiClient.createPrintJob).mockResolvedValue({
       success: true,
       data: {
@@ -111,8 +113,61 @@ describe("batch print operations", () => {
     });
 
     expect(setPrintJobId).toHaveBeenCalledWith("job-live");
-    expect(setPrintProgressPhase).toHaveBeenLastCalledWith("Waiting for printer helper");
-    expect(setPrintProgressNotice).toHaveBeenCalledWith("Waiting for connector to claim job.");
+    expect(apiClient.wakeLocalPrintAgent).toHaveBeenCalledWith("user_print_job_created");
+    expect(setPrintProgressPhase).toHaveBeenLastCalledWith("Waiting for connector to claim job");
+    expect(setPrintProgressNotice).toHaveBeenCalledWith("Connector wake sent. Waiting for backend-confirmed printer progress.");
     expect(apiClient.getPrintJobStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps fallback status visible when local connector wake fails", async () => {
+    vi.mocked(apiClient.wakeLocalPrintAgent).mockResolvedValueOnce({ success: false, error: "Local print agent is unavailable" } as any);
+    const setPrintProgressPhase = setter();
+    const setPrintProgressNotice = setter();
+
+    await createPrintJob({
+      toast: vi.fn(),
+      printBatch: { id: "batch-1", name: "Batch 1" } as any,
+      printQuantity: "10",
+      getAvailableInventory: () => 10,
+      selectedPrinterProfile: {
+        id: "printer-profile-1",
+        name: "ZDesigner ZT410-300dpi ZPL",
+        connectionType: "LOCAL_AGENT",
+        nativePrinterId: "usb-zebra",
+        isActive: true,
+      } as any,
+      selectedPrinterId: "usb-zebra",
+      detectedPrinters: [{ printerId: "usb-zebra", printerName: "ZDesigner ZT410-300dpi ZPL", online: true }] as any,
+      printerStatus: {
+        connected: true,
+        eligibleForPrinting: true,
+        selectedPrinterId: "usb-zebra",
+        printerId: "usb-zebra",
+      } as any,
+      activeLocalPrinterId: "usb-zebra",
+      selectedPrinterCanPrint: true,
+      setPrinterStatus: setter(),
+      buildCalibrationPayload: () => ({}),
+      autoReportPrinterFailure: vi.fn(),
+      onBatchesChanged: vi.fn(),
+      loadRecentPrintJobs: vi.fn(),
+      setPrintJobId: setter(),
+      printJobId: "",
+      directRemainingToPrint: null,
+      setPrintProgressOpen: setter(),
+      setPrintProgressPhase,
+      setPrintProgressTotal: setter(),
+      setPrintProgressPrinted: setter(),
+      setPrintProgressRemaining: setter(),
+      setPrintProgressCurrentCode: setter(),
+      setPrintProgressError: setter(),
+      setPrintProgressNotice,
+      setPrintProgressPrinterName: setter(),
+      setPrintProgressDispatchMode: setter(),
+      setDirectRemainingToPrint: setter(),
+    });
+
+    expect(setPrintProgressPhase).toHaveBeenLastCalledWith("Waiting for printer helper");
+    expect(setPrintProgressNotice).toHaveBeenCalledWith("Connector wake failed. Safe fallback polling remains active.");
   });
 });

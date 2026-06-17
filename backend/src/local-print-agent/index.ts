@@ -24,7 +24,7 @@ import {
 } from "./state";
 import { buildDiagnosticTestZplPayload } from "./render";
 import { startGatewayWorker } from "./gateway";
-import { startDirectPrintWorker } from "./directPrintWorker";
+import { requestDirectPrintWake, startDirectPrintWorker } from "./directPrintWorker";
 import { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
 import {
   LOCAL_AGENT_CAPABILITIES,
@@ -463,6 +463,22 @@ app.post("/backend/config", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: error?.message || "Could not save backend connection details.",
+    });
+  }
+});
+
+app.post("/wake", async (req, res) => {
+  try {
+    const reason = String(req.body?.reason || "user_print_job_created").trim().slice(0, 80) || "user_print_job_created";
+    const result = requestDirectPrintWake(reason);
+    return res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      error: error?.message || "Could not wake local print worker.",
     });
   }
 });

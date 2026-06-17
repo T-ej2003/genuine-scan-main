@@ -50,7 +50,7 @@ export const isOrgAdminRole = (role: UserRole) =>
   role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN;
 
 export const isAdminMfaRequiredRole = (role: UserRole) =>
-  isPlatformSuperAdminRole(role) || isOrgAdminRole(role);
+  isPlatformSuperAdminRole(role) || isOrgAdminRole(role) || isManufacturerRole(role);
 
 export const isManufacturerRole = (role: UserRole) =>
   role === UserRole.MANUFACTURER || role === UserRole.MANUFACTURER_ADMIN || role === UserRole.MANUFACTURER_USER;
@@ -454,7 +454,8 @@ export const loginWithPassword = async (input: {
     const loginCycleDays = Math.max(1, getAdminLoginMfaCycleDays());
     const cycleThreshold = addDays(now, -loginCycleDays);
     const mfaFreshForLogin = Boolean(
-      mfaStatus?.enabled &&
+      !isManufacturerRole(user.role) &&
+        mfaStatus?.enabled &&
         hasValidLastUsedAt &&
         (lastUsedAt as Date).getTime() >= cycleThreshold.getTime()
     );

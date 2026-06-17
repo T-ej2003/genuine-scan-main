@@ -1,6 +1,8 @@
 const { createHash } = require("crypto");
 const {
   isCloudConnectivityError,
+  isBackendRateLimitError,
+  resolveActiveWakeRetryAfterMs,
   resolveConnectivityRetryAfterMs,
   resolveNoWorkRetryAfterMs,
   validateClaimedLocalPrintJobForAttempt,
@@ -56,12 +58,17 @@ const run = () => {
     "USB raw spooler capability must be required for the current connector"
   );
   assert(isCloudConnectivityError(Object.assign(new Error("fetch failed"), { cause: { code: "ENOTFOUND" } })), "DNS failures should be classified as cloud connectivity issues");
+  assert(isBackendRateLimitError({ status: 429 }), "HTTP 429 should force connector rate-limit backoff");
+  assert(!isBackendRateLimitError({ status: 409 }), "Non-rate-limit errors should not use the 429 backoff path");
   assert(resolveConnectivityRetryAfterMs(5) >= 4000, "Connectivity retry should stay within bounded backoff");
   assert(resolveNoWorkRetryAfterMs(8000, 1) >= 15000, "No-work claims must back off beyond the old 8s server hint");
+  assert(resolveNoWorkRetryAfterMs(8000, 4) <= 30000, "Idle fallback should no longer leave user-created jobs waiting 40-60 seconds");
   assert(
     resolveNoWorkRetryAfterMs(8000, 3) >= resolveNoWorkRetryAfterMs(8000, 1),
     "Repeated no-work claims should not become more aggressive"
   );
+  assert(resolveActiveWakeRetryAfterMs(1) >= 4000, "Explicit wake retries should reuse the connector claim floor");
+  assert(resolveActiveWakeRetryAfterMs(4) <= 5000, "Explicit wake retry burst must stay capped");
 
   const payloadContent = "^XA\n^XZ";
   const valid = validateClaimedLocalPrintJobForAttempt({

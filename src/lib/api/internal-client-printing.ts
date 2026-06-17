@@ -214,9 +214,12 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     return controlledPrinterGet<any[]>(`manufacturer-print-jobs:${query}`, 30_000, () => core.request<any[]>(`/manufacturer/print-jobs${query}`));
   },
 
-  async getPrintJobStatus(jobId: string) {
-    return controlledPrinterGet<any>(`manufacturer-print-job-status:${jobId}`, 30_000, () =>
-      core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`)
+  async getPrintJobStatus(jobId: string, options?: ControlledPrinterGetOptions) {
+    return controlledPrinterGet<any>(
+      `manufacturer-print-job-status:${jobId}`,
+      options?.minIntervalMs ?? 30_000,
+      () => core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`),
+      options
     );
   },
 
@@ -529,6 +532,40 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       return {
         success: false,
         error: aborted ? "Local print backend configuration timed out" : "Local print agent is unavailable",
+      };
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  },
+
+  async wakeLocalPrintAgent(reason = "user_print_job_created") {
+    const base = String(import.meta.env.VITE_PRINT_AGENT_URL || "http://127.0.0.1:17866")
+      .trim()
+      .replace(/\/+$/, "");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 1500);
+    try {
+      const response = await fetch(`${base}/wake`, {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return {
+          success: false,
+          status: response.status,
+          error: String((payload as any)?.error || `Local print wake failed: HTTP ${response.status}`),
+        };
+      }
+      return { success: true, data: payload?.data || payload };
+    } catch (error: any) {
+      const aborted = error?.name === "AbortError";
+      return {
+        success: false,
+        error: aborted ? "Local print wake timed out" : "Local print agent is unavailable",
       };
     } finally {
       window.clearTimeout(timeout);
