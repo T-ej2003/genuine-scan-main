@@ -92,6 +92,60 @@ const goto = async (page: Page, path: string) => {
 const backupCodeForRetry = (codes: string[], testInfo: TestInfo) =>
   codes[Math.min(testInfo.retry, Math.max(codes.length - 1, 0))] || "";
 
+const completeMfaWithBackupCode = async (page: Page, backupCode: string) => {
+  const result = await page.evaluate(async (code) => {
+    const readCookie = (name: string) => {
+      const prefix = `${name}=`;
+      return document.cookie
+        .split(";")
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(prefix))
+        ?.slice(prefix.length) || "";
+    };
+    const csrf = decodeURIComponent(readCookie("aq_csrf"));
+    const headers = {
+      "content-type": "application/json",
+      "x-csrf-token": csrf,
+      "x-idempotency-key": crypto.randomUUID(),
+    };
+    const beginResponse = await fetch("/api/auth/mfa/challenge/begin", {
+      method: "POST",
+      credentials: "include",
+      headers,
+    });
+    const beginPayload = await beginResponse.json().catch(() => null);
+    if (!beginResponse.ok || !beginPayload?.success || !beginPayload?.data?.ticket) {
+      return {
+        success: false,
+        status: beginResponse.status,
+        error: beginPayload?.error || "Could not start MFA challenge.",
+      };
+    }
+
+    const completeResponse = await fetch("/api/auth/mfa/challenge/complete", {
+      method: "POST",
+      credentials: "include",
+      headers: { ...headers, "x-idempotency-key": crypto.randomUUID() },
+      body: JSON.stringify({
+        ticket: beginPayload.data.ticket,
+        method: "backup_code",
+        code,
+      }),
+    });
+    const completePayload = await completeResponse.json().catch(() => null);
+    return {
+      success: Boolean(completeResponse.ok && completePayload?.success && completePayload?.data?.user),
+      status: completeResponse.status,
+      error: completePayload?.error || null,
+      sessionStage: completePayload?.data?.auth?.sessionStage || null,
+    };
+  }, backupCode);
+
+  if (!result.success || result.sessionStage !== "ACTIVE") {
+    throw new Error(`Manufacturer MFA backup-code completion failed: HTTP ${result.status} ${result.error || "unknown error"}`);
+  }
+};
+
 const login = async (page: Page, email: string, password: string, options: { mfaBackupCode?: string } = {}) => {
   await goto(page, "/login");
   await page.locator("#email").fill(email);
@@ -100,11 +154,10 @@ const login = async (page: Page, email: string, password: string, options: { mfa
 
   if (options.mfaBackupCode) {
     const backupTab = page.getByRole("button", { name: /^backup code$/i });
-    if (await backupTab.isVisible({ timeout: 10_000 }).catch(() => false)) {
-      await backupTab.click();
-      await page.locator("#mfa-backup-code").fill(options.mfaBackupCode);
-      await page.getByRole("button", { name: /^open secure session$/i }).click();
-    }
+    await expect(backupTab).toBeVisible({ timeout: 15_000 });
+    await completeMfaWithBackupCode(page, options.mfaBackupCode);
+    await goto(page, "/dashboard");
+    return;
   }
 
   await page.waitForFunction(
