@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
-const script = fs.readFileSync(path.join(repoRoot, "backend/scripts/repair-admin-accounts.ts"), "utf8");
+const script = fs.readFileSync(path.join(repoRoot, "backend/scripts/repair-admin-accounts.js"), "utf8");
 const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "backend/package.json"), "utf8"));
 
 assert(script.includes('const isApply = process.argv.includes("--apply")'), "repair script must be dry-run unless --apply is explicit");
@@ -15,6 +15,8 @@ assert(script.includes("createInvite({"), "Victoria setup email must use the exi
 assert(script.includes("allowExistingInvitedUser: true"), "repair script must be idempotent for invited users");
 assert(script.includes("tokenLogged: false"), "repair output must explicitly avoid token logging");
 assert(!script.includes("inviteLink"), "repair script must not log invite links");
-assert.strictEqual(packageJson.scripts["repair:admin-accounts"], "tsx scripts/repair-admin-accounts.ts");
+assert(script.includes('require("../dist/services/auth/inviteService")'), "runtime repair script must use compiled backend services");
+assert.strictEqual(packageJson.scripts["repair:admin-accounts"], "node scripts/repair-admin-accounts.js");
+assert(!packageJson.scripts["repair:admin-accounts"].includes("tsx"), "runtime repair script must not depend on tsx");
 
 console.log("admin account repair script contract tests passed");

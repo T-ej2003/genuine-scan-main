@@ -7,7 +7,7 @@
     "dev": "prisma generate && tsx watch src/index.ts",
     "auth:mfa:break-glass": "tsx scripts/break-glass-mfa-reset.ts",
     "seed:launch-smoke-users": "node scripts/seed-launch-smoke-users.js",
-    "repair:admin-accounts": "tsx scripts/repair-admin-accounts.ts",
+    "repair:admin-accounts": "node scripts/repair-admin-accounts.js",
     "check:smtp": "node scripts/check-smtp-delivery.js",
     "check:email:dns": "node scripts/check-email-dns.js",
     "analytics:refresh-rollups": "tsx scripts/refresh-analytics-rollups.ts",
