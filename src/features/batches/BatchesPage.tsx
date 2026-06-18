@@ -40,6 +40,8 @@ export default function BatchesPage() {
   const [reissueRequestsLoading, setReissueRequestsLoading] = useState(false);
   const [reissueDecisionNote, setReissueDecisionNote] = useState("");
   const [decidingReissueRequestId, setDecidingReissueRequestId] = useState<string | null>(null);
+  const [printingReissueRequestId, setPrintingReissueRequestId] = useState<string | null>(null);
+  const [reissuePrintRecoveryById, setReissuePrintRecoveryById] = useState<Record<string, string>>({});
 
   const operations = useBatchOperationsController({
     role,
@@ -77,7 +79,7 @@ export default function BatchesPage() {
     if (!canRequestReissue) return;
     setReissueRequestsLoading(true);
     try {
-      const response = await apiClient.listPrintReissueRequests({ status: "PENDING", limit: 25 });
+      const response = await apiClient.listPrintReissueRequests({ status: isManufacturer ? "APPROVED" : "PENDING", limit: 25 });
       setReissueRequests(response.success && Array.isArray(response.data) ? response.data : []);
     } finally {
       setReissueRequestsLoading(false);
@@ -162,12 +164,55 @@ export default function BatchesPage() {
         title: decision === "approve" ? "Reissue approved" : "Reissue rejected",
         description:
           decision === "approve"
-            ? "MSCQR queued the approved replacement workflow and updated the audit trail."
+            ? "Replacement labels are approved and ready for the manufacturer to print."
             : "MSCQR recorded the rejection and notified the requester.",
       });
       await Promise.allSettled([fetchReissueRequests(), workspacePrintJobsQuery.refetch(), operations.fetchBatches()]);
     } finally {
       setDecidingReissueRequestId(null);
+    }
+  };
+
+  const printApprovedReissueRequest = async (requestId: string) => {
+    setPrintingReissueRequestId(requestId);
+    try {
+      const response = await apiClient.printApprovedReissueRequest(requestId);
+      if (!response.success) {
+        const code = String(response.errorCode || response.code || "").toUpperCase();
+        const stalePrinter = code === "PRINTER_ATTESTATION_STALE" || code === "MISSING_PRINTER_SESSION";
+        const message = stalePrinter
+          ? "Printer verification expired. Refresh printer status before printing."
+          : response.error || "Replacement labels could not be printed.";
+        if (stalePrinter) {
+          setReissuePrintRecoveryById((current) => ({ ...current, [requestId]: message }));
+        }
+        toast({
+          title: stalePrinter ? "Refresh printer status" : "Replacement print not started",
+          description: message,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const replacementPrintJobId = response.data?.result?.replacementPrintJobId;
+      if (replacementPrintJobId) {
+        printWorkflow.dialogProps.onOpenExistingPrintProgress?.(
+          replacementPrintJobId,
+          "Replacement labels queued. Waiting for connector confirmation."
+        );
+      }
+      setReissuePrintRecoveryById((current) => {
+        const next = { ...current };
+        delete next[requestId];
+        return next;
+      });
+      toast({
+        title: "Replacement print started",
+        description: "MSCQR created the replacement print job. Physical confirmation still comes from the connector.",
+      });
+      await Promise.allSettled([fetchReissueRequests(), workspacePrintJobsQuery.refetch(), operations.fetchBatches()]);
+    } finally {
+      setPrintingReissueRequestId(null);
     }
   };
 
@@ -285,9 +330,12 @@ export default function BatchesPage() {
         }}
         reissuingJobId={reissuingJobId}
         reissueRequests={reissueRequests}
+        reissueRequestsMode={isManufacturer ? "print" : "review"}
         reissueRequestsLoading={reissueRequestsLoading}
         reissueDecisionNote={reissueDecisionNote}
         decidingReissueRequestId={decidingReissueRequestId}
+        printingReissueRequestId={printingReissueRequestId}
+        reissuePrintRecoveryById={reissuePrintRecoveryById}
         onReissueDecisionNoteChange={setReissueDecisionNote}
         onRefreshReissueRequests={() => {
           void fetchReissueRequests();
@@ -295,6 +343,10 @@ export default function BatchesPage() {
         onDecideReissueRequest={(requestId, decision) => {
           void decideReissueRequest(requestId, decision);
         }}
+        onPrintApprovedReissueRequest={(requestId) => {
+          void printApprovedReissueRequest(requestId);
+        }}
+        onRefreshPrinterStatus={printWorkflow.dialogProps.onRefreshPrinters}
       />
 
       <RenameBatchDialog

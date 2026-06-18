@@ -12,6 +12,7 @@ export {
   listManufacturerPrintJobs,
   listManufacturerPrintReissueRequests,
   pauseManufacturerPrintJob,
+  printApprovedManufacturerPrintReissueRequest,
   rejectManufacturerPrintReissueRequest,
   reissueManufacturerPrintJob,
   reportDirectPrintFailure,

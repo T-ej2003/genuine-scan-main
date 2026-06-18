@@ -31,6 +31,7 @@ export const createAuthorizedPrintReissue = async (params: {
   originalPrintJobId: string;
   reason: string;
   quantity?: number | null;
+  approvedReissueRequestId?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;
 }) => {
@@ -142,6 +143,25 @@ export const createAuthorizedPrintReissue = async (params: {
         },
       });
 
+      let reissueRequest: any;
+      if (params.approvedReissueRequestId) {
+        const claimed = await tx.printReissueRequest.updateMany({
+          where: {
+            id: params.approvedReissueRequestId,
+            originalPrintJobId: originalJob.id,
+            status: ReissueRequestStatus.APPROVED,
+            replacementPrintJobId: null,
+          },
+          data: {
+            status: ReissueRequestStatus.EXECUTED,
+            executedAt: now,
+          },
+        });
+        if (claimed.count !== 1) {
+          throw Object.assign(new Error("PRINT_REISSUE_ALREADY_EXECUTED"), { statusCode: 409 });
+        }
+      }
+
       const values = prepared.map((item) =>
         Prisma.sql`(${item.qr.id}, ${item.nonce}, ${item.tokenHash}, ${now}, ${expAt})`
       );
@@ -241,18 +261,28 @@ export const createAuthorizedPrintReissue = async (params: {
         });
       }
 
-      const reissueRequest = await tx.printReissueRequest.create({
-        data: {
-          originalPrintJobId: originalJob.id,
-          replacementPrintJobId: replacementJob.id,
-          requestedByUserId: params.scope.userId,
-          approvedByUserId: params.scope.userId,
-          status: ReissueRequestStatus.EXECUTED,
-          reason: params.reason,
-          approvedAt: now,
-          executedAt: now,
-        },
-      });
+      if (params.approvedReissueRequestId) {
+        reissueRequest = await tx.printReissueRequest.update({
+          where: { id: params.approvedReissueRequestId },
+          data: {
+            replacementPrintJobId: replacementJob.id,
+            executedAt: now,
+          },
+        });
+      } else {
+        reissueRequest = await tx.printReissueRequest.create({
+          data: {
+            originalPrintJobId: originalJob.id,
+            replacementPrintJobId: replacementJob.id,
+            requestedByUserId: params.scope.userId,
+            approvedByUserId: params.scope.userId,
+            status: ReissueRequestStatus.EXECUTED,
+            reason: params.reason,
+            approvedAt: now,
+            executedAt: now,
+          },
+        });
+      }
 
       await materializeReplacementChainsForReissue({
         tx,

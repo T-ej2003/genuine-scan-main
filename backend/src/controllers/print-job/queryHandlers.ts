@@ -11,6 +11,7 @@ import {
   createScopedPrintReissueRequest,
   decideScopedPrintReissueRequest,
   listScopedPrintReissueRequests,
+  startApprovedPrintReissueRequest,
 } from "../../services/printReissueRequestWorkflowService";
 import {
   ensurePrintOperationsUser,
@@ -18,6 +19,7 @@ import {
   printJobIdParamSchema,
   reissuePrintJobSchema,
 } from "./shared";
+import { describeMissingPrinterReadinessFields } from "./errorResponses";
 import {
   createReissueRequestSchema,
   listReissueRequestsQuerySchema,
@@ -327,6 +329,60 @@ export const approveManufacturerPrintReissueRequest = async (req: AuthRequest, r
   } catch (error: any) {
     console.error("approveManufacturerPrintReissueRequest error:", error);
     return handleUserSafeError(res, error, "Print reissue request could not be approved.");
+  }
+};
+
+export const printApprovedManufacturerPrintReissueRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintOperationsUser(req, res);
+    if (!user) return;
+
+    const parsedParams = reissueRequestIdParamSchema.safeParse(req.params || {});
+    if (!parsedParams.success) {
+      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid reissue request id" });
+    }
+
+    const result = await startApprovedPrintReissueRequest({
+      scope: printControlScope(req, user),
+      requestId: parsedParams.data.id,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
+    });
+    return res.status(result.idempotent ? 200 : 201).json({
+      success: true,
+      data: result,
+      meta: { idempotent: result.idempotent },
+    });
+  } catch (error: any) {
+    console.error("printApprovedManufacturerPrintReissueRequest error:", error);
+    const message = String(error?.message || "");
+    if (message.includes("PRINTER_NOT_TRUSTED")) {
+      const printerStatus = error?.printerStatus || null;
+      return res.status(409).json({
+        success: false,
+        error: "Printer verification expired. Refresh printer status before printing.",
+        message: "Printer verification expired. Refresh printer status before printing.",
+        code: "PRINTER_ATTESTATION_STALE",
+        errorCode: "PRINTER_ATTESTATION_STALE",
+        recoveryAction: "refresh_printer_status",
+        canRetry: true,
+        details: { missingFields: describeMissingPrinterReadinessFields(printerStatus) },
+        data: { printerStatus },
+      });
+    }
+    if (message.startsWith("NOT_ENOUGH_CODES")) {
+      return res.status(409).json({
+        success: false,
+        error: "Not enough unprinted codes remain in this source batch to authorize a controlled reissue.",
+      });
+    }
+    if (message === "BATCH_BUSY") {
+      return res.status(409).json({
+        success: false,
+        error: "This source batch is busy. Refresh the workspace and try the reissue again.",
+      });
+    }
+    return handleUserSafeError(res, error, "Replacement labels could not be printed.");
   }
 };
 

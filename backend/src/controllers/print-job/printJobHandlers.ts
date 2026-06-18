@@ -16,6 +16,7 @@ export {
   listManufacturerPrintJobs,
   listManufacturerPrintReissueRequests,
   pauseManufacturerPrintJob,
+  printApprovedManufacturerPrintReissueRequest,
   rejectManufacturerPrintReissueRequest,
   reissueManufacturerPrintJob,
   resumeManufacturerPrintJob,

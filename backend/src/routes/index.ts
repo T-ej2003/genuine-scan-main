@@ -172,6 +172,7 @@ import {
   listManufacturerPrintJobs,
   listManufacturerPrintReissueRequests,
   pauseManufacturerPrintJob,
+  printApprovedManufacturerPrintReissueRequest,
   rejectManufacturerPrintReissueRequest,
   reissueManufacturerPrintJob,
   reportDirectPrintFailure,
@@ -1974,6 +1975,18 @@ protectedMutationRouter.post(
   printMutationActorLimiter,
   requireCsrf,
   approveManufacturerPrintReissueRequest
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-reissue-requests/:id/print",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  authenticate,
+  requireOpsUser,
+  requireRecentSensitiveAuth,
+  enforceTenantIsolation,
+  printMutationActorLimiter,
+  requireCsrf,
+  printApprovedManufacturerPrintReissueRequest
 );
 protectedMutationRouter.post(
   "/manufacturer/print-reissue-requests/:id/reject",
