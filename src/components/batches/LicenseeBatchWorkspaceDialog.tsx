@@ -59,6 +59,7 @@ type TraceEventRow = {
 type LicenseeBatchWorkspaceDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  role?: string | null;
   workspace: StableBatchOverviewRow | null;
   manufacturers: ManufacturerRow[];
   assignManufacturerId: string;
@@ -97,6 +98,7 @@ type LicenseeBatchWorkspaceDialogProps = {
   onDecideReissueRequest?: (requestId: string, decision: "approve" | "reject") => void;
   onPrintApprovedReissueRequest?: (requestId: string) => void;
   onRefreshPrinterStatus?: () => void;
+  securePrinterReady?: boolean;
   initialTab?: "overview" | "operations" | "audit";
   highlightedReissueRequestId?: string | null;
 };
@@ -207,6 +209,25 @@ const getRecoveryInstruction = (job: PrintJobRow) => {
 const printJobOperator = (job: PrintJobRow) =>
   job.operator?.name || job.operator?.email || "Operator not recorded";
 
+const printJobRange = (job: PrintJobRow) => {
+  const start = String((job as any).rangeStart || job.session?.pendingRange?.startCode || job.session?.confirmedRange?.startCode || "").trim();
+  const end = String((job as any).rangeEnd || job.session?.pendingRange?.endCode || job.session?.confirmedRange?.endCode || "").trim();
+  if (start && end) return `${start} to ${end}`;
+  if (start) return start;
+  return "Range not recorded";
+};
+
+const workspacePrimaryRange = (workspace: StableBatchOverviewRow) => {
+  const allocation = workspace.allocations[0] || null;
+  return {
+    start: allocation?.batchRangeStart || workspace.sourceOriginalRangeStart,
+    end: allocation?.batchRangeEnd || workspace.sourceOriginalRangeEnd,
+  };
+};
+
+const manufacturerRemainingLabels = (workspace: StableBatchOverviewRow) =>
+  Number(workspace.pendingPrintableCodes || 0);
+
 const renderManufacturerLine = (allocation: BatchWorkspaceAllocation) => (
   <div key={`${allocation.batchId}:${allocation.manufacturerId}`} className="rounded-xl border bg-muted/20 p-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -248,6 +269,7 @@ const renderManufacturerLine = (allocation: BatchWorkspaceAllocation) => (
 export function LicenseeBatchWorkspaceDialog({
   open,
   onOpenChange,
+  role,
   workspace,
   manufacturers,
   assignManufacturerId,
@@ -286,6 +308,7 @@ export function LicenseeBatchWorkspaceDialog({
   onDecideReissueRequest = () => undefined,
   onPrintApprovedReissueRequest = () => undefined,
   onRefreshPrinterStatus = () => undefined,
+  securePrinterReady = false,
   initialTab = "overview",
   highlightedReissueRequestId = null,
 }: LicenseeBatchWorkspaceDialogProps) {
@@ -294,11 +317,450 @@ export function LicenseeBatchWorkspaceDialog({
   const sourceBatch = workspace?.sourceBatchRow || null;
   const showingApprovedReissueRequests =
     reissueRequestsMode === "print" || reissueRequests.some((request) => request.status === "APPROVED");
+  const isManufacturerMode = role === "manufacturer";
+  const isSuperAdminMode = role === "super_admin" || role === "platform_super_admin";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="batch-workspace-dialog" className="flex h-[90vh] max-h-[90vh] flex-col overflow-hidden p-0 sm:max-w-[980px]">
-        {!workspace ? null : (
+        {!workspace ? null : isManufacturerMode ? (
+          <>
+            <DialogHeader className="border-b px-6 py-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="space-y-2">
+                  <DialogTitle className="text-2xl">{workspace.sourceBatchName}</DialogTitle>
+                  <DialogDescription className="max-w-2xl">
+                    Manufacturer operations for assigned labels, print recovery, replacement requests, and audit history.
+                  </DialogDescription>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <Badge variant="secondary">Assigned batch</Badge>
+                    <Badge variant={statusTone(manufacturerRemainingLabels(workspace))}>
+                      {manufacturerRemainingLabels(workspace).toLocaleString()} remaining labels
+                    </Badge>
+                    <Badge variant="outline">{workspace.originalTotalCodes.toLocaleString()} assigned labels</Badge>
+                  </div>
+                </div>
+                <div className="min-w-[16rem] rounded-lg border bg-muted/20 px-4 py-3 text-sm">
+                  <div className="text-xs font-medium uppercase text-muted-foreground">Assigned label range</div>
+                  <div className="mt-2 font-mono text-xs break-all">
+                    {workspacePrimaryRange(workspace).start}{" to "}{workspacePrimaryRange(workspace).end}
+                  </div>
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    Next printable index: <span className="font-mono">{workspace.remainingRangeStart || "None"}</span>
+                  </div>
+                </div>
+              </div>
+            </DialogHeader>
+
+            <Tabs key={`${workspace.sourceBatchId}:manufacturer:${initialTab}`} defaultValue={initialTab} className="flex min-h-0 flex-1 flex-col">
+              <div className="border-b px-6 py-3">
+                <TabsList className="grid w-full grid-cols-3 sm:w-[26rem]">
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="operations">Operations</TabsTrigger>
+                  <TabsTrigger value="audit">Audit</TabsTrigger>
+                </TabsList>
+              </div>
+              <ScrollArea type="always" scrollHideDelay={0} className="min-h-0 flex-1">
+                <div className="px-6 py-5 pr-8">
+                  <TabsContent value="overview" className="mt-0 space-y-6">
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-lg border bg-muted/20 p-4">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Assigned labels</div>
+                        <div className="mt-3 text-3xl font-semibold">{workspace.originalTotalCodes.toLocaleString()}</div>
+                      </div>
+                      <div className="rounded-lg border bg-muted/20 p-4">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Confirmed printed</div>
+                        <div className="mt-3 text-3xl font-semibold">{workspace.printedCodes.toLocaleString()}</div>
+                      </div>
+                      <div className="rounded-lg border bg-muted/20 p-4">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Remaining labels</div>
+                        <div className="mt-3 text-3xl font-semibold">{manufacturerRemainingLabels(workspace).toLocaleString()}</div>
+                        <div className="mt-2 text-xs text-muted-foreground font-mono break-all">
+                          {workspace.remainingRangeStart && workspace.remainingRangeEnd
+                            ? `${workspace.remainingRangeStart} to ${workspace.remainingRangeEnd}`
+                            : "No printable range remains."}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border bg-muted/20 p-4">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Scanned / blocked</div>
+                        <div className="mt-3 text-3xl font-semibold">{workspace.redeemedCodes.toLocaleString()} / {workspace.blockedCodes.toLocaleString()}</div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border p-4">
+                      <div className="font-semibold">Label ranges</div>
+                      <div className="mt-3 grid gap-3 text-sm md:grid-cols-2">
+                        <div>
+                          <div className="text-xs font-medium text-muted-foreground">Original assigned range</div>
+                          <div className="font-mono text-xs break-all">{workspacePrimaryRange(workspace).start} to {workspacePrimaryRange(workspace).end}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-muted-foreground">Remaining available range</div>
+                          <div className="font-mono text-xs break-all">
+                            {workspace.remainingRangeStart && workspace.remainingRangeEnd
+                              ? `${workspace.remainingRangeStart} to ${workspace.remainingRangeEnd}`
+                              : "None"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="operations" className="mt-0 space-y-5">
+                    <div className="rounded-lg border p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold">Print recovery</div>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Continue from the next printable index before starting a later range.
+                          </p>
+                        </div>
+                        <Badge variant={manufacturerRemainingLabels(workspace) > 0 ? "default" : "secondary"}>
+                          Next printable {workspace.remainingRangeStart || "none"}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        Continue from QR index {workspace.remainingRangeStart || "the next unprinted label"}.
+                        {workspace.remainingRangeStart && workspace.remainingRangeEnd
+                          ? ` Recover unconfirmed range ${workspace.remainingRangeStart}-${workspace.remainingRangeEnd} when a stopped run exists.`
+                          : " No recovery range is currently reported for this batch."}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold">Recent print runs</div>
+                          <p className="mt-1 text-sm text-muted-foreground">Requested label ranges, confirmation counts, printer, operator, and recovery state.</p>
+                        </div>
+                        <Badge variant="secondary">{recentPrintJobs.length} run{recentPrintJobs.length === 1 ? "" : "s"}</Badge>
+                      </div>
+                      {printJobsLoading ? (
+                        <div className="mt-3 rounded-lg border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">Loading recent print runs...</div>
+                      ) : recentPrintJobs.length === 0 ? (
+                        <div className="mt-3 rounded-lg border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">No recent print runs were found for this batch.</div>
+                      ) : (
+                        <div className="mt-3 space-y-3">
+                          {recentPrintJobs.map((job) => (
+                            <div key={job.id} className="rounded-lg border bg-muted/10 p-4">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <div className="font-medium">{job.jobNumber || "Print run"}</div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    Requested range: <span className="font-mono">{printJobRange(job)}</span>
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {job.printer?.name || "Saved printer"} · Operator: {printJobOperator(job)}
+                                  </div>
+                                </div>
+                                <Badge variant={getPrintJobStatusBadgeVariant(job)}>{getPrintJobStageLabel(job)}</Badge>
+                              </div>
+                              <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                                <div>Requested {getPrintRunCounts(job).requested.toLocaleString()}</div>
+                                <div>Confirmed {getPrintRunCounts(job).confirmed.toLocaleString()}</div>
+                                <div>Pending {getPrintRunCounts(job).pending.toLocaleString()}</div>
+                                <div>Failed {getPrintRunCounts(job).failed.toLocaleString()}</div>
+                              </div>
+                              {needsRecovery(job) ? (
+                                <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                                  <div>{getRecoveryInstruction(job).firstLine}</div>
+                                  <div>{getRecoveryInstruction(job).secondLine}</div>
+                                </div>
+                              ) : null}
+                              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                                <Button size="sm" variant="outline">View details</Button>
+                                {needsRecovery(job) ? <Button size="sm" variant="outline">Continue/recover remaining labels</Button> : null}
+                                {canRequestReissue && isEligibleForReissue(job) ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!reissueReason.trim() || reissuingJobId === job.id}
+                                    onClick={() => onRequestReissue(job.id)}
+                                  >
+                                    {reissuingJobId === job.id ? "Submitting..." : "Request reissue"}
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="font-semibold">Replacement labels</div>
+                          <p className="mt-1 text-sm text-muted-foreground">Approved replacements are printed only after printer helper verification is fresh.</p>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={onRefreshReissueRequests} disabled={reissueRequestsLoading}>
+                          {reissueRequestsLoading ? "Refreshing..." : "Refresh"}
+                        </Button>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        <Label htmlFor="manufacturer-reissue-reason">Reissue request reason</Label>
+                        <Input
+                          id="manufacturer-reissue-reason"
+                          value={reissueReason}
+                          onChange={(event) => onReissueReasonChange(event.target.value)}
+                          placeholder="Explain why replacement labels are required"
+                        />
+                      </div>
+                      {reissueRequests.length === 0 ? (
+                        <div className="mt-3 rounded-lg border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">No replacement requests are ready for this batch.</div>
+                      ) : (
+                        <div className="mt-3 space-y-2">
+                          {reissueRequests.map((request) => (
+                            <div
+                              key={request.id}
+                              data-testid={highlightedReissueRequestId === request.id ? "highlighted-reissue-request" : undefined}
+                              className={`rounded-lg border bg-background p-3 text-sm ${
+                                highlightedReissueRequestId === request.id ? "border-emerald-300 bg-emerald-50/60" : ""
+                              }`}
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <div className="font-medium">{request.batch?.name || "Replacement request"}</div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {request.quantity ? `${Number(request.quantity).toLocaleString()} labels · ` : ""}
+                                    {request.status === "APPROVED" ? "Ready after printer verification" : humanStatusLabel(request.status || "requested")}
+                                  </div>
+                                  <div className="mt-2 text-xs text-muted-foreground">{request.reason}</div>
+                                </div>
+                                <Badge variant="secondary">
+                                  {request.status === "APPROVED" ? "Replacement approved" : humanStatusLabel(request.status || "requested")}
+                                </Badge>
+                              </div>
+                              {request.status === "APPROVED" ? (
+                                <div className="mt-3 space-y-2">
+                                  {reissuePrintRecoveryById[request.id] || !securePrinterReady ? (
+                                    <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                                      {reissuePrintRecoveryById[request.id] || "Printer verification expired. Refresh printer helper before printing."}
+                                    </div>
+                                  ) : null}
+                                  <div className="flex flex-wrap justify-end gap-2">
+                                    <Button size="sm" variant="outline" onClick={onRefreshPrinterStatus}>
+                                      Refresh printer helper
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      disabled={!securePrinterReady || printingReissueRequestId === request.id}
+                                      onClick={() => onPrintApprovedReissueRequest(request.id)}
+                                    >
+                                      {printingReissueRequestId === request.id ? "Checking printer..." : "Print replacement labels"}
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="audit" className="mt-0 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 px-4 py-3 text-sm">
+                      <div>
+                        <div className="font-semibold">Manufacturer-safe audit</div>
+                        <div className="text-xs text-muted-foreground">
+                          {historyLastUpdatedAt ? `Updated ${format(historyLastUpdatedAt, "PPp")}` : "Waiting for first snapshot..."}
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={onRefreshHistory} disabled={historyLoading}>
+                        <RefreshButtonLabel loading={historyLoading} />
+                      </Button>
+                    </div>
+                    {historyLoading ? (
+                      <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">Loading audit history...</div>
+                    ) : historyLogs.length === 0 ? (
+                      <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">No manufacturer-safe history found for this batch.</div>
+                    ) : (
+                      <div className="space-y-3">
+                        {historyLogs.map((log, index) => (
+                          <div key={log.id || `${log.createdAt}-${index}`} className="rounded-lg border p-4">
+                            {log.eventType ? <Badge className={eventBadgeClass(log.eventType)}>{humanStatusLabel(log.eventType)}</Badge> : null}
+                            <div className="mt-2 font-medium">{historySummary(log)}</div>
+                            <div className="mt-2 text-xs text-muted-foreground">By {historyActor(log)} · {log.createdAt ? format(new Date(log.createdAt), "PPp") : "-"}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                </div>
+              </ScrollArea>
+            </Tabs>
+          </>
+        ) : isSuperAdminMode ? (
+          <>
+            <DialogHeader className="border-b px-6 py-5">
+              <DialogTitle className="text-2xl">{workspace.sourceBatchName}</DialogTitle>
+              <DialogDescription className="max-w-2xl">
+                Super admin governance view for ownership, allocation ranges, reissue decisions, QR state, and audit oversight.
+              </DialogDescription>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant="secondary">Platform governance</Badge>
+                <Badge variant="outline">{workspace.originalTotalCodes.toLocaleString()} total labels</Badge>
+                <Badge variant={workspace.blockedCodes > 0 ? "destructive" : "secondary"}>{workspace.blockedCodes.toLocaleString()} canceled/replaced or blocked</Badge>
+              </div>
+            </DialogHeader>
+            <Tabs key={`${workspace.sourceBatchId}:super:${initialTab}`} defaultValue={initialTab} className="flex min-h-0 flex-1 flex-col">
+              <div className="border-b px-6 py-3">
+                <TabsList className="grid w-full grid-cols-3 sm:w-[28rem]">
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="operations">Governance</TabsTrigger>
+                  <TabsTrigger value="audit">Audit</TabsTrigger>
+                </TabsList>
+              </div>
+              <ScrollArea type="always" scrollHideDelay={0} className="min-h-0 flex-1">
+                <div className="px-6 py-5 pr-8">
+                  <TabsContent value="overview" className="mt-0 space-y-5">
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-lg border bg-muted/20 p-4">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Ownership chain</div>
+                        <div className="mt-3 text-sm font-semibold">{workspace.licensee?.name || "Licensee not recorded"}</div>
+                        <div className="text-xs text-muted-foreground">{workspace.manufacturerCount.toLocaleString()} manufacturer allocation{workspace.manufacturerCount === 1 ? "" : "s"}</div>
+                      </div>
+                      <div className="rounded-lg border bg-muted/20 p-4">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Original QR range</div>
+                        <div className="mt-3 font-mono text-xs break-all">{workspace.sourceOriginalRangeStart} to {workspace.sourceOriginalRangeEnd}</div>
+                      </div>
+                      <div className="rounded-lg border bg-muted/20 p-4">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Printed / remaining</div>
+                        <div className="mt-3 text-2xl font-semibold">{workspace.printedCodes.toLocaleString()} / {workspace.pendingPrintableCodes.toLocaleString()}</div>
+                      </div>
+                      <div className="rounded-lg border bg-muted/20 p-4">
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Public QR state</div>
+                        <div className="mt-3 text-sm">Canceled/replaced: {workspace.blockedCodes.toLocaleString()}</div>
+                        <div className="text-xs text-muted-foreground">Original and replacement QR verification state is controlled by backend policy.</div>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border p-4">
+                      <div className="font-semibold">Allocation / ranges</div>
+                      <div className="mt-3 space-y-3">
+                        {workspace.allocations.length === 0 ? (
+                          <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">No manufacturer allocations found.</div>
+                        ) : workspace.allocations.map((allocation) => (
+                          <div key={allocation.batchId} className="rounded-md border bg-muted/10 p-3 text-sm">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="font-medium">{allocation.manufacturerName}</div>
+                                <div className="font-mono text-xs text-muted-foreground">{allocation.batchRangeStart} to {allocation.batchRangeEnd}</div>
+                              </div>
+                              <Badge variant="secondary">{allocation.allocatedCodes.toLocaleString()} assigned</Badge>
+                            </div>
+                            <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                              <div>Confirmed {allocation.printedCodes.toLocaleString()}</div>
+                              <div>Remaining {allocation.printableCodes.toLocaleString()}</div>
+                              <div>Scanned {allocation.redeemedCodes.toLocaleString()}</div>
+                              <div>Canceled/replaced {allocation.blockedCodes.toLocaleString()}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="operations" className="mt-0 space-y-5">
+                    <div className="rounded-lg border p-4">
+                      <div className="font-semibold">Reissue / replacement approvals</div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Super admin approves or rejects replacement allocation. Manufacturer-local print jobs are not started from this governance view.
+                      </p>
+                      <div className="mt-3 space-y-2">
+                        <Label htmlFor="super-reissue-decision-note">Decision note</Label>
+                        <Input
+                          id="super-reissue-decision-note"
+                          value={reissueDecisionNote}
+                          onChange={(event) => onReissueDecisionNoteChange(event.target.value)}
+                          placeholder="Explain the platform decision"
+                        />
+                      </div>
+                      {reissueRequests.length === 0 ? (
+                        <div className="mt-3 rounded-lg border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">No forwarded reissue requests are waiting for super admin decision.</div>
+                      ) : (
+                        <div className="mt-3 space-y-2">
+                          {reissueRequests.map((request) => (
+                            <div
+                              key={request.id}
+                              data-testid={highlightedReissueRequestId === request.id ? "highlighted-reissue-request" : undefined}
+                              className={`rounded-lg border bg-background p-3 text-sm ${
+                                highlightedReissueRequestId === request.id ? "border-emerald-300 bg-emerald-50/60" : ""
+                              }`}
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <div className="font-medium">{request.batch?.name || "Forwarded reissue request"}</div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    Requested by {request.requestedBy?.name || "User"} · {request.quantity ? `${Number(request.quantity).toLocaleString()} labels` : "Quantity pending"}
+                                  </div>
+                                  <div className="mt-2 text-xs text-muted-foreground">{request.reason}</div>
+                                </div>
+                                <Badge variant="secondary">{request.targetApproverRole === "SUPER_ADMIN" ? "Super admin review" : humanStatusLabel(request.status || "review")}</Badge>
+                              </div>
+                              {request.status === "PENDING" || request.targetApproverRole === "SUPER_ADMIN" ? (
+                                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={decidingReissueRequestId === request.id || reissueDecisionNote.trim().length < 8}
+                                    onClick={() => onDecideReissueRequest(request.id, "reject")}
+                                  >
+                                    Reject
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    disabled={decidingReissueRequestId === request.id || reissueDecisionNote.trim().length < 8}
+                                    onClick={() => onDecideReissueRequest(request.id, "approve")}
+                                  >
+                                    {decidingReissueRequestId === request.id ? "Saving..." : "Approve replacement allocation"}
+                                  </Button>
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-lg border p-4">
+                      <div className="font-semibold">Print recovery oversight</div>
+                      <div className="mt-2 text-sm text-muted-foreground">
+                        Recovery-needed range: <span className="font-mono">{workspace.remainingRangeStart && workspace.remainingRangeEnd ? `${workspace.remainingRangeStart} to ${workspace.remainingRangeEnd}` : "None reported"}</span>
+                      </div>
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="audit" className="mt-0 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 px-4 py-3 text-sm">
+                      <div>
+                        <div className="font-semibold">Platform audit trail</div>
+                        <div className="text-xs text-muted-foreground">
+                          {historyLastUpdatedAt ? `Updated ${format(historyLastUpdatedAt, "PPp")}` : "Waiting for first snapshot..."}
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={onRefreshHistory} disabled={historyLoading}>
+                        <RefreshButtonLabel loading={historyLoading} />
+                      </Button>
+                    </div>
+                    {historyLoading ? (
+                      <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">Loading audit history...</div>
+                    ) : historyLogs.length === 0 ? (
+                      <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">No audit history found for this batch.</div>
+                    ) : (
+                      <div className="space-y-3">
+                        {historyLogs.map((log, index) => (
+                          <div key={log.id || `${log.createdAt}-${index}`} className="rounded-lg border p-4">
+                            {log.eventType ? <Badge className={eventBadgeClass(log.eventType)}>{humanStatusLabel(log.eventType)}</Badge> : null}
+                            <div className="mt-2 font-medium">{historySummary(log)}</div>
+                            <div className="mt-2 text-xs text-muted-foreground">By {historyActor(log)} · {log.createdAt ? format(new Date(log.createdAt), "PPp") : "-"}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                </div>
+              </ScrollArea>
+            </Tabs>
+          </>
+        ) : (
           <>
             <DialogHeader className="border-b px-6 py-5">
               <div className="flex flex-wrap items-start justify-between gap-4">

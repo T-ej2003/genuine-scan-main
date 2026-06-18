@@ -243,7 +243,7 @@ describe("DashboardLayout printer connection dialog", () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /printing needs help/i }));
+    fireEvent.click(screen.getByRole("button", { name: /printing needs review/i }));
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalled();
@@ -330,7 +330,7 @@ describe("DashboardLayout printer connection dialog", () => {
     });
 
     expect(screen.queryByText("Set up printing on this computer")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /printing ready/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /printing needs review/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /printer setup/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /install printer helper/i })).not.toBeInTheDocument();
   });
@@ -399,7 +399,7 @@ describe("DashboardLayout printer connection dialog", () => {
     expect(screen.queryByText("Printing Status")).not.toBeInTheDocument();
   });
 
-  it("shows secure verification pending as a non-blocking ready notice", async () => {
+  it("shows secure verification pending as a blocking helper refresh notice", async () => {
     localStorageState.set(onboardingKey, "dismissed");
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
       success: true,
@@ -493,18 +493,18 @@ describe("DashboardLayout printer connection dialog", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /printing ready/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /printing needs review/i })).toBeInTheDocument();
     });
     expect(vi.mocked(apiClient.getPrinterConnectionStatus)).not.toHaveBeenCalled();
     expect(screen.queryByText("Recovery mode")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /printing ready/i }));
+    fireEvent.click(screen.getByRole("button", { name: /printing needs review/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Printing Status")).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText(/secure printer verification is still finishing\. printing can continue/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Printer verification expired\. Refresh printer helper before printing\./i).length).toBeGreaterThan(0);
     expect(screen.queryByText("Recovery mode")).not.toBeInTheDocument();
   });
 
@@ -821,7 +821,7 @@ describe("DashboardLayout printer connection dialog", () => {
       </MemoryRouter>
     );
 
-    const statusButton = await screen.findByRole("button", { name: /printing needs help/i });
+    const statusButton = await screen.findByRole("button", { name: /printing needs review/i });
     fireEvent.click(statusButton);
 
     await waitFor(() => {

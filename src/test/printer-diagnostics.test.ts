@@ -245,6 +245,42 @@ describe("printer diagnostics summary", () => {
     expect(display.modeLabel).toBe("Needs review");
   });
 
+  it("does not show ready when secure printer verification is missing mTLS evidence", () => {
+    const summary = getPrinterDiagnosticSummary({
+      localAgent: { reachable: true, connected: true, error: null },
+      remoteStatus: {
+        connected: false,
+        trusted: false,
+        compatibilityMode: false,
+        eligibleForPrinting: false,
+        connectionClass: "BLOCKED",
+        stale: true,
+        trustStatus: "FAILED",
+        trustReason: "mTLS client certificate fingerprint header missing",
+        lastHeartbeatAt: new Date(Date.now() - 145_000).toISOString(),
+        ageSeconds: 145,
+        selectedPrinterId: "ZDesigner ZT410-300dpi ZPL",
+        selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
+        printers: [{ printerId: "ZDesigner ZT410-300dpi ZPL", printerName: "ZDesigner ZT410-300dpi ZPL", online: true }],
+      },
+      printers: [{ printerId: "ZDesigner ZT410-300dpi ZPL", printerName: "ZDesigner ZT410-300dpi ZPL", online: true }],
+      selectedPrinterId: "ZDesigner ZT410-300dpi ZPL",
+    });
+    const display = buildPrinterReadinessDisplay({
+      diagnostics: summary,
+      ready: false,
+      stale: true,
+      trusted: false,
+      compatibilityMode: false,
+      identityLabel: "ZDesigner ZT410-300dpi ZPL",
+    });
+
+    expect(display.badgeLabel).toBe("Needs check");
+    expect(display.modeLabel).toBe("Needs review");
+    expect(display.summary).toBe("Printer verification expired. Refresh printer helper before printing.");
+    expect(display.blocksPrintStart).toBe(true);
+  });
+
   it("keeps the live local printer summary primary when local inventory exists", () => {
     expect(
       shouldPreferNetworkDirectSummary({

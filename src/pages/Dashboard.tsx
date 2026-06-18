@@ -288,7 +288,7 @@ export default function Dashboard() {
   const scansToday = qrStatsExtras?.scansToday ?? qrStatsExtras?.todayScans ?? null;
   const qrLabelsAvailable = qrStatusData.dormant + qrStatusData.allocated;
 
-  const roleLabel = useMemo(() => getRoleDisplayLabel(user?.role), [user?.role]);
+  const roleLabel = useMemo(() => getRoleDisplayLabel(user?.role, user?.rawRole), [user?.rawRole, user?.role]);
   const normalizedRole = String(user?.role || "").toLowerCase();
   const isPlatformAdmin = normalizedRole === "super_admin" || normalizedRole === "platform_super_admin";
 

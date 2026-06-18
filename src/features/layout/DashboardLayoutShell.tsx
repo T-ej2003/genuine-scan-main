@@ -79,7 +79,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   const workspaceLabel = resolveWorkspaceLabel(user);
   const currentPageLabel = breadcrumbs[breadcrumbs.length - 1]?.label || "Workspace";
-  const roleLabel = getRoleDisplayLabel(user?.role);
+  const roleLabel = getRoleDisplayLabel(user?.role, user?.rawRole);
 
   const contextPanel = (
     <ContextualIntelligencePanel

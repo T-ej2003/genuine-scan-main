@@ -221,6 +221,8 @@ export type PrintJobRow = {
   printMode: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP";
   quantity: number;
   itemCount?: number | null;
+  rangeStart?: string | null;
+  rangeEnd?: string | null;
   reprintOfJobId?: string | null;
   reprintReason?: string | null;
   failureReason?: string | null;

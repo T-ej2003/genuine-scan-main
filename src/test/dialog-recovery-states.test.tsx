@@ -321,6 +321,204 @@ describe("dialog recovery states", () => {
     expect(screen.getByText("Operator: Priya Operator")).toBeInTheDocument();
   });
 
+  it("renders manufacturer batch modal with remaining labels, requested range, and no source-batch sample proof", () => {
+    render(
+      <MemoryRouter>
+        <LicenseeBatchWorkspaceDialog
+          open
+          onOpenChange={noop}
+          role="manufacturer"
+          workspace={{
+            sourceBatchId: "batch-mfg",
+            focusBatchId: "batch-mfg",
+            sourceBatchName: "Manufacturer Launch Batch",
+            sourceBatchRow: null,
+            licensee: { id: "lic-1", name: "Acme", prefix: "ACM" },
+            sourceCreatedAt: "2026-06-18T10:00:00.000Z",
+            sourceUpdatedAt: "2026-06-18T10:00:00.000Z",
+            sourceOriginalRangeStart: "QR-000001",
+            sourceOriginalRangeEnd: "QR-001000",
+            originalTotalCodes: 1000,
+            remainingUnassignedCodes: 0,
+            remainingRangeStart: "QR-000075",
+            remainingRangeEnd: "QR-001000",
+            assignedCodes: 1000,
+            pendingPrintableCodes: 925,
+            printedCodes: 74,
+            redeemedCodes: 1,
+            blockedCodes: 0,
+            manufacturerCount: 1,
+            allocations: [
+              {
+                batchId: "batch-mfg",
+                batchName: "Manufacturer Launch Batch",
+                manufacturerId: "mfg-1",
+                manufacturerName: "Factory",
+                allocatedCodes: 1000,
+                printableCodes: 925,
+                printedCodes: 74,
+                redeemedCodes: 1,
+                blockedCodes: 0,
+                createdAt: "2026-06-18T10:00:00.000Z",
+                batchRangeStart: "QR-000001",
+                batchRangeEnd: "QR-001000",
+                currentRangeStart: "QR-000075",
+                currentRangeEnd: "QR-001000",
+              },
+            ],
+            manufacturerSummary: [],
+            printedAt: null,
+          }}
+          manufacturers={[]}
+          assignManufacturerId=""
+          assignQuantity=""
+          assigning={false}
+          onAssignManufacturerChange={noop}
+          onAssignQuantityChange={noop}
+          onSubmitAssign={noop}
+          onOpenRename={noop}
+          onOpenAllocationMap={noop}
+          onDownloadAudit={noop}
+          onDelete={noop}
+          canAssignManufacturer={false}
+          canDelete={false}
+          exportingAudit={false}
+          historyLoading={false}
+          historyLogs={[]}
+          historyLastUpdatedAt={null}
+          onRefreshHistory={noop}
+          recentPrintJobs={[
+            {
+              id: "job-range",
+              jobNumber: "PJ-RANGE",
+              status: "CONFIRMED",
+              pipelineState: "PRINT_CONFIRMED",
+              printMode: "LOCAL_AGENT",
+              quantity: 10,
+              itemCount: 10,
+              rangeStart: "QR-000065",
+              rangeEnd: "QR-000074",
+              createdAt: "2026-06-18T10:01:00.000Z",
+              printer: { name: "ZDesigner" },
+              operator: { name: "Priya Operator" },
+              session: { confirmedItems: 10, remainingToPrint: 0 },
+            } as any,
+          ]}
+          printJobsLoading={false}
+          canRequestReissue
+          reissueReason="Damaged labels"
+          onReissueReasonChange={noop}
+          onRequestReissue={noop}
+            reissuingJobId={null}
+            reissueRequests={[
+              {
+                id: "reissue-ready",
+                status: "APPROVED",
+                reason: "Damaged labels",
+                printJobId: "job-range",
+                printJob: { jobNumber: "PJ-RANGE" },
+              },
+            ]}
+            reissueRequestsMode="print"
+            initialTab="operations"
+            securePrinterReady={false}
+          />
+      </MemoryRouter>
+    );
+
+    expect(screen.getAllByText(/remaining labels/i).length).toBeGreaterThan(0);
+    expect(screen.getByText((_, element) => element?.textContent === "925 remaining labels")).toBeInTheDocument();
+    expect(screen.getByText(/Requested range:/)).toBeInTheDocument();
+    expect(screen.getByText("QR-000065 to QR-000074")).toBeInTheDocument();
+    expect(screen.queryByText(/source batch/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample scan proof/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Printer verification expired\. Refresh printer helper before printing\./)).toBeInTheDocument();
+  });
+
+  it("renders super-admin governance modal without manufacturer-local print controls", () => {
+    const onDecide = vi.fn();
+    render(
+      <MemoryRouter>
+        <LicenseeBatchWorkspaceDialog
+          open
+          onOpenChange={noop}
+          role="super_admin"
+          workspace={{
+            sourceBatchId: "batch-super",
+            focusBatchId: "batch-super",
+            sourceBatchName: "Platform Batch",
+            sourceBatchRow: null,
+            licensee: { id: "lic-1", name: "Acme", prefix: "ACM" },
+            sourceCreatedAt: "2026-06-18T10:00:00.000Z",
+            sourceUpdatedAt: "2026-06-18T10:00:00.000Z",
+            sourceOriginalRangeStart: "QR-000001",
+            sourceOriginalRangeEnd: "QR-000100",
+            originalTotalCodes: 100,
+            remainingUnassignedCodes: 0,
+            remainingRangeStart: "QR-000076",
+            remainingRangeEnd: "QR-000100",
+            assignedCodes: 100,
+            pendingPrintableCodes: 25,
+            printedCodes: 75,
+            redeemedCodes: 0,
+            blockedCodes: 2,
+            manufacturerCount: 1,
+            allocations: [],
+            manufacturerSummary: [],
+            printedAt: null,
+          }}
+          manufacturers={[]}
+          assignManufacturerId=""
+          assignQuantity=""
+          assigning={false}
+          onAssignManufacturerChange={noop}
+          onAssignQuantityChange={noop}
+          onSubmitAssign={noop}
+          onOpenRename={noop}
+          onOpenAllocationMap={noop}
+          onDownloadAudit={noop}
+          onDelete={noop}
+          canAssignManufacturer={false}
+          canDelete={false}
+          exportingAudit={false}
+          historyLoading={false}
+          historyLogs={[]}
+          historyLastUpdatedAt={null}
+          onRefreshHistory={noop}
+          recentPrintJobs={[]}
+          printJobsLoading={false}
+          canRequestReissue
+          reissueReason=""
+          onReissueReasonChange={noop}
+          onRequestReissue={noop}
+          reissuingJobId={null}
+          reissueDecisionNote="Approved after review"
+          onReissueDecisionNoteChange={noop}
+          onDecideReissueRequest={onDecide}
+          reissueRequests={[
+            {
+              id: "reissue-1",
+              status: "PENDING",
+              targetApproverRole: "SUPER_ADMIN",
+              quantity: 2,
+              reason: "Damaged confirmed labels",
+              requestedBy: { name: "Licensee Admin" },
+              batch: { name: "Platform Batch" },
+            },
+          ]}
+          initialTab="operations"
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText(/Super admin approves or rejects replacement allocation/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve replacement allocation" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Print replacement labels" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample scan proof/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Approve replacement allocation" }));
+    expect(onDecide).toHaveBeenCalledWith("reissue-1", "approve");
+  });
+
   it("shows active local-agent print controls without waiting for recent jobs", () => {
     const onOpenControl = vi.fn();
     const onRefresh = vi.fn();

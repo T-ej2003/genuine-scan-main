@@ -477,6 +477,8 @@ const buildPrintJobView = async (job: {
   printMode: PrintDispatchMode;
   quantity: number;
   itemCount: number | null;
+  rangeStart?: string | null;
+  rangeEnd?: string | null;
   reprintOfJobId: string | null;
   reprintReason: string | null;
   failureReason: string | null;
@@ -536,6 +538,8 @@ const buildPrintJobView = async (job: {
     printMode: job.printMode,
     quantity: job.quantity,
     itemCount: job.itemCount || job.quantity,
+    rangeStart: job.rangeStart || null,
+    rangeEnd: job.rangeEnd || null,
     reprintOfJobId: job.reprintOfJobId,
     reprintReason: job.reprintReason,
     failureReason: job.failureReason,
