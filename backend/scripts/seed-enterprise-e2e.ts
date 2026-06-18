@@ -14,8 +14,8 @@ import {
 } from "@prisma/client";
 import { createHash } from "crypto";
 
+import { hashBackupCode } from "../src/services/auth/backupCodeHashService";
 import { hashPassword } from "../src/services/auth/passwordService";
-import { hashToken } from "../src/utils/security";
 import {
   LOCAL_AGENT_CAPABILITIES,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
@@ -81,7 +81,6 @@ const printCodes = Array.from({ length: 10 }, (_, index) => `E2E2000000${String(
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const now = () => new Date();
 const backupCodeShapeOk = (code: string) => /^[A-Za-z0-9]{4,8}-[A-Za-z0-9]{4,8}$/.test(code);
-const hashBackupCode = (code: string) => hashToken(code.trim().toUpperCase());
 
 const e2ePrinterTestLabelMetadata = (confirmedAt: Date) => ({
   lastTestLabelConfirmedAt: confirmedAt.toISOString(),

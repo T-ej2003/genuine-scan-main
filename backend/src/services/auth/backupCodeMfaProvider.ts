@@ -1,7 +1,9 @@
 import { randomBytes } from "crypto";
 
 import prisma from "../../config/database";
-import { buildTokenHashCandidates, hashToken, matchesHashedToken } from "../../utils/security";
+import { buildBackupCodeHashCandidates, hashBackupCode, matchesBackupCodeHash } from "./backupCodeHashService";
+
+export { hashBackupCode } from "./backupCodeHashService";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = Number(String(process.env[key] || "").trim());
@@ -18,8 +20,6 @@ export const generateBackupCodes = (count = getBackupCodeCount()) => {
   }
   return out;
 };
-
-export const hashBackupCode = (code: string) => hashToken(String(code || "").trim().toUpperCase());
 
 export const backupCodeShapeOk = (code: string) => /^[A-Za-z0-9]{4,8}-[A-Za-z0-9]{4,8}$/.test(String(code || "").trim());
 
@@ -40,7 +40,7 @@ export const replaceUserBackupCodes = async (params: { userId: string; codes: st
 export const consumeUserBackupCode = async (params: { userId: string; code: string }) => {
   const normalized = String(params.code || "").trim().toUpperCase();
   if (!backupCodeShapeOk(normalized)) return false;
-  const candidates = buildTokenHashCandidates(normalized);
+  const candidates = buildBackupCodeHashCandidates(normalized);
   const consumed = await prisma.userBackupCode.updateMany({
     where: {
       userId: params.userId,
@@ -62,7 +62,7 @@ export const consumeLegacyBackupCode = async (params: {
   const normalized = String(params.code || "").trim().toUpperCase();
   if (!backupCodeShapeOk(normalized)) return false;
 
-  const index = params.codesHash.findIndex((entry) => matchesHashedToken(normalized, entry));
+  const index = params.codesHash.findIndex((entry) => matchesBackupCodeHash(normalized, entry));
   if (index < 0) return false;
 
   const updated = [...params.codesHash];

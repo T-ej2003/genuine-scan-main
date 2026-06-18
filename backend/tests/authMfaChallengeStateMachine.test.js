@@ -565,6 +565,14 @@ const run = async () => {
   assert.strictEqual(tooMany.retryAfterSeconds, 60);
 
   const backupSetup = await reset();
+  assert(
+    backupCodeRows.every((row) => String(row.codeHash || "").startsWith("scrypt-sha256:")),
+    "new MFA backup-code rows must use the strengthened backup-code hash format"
+  );
+  assert(
+    credential.backupCodesHash.every((hash) => String(hash || "").startsWith("scrypt-sha256:")),
+    "legacy MFA backup-code mirror must use the strengthened backup-code hash format"
+  );
   const backupChallenge = await makeChallenge();
   const backup = await completeAdminMfaChallenge({
     userId: "admin-1",
