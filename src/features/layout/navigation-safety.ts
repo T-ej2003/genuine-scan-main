@@ -38,6 +38,25 @@ export const resolveNotificationTarget = (notification: DashboardNotification) =
       : {};
 
   if (isSafeInternalRoute(data.targetRoute)) return String(data.targetRoute).trim();
+  const entityType = String(data.entityType || "").trim();
+  if (
+    (entityType === "reissue_request" || entityType === "replacement_allocation" || data.reissueRequestId) &&
+    data.batchId
+  ) {
+    const params = new URLSearchParams();
+    params.set("batchId", String(data.batchId));
+    params.set("tab", "reissue");
+    if (data.reissueRequestId) params.set("reissueRequestId", String(data.reissueRequestId));
+    if (data.replacementPrintJobId) params.set("printJobId", String(data.replacementPrintJobId));
+    return `${APP_PATHS.batches}?${params.toString()}`;
+  }
+  if ((entityType === "batch" || entityType === "print_run" || data.printJobId) && data.batchId) {
+    const params = new URLSearchParams();
+    params.set("batchId", String(data.batchId));
+    params.set("tab", entityType === "print_run" || data.printJobId ? "operations" : "overview");
+    if (data.printJobId) params.set("printJobId", String(data.printJobId));
+    return `${APP_PATHS.batches}?${params.toString()}`;
+  }
   if (data.ticketId) return `${APP_PATHS.support}?ticketId=${encodeURIComponent(String(data.ticketId))}`;
   if (data.ticketReference) return `${APP_PATHS.support}?reference=${encodeURIComponent(String(data.ticketReference))}`;
   if (notification?.incidentId) return `${APP_PATHS.incidentResponse}?incidentId=${encodeURIComponent(String(notification.incidentId))}`;

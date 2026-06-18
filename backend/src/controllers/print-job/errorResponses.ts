@@ -24,6 +24,7 @@ type PrintJobErrorCode =
   | "printer_selection_mismatch"
   | "printer_status_unavailable"
   | "PRINTER_TEST_LABEL_REQUIRED"
+  | "RECOVERY_REQUIRED_BEFORE_NEW_PRINT"
   | "print_job_conflict"
   | "print_job_transaction_failed"
   | "print_item_reservation_failed"
@@ -124,6 +125,7 @@ const batchStateErrorCodes = new Set<PrintJobErrorCode>([
   "BATCH_ALREADY_RELEASED",
   "QR_NOT_IN_PRINT_JOB",
   "INVALID_STATE_TRANSITION",
+  "RECOVERY_REQUIRED_BEFORE_NEW_PRINT",
 ]);
 
 const classifyPrinterReadinessError = (printerStatus: PrinterStatusLike | null | undefined): PrintJobErrorCode => {

@@ -158,7 +158,10 @@ export const createAuthorizedPrintReissue = async (params: {
           },
         });
         if (claimed.count !== 1) {
-          throw Object.assign(new Error("PRINT_REISSUE_ALREADY_EXECUTED"), { statusCode: 409 });
+          throw Object.assign(new Error("Replacement labels were already allocated for this reissue request."), {
+            code: "REPLACEMENT_ALREADY_ALLOCATED",
+            statusCode: 409,
+          });
         }
       }
 
@@ -225,11 +228,8 @@ export const createAuthorizedPrintReissue = async (params: {
           where: {
             id: reusablePrintItemId,
             qrCodeId: item.qr.id,
-            agentAckedAt: null,
-            dispatchedAt: null,
             printConfirmedAt: null,
-            deviceJobRef: null,
-            state: { in: [PrintItemState.FAILED, PrintItemState.FROZEN] },
+            state: { in: [PrintItemState.FAILED, PrintItemState.FROZEN, PrintItemState.CANCELLED] },
           },
           data: buildReusablePrintItemResetData(now),
         });
@@ -325,12 +325,19 @@ export const createAuthorizedPrintReissue = async (params: {
       title: "Authorized reissue created",
       body: `A controlled reissue was authorized for ${originalJob.batch.name}.`,
       data: {
+        entityType: "replacement_allocation",
+        entityId: created.replacementJob.id,
         originalPrintJobId: originalJob.id,
         replacementPrintJobId: created.replacementJob.id,
+        reissueRequestId: created.reissueRequest.id,
         printSessionId: created.session.id,
         batchId: originalJob.batch.id,
+        licenseeId: originalJob.batch.licenseeId,
+        manufacturerId: originalJob.manufacturerId,
         quantity,
-        targetRoute: "/batches",
+        preferredTab: "reissue",
+        preferredSection: "replacement-ready",
+        targetRoute: `/batches?batchId=${encodeURIComponent(originalJob.batch.id)}&tab=reissue&reissueRequestId=${encodeURIComponent(created.reissueRequest.id)}&printJobId=${encodeURIComponent(created.replacementJob.id)}`,
       },
     }),
   ]);

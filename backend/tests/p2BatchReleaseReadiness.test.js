@@ -229,8 +229,53 @@ const createReadyBatchWithAcknowledgedPrintJob = async (prisma, params) => {
   return { batch, qrRows, printJob, printSession };
 };
 
-const confirmScanAndRelease = async ({ request, tokens, batch, printJob, qrCode }) => {
-  await confirmAndSample({ request, tokens, printJob, qrCode });
+const confirmPrintJobViaConnector = async ({ prisma, printJob, printSession, actorUserId }) => {
+  const { confirmPrintItemDispatch } = loadDist("services/printConfirmationService");
+  const items = await prisma.printItem.findMany({
+    where: { printSessionId: printSession.id },
+    orderBy: [{ issueSequence: "asc" }, { code: "asc" }],
+    select: { id: true, deviceJobRef: true, dispatchMetadata: true },
+  });
+  assert.strictEqual(items.length, printJob.quantity, "connector helper should see every acknowledged print item");
+
+  for (const item of items) {
+    const metadata =
+      item.dispatchMetadata && typeof item.dispatchMetadata === "object" && !Array.isArray(item.dispatchMetadata)
+        ? item.dispatchMetadata
+        : {};
+    await confirmPrintItemDispatch({
+      printSessionId: printSession.id,
+      printJobId: printJob.id,
+      batchId: printJob.batchId,
+      printItemId: item.id,
+      actorUserId,
+      dispatchMode: PrintDispatchMode.NETWORK_DIRECT,
+      payloadType: PrintPayloadType.ZPL,
+      payloadHash: printJob.payloadHash,
+      bytesWritten: Number(metadata.bytesWritten || 128),
+      deviceJobRef: item.deviceJobRef || `p2-connector-${item.id}`,
+      dispatchMetadata: {
+        ...metadata,
+        confirmationSource: "p2_connector_physical_confirmation",
+      },
+      confirmationMode: "ZEBRA_ODOMETER",
+      confirmationEvidence: {
+        p2ConnectorConfirmed: true,
+        deviceJobRef: item.deviceJobRef || `p2-connector-${item.id}`,
+      },
+    });
+  }
+
+  const confirmed = await prisma.printJob.findUnique({
+    where: { id: printJob.id },
+    select: { status: true, confirmedAt: true },
+  });
+  assert.strictEqual(confirmed.status, PrintJobStatus.CONFIRMED, "connector confirmation should confirm the print job");
+  assert(confirmed.confirmedAt, "connector confirmation should set confirmedAt");
+};
+
+const confirmScanAndRelease = async ({ request, tokens, prisma, batch, printJob, printSession, qrCode }) => {
+  await confirmAndSample({ request, tokens, prisma, printJob, printSession, qrCode });
 
   const release = await request("POST", `/api/qr/batches/${batch.id}/release`, null, {
     headers: authHeader(tokens.manufacturerA),
@@ -240,14 +285,13 @@ const confirmScanAndRelease = async ({ request, tokens, batch, printJob, qrCode 
   return release;
 };
 
-const confirmAndSample = async ({ request, tokens, printJob, qrCode }) => {
-  const confirm = await request(
-    "POST",
-    `/api/manufacturer/print-jobs/${printJob.id}/confirm`,
-    { operatorNote: "P2 operator confirmed physical labels printed." },
-    { headers: authHeader(tokens.manufacturerA) }
-  );
-  assert.strictEqual(confirm.status, 200, confirm.text);
+const confirmAndSample = async ({ request, tokens, prisma, printJob, printSession, qrCode }) => {
+  await confirmPrintJobViaConnector({
+    prisma,
+    printJob,
+    printSession,
+    actorUserId: ids.manufacturerA,
+  });
 
   const sample = await request(
     "POST",
@@ -268,7 +312,7 @@ const createHighValueApprovalRequest = async ({ request, tokens, prisma, printer
     quantity: 2,
     startNumber,
   });
-  await confirmAndSample({ request, tokens, printJob: high.printJob, qrCode: high.qrRows[0] });
+  await confirmAndSample({ request, tokens, prisma, printJob: high.printJob, printSession: high.printSession, qrCode: high.qrRows[0] });
   const response = await request("POST", `/api/qr/batches/${high.batch.id}/release`, null, {
     headers: authHeader(tokens.manufacturerA),
   });
@@ -307,20 +351,52 @@ let skipped = false;
         startNumber: 710001,
       });
 
-      await request(
-        "POST",
-        `/api/manufacturer/print-jobs/${other.printJob.id}/confirm`,
-        { operatorNote: "P2 other batch printed." },
-        { headers: authHeader(tokens.manufacturerA) }
-      );
-
       const confirmPrimary = await request(
         "POST",
         `/api/manufacturer/print-jobs/${lifecycle.printJob.id}/confirm`,
         { operatorNote: "P2 operator confirmed physical labels printed." },
         { headers: authHeader(tokens.manufacturerA) }
       );
-      assert.strictEqual(confirmPrimary.status, 200, confirmPrimary.text);
+      assert.strictEqual(confirmPrimary.status, 409, confirmPrimary.text);
+      assert.strictEqual(confirmPrimary.payload.code, "PHYSICAL_CONFIRMATION_REQUIRED");
+      assert.strictEqual(confirmPrimary.payload.errorCode, "PHYSICAL_CONFIRMATION_REQUIRED");
+      assert.match(confirmPrimary.payload.message, /waiting for connector physical confirmation/i);
+      assert.match(confirmPrimary.payload.recoveryAction, /connector|recover/i);
+
+      const blockedState = await prisma.printJob.findUnique({
+        where: { id: lifecycle.printJob.id },
+        select: {
+          status: true,
+          confirmedAt: true,
+          printSession: { select: { confirmedItems: true } },
+          qrCodes: { select: { status: true, printedAt: true }, orderBy: { displayCode: "asc" } },
+        },
+      });
+      assert.strictEqual(blockedState.status, PrintJobStatus.SENT, "browser confirm must not confirm the print job");
+      assert.strictEqual(blockedState.confirmedAt, null, "browser confirm must not set confirmedAt");
+      assert.strictEqual(blockedState.printSession.confirmedItems, 0, "browser confirm must not increment confirmed items");
+      assert(
+        blockedState.qrCodes.every((qr) => qr.status === QRStatus.ACTIVATED && qr.printedAt === null),
+        "browser confirm must leave QR labels unprinted"
+      );
+
+      const blockedRelease = await request("POST", `/api/qr/batches/${lifecycle.batch.id}/release`, null, {
+        headers: authHeader(tokens.manufacturerA),
+      });
+      assert.notStrictEqual(blockedRelease.status, 200, "release readiness must remain blocked before connector confirmation");
+      const stillBlockedBatch = await prisma.batch.findUnique({
+        where: { id: lifecycle.batch.id },
+        select: { lifecycleState: true, releasedAt: true },
+      });
+      assert.notStrictEqual(stillBlockedBatch.lifecycleState, BatchLifecycleState.RELEASED);
+      assert.strictEqual(stillBlockedBatch.releasedAt, null);
+
+      await confirmPrintJobViaConnector({
+        prisma,
+        printJob: lifecycle.printJob,
+        printSession: lifecycle.printSession,
+        actorUserId: ids.manufacturerA,
+      });
 
       const wrongSample = await request(
         "POST",
@@ -519,7 +595,14 @@ let skipped = false;
         quantity: 2,
         startNumber: 730001,
       });
-      await confirmAndSample({ request, tokens, printJob: rejectedBatch.printJob, qrCode: rejectedBatch.qrRows[0] });
+      await confirmAndSample({
+        request,
+        tokens,
+        prisma,
+        printJob: rejectedBatch.printJob,
+        printSession: rejectedBatch.printSession,
+        qrCode: rejectedBatch.qrRows[0],
+      });
       const rejectRequest = await request("POST", `/api/qr/batches/${rejectedBatch.batch.id}/release`, null, {
         headers: authHeader(tokens.superAdmin),
       });

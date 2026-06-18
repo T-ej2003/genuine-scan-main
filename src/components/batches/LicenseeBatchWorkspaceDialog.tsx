@@ -97,6 +97,8 @@ type LicenseeBatchWorkspaceDialogProps = {
   onDecideReissueRequest?: (requestId: string, decision: "approve" | "reject") => void;
   onPrintApprovedReissueRequest?: (requestId: string) => void;
   onRefreshPrinterStatus?: () => void;
+  initialTab?: "overview" | "operations" | "audit";
+  highlightedReissueRequestId?: string | null;
 };
 
 const eventBadgeClass = (eventType?: string) => {
@@ -160,6 +162,50 @@ const getPrintJobStageLabel = (job: PrintJobRow) => {
 
 const isEligibleForReissue = (job: PrintJobRow) =>
   job.pipelineState === "LOCKED" || job.pipelineState === "PRINT_CONFIRMED" || job.status === "CONFIRMED";
+
+const getPrintRunCounts = (job: PrintJobRow) => {
+  const requested = Number(job.itemCount || job.quantity || 0);
+  const confirmed = Number(job.session?.confirmedItems || 0);
+  const failed = Number(job.session?.failedItems || 0);
+  const pending = Number(job.session?.pendingUnconfirmedItems ?? Math.max(0, requested - confirmed - failed));
+  const remaining = Number(job.session?.remainingToPrint ?? pending);
+  return { requested, confirmed, failed, pending, remaining };
+};
+
+const needsRecovery = (job: PrintJobRow) => {
+  const counts = getPrintRunCounts(job);
+  return Boolean(
+    job.session?.recoveryNeeded ||
+    job.session?.recoveryRange ||
+    (
+    counts.remaining > 0 &&
+    (job.status === "STOPPED" ||
+      job.status === "PARTIALLY_COMPLETED" ||
+      job.status === "FAILED" ||
+      job.pipelineState === "STOPPED" ||
+      job.pipelineState === "NEEDS_OPERATOR_ACTION")
+    )
+  );
+};
+
+const getRecoveryInstruction = (job: PrintJobRow) => {
+  const recoveryRange = job.session?.recoveryRange;
+  const start = recoveryRange?.startCode || job.session?.nextPrintableIndex || null;
+  const end = recoveryRange?.endCode || start;
+  if (start && end) {
+    return {
+      firstLine: `Continue from QR index ${start}.`,
+      secondLine: `Recover unconfirmed range ${start}-${end}. Do not start a later range until this recovery is resolved.`,
+    };
+  }
+  return {
+    firstLine: "Continue from the first unconfirmed QR index.",
+    secondLine: "Recover the unconfirmed remaining labels before starting a later range.",
+  };
+};
+
+const printJobOperator = (job: PrintJobRow) =>
+  job.operator?.name || job.operator?.email || "Operator not recorded";
 
 const renderManufacturerLine = (allocation: BatchWorkspaceAllocation) => (
   <div key={`${allocation.batchId}:${allocation.manufacturerId}`} className="rounded-xl border bg-muted/20 p-4">
@@ -240,6 +286,8 @@ export function LicenseeBatchWorkspaceDialog({
   onDecideReissueRequest = () => undefined,
   onPrintApprovedReissueRequest = () => undefined,
   onRefreshPrinterStatus = () => undefined,
+  initialTab = "overview",
+  highlightedReissueRequestId = null,
 }: LicenseeBatchWorkspaceDialogProps) {
   const remaining = Number(workspace?.remainingUnassignedCodes || 0);
   const assignQuantityValue = Number(assignQuantity || 0);
@@ -282,7 +330,7 @@ export function LicenseeBatchWorkspaceDialog({
               </div>
             </DialogHeader>
 
-            <Tabs defaultValue="overview" className="flex min-h-0 flex-1 flex-col">
+            <Tabs key={`${workspace.sourceBatchId}:${initialTab}`} defaultValue={initialTab} className="flex min-h-0 flex-1 flex-col">
               <div className="border-b px-6 py-3">
                 <TabsList className="grid w-full grid-cols-3 sm:w-[26rem]">
                   <TabsTrigger data-testid="batch-workspace-tab-overview" value="overview">Overview</TabsTrigger>
@@ -562,7 +610,13 @@ export function LicenseeBatchWorkspaceDialog({
                             ) : (
                               <div className="mt-3 space-y-2">
                                 {reissueRequests.map((request) => (
-                                  <div key={request.id} className="rounded-lg border bg-background p-3 text-sm">
+                                  <div
+                                    key={request.id}
+                                    data-testid={highlightedReissueRequestId === request.id ? "highlighted-reissue-request" : undefined}
+                                    className={`rounded-lg border bg-background p-3 text-sm ${
+                                      highlightedReissueRequestId === request.id ? "border-emerald-300 bg-emerald-50/60" : ""
+                                    }`}
+                                  >
                                     <div className="flex flex-wrap items-start justify-between gap-3">
                                       <div>
                                         <div className="font-medium">{request.batch?.name || "Batch reissue request"}</div>
@@ -575,8 +629,10 @@ export function LicenseeBatchWorkspaceDialog({
                                       <Badge variant="secondary">
                                         {request.status === "APPROVED"
                                           ? "Ready to print"
+                                          : request.status === "EXECUTED"
+                                            ? "Replacement allocated"
                                           : request.targetApproverRole === "SUPER_ADMIN"
-                                            ? "Super admin review"
+                                            ? "Forwarded to super admin"
                                             : "Brand admin review"}
                                       </Badge>
                                     </div>
@@ -649,9 +705,25 @@ export function LicenseeBatchWorkspaceDialog({
                                         {job.reprintOfJobId ? <Badge variant="outline">Replacement</Badge> : null}
                                       </div>
                                       <div className="text-xs text-muted-foreground">
-                                        {job.printer?.name || "Saved printer"} · {job.quantity.toLocaleString()} labels
+                                        {job.printer?.name || "Saved printer"} · requested {getPrintRunCounts(job).requested.toLocaleString()} labels
                                         {job.confirmedAt ? ` · confirmed ${format(new Date(job.confirmedAt), "PPp")}` : ""}
                                       </div>
+                                      <div className="text-xs text-muted-foreground">
+                                        Operator: {printJobOperator(job)}
+                                      </div>
+                                      <div className="flex flex-wrap gap-1 text-xs">
+                                        <Badge variant="outline">Confirmed {getPrintRunCounts(job).confirmed.toLocaleString()}</Badge>
+                                        <Badge variant="outline">Pending/unconfirmed {getPrintRunCounts(job).pending.toLocaleString()}</Badge>
+                                        <Badge variant={getPrintRunCounts(job).failed > 0 ? "destructive" : "outline"}>
+                                          Failed {getPrintRunCounts(job).failed.toLocaleString()}
+                                        </Badge>
+                                      </div>
+                                      {needsRecovery(job) ? (
+                                        <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                                          <div>{getRecoveryInstruction(job).firstLine}</div>
+                                          <div>{getRecoveryInstruction(job).secondLine}</div>
+                                        </div>
+                                      ) : null}
                                       {job.reprintReason ? (
                                         <div className="text-xs text-muted-foreground">Reason: {job.reprintReason}</div>
                                       ) : null}

@@ -33,7 +33,7 @@ const installReconciliationMocks = (overrides = {}) => {
     backup(prisma.auditLog, "create"),
     backup(prisma, "$queryRaw"),
   ];
-  const calls = { batchUpdates: [], auditEvents: [], auditLogs: [] };
+  const calls = { batchUpdates: [], auditEvents: [], auditLogs: [], printJobCountArgs: [], printJobFindArgs: [] };
   const batch = {
     id: "batch-1",
     licenseeId: "licensee-1",
@@ -61,9 +61,14 @@ const installReconciliationMocks = (overrides = {}) => {
     if (status?.in) return overrides.printedQrCount ?? 0;
     return overrides.qrCount ?? 3;
   };
-  prisma.printJob.count = async () => overrides.confirmedPrintJobCount ?? 0;
-  prisma.printJob.findFirst = async () =>
-    (overrides.confirmedPrintJobCount ?? 0) > 0 ? { id: "print-job-1" } : null;
+  prisma.printJob.count = async (args) => {
+    calls.printJobCountArgs.push(args);
+    return overrides.confirmedPrintJobCount ?? 0;
+  };
+  prisma.printJob.findFirst = async (args) => {
+    calls.printJobFindArgs.push(args);
+    return (overrides.confirmedPrintJobCount ?? 0) > 0 ? { id: "print-job-1" } : null;
+  };
   prisma.printSession.count = async () => overrides.completedPrintSessionCount ?? 0;
   prisma.printAuditEvent.create = async (args) => {
     calls.auditEvents.push(args);
@@ -85,6 +90,8 @@ const runDryRunTest = async () => {
     assert(result.targetState === BatchLifecycleState.PRINT_CONFIRMED, "dry-run should detect print evidence drift");
     assert(result.mutated === false, "dry-run must not mutate");
     assert(calls.batchUpdates.length === 0, "dry-run must not update the batch");
+    const printJobFilters = JSON.stringify([calls.printJobCountArgs, calls.printJobFindArgs]);
+    assert(!printJobFilters.includes("completedAt"), "completedAt must not count as physical print confirmation evidence");
   } finally {
     restore.reverse().forEach((fn) => fn());
   }

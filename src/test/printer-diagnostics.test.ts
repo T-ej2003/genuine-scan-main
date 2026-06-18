@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   deriveManagedPrinterAutoDetect,
+  buildPrinterReadinessDisplay,
   getPrinterDiagnosticSummary,
   shouldPreferNetworkDirectSummary,
 } from "@/lib/printer-diagnostics";
@@ -171,6 +172,77 @@ describe("printer diagnostics summary", () => {
 
     expect(summary.state).toBe("trust_blocked");
     expect(summary.badgeLabel).toBe("Needs attention");
+  });
+
+  it("keeps a known-ready printer as refreshing during transient rate limits", () => {
+    const summary = getPrinterDiagnosticSummary({
+      localAgent: { reachable: true, connected: true, error: null },
+      remoteStatus: {
+        connected: true,
+        trusted: true,
+        compatibilityMode: false,
+        eligibleForPrinting: true,
+        connectionClass: "TRUSTED",
+        stale: false,
+        lastHeartbeatAt: new Date().toISOString(),
+        ageSeconds: 3,
+        selectedPrinterId: "printer-1",
+        selectedPrinterName: "Zebra ZD421",
+        refreshPaused: true,
+        rateLimited: true,
+      },
+      printers: [{ printerId: "printer-1", printerName: "Zebra ZD421", online: true }],
+      selectedPrinterId: "printer-1",
+    });
+    const display = buildPrinterReadinessDisplay({
+      diagnostics: summary,
+      ready: true,
+      refreshPaused: true,
+      rateLimited: true,
+      stale: false,
+      trusted: true,
+      compatibilityMode: false,
+      identityLabel: "Zebra ZD421",
+    });
+
+    expect(display.modeLabel).toBe("Refreshing");
+    expect(display.badgeLabel).toBe("Refreshing");
+    expect(display.tone).toBe("success");
+    expect(display.blocksPrintStart).toBe(false);
+  });
+
+  it("blocks print start when trust is stale even if a printer was selected", () => {
+    const summary = getPrinterDiagnosticSummary({
+      localAgent: { reachable: true, connected: true, error: null },
+      remoteStatus: {
+        connected: true,
+        trusted: true,
+        compatibilityMode: false,
+        eligibleForPrinting: false,
+        connectionClass: "BLOCKED",
+        stale: true,
+        lastHeartbeatAt: new Date(Date.now() - 120_000).toISOString(),
+        ageSeconds: 120,
+        selectedPrinterId: "printer-1",
+        selectedPrinterName: "Zebra ZD421",
+      },
+      printers: [{ printerId: "printer-1", printerName: "Zebra ZD421", online: true }],
+      selectedPrinterId: "printer-1",
+    });
+    const display = buildPrinterReadinessDisplay({
+      diagnostics: summary,
+      ready: false,
+      refreshPaused: false,
+      rateLimited: false,
+      stale: true,
+      trusted: true,
+      compatibilityMode: false,
+      identityLabel: "Zebra ZD421",
+    });
+
+    expect(summary.state).toBe("heartbeat_stale");
+    expect(display.blocksPrintStart).toBe(true);
+    expect(display.modeLabel).toBe("Needs review");
   });
 
   it("keeps the live local printer summary primary when local inventory exists", () => {

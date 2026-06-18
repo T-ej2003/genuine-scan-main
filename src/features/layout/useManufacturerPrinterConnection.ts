@@ -11,6 +11,7 @@ import {
 } from "@/lib/consent";
 import {
   chooseStablePrinterSelection,
+  buildPrinterReadinessDisplay,
   getManagedPrinterDiagnosticSummary,
   getPrinterDiagnosticSummary,
   selectPreferredManagedPrinter,
@@ -547,23 +548,6 @@ export function useManufacturerPrinterConnection({
     shouldUseManagedPrinterSummary && managedPrinterDiagnostics ? managedPrinterDiagnostics : printerDiagnostics;
   const effectivePrinterReady = printerReady || managedPrinterDiagnostics?.tone === "success";
   const printerUnavailable = !effectivePrinterReady && !printerHasInventory && managedNetworkPrinters.length === 0;
-  const printerModeLabel =
-    effectivePrinterDiagnostics.tone === "success"
-      ? "Ready"
-      : effectivePrinterDiagnostics.tone === "warning"
-        ? "Needs review"
-        : effectivePrinterDiagnostics.tone === "neutral"
-          ? "Check setup"
-          : "Needs help";
-  const printerToneClass =
-    effectivePrinterDiagnostics.tone === "success"
-      ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-      : effectivePrinterDiagnostics.tone === "warning"
-        ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
-        : effectivePrinterDiagnostics.tone === "neutral"
-          ? "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
-          : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100";
-  const printerTitle = effectivePrinterDiagnostics.summary;
   const selectedPrinter =
     chooseStablePrinterSelection(
       detectedPrinters,
@@ -589,6 +573,20 @@ export function useManufacturerPrinterConnection({
   const printerFeedLabel = printerStatusLive ? "Live status" : "Checking status";
   const printerUpdatedLabel = formatPrinterTimestamp(printerStatusUpdatedAt || printerStatus.lastHeartbeatAt);
   const printerRefreshPaused = Boolean((printerStatus as PrinterConnectionStatusDTO & { refreshPaused?: boolean }).refreshPaused);
+  const printerRateLimited = Boolean((printerStatus as PrinterConnectionStatusDTO & { rateLimited?: boolean }).rateLimited);
+  const printerReadinessDisplay = buildPrinterReadinessDisplay({
+    diagnostics: effectivePrinterDiagnostics,
+    ready: Boolean(effectivePrinterReady),
+    refreshPaused: printerRefreshPaused,
+    rateLimited: printerRateLimited,
+    stale: Boolean(printerStatus.stale),
+    trusted: Boolean(printerStatus.trusted),
+    compatibilityMode: Boolean(printerStatus.compatibilityMode),
+    identityLabel: shouldUseManagedPrinterSummary ? preferredManagedNetworkPrinter?.name : printerIdentity.displayName,
+  });
+  const printerModeLabel = printerReadinessDisplay.modeLabel;
+  const printerToneClass = printerReadinessDisplay.toneClass;
+  const printerTitle = printerReadinessDisplay.summary;
   const printerDegraded = Boolean(printerStatus.degraded && !effectivePrinterReady);
   const printerDegradedMessage = printerDegraded
     ? sanitizePrinterUiError(
@@ -597,14 +595,12 @@ export function useManufacturerPrinterConnection({
       )
     : "";
   const printerNoticeMessage = printerRefreshPaused
-    ? "Printer status refresh is temporarily paused. Printing can continue."
+    ? printerReadinessDisplay.notice
     : effectivePrinterReady && (!printerStatus.trusted || printerStatus.compatibilityMode)
-      ? "Secure printer verification is still finishing. Printing can continue."
+      ? printerReadinessDisplay.notice
       : "";
   const printerSummaryMessage = effectivePrinterReady
-    ? shouldUseManagedPrinterSummary
-      ? effectivePrinterDiagnostics.summary
-      : `${printerIdentity.displayName} is ready to print.`
+    ? printerReadinessDisplay.summary
     : effectivePrinterDiagnostics.summary;
   const printerNextStep = effectivePrinterReady
     ? shouldUseManagedPrinterSummary

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { BatchAllocationMapDialog } from "@/components/batches/BatchAllocationMapDialog";
@@ -42,6 +42,7 @@ export default function BatchesPage() {
   const [decidingReissueRequestId, setDecidingReissueRequestId] = useState<string | null>(null);
   const [printingReissueRequestId, setPrintingReissueRequestId] = useState<string | null>(null);
   const [reissuePrintRecoveryById, setReissuePrintRecoveryById] = useState<Record<string, string>>({});
+  const openedDeepLinkRef = useRef("");
 
   const operations = useBatchOperationsController({
     role,
@@ -79,7 +80,7 @@ export default function BatchesPage() {
     if (!canRequestReissue) return;
     setReissueRequestsLoading(true);
     try {
-      const response = await apiClient.listPrintReissueRequests({ status: isManufacturer ? "APPROVED" : "PENDING", limit: 25 });
+      const response = await apiClient.listPrintReissueRequests({ status: isManufacturer ? undefined : "PENDING", limit: 25 });
       setReissueRequests(response.success && Array.isArray(response.data) ? response.data : []);
     } finally {
       setReissueRequestsLoading(false);
@@ -160,11 +161,14 @@ export default function BatchesPage() {
         return;
       }
       setReissueDecisionNote("");
+      const forwardedToSuperAdmin = response.data?.request?.targetApproverRole === "SUPER_ADMIN" && response.data?.request?.status === "PENDING";
       toast({
-        title: decision === "approve" ? "Reissue approved" : "Reissue rejected",
+        title: decision === "approve" ? (forwardedToSuperAdmin ? "Forwarded to super admin" : "Reissue approved") : "Reissue rejected",
         description:
           decision === "approve"
-            ? "Replacement labels are approved and ready for the manufacturer to print."
+            ? forwardedToSuperAdmin
+              ? "MSCQR recorded your review and forwarded the replacement request for final approval."
+              : "Replacement labels are approved and ready for the manufacturer to print."
             : "MSCQR recorded the rejection and notified the requester.",
       });
       await Promise.allSettled([fetchReissueRequests(), workspacePrintJobsQuery.refetch(), operations.fetchBatches()]);
@@ -172,6 +176,37 @@ export default function BatchesPage() {
       setDecidingReissueRequestId(null);
     }
   };
+
+  useEffect(() => {
+    const targetBatchId = String(searchParams.get("batchId") || "").trim();
+    const targetReissueRequestId = String(searchParams.get("reissueRequestId") || "").trim();
+    if (!targetBatchId || operations.loading || operations.stableRows.length === 0) return;
+
+    const deepLinkKey = `${targetBatchId}:${searchParams.get("tab") || ""}:${targetReissueRequestId}`;
+    if (openedDeepLinkRef.current === deepLinkKey) return;
+
+    const matchedWorkspace =
+      operations.stableRows.find(
+        (row) =>
+          row.sourceBatchId === targetBatchId ||
+          row.sourceBatchRow?.id === targetBatchId ||
+          row.allocations.some((allocation) => allocation.batchId === targetBatchId)
+      ) || null;
+
+    openedDeepLinkRef.current = deepLinkKey;
+    if (!matchedWorkspace) {
+      toast({
+        title: "Item unavailable",
+        description: "This item is unavailable or outside your access scope.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    void workspace.openWorkspace(matchedWorkspace);
+    if (targetReissueRequestId) void fetchReissueRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [operations.loading, operations.stableRows, searchParams]);
 
   const printApprovedReissueRequest = async (requestId: string) => {
     setPrintingReissueRequestId(requestId);
@@ -232,29 +267,7 @@ export default function BatchesPage() {
         stableRows={operations.stableRows}
         filteredStableRows={operations.filteredStableRows}
         printerDiagnostics={
-          printWorkflow.dialogProps.selectedPrinterNotice.tone === "success"
-            ? {
-                tone: "success",
-                summary: printWorkflow.dialogProps.selectedPrinterNotice.summary,
-                badgeLabel: "Ready",
-              }
-            : printWorkflow.dialogProps.selectedPrinterNotice.tone === "warning"
-              ? {
-                  tone: "warning",
-                  summary: printWorkflow.dialogProps.selectedPrinterNotice.summary,
-                  badgeLabel: "Needs check",
-                }
-              : printWorkflow.dialogProps.selectedPrinterNotice.tone === "danger"
-                ? {
-                    tone: "danger",
-                    summary: printWorkflow.dialogProps.selectedPrinterNotice.summary,
-                    badgeLabel: "Blocked",
-                  }
-                : {
-                    tone: "neutral",
-                    summary: printWorkflow.dialogProps.selectedPrinterNotice.summary,
-                    badgeLabel: "Pending",
-                  }
+          printWorkflow.dialogProps.selectedPrinterReadinessDisplay
         }
         onDismissAllocationHint={() => operations.setAllocationHint(null)}
         onSearchChange={operations.setQ}
@@ -347,6 +360,8 @@ export default function BatchesPage() {
           void printApprovedReissueRequest(requestId);
         }}
         onRefreshPrinterStatus={printWorkflow.dialogProps.onRefreshPrinters}
+        initialTab={searchParams.get("tab") === "audit" ? "audit" : searchParams.get("tab") === "reissue" ? "operations" : "overview"}
+        highlightedReissueRequestId={searchParams.get("reissueRequestId")}
       />
 
       <RenameBatchDialog

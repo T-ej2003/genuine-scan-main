@@ -68,7 +68,11 @@ export const materializeReplacementChainsForReissue = async (params: {
 
   const [originalQrs, replacementQrs] = await Promise.all([
     tx.qRCode.findMany({
-      where: { printJobId: params.originalPrintJobId },
+      where: {
+        printJobId: params.originalPrintJobId,
+        status: { in: [QRStatus.PRINTED, QRStatus.REDEEMED, QRStatus.SCANNED] },
+        printedAt: { not: null },
+      },
       orderBy: [{ code: "asc" }],
       select: { id: true, code: true },
     }),

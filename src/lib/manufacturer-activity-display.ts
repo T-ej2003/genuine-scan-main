@@ -137,7 +137,7 @@ export const getManufacturerActivityDisplay = (log: {
     case "CONFIRM_PRINT":
     case "PRINT_CONFIRMED":
       return {
-        title: "Labels marked printed",
+        title: "Printer confirmed labels",
         description: `Print progress was confirmed for assigned labels.${quantity}${batch}`,
         category: "printing",
         tone: "success",
@@ -303,20 +303,26 @@ export const buildManufacturerPrintHistoryRow = (job: Record<string, any>): Manu
   const pipelineState = String(job.pipelineState || "").toUpperCase();
   const issue = safeText(job.failureReason || job.confirmationFailureReason || session.failedReason);
 
-  let statusLabel = "In progress";
+  let statusLabel = "Printing";
   let statusTone: ManufacturerActivityTone = "progress";
-  if (status === "CONFIRMED" || pipelineState === "PRINT_CONFIRMED") {
-    statusLabel = remainingLabels > 0 ? "Partially completed" : "Completed";
+  if (job.reprintOfJobId && (status === "CONFIRMED" || pipelineState === "PRINT_CONFIRMED")) {
+    statusLabel = "Replacement printed";
+    statusTone = "success";
+  } else if (status === "CONFIRMED" || pipelineState === "PRINT_CONFIRMED") {
+    statusLabel = remainingLabels > 0 ? "Partially confirmed" : "Confirmed";
     statusTone = remainingLabels > 0 ? "warning" : "success";
   } else if (status === "FAILED" || pipelineState === "FAILED") {
-    statusLabel = printedLabels > 0 ? "Partially completed" : "Failed";
+    statusLabel = printedLabels > 0 ? "Needs recovery" : "Needs recovery";
     statusTone = "danger";
   } else if (pipelineState === "NEEDS_OPERATOR_ACTION" || job.awaitingConfirmation) {
-    statusLabel = "Recovery needed";
+    statusLabel = "Needs recovery";
     statusTone = "warning";
   } else if (status === "CANCELLED") {
     statusLabel = "Cancelled";
     statusTone = "neutral";
+  } else if (status === "STOPPED" || status === "PARTIALLY_COMPLETED" || pipelineState === "STOPPED") {
+    statusLabel = printedLabels > 0 ? "Partially confirmed" : "Needs recovery";
+    statusTone = "warning";
   } else if (status === "SENT") {
     statusLabel = "Sent to printer";
     statusTone = "progress";
@@ -335,7 +341,7 @@ export const buildManufacturerPrintHistoryRow = (job: Record<string, any>): Manu
     printedLabels,
     remainingLabels: Number.isFinite(remainingLabels) ? remainingLabels : null,
     printerName: safeText(job.printer?.name, "Printer not recorded"),
-    actorLabel: actor ? actorLabel(actor) : "Operator not included",
+    actorLabel: actor ? actorLabel(actor) : "Operator not recorded",
     statusLabel,
     statusTone,
     timestamp: safeText(job.completedAt || job.confirmedAt || job.sentAt || job.createdAt, "") || null,

@@ -56,6 +56,14 @@ export type ReservableQrCodeSummary = {
   endCode: string | null;
 };
 
+export type UnresolvedRecoveryRange = {
+  count: number;
+  startCode: string;
+  endCode: string;
+  printSessionId: string | null;
+  printJobId: string | null;
+};
+
 const hasNonEmptyJsonEvidence = (value: unknown) => {
   if (value === null || value === undefined) return false;
   if (typeof value === "object" && !Array.isArray(value)) return Object.keys(value as Record<string, unknown>).length > 0;
@@ -80,40 +88,56 @@ const hasReusableReason = (item: ReusablePrintItemCandidate) => {
 };
 
 export const isZeroEvidencePrintItemReusable = (item: ReusablePrintItemCandidate) => {
+  const itemState = String(item.state || "").trim();
+  const sessionStatus = String(item.printSession?.status || "").trim();
+  const jobStatus = String(item.printSession?.printJob?.status || "").trim();
+
+  const stoppedUnconfirmedRecovery =
+    itemState === PrintItemState.CANCELLED &&
+    sessionStatus === PrintSessionStatus.STOPPED &&
+    (jobStatus === PrintJobStatus.STOPPED || jobStatus === PrintJobStatus.PARTIALLY_COMPLETED) &&
+    !item.printConfirmedAt &&
+    !hasNonEmptyJsonEvidence(item.confirmationEvidence);
+  if (stoppedUnconfirmedRecovery) return true;
+
   if (hasPrintItemPhysicalEvidence(item)) return false;
   if (!hasReusableReason(item)) return false;
 
-  const itemState = String(item.state || "").trim();
   if (itemState !== PrintItemState.FAILED && itemState !== PrintItemState.FROZEN) return false;
-
-  const sessionStatus = String(item.printSession?.status || "").trim();
   if (sessionStatus !== PrintSessionStatus.CANCELLED && sessionStatus !== PrintSessionStatus.FAILED) return false;
-
-  const jobStatus = String(item.printSession?.printJob?.status || "").trim();
   return jobStatus === PrintJobStatus.CANCELLED || jobStatus === PrintJobStatus.FAILED;
 };
 
 const reusablePrintItemSql = Prisma.sql`
   pi."id" IS NOT NULL
-  AND pi."state" IN (CAST(${PrintItemState.FAILED} AS "PrintItemState"), CAST(${PrintItemState.FROZEN} AS "PrintItemState"))
-  AND pi."agentAckedAt" IS NULL
-  AND pi."dispatchedAt" IS NULL
   AND pi."printConfirmedAt" IS NULL
-  AND pi."deviceJobRef" IS NULL
   AND (
     pi."confirmationEvidence" IS NULL
     OR pi."confirmationEvidence"::text IN ('null', '{}')
   )
   AND (
-    pi."deadLetterReason" IN (${Prisma.join([...REUSABLE_DEAD_LETTER_REASONS])})
-    OR pi."failureReason" ILIKE '%operator closed unconfirmed failed print run%'
-    OR pi."failureReason" ILIKE '%operator abandoned unconfirmed print run%'
-    OR pi."failureReason" ILIKE '%before any printer acknowledgement%'
-    OR pi."failureReason" ILIKE '%pre-dispatch%'
-    OR pi."failureReason" ILIKE '%pre dispatch%'
+    (
+      pi."state" IN (CAST(${PrintItemState.FAILED} AS "PrintItemState"), CAST(${PrintItemState.FROZEN} AS "PrintItemState"))
+      AND pi."agentAckedAt" IS NULL
+      AND pi."dispatchedAt" IS NULL
+      AND pi."deviceJobRef" IS NULL
+      AND (
+        pi."deadLetterReason" IN (${Prisma.join([...REUSABLE_DEAD_LETTER_REASONS])})
+        OR pi."failureReason" ILIKE '%operator closed unconfirmed failed print run%'
+        OR pi."failureReason" ILIKE '%operator abandoned unconfirmed print run%'
+        OR pi."failureReason" ILIKE '%before any printer acknowledgement%'
+        OR pi."failureReason" ILIKE '%pre-dispatch%'
+        OR pi."failureReason" ILIKE '%pre dispatch%'
+      )
+      AND ps."status" IN (CAST(${PrintSessionStatus.CANCELLED} AS "PrintSessionStatus"), CAST(${PrintSessionStatus.FAILED} AS "PrintSessionStatus"))
+      AND pj."status" IN (CAST(${PrintJobStatus.CANCELLED} AS "PrintJobStatus"), CAST(${PrintJobStatus.FAILED} AS "PrintJobStatus"))
+    )
+    OR (
+      pi."state" = CAST(${PrintItemState.CANCELLED} AS "PrintItemState")
+      AND ps."status" = CAST(${PrintSessionStatus.STOPPED} AS "PrintSessionStatus")
+      AND pj."status" IN (CAST(${PrintJobStatus.STOPPED} AS "PrintJobStatus"), CAST(${PrintJobStatus.PARTIALLY_COMPLETED} AS "PrintJobStatus"))
+    )
   )
-  AND ps."status" IN (CAST(${PrintSessionStatus.CANCELLED} AS "PrintSessionStatus"), CAST(${PrintSessionStatus.FAILED} AS "PrintSessionStatus"))
-  AND pj."status" IN (CAST(${PrintJobStatus.CANCELLED} AS "PrintJobStatus"), CAST(${PrintJobStatus.FAILED} AS "PrintJobStatus"))
 `;
 
 const reservableQrWhereSql = (params: {
@@ -209,6 +233,63 @@ export const countBlockedQrCodesForPrint = async (
       AND NOT (${reusablePrintItemSql});
   `);
   return Number(rows[0]?.count || 0);
+};
+
+export const requestedRangeSkipsRecovery = (params: {
+  recoveryStartCode?: string | null;
+  rangeStart?: string | null;
+  rangeEnd?: string | null;
+}) => {
+  const recoveryStart = String(params.recoveryStartCode || "").trim();
+  if (!recoveryStart) return false;
+  const rangeStart = String(params.rangeStart || "").trim();
+  const rangeEnd = String(params.rangeEnd || "").trim();
+  if (!rangeStart && !rangeEnd) return false;
+  if (rangeStart && rangeStart > recoveryStart) return true;
+  if (rangeEnd && rangeEnd < recoveryStart) return true;
+  return false;
+};
+
+export const findUnresolvedRecoveryRangeForBatch = async (
+  client: Prisma.TransactionClient,
+  params: { batchId: string }
+): Promise<UnresolvedRecoveryRange | null> => {
+  const rows = await client.$queryRaw<
+    Array<{
+      count: bigint | number;
+      startCode: string | null;
+      endCode: string | null;
+      printSessionId: string | null;
+      printJobId: string | null;
+    }>
+  >(Prisma.sql`
+    SELECT
+      COUNT(*)::int AS "count",
+      MIN(COALESCE(q."displayCode", q."code")) AS "startCode",
+      MAX(COALESCE(q."displayCode", q."code")) AS "endCode",
+      MIN(ps."id") AS "printSessionId",
+      MIN(pj."id") AS "printJobId"
+    FROM "QRCode" q
+    JOIN "PrintItem" pi ON pi."qrCodeId" = q."id"
+    JOIN "PrintSession" ps ON ps."id" = pi."printSessionId"
+    JOIN "PrintJob" pj ON pj."id" = ps."printJobId"
+    WHERE q."batchId" = ${params.batchId}
+      AND q."status" = CAST(${QRStatus.ALLOCATED} AS "QRStatus")
+      AND q."printJobId" IS NULL
+      AND ${reusablePrintItemSql}
+      AND pi."state" = CAST(${PrintItemState.CANCELLED} AS "PrintItemState")
+      AND ps."status" = CAST(${PrintSessionStatus.STOPPED} AS "PrintSessionStatus");
+  `);
+  const row = rows[0];
+  const count = Number(row?.count || 0);
+  if (!row || count <= 0 || !row.startCode || !row.endCode) return null;
+  return {
+    count,
+    startCode: row.startCode,
+    endCode: row.endCode,
+    printSessionId: row.printSessionId || null,
+    printJobId: row.printJobId || null,
+  };
 };
 
 export const listReservableQrCodeSummaries = async (

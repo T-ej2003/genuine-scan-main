@@ -191,10 +191,16 @@ export const createScopedPrintReissueRequest = async (params: {
     body: `${original.batch.name} has a replacement label request awaiting approval.`,
     type: "print_reissue_requested",
     data: {
+      entityType: "reissue_request",
+      entityId: created.id,
       reissueRequestId: created.id,
       originalPrintJobId: originalJob.id,
       batchId: original.batch.id,
-      targetRoute: "/batches",
+      licenseeId: original.batch.licenseeId,
+      manufacturerId: original.manufacturerId,
+      preferredTab: "reissue",
+      preferredSection: "review",
+      targetRoute: `/batches?batchId=${encodeURIComponent(original.batch.id)}&tab=reissue&reissueRequestId=${encodeURIComponent(created.id)}`,
     },
     channels: [NotificationChannel.WEB],
   });
@@ -294,9 +300,91 @@ export const decideScopedPrintReissueRequest = async (params: {
       type: "print_reissue_rejected",
       title: "Print reissue request rejected",
       body: "A replacement label request was reviewed and rejected.",
-      data: { reissueRequestId: request.id, targetRoute: "/batches" },
+      data: {
+        entityType: "reissue_request",
+        entityId: request.id,
+        reissueRequestId: request.id,
+        originalPrintJobId: request.originalPrintJobId,
+        batchId: request.batchId,
+        licenseeId: request.licenseeId,
+        manufacturerId: request.manufacturerId,
+        preferredTab: "reissue",
+        preferredSection: "status",
+        targetRoute: `/batches?batchId=${encodeURIComponent(String(request.batchId || ""))}&tab=reissue&reissueRequestId=${encodeURIComponent(request.id)}`,
+      },
     });
     return { request: serializeRequest(rejected), result: null };
+  }
+
+  if (request.targetApproverRole === "LICENSEE_ADMIN") {
+    const forwarded = await prisma.printReissueRequest.update({
+      where: { id: request.id },
+      data: {
+        status: ReissueRequestStatus.PENDING,
+        targetApproverRole: "SUPER_ADMIN",
+        decisionNote,
+        approvalReferenceId: request.id,
+      },
+      include: requestInclude,
+    });
+
+    await createAuditLog({
+      userId: params.scope.userId,
+      licenseeId: request.licenseeId || undefined,
+      action: "PRINT_REISSUE_FORWARDED_TO_SUPER_ADMIN",
+      entityType: "PrintReissueRequest",
+      entityId: request.id,
+      details: {
+        originalPrintJobId: request.originalPrintJobId,
+        decisionNote,
+        targetApproverRole: "SUPER_ADMIN",
+        readyToPrint: false,
+      },
+      ipAddress: params.ipAddress || undefined,
+      userAgent: params.userAgent || undefined,
+    });
+
+    await createRoleNotifications({
+      audience: NotificationAudience.SUPER_ADMIN,
+      title: "Print reissue forwarded for super admin review",
+      body: "A brand admin forwarded a manufacturer replacement label request for final approval.",
+      type: "print_reissue_forwarded_to_super_admin",
+      data: {
+        entityType: "reissue_request",
+        entityId: request.id,
+        reissueRequestId: request.id,
+        originalPrintJobId: request.originalPrintJobId,
+        batchId: request.batchId,
+        licenseeId: request.licenseeId,
+        manufacturerId: request.manufacturerId,
+        preferredTab: "reissue",
+        preferredSection: "review",
+        targetRoute: `/batches?batchId=${encodeURIComponent(String(request.batchId || ""))}&tab=reissue&reissueRequestId=${encodeURIComponent(request.id)}`,
+      },
+      channels: [NotificationChannel.WEB],
+    });
+
+    await createUserNotification({
+      userId: request.requestedByUserId,
+      licenseeId: request.licenseeId,
+      type: "print_reissue_forwarded",
+      title: "Print reissue forwarded",
+      body: "Your replacement label request was forwarded for super admin review.",
+      data: {
+        entityType: "reissue_request",
+        entityId: request.id,
+        reissueRequestId: request.id,
+        originalPrintJobId: request.originalPrintJobId,
+        batchId: request.batchId,
+        licenseeId: request.licenseeId,
+        manufacturerId: request.manufacturerId,
+        preferredTab: "reissue",
+        preferredSection: "status",
+        targetRoute: `/batches?batchId=${encodeURIComponent(String(request.batchId || ""))}&tab=reissue&reissueRequestId=${encodeURIComponent(request.id)}`,
+      },
+    });
+
+    return { request: serializeRequest(forwarded), result: null };
   }
 
   const approved = await prisma.printReissueRequest.update({
@@ -327,21 +415,6 @@ export const decideScopedPrintReissueRequest = async (params: {
     userAgent: params.userAgent || undefined,
   });
 
-  if (request.targetApproverRole === "LICENSEE_ADMIN") {
-    await createRoleNotifications({
-      audience: NotificationAudience.SUPER_ADMIN,
-      title: "Print reissue approved by brand admin",
-      body: "A brand admin approved a manufacturer replacement label request.",
-      type: "print_reissue_approved_audit",
-      data: {
-        reissueRequestId: request.id,
-        originalPrintJobId: request.originalPrintJobId,
-        targetRoute: "/batches",
-      },
-      channels: [NotificationChannel.WEB],
-    });
-  }
-
   await createUserNotification({
     userId: request.requestedByUserId,
     licenseeId: request.licenseeId,
@@ -349,8 +422,16 @@ export const decideScopedPrintReissueRequest = async (params: {
     title: "Print reissue request approved",
     body: "A replacement label request was approved and is ready to print.",
     data: {
+      entityType: "reissue_request",
+      entityId: request.id,
       reissueRequestId: request.id,
-      targetRoute: "/batches",
+      originalPrintJobId: request.originalPrintJobId,
+      batchId: request.batchId,
+      licenseeId: request.licenseeId,
+      manufacturerId: request.manufacturerId,
+      preferredTab: "reissue",
+      preferredSection: "replacement-ready",
+      targetRoute: `/batches?batchId=${encodeURIComponent(String(request.batchId || ""))}&tab=reissue&reissueRequestId=${encodeURIComponent(request.id)}`,
     },
   });
 
