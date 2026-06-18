@@ -176,10 +176,10 @@ describe("Dashboard shell nav visibility", () => {
     authState.user = null;
   });
 
-  it("shows Platform Admin navigation without exposing raw technical labels", () => {
+  it("shows Super Admin navigation without exposing raw technical labels", () => {
     renderShellForRole("super_admin");
 
-    expect(screen.getAllByText("Platform Admin").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Super Admin").length).toBeGreaterThan(0);
     expectNavLabels(["Overview", "QR Requests", "Batches", "Scans", "Brands", "Manufacturers", "Issues", "History", "Settings"]);
     expect(screen.getByText("Advanced")).toBeInTheDocument();
 

@@ -366,8 +366,8 @@ export const printApprovedManufacturerPrintReissueRequest = async (req: AuthRequ
       const printerStatus = error?.printerStatus || null;
       return res.status(409).json({
         success: false,
-        error: "Printer verification expired. Refresh printer status before printing.",
-        message: "Printer verification expired. Refresh printer status before printing.",
+        error: "Printer verification expired. Refresh printer helper before printing.",
+        message: "Printer verification expired. Refresh printer helper before printing.",
         code: "PRINTER_ATTESTATION_STALE",
         errorCode: "PRINTER_ATTESTATION_STALE",
         recoveryAction: "refresh_printer_status",

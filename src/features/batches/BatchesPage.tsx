@@ -69,6 +69,7 @@ export default function BatchesPage() {
     getAvailableInventory: operations.getAvailableInventory,
     onBatchesChanged: operations.fetchBatches,
   });
+  const securePrinterReady = Boolean(printWorkflow.dialogProps.securePrintReadiness?.ready);
 
   const workspacePrintJobsQuery = usePrintJobs(
     workspace.workspaceBatch?.sourceBatchRow?.id,
@@ -216,13 +217,13 @@ export default function BatchesPage() {
         const code = String(response.errorCode || response.code || "").toUpperCase();
         const stalePrinter = code === "PRINTER_ATTESTATION_STALE" || code === "MISSING_PRINTER_SESSION";
         const message = stalePrinter
-          ? "Printer verification expired. Refresh printer status before printing."
+          ? "Printer verification expired. Refresh printer helper before printing."
           : response.error || "Replacement labels could not be printed.";
         if (stalePrinter) {
           setReissuePrintRecoveryById((current) => ({ ...current, [requestId]: message }));
         }
         toast({
-          title: stalePrinter ? "Refresh printer status" : "Replacement print not started",
+          title: stalePrinter ? "Refresh printer helper" : "Replacement print not started",
           description: message,
           variant: "destructive",
         });
@@ -294,6 +295,7 @@ export default function BatchesPage() {
             setReissueReason("");
           }
         }}
+        role={role}
         workspace={workspace.workspaceBatch}
         manufacturers={operations.manufacturers}
         assignManufacturerId={operations.assignManufacturerId}
@@ -349,6 +351,7 @@ export default function BatchesPage() {
         decidingReissueRequestId={decidingReissueRequestId}
         printingReissueRequestId={printingReissueRequestId}
         reissuePrintRecoveryById={reissuePrintRecoveryById}
+        securePrinterReady={securePrinterReady}
         onReissueDecisionNoteChange={setReissueDecisionNote}
         onRefreshReissueRequests={() => {
           void fetchReissueRequests();

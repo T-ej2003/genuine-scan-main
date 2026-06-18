@@ -73,7 +73,7 @@ test.describe("P0 frontend access control", () => {
       const nav = page.getByRole("navigation", { name: "Authenticated MSCQR navigation" });
       await expect(nav).toBeVisible();
       await expect(
-        page.getByText(role === "super_admin" ? "Platform Admin" : role === "licensee_admin" ? "Brand Admin" : "Manufacturer Admin", {
+        page.getByText(role === "super_admin" ? "Super Admin" : role === "licensee_admin" ? "Brand Admin" : "Manufacturer Admin", {
           exact: true,
         }).first(),
       ).toBeVisible();

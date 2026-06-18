@@ -34,7 +34,7 @@ assert(startBody.includes("approvedReissueRequestId: request.id"), "print start 
 assert(startBody.includes("PRINT_REISSUE_PRINT_BLOCKED"), "stale printer print-start failures must be audited");
 
 assert(controllerSource.includes("PRINTER_ATTESTATION_STALE"), "stale printer response must use a typed safe code");
-assert(controllerSource.includes("Printer verification expired. Refresh printer status before printing."), "stale printer response must use recovery copy");
+assert(controllerSource.includes("Printer verification expired. Refresh printer helper before printing."), "stale printer response must use recovery copy");
 assert(controllerSource.includes("res.status(409).json"), "stale printer response must be controlled non-500");
 assert(controllerSource.includes("errorCode: code"), "typed reissue business-state errors must include errorCode");
 assert(reissueServiceSource.includes("REPLACEMENT_ALREADY_ALLOCATED"), "duplicate replacement allocation must use a typed business-state code");

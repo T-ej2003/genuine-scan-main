@@ -657,12 +657,15 @@ export const buildPrinterReadinessDisplay = (params: {
   identityLabel?: string | null;
 }): PrinterReadinessDisplay => {
   const transientRefresh = Boolean((params.refreshPaused || params.rateLimited) && params.ready && !params.stale);
-  const blocksPrintStart = Boolean(params.stale || (!params.ready && params.diagnostics.tone === "danger"));
-  const tone = transientRefresh ? "success" : params.diagnostics.tone;
+  const secureVerificationBlocked = Boolean(!params.ready && (params.stale || params.trusted === false || params.compatibilityMode));
+  const blocksPrintStart = Boolean(secureVerificationBlocked || params.stale || (!params.ready && params.diagnostics.tone === "danger"));
+  const tone = transientRefresh ? "success" : secureVerificationBlocked ? "warning" : params.diagnostics.tone;
   const modeLabel = transientRefresh
     ? "Refreshing"
     : params.ready
       ? "Ready"
+      : secureVerificationBlocked
+        ? "Needs review"
       : params.diagnostics.tone === "warning"
         ? "Needs review"
         : params.diagnostics.tone === "neutral"
@@ -672,6 +675,8 @@ export const buildPrinterReadinessDisplay = (params: {
     ? "Refreshing"
     : params.ready
       ? "Ready"
+      : secureVerificationBlocked
+        ? "Needs check"
       : params.diagnostics.tone === "warning"
         ? "Needs check"
         : params.diagnostics.tone === "neutral"
@@ -682,6 +687,8 @@ export const buildPrinterReadinessDisplay = (params: {
     ? `${identity} was ready at the last trusted check. Status refresh is temporarily paused.`
     : params.ready
       ? `${identity} is ready to print.`
+      : secureVerificationBlocked
+        ? "Printer verification expired. Refresh printer helper before printing."
       : params.diagnostics.summary;
   const notice = transientRefresh
     ? "Printer status refresh is temporarily paused. Printing can continue with the last ready status."

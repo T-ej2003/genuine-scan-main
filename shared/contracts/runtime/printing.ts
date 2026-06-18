@@ -124,6 +124,8 @@ export const printJobSchema = z
     printMode: z.enum(["LOCAL_AGENT", "NETWORK_DIRECT", "NETWORK_IPP"]),
     quantity: z.number(),
     itemCount: z.number().nullable().optional(),
+    rangeStart: z.string().nullable().optional(),
+    rangeEnd: z.string().nullable().optional(),
     reprintOfJobId: z.string().nullable().optional(),
     reprintReason: z.string().nullable().optional(),
     failureReason: z.string().nullable().optional(),

@@ -19,6 +19,7 @@ import {
   type LocalPrinterAgentSnapshot,
 } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 import { canPollVisibleDocument } from "@/lib/query-polling-policy";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 import { normalizeLocalPrinterRows } from "@/features/printing/hooks";
@@ -511,7 +512,8 @@ export function useManufacturerPrinterConnection({
     if (next && next !== selectedLocalPrinterId) setSelectedLocalPrinterId(next);
   }, [detectedPrinters, printerStatus, selectedLocalPrinterId]);
 
-  const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
+  const securePrintReadiness = useMemo(() => buildSecurePrintReadiness(printerStatus), [printerStatus]);
+  const printerReady = securePrintReadiness.ready;
   const managedNetworkPrinters = useMemo(
     () => managedPrinterProfiles.filter((printer) => printer.connectionType !== "LOCAL_AGENT" && printer.isActive),
     [managedPrinterProfiles]
@@ -546,7 +548,7 @@ export function useManufacturerPrinterConnection({
   );
   const effectivePrinterDiagnostics =
     shouldUseManagedPrinterSummary && managedPrinterDiagnostics ? managedPrinterDiagnostics : printerDiagnostics;
-  const effectivePrinterReady = printerReady || managedPrinterDiagnostics?.tone === "success";
+  const effectivePrinterReady = printerReady;
   const printerUnavailable = !effectivePrinterReady && !printerHasInventory && managedNetworkPrinters.length === 0;
   const selectedPrinter =
     chooseStablePrinterSelection(
@@ -599,14 +601,14 @@ export function useManufacturerPrinterConnection({
     : effectivePrinterReady && (!printerStatus.trusted || printerStatus.compatibilityMode)
       ? printerReadinessDisplay.notice
       : "";
-  const printerSummaryMessage = effectivePrinterReady
-    ? printerReadinessDisplay.summary
-    : effectivePrinterDiagnostics.summary;
+  const printerSummaryMessage = printerReadinessDisplay.summary;
   const printerNextStep = effectivePrinterReady
     ? shouldUseManagedPrinterSummary
       ? "Open batches and choose this saved printer when you are ready to print."
       : "You can go back to batches and start printing."
-    : effectivePrinterDiagnostics.nextSteps[0] || "Refresh printer status before starting a print run.";
+    : printerReadinessDisplay.blocksPrintStart
+      ? "Refresh printer helper before starting a print run."
+      : effectivePrinterDiagnostics.nextSteps[0] || "Refresh printer status before starting a print run.";
   const selectedPrinterIsActive = Boolean(selectedPrinter && selectedPrinter.printerId === activePrinterId);
   const printerDiscoveryCountLabel =
     detectedPrinters.length === 1 ? "1 printer detected" : `${detectedPrinters.length} printers detected`;
@@ -625,7 +627,7 @@ export function useManufacturerPrinterConnection({
     enabled: currentPath === APP_PATHS.batches,
     managedProfilesLoaded: managedPrinterProfilesLoaded,
     printerReady,
-    managedPrinterReady: managedPrinterDiagnostics?.tone === "success",
+    managedPrinterReady: false,
     managedNetworkPrinterCount: managedNetworkPrinters.length,
     setOpen: setPrinterOnboardingOpen,
   });
@@ -690,6 +692,7 @@ export function useManufacturerPrinterConnection({
     printerToneClass,
     printerTitle,
     printerModeLabel,
+    securePrintReadiness,
     printerDegraded,
     printerDegradedMessage,
     printerNoticeMessage,

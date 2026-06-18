@@ -26,6 +26,8 @@ const makeJob = () => ({
   printMode: PrintDispatchMode.LOCAL_AGENT,
   quantity: 1,
   itemCount: 1,
+  rangeStart: "QR-000001",
+  rangeEnd: "QR-000001",
   reprintOfJobId: "job-root-1",
   reprintReason: "Damaged labels on first pass",
   failureReason: null,
@@ -109,6 +111,7 @@ const run = async () => {
     assert(view.session.remainingToPrint === 0, "Operational view should derive remainingToPrint from print item state");
     assert(view.reprintOfJobId === "job-root-1", "Operational view should expose the original job link");
     assert(view.reprintReason === "Damaged labels on first pass", "Operational view should expose the reissue reason");
+    assert(view.rangeStart === "QR-000001" && view.rangeEnd === "QR-000001", "Operational view should expose requested range");
     assert(view.operator.name === "Operator One", "Operational view should expose captured print operator");
     assert(view.session.confirmedRange.startCode === "QR-000001", "Operational view should expose confirmed range");
     assert(view.sampleScanPolicy.satisfied === true, "Operational view should expose satisfied sample scan policy");
@@ -130,6 +133,7 @@ const run = async () => {
     assert(rows[0].session.remainingToPrint === 0, "List should derive remainingToPrint from print item state");
     assert(rows[0].reprintOfJobId === "job-root-1", "List rows should expose the original job link");
     assert(rows[0].reprintReason === "Damaged labels on first pass", "List rows should expose the reissue reason");
+    assert(rows[0].rangeStart === "QR-000001" && rows[0].rangeEnd === "QR-000001", "List rows should expose requested range");
     assert(rows[0].operator.name === "Operator One", "List rows should expose captured print operator");
     assert(rows[0].sampleScanPolicy.satisfied === true, "List rows should expose satisfied sample scan policy");
     assert(

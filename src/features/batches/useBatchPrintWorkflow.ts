@@ -10,6 +10,7 @@ import {
   type LocalPrinterAgentSnapshot,
 } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 import {
   loadManufacturerPrinterRuntimeSnapshot,
@@ -130,7 +131,8 @@ export function useBatchPrintWorkflow({
   const printJobsQuery = usePrintJobs(printBatch?.id, 8, false);
   const printerRuntimeQuery = useManufacturerPrinterRuntime(true, isManufacturer && !printJobId);
 
-  const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
+  const securePrintReadiness = useMemo(() => buildSecurePrintReadiness(printerStatus), [printerStatus]);
+  const printerReady = securePrintReadiness.ready;
   const printerHasInventory =
     detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
   const activeLocalPrinterId = String(
@@ -201,13 +203,13 @@ export function useBatchPrintWorkflow({
         ? "The printer is ready on this computer, but the saved printer link belongs to an older connector install."
         : printerReady
         ? `${selectedDetectedPrinter?.printerName || printerStatus.selectedPrinterName || printerStatus.printerName || "Printer on this computer"} is ready.`
-        : printerDiagnostics.summary,
+        : securePrintReadiness.summary || printerDiagnostics.summary,
       detail: selectedLocalProfileRegistrationStale
         ? "Relink this saved printer to the current connector before starting the print run."
         : !printerReady
-        ? printerDiagnostics.detail
+        ? securePrintReadiness.detail || printerDiagnostics.detail
         : "This printer is ready for approved MSCQR printing.",
-      tone: selectedLocalProfileRegistrationStale ? "warning" : printerDiagnostics.tone,
+      tone: selectedLocalProfileRegistrationStale ? "warning" : securePrintReadiness.tone || printerDiagnostics.tone,
     };
   }, [
     printerDiagnostics.detail,
@@ -217,6 +219,9 @@ export function useBatchPrintWorkflow({
     printerReady,
     printerStatus.printerName,
     printerStatus.selectedPrinterName,
+    securePrintReadiness.detail,
+    securePrintReadiness.summary,
+    securePrintReadiness.tone,
     selectedDetectedPrinter?.printerName,
     selectedLocalProfileRegistrationStale,
     selectedPrinterProfile,
@@ -401,7 +406,7 @@ export function useBatchPrintWorkflow({
       try {
         applyPrinterRuntimeSnapshot(await loadManufacturerPrinterRuntimeSnapshot(true, { force: true }));
       } catch {
-        if (printerStatus.connected && printerStatus.eligibleForPrinting) return;
+        if (printerReady) return;
         setRegisteredPrinters([]);
         setDetectedPrinters([]);
       }
@@ -409,7 +414,7 @@ export function useBatchPrintWorkflow({
     }
     const response = await printerRuntimeQuery.refetch();
     if (!response.data) {
-      if (printerStatus.connected && printerStatus.eligibleForPrinting) return;
+      if (printerReady) return;
       setRegisteredPrinters([]);
       setDetectedPrinters([]);
       return;
@@ -892,6 +897,7 @@ export function useBatchPrintWorkflow({
     onOpenChange: handlePrintDialogOpenChange,
     printBatch,
     selectedPrinterNotice,
+    securePrintReadiness,
     selectedPrinterReadinessDisplay,
     printQuantity,
     onPrintQuantityChange: setPrintQuantity,

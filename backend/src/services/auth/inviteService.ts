@@ -39,7 +39,7 @@ const canonicalizeRole = (role: UserRole): UserRole => {
 
 const normalizeRole = (role: string): UserRole => {
   const r = String(role || "").trim().toUpperCase();
-  if (r === "PLATFORM_SUPER_ADMIN") return UserRole.SUPER_ADMIN;
+  if (r === "PLATFORM_SUPER_ADMIN") return UserRole.PLATFORM_SUPER_ADMIN;
   if (r === "ORG_ADMIN") return UserRole.LICENSEE_ADMIN;
   if (r === "MANUFACTURER_ADMIN") return UserRole.MANUFACTURER;
   if (r === "MANUFACTURER_USER") return UserRole.MANUFACTURER;
@@ -279,7 +279,7 @@ export const createInvite = async (input: {
       if (!allowExistingInvitedUser) throw new Error("User with this email already exists");
       if (existing.deletedAt || !existing.isActive) throw new Error("User account is disabled");
       const existingCanonicalRole = canonicalizeRole(existing.role);
-      if (existingCanonicalRole !== role) throw new Error("Existing user role does not match invite role");
+      if (existingCanonicalRole !== canonicalizeRole(role)) throw new Error("Existing user role does not match invite role");
       const existingStatus = String(existing.status || "").toUpperCase();
 
       if (isManufacturerRole(role) && licenseeId) {

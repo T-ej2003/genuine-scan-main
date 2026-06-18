@@ -297,8 +297,11 @@ export const getNavItemsForRole = (role?: UserRole | null) => {
   }));
 };
 
-export const getRoleDisplayLabel = (role?: UserRole | null) => {
-  if (role === "super_admin") return "Platform Admin";
+export const getRoleDisplayLabel = (role?: UserRole | null, rawRole?: string | null) => {
+  const raw = String(rawRole || "").trim().toUpperCase();
+  if (raw === "PLATFORM_SUPER_ADMIN") return "Platform Admin";
+  if (raw === "SUPER_ADMIN") return "Super Admin";
+  if (role === "super_admin") return "Super Admin";
   if (role === "licensee_admin") return "Brand Admin";
   if (role === "manufacturer") return "Manufacturer Admin";
   return "User";
