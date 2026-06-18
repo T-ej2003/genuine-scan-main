@@ -23,6 +23,38 @@ const startHtml503Server = async () => {
   };
 };
 
+const startMfaBootstrapServer = async () => {
+  const server = http.createServer((req, res) => {
+    const json = (status, payload) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(payload));
+    };
+
+    if (req.url === "/api/health/ready") return json(200, { success: true, status: "ready" });
+    if (req.url === "/api/health/live") return json(200, { success: true, status: "live" });
+    if (req.url === "/api/auth/login" && req.method === "POST") {
+      req.resume();
+      return json(200, {
+        success: true,
+        data: {
+          auth: {
+            sessionStage: "MFA_BOOTSTRAP",
+          },
+        },
+      });
+    }
+
+    return json(404, { success: false, error: "unexpected smoke path" });
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
+};
+
 const runSmoke = (baseUrl, env) =>
   new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["scripts/smoke-release.mjs"], {
@@ -64,6 +96,29 @@ test("pull request smoke records HTML 503 readiness as degraded instead of relea
     assert.match(result.stdout, /status=503/);
     assert.match(result.stdout, /content-type=text\/html/);
     assert.match(result.stdout, /503 Service Temporarily Unavailable/);
+  } finally {
+    await server.close();
+  }
+});
+
+test("pull request smoke soft-skips MFA bootstrap when smoke MFA code is not configured", async () => {
+  const server = await startMfaBootstrapServer();
+  try {
+    const result = await runSmoke(server.baseUrl, {
+      GITHUB_EVENT_NAME: "pull_request",
+      SMOKE_REQUIRED: "false",
+      ALLOW_STAGING_SMOKE_DEGRADED_ON_PR: "true",
+      SMOKE_LOGIN_EMAIL: "admin@example.com",
+      SMOKE_LOGIN_PASSWORD: "correct-horse-battery-staple",
+      SMOKE_ADMIN_MFA_CODE: "",
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /PASS ready health/);
+    assert.match(result.stdout, /PASS live health/);
+    assert.match(result.stdout, /PASS login/);
+    assert.match(result.stdout, /SKIP admin MFA bootstrap completion/);
+    assert.match(result.stdout, /SMOKE_REQUIRED=false/);
   } finally {
     await server.close();
   }

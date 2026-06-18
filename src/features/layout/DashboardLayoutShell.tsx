@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { Activity, ChevronDown, CircleHelp, Command, LogOut, Menu, Printer, Settings } from "lucide-react";
+import { Activity, ChevronDown, CircleHelp, Command, LogOut, Menu, Settings } from "lucide-react";
 
 import { APP_PATHS, getAppBreadcrumbs, getNavItemsForRole, getRoleDisplayLabel, isAppRouteActive } from "@/app/route-metadata";
 import { BrandLockup } from "@/components/brand/BrandLockup";
@@ -9,7 +9,6 @@ import { ContextualIntelligencePanel } from "@/components/platform/ContextualInt
 import { PlatformCommandPalette } from "@/components/platform/PlatformCommandPalette";
 import { SupportIssueLauncher } from "@/components/support/SupportIssueLauncher";
 import { LegalFooter } from "@/components/trust/LegalFooter";
-import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -29,6 +28,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { useAuth } from "@/contexts/AuthContext";
 import { useDashboardNotificationCenter, useOperationalAttentionQueue } from "@/features/layout/hooks";
 import { DashboardThemeToggle } from "@/features/layout/components/DashboardThemeToggle";
+import { HeaderPrinterStatusButton } from "@/features/layout/components/HeaderPrinterStatusButton";
 import { NotificationsDropdown } from "@/features/layout/components/NotificationsDropdown";
 import {
   PrinterOnboardingDialog,
@@ -38,13 +38,7 @@ import { NOTIFICATION_FETCH_LIMIT, resolveNotificationTarget, resolveWorkspaceLa
 import { useManufacturerPrinterConnection } from "@/features/layout/useManufacturerPrinterConnection";
 import { getContextualHelpRoute } from "@/help/contextual-help";
 import { useToast } from "@/hooks/use-toast";
-import {
-  getActivePrintRecoveryLabel,
-  clearActivePrintSession,
-  hasRecoverableActivePrintSession,
-  requestActivePrintSessionRecovery,
-  useActivePrintSession,
-} from "@/lib/active-print-session";
+import { clearActivePrintSession } from "@/lib/active-print-session";
 import { cn } from "@/lib/utils";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -68,7 +62,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const contextualHelpRoute = getContextualHelpRoute(location.pathname, user?.role);
   const notificationCenter = useDashboardNotificationCenter(user?.id, NOTIFICATION_FETCH_LIMIT);
   const attentionQueue = useOperationalAttentionQueue(Boolean(user?.id));
-  const activePrintSession = useActivePrintSession();
   const printerConnection = useManufacturerPrinterConnection({
     user,
     contextualHelpRoute,
@@ -87,24 +80,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const workspaceLabel = resolveWorkspaceLabel(user);
   const currentPageLabel = breadcrumbs[breadcrumbs.length - 1]?.label || "Workspace";
   const roleLabel = getRoleDisplayLabel(user?.role);
-  const canRecoverPrintProgress =
-    printerConnection.isManufacturer && hasRecoverableActivePrintSession(activePrintSession);
-  const printRecoveryLabel = getActivePrintRecoveryLabel(activePrintSession);
-  const printerStatusButtonTitle = canRecoverPrintProgress
-    ? activePrintSession.terminal
-      ? "Recover interrupted view for the completed or stopped print run."
-      : activePrintSession.modalOpen
-        ? "View the active print progress dialog."
-        : "Print is still running. Resume print progress."
-    : printerConnection.printerTitle;
-  const openPrinterStatusOrPrintRecovery = () => {
-    if (canRecoverPrintProgress) {
-      if (location.pathname !== APP_PATHS.batches) navigate(APP_PATHS.batches);
-      requestActivePrintSessionRecovery();
-      return;
-    }
-    printerConnection.openPrinterConnectionDialog();
-  };
 
   const contextPanel = (
     <ContextualIntelligencePanel
@@ -328,31 +303,16 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               onClearNotifications={notificationCenter.clearNotifications}
             />
 
-            {printerConnection.isManufacturer ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={openPrinterStatusOrPrintRecovery}
-                className={cn("mr-1 gap-2", printerConnection.printerToneClass)}
-                title={printerStatusButtonTitle}
-              >
-                <Printer className="h-4 w-4" />
-                <span className="hidden md:inline">
-                  {canRecoverPrintProgress ? printRecoveryLabel : `Printing ${printerConnection.printerModeLabel}`}
-                </span>
-                <span className="md:hidden">
-                  {canRecoverPrintProgress ? (activePrintSession.terminal ? "Result" : "Progress") : printerConnection.printerModeLabel}
-                </span>
-                {printerConnection.printerDegraded ? (
-                  <Badge
-                    variant="outline"
-                    className="border-amber-300 bg-amber-100/80 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800"
-                  >
-                    Recovery mode
-                  </Badge>
-                ) : null}
-              </Button>
-            ) : null}
+            <HeaderPrinterStatusButton
+              isManufacturer={printerConnection.isManufacturer}
+              currentPath={location.pathname}
+              navigate={navigate}
+              printerToneClass={printerConnection.printerToneClass}
+              printerTitle={printerConnection.printerTitle}
+              printerModeLabel={printerConnection.printerModeLabel}
+              printerDegraded={printerConnection.printerDegraded}
+              onOpenPrinterStatus={printerConnection.openPrinterConnectionDialog}
+            />
 
             {printerConnection.isManufacturer &&
             !printerConnection.effectivePrinterReady &&
