@@ -106,7 +106,7 @@ describe("manufacturer History page", () => {
     expect(screen.getByText("PRINT-42")).toBeInTheDocument();
     expect(screen.getByText(/12 printed of 12/i)).toBeInTheDocument();
     expect(screen.getByText("Zebra ZT410")).toBeInTheDocument();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
 
     expect(await screen.findByText("Print job received by printer connector")).toBeInTheDocument();
     expect(screen.getByText("Label print confirmed")).toBeInTheDocument();

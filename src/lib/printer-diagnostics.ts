@@ -97,6 +97,17 @@ export type PrinterDiagnosticSummary = {
   recommendedPrinter?: PrinterInventoryRow | null;
 };
 
+export type PrinterReadinessDisplay = {
+  modeLabel: "Ready" | "Refreshing" | "Needs review" | "Check setup" | "Needs help";
+  badgeLabel: "Ready" | "Refreshing" | "Needs check" | "Pending" | "Blocked";
+  tone: "success" | "warning" | "neutral" | "danger";
+  toneClass: string;
+  title: string;
+  summary: string;
+  notice: string;
+  blocksPrintStart: boolean;
+};
+
 export type NetworkDirectPrinterSummaryLike = {
   id?: string | null;
   name?: string | null;
@@ -632,6 +643,70 @@ export const getPrinterDiagnosticSummary = (params: {
       "If needed, send a support summary to your support team.",
     ],
     selectedPrinter,
+  };
+};
+
+export const buildPrinterReadinessDisplay = (params: {
+  diagnostics: PrinterDiagnosticSummary;
+  ready: boolean;
+  refreshPaused?: boolean;
+  rateLimited?: boolean;
+  stale?: boolean;
+  trusted?: boolean;
+  compatibilityMode?: boolean;
+  identityLabel?: string | null;
+}): PrinterReadinessDisplay => {
+  const transientRefresh = Boolean((params.refreshPaused || params.rateLimited) && params.ready && !params.stale);
+  const blocksPrintStart = Boolean(params.stale || (!params.ready && params.diagnostics.tone === "danger"));
+  const tone = transientRefresh ? "success" : params.diagnostics.tone;
+  const modeLabel = transientRefresh
+    ? "Refreshing"
+    : params.ready
+      ? "Ready"
+      : params.diagnostics.tone === "warning"
+        ? "Needs review"
+        : params.diagnostics.tone === "neutral"
+          ? "Check setup"
+          : "Needs help";
+  const badgeLabel = transientRefresh
+    ? "Refreshing"
+    : params.ready
+      ? "Ready"
+      : params.diagnostics.tone === "warning"
+        ? "Needs check"
+        : params.diagnostics.tone === "neutral"
+          ? "Pending"
+          : "Blocked";
+  const identity = String(params.identityLabel || params.diagnostics.selectedPrinter?.printerName || "Selected printer").trim();
+  const summary = transientRefresh
+    ? `${identity} was ready at the last trusted check. Status refresh is temporarily paused.`
+    : params.ready
+      ? `${identity} is ready to print.`
+      : params.diagnostics.summary;
+  const notice = transientRefresh
+    ? "Printer status refresh is temporarily paused. Printing can continue with the last ready status."
+    : params.ready && (!params.trusted || params.compatibilityMode)
+      ? "Secure printer verification is still finishing. Printing can continue."
+      : "";
+
+  const toneClass =
+    tone === "success"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+      : tone === "warning"
+        ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+        : tone === "neutral"
+          ? "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
+          : "border-red-300 bg-red-50 text-red-700 hover:bg-red-100";
+
+  return {
+    modeLabel,
+    badgeLabel,
+    tone,
+    toneClass,
+    title: params.diagnostics.title,
+    summary,
+    notice,
+    blocksPrintStart,
   };
 };
 

@@ -96,6 +96,77 @@ const buildDispatchReferenceSummary = async (sessionId: string, awaitingCount: n
   };
 };
 
+const hasNonEmptyJsonEvidence = (value: unknown) => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "object" && !Array.isArray(value)) return Object.keys(value as Record<string, unknown>).length > 0;
+  return true;
+};
+
+const buildCodeRangeSummary = (codes: Array<string | null | undefined>) => {
+  const sorted = codes.map((code) => String(code || "").trim()).filter(Boolean).sort();
+  if (sorted.length === 0) return null;
+  return {
+    startCode: sorted[0],
+    endCode: sorted[sorted.length - 1],
+    count: sorted.length,
+  };
+};
+
+const buildSessionRangeSummary = async (sessionId?: string | null) => {
+  if (!sessionId) {
+    return {
+      confirmedRange: null,
+      pendingRange: null,
+      recoveryRange: null,
+      failedRange: null,
+      nextPrintableIndex: null,
+      recoveryNeeded: false,
+      pendingUnconfirmedItems: 0,
+      failedItems: 0,
+    };
+  }
+  const rows = await prisma.printItem.findMany({
+    where: { printSessionId: sessionId },
+    orderBy: [{ issueSequence: "asc" }, { code: "asc" }],
+    select: {
+      code: true,
+      state: true,
+      printConfirmedAt: true,
+      confirmationEvidence: true,
+    },
+  });
+
+  const confirmedCodes = rows
+    .filter((row) => row.state === PrintItemState.PRINT_CONFIRMED || row.state === PrintItemState.CLOSED || row.printConfirmedAt)
+    .map((row) => row.code);
+  const pendingRows = rows.filter(
+    (row) =>
+      !row.printConfirmedAt &&
+      !hasNonEmptyJsonEvidence(row.confirmationEvidence) &&
+      (OPEN_PRINT_STATES.includes(row.state) || row.state === PrintItemState.AGENT_ACKED)
+  );
+  const recoveryRows = rows.filter(
+    (row) =>
+      row.state === PrintItemState.CANCELLED &&
+      !row.printConfirmedAt &&
+      !hasNonEmptyJsonEvidence(row.confirmationEvidence)
+  );
+  const failedRows = rows.filter((row) => row.state === PrintItemState.FAILED || row.state === PrintItemState.FROZEN);
+  const recoveryRange = buildCodeRangeSummary(recoveryRows.map((row) => row.code));
+  const pendingRange = buildCodeRangeSummary(pendingRows.map((row) => row.code));
+
+  return {
+    confirmedRange: buildCodeRangeSummary(confirmedCodes),
+    pendingRange,
+    recoveryRange,
+    failedRange: buildCodeRangeSummary(failedRows.map((row) => row.code)),
+    nextPrintableIndex: recoveryRange?.startCode || pendingRange?.startCode || null,
+    recoveryNeeded: Boolean(recoveryRange),
+    pendingUnconfirmedItems: pendingRows.length + recoveryRows.length,
+    failedItems: failedRows.length,
+  };
+};
+
 const buildSessionSnapshot = <
   T extends {
     id: string;
@@ -414,6 +485,7 @@ const buildPrintJobView = async (job: {
   sentAt: Date | null;
   confirmedAt: Date | null;
   completedAt: Date | null;
+  manufacturer?: { id: string; name: string | null; email: string | null } | null;
   batch:
     | {
         id: string;
@@ -443,6 +515,7 @@ const buildPrintJobView = async (job: {
   const sessionIds = job.printSession?.id ? [job.printSession.id] : [];
   const sessionStateCounts = await buildSessionStateCounts(sessionIds);
   const counts = job.printSession?.id ? sessionStateCounts[job.printSession.id] || {} : {};
+  const sessionRanges = await buildSessionRangeSummary(job.printSession?.id || null);
   const awaitingConfirmationCount = counts[PrintItemState.AGENT_ACKED] || 0;
   const sampleScanPolicy =
     job.batch?.id && job.status === PrintJobStatus.CONFIRMED
@@ -480,7 +553,20 @@ const buildPrintJobView = async (job: {
     completedAt: toIsoOrNull(job.completedAt),
     batch: job.batch,
     printer: job.printer,
-    session: buildSessionSnapshot(job.printSession, counts),
+    operator: job.manufacturer
+      ? {
+          id: job.manufacturer.id,
+          name: job.manufacturer.name,
+          email: job.manufacturer.email,
+          source: "print_job_actor",
+        }
+      : null,
+    session: job.printSession
+      ? {
+          ...buildSessionSnapshot(job.printSession, counts),
+          ...sessionRanges,
+        }
+      : null,
     sampleScanPolicy,
   };
 };
@@ -502,6 +588,9 @@ export const getPrintJobOperationalView = async (params: {
           sampleScanPolicy: true,
           totalCodes: true,
         },
+      },
+      manufacturer: {
+        select: { id: true, name: true, email: true },
       },
       printer: {
         select: {
@@ -570,6 +659,9 @@ export const listPrintJobsForManufacturer = async (params: {
           sampleScanPolicy: true,
           totalCodes: true,
         },
+      },
+      manufacturer: {
+        select: { id: true, name: true, email: true },
       },
       printer: {
         select: {

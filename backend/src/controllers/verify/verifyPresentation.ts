@@ -109,7 +109,7 @@ const isPrintLifecycleConfirmed = (qrCode: any) => {
   ) {
     return true;
   }
-  if (printJob.printSession?.status === PrintSessionStatus.COMPLETED || printJob.printSession?.completedAt) {
+  if (printJob.printSession?.status === PrintSessionStatus.COMPLETED && printJob.confirmedAt) {
     return true;
   }
 

@@ -34,6 +34,11 @@ const makeJob = () => ({
   sentAt: new Date("2026-03-20T09:01:00.000Z"),
   confirmedAt: new Date("2026-03-20T09:05:00.000Z"),
   completedAt: new Date("2026-03-20T09:05:00.000Z"),
+  manufacturer: {
+    id: "user-1",
+    name: "Operator One",
+    email: "operator@example.com",
+  },
   batch: { id: "batch-1", name: "Batch 1", licenseeId: "lic-1" },
   printer: {
     id: "printer-1",
@@ -58,6 +63,7 @@ const run = async () => {
   const backupFindFirst = prisma.printJob.findFirst;
   const backupFindMany = prisma.printJob.findMany;
   const backupGroupBy = prisma.printItem.groupBy;
+  const backupPrintItemFindMany = prisma.printItem.findMany;
   const backupPrintAuditFindMany = prisma.printAuditEvent.findMany;
   let lastFindFirstArgs = null;
   let lastFindManyArgs = null;
@@ -75,6 +81,14 @@ const run = async () => {
       printSessionId: "session-1",
       state: PrintItemState.CLOSED,
       _count: { _all: 1 },
+    },
+  ];
+  prisma.printItem.findMany = async () => [
+    {
+      code: "QR-000001",
+      state: PrintItemState.CLOSED,
+      printConfirmedAt: new Date("2026-03-20T09:05:00.000Z"),
+      confirmationEvidence: { source: "connector" },
     },
   ];
   prisma.printAuditEvent.findMany = async () => [
@@ -95,6 +109,8 @@ const run = async () => {
     assert(view.session.remainingToPrint === 0, "Operational view should derive remainingToPrint from print item state");
     assert(view.reprintOfJobId === "job-root-1", "Operational view should expose the original job link");
     assert(view.reprintReason === "Damaged labels on first pass", "Operational view should expose the reissue reason");
+    assert(view.operator.name === "Operator One", "Operational view should expose captured print operator");
+    assert(view.session.confirmedRange.startCode === "QR-000001", "Operational view should expose confirmed range");
     assert(view.sampleScanPolicy.satisfied === true, "Operational view should expose satisfied sample scan policy");
     assert(
       lastFindFirstArgs.where.batch.is.licenseeId === "lic-1",
@@ -114,6 +130,7 @@ const run = async () => {
     assert(rows[0].session.remainingToPrint === 0, "List should derive remainingToPrint from print item state");
     assert(rows[0].reprintOfJobId === "job-root-1", "List rows should expose the original job link");
     assert(rows[0].reprintReason === "Damaged labels on first pass", "List rows should expose the reissue reason");
+    assert(rows[0].operator.name === "Operator One", "List rows should expose captured print operator");
     assert(rows[0].sampleScanPolicy.satisfied === true, "List rows should expose satisfied sample scan policy");
     assert(
       lastFindManyArgs.where.manufacturerId === "user-1",
@@ -125,6 +142,7 @@ const run = async () => {
     prisma.printJob.findFirst = backupFindFirst;
     prisma.printJob.findMany = backupFindMany;
     prisma.printItem.groupBy = backupGroupBy;
+    prisma.printItem.findMany = backupPrintItemFindMany;
     prisma.printAuditEvent.findMany = backupPrintAuditFindMany;
   }
 };

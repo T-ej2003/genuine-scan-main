@@ -43,7 +43,7 @@ type BatchesWorkspaceTableProps = {
   printerDiagnostics: {
     tone: "success" | "warning" | "neutral" | "danger";
     summary: string;
-    badgeLabel: string;
+    badgeLabel: "Ready" | "Refreshing" | "Needs check" | "Pending" | "Blocked";
   };
   onDismissAllocationHint: () => void;
   onSearchChange: (value: string) => void;
@@ -237,8 +237,16 @@ export function BatchesWorkspaceTable({
                             ? printReadiness.userMessage || printReadiness.requiredPreviousStep || "Complete the previous batch step first."
                             : "Nothing is waiting to print in this batch right now.";
 
+                        const workspaceForBatch = buildStableBatchOverviewRows([batch])[0] || null;
+
                         return (
-                          <TableRow key={batch.id}>
+                          <TableRow
+                            key={batch.id}
+                            className="cursor-pointer hover:bg-muted/20"
+                            onClick={() => {
+                              if (workspaceForBatch) onOpenWorkspace(workspaceForBatch);
+                            }}
+                          >
                             <TableCell>
                               <div className="space-y-1">
                                 <div className="font-medium break-words">{batch.name}</div>
@@ -319,7 +327,10 @@ export function BatchesWorkspaceTable({
                                 data-testid="manufacturer-create-print-job"
                                 size="sm"
                                 variant="outline"
-                                onClick={() => onOpenPrintPack(batch)}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onOpenPrintPack(batch);
+                                }}
                                 state={
                                   loading
                                     ? createUiActionState("pending", "Checking whether this batch is ready to print.")

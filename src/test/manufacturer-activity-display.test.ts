@@ -54,6 +54,21 @@ describe("manufacturer activity display", () => {
     expect(row.remainingLabels).toBe(0);
     expect(row.printerName).toBe("Zebra ZT410");
     expect(row.actorLabel).toContain("Factory Operator");
-    expect(row.statusLabel).toBe("Completed");
+    expect(row.statusLabel).toBe("Confirmed");
+  });
+
+  it("uses a clear fallback when operator capture is unavailable", () => {
+    const row = buildManufacturerPrintHistoryRow({
+      id: "run-without-operator",
+      status: "STOPPED",
+      quantity: 10,
+      itemCount: 10,
+      batch: { name: "Spring Denim" },
+      printer: { name: "Zebra ZT410" },
+      session: { confirmedItems: 5, remainingToPrint: 5 },
+    });
+
+    expect(row.actorLabel).toBe("Operator not recorded");
+    expect(row.statusLabel).toBe("Partially confirmed");
   });
 });

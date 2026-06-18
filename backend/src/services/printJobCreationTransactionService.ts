@@ -16,6 +16,8 @@ import { reconcileBatchPrintLifecycle } from "./batchPrintLifecycleReconciliatio
 import {
   buildReusablePrintItemResetData,
   countBlockedQrCodesForPrint,
+  findUnresolvedRecoveryRangeForBatch,
+  requestedRangeSkipsRecovery,
   selectReservableQrCodesForPrint,
   type ReservableQrCodeRow,
 } from "./printReservationService";
@@ -80,6 +82,38 @@ export const createPrintJobRecords = async (params: {
         actor: { userId },
         tx,
       });
+      const recoveryRange = await findUnresolvedRecoveryRangeForBatch(tx, { batchId: batch.id });
+      if (requestedRangeSkipsRecovery({ recoveryStartCode: recoveryRange?.startCode, rangeStart, rangeEnd })) {
+        onEvent("print_recovery_required_before_new_print", {
+          batchId: batch.id,
+          requestedQuantity: quantity,
+          rangeStart: rangeStart || null,
+          rangeEnd: rangeEnd || null,
+          recoveryRange,
+        });
+        throw Object.assign(
+          new Error(
+            recoveryRange
+              ? `Recover unconfirmed range ${recoveryRange.startCode}-${recoveryRange.endCode} before starting a later print run.`
+              : "Recover unconfirmed labels before starting a later print run."
+          ),
+          {
+            code: "RECOVERY_REQUIRED_BEFORE_NEW_PRINT",
+            statusCode: 409,
+            details: {
+              batchId: batch.id,
+              recoveryRange,
+              recoveryAction: recoveryRange
+                ? `Continue from QR index ${recoveryRange.startCode}. Recover unconfirmed range ${recoveryRange.startCode}-${recoveryRange.endCode}.`
+                : "Recover unconfirmed labels before starting a later print run.",
+              userMessage: recoveryRange
+                ? `Continue from QR index ${recoveryRange.startCode} before starting a later range.`
+                : "Recover unconfirmed labels before starting a later range.",
+              canRetry: true,
+            },
+          }
+        );
+      }
       const reservedRows = await selectReservableQrCodesForPrint(tx, {
         batchId: batch.id,
         quantity,
@@ -235,11 +269,8 @@ export const createPrintJobRecords = async (params: {
           where: {
             id: reusablePrintItemId,
             qrCodeId: item.qr.id,
-            agentAckedAt: null,
-            dispatchedAt: null,
             printConfirmedAt: null,
-            deviceJobRef: null,
-            state: { in: [PrintItemState.FAILED, PrintItemState.FROZEN] },
+            state: { in: [PrintItemState.FAILED, PrintItemState.FROZEN, PrintItemState.CANCELLED] },
           },
           data: buildReusablePrintItemResetData(now),
         });

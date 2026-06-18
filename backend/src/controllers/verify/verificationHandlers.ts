@@ -321,7 +321,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
     if (qrCode.status === QRStatus.BLOCKED) {
       const blockedReasons =
         replacement.replacementStatus === VerificationReplacementStatus.REPLACED_LABEL
-          ? ["This label was superseded by a controlled replacement issuance."]
+          ? ["This label is no longer valid."]
           : undefined;
       const blockedSemantics = buildPublicVerificationSemantics({
         classification: "BLOCKED_BY_SECURITY",
@@ -337,10 +337,9 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
         verifyUxPolicy,
       });
       if (blockedReasons) {
-        blockedPayload.message = "This label has been superseded by a controlled replacement.";
+        blockedPayload.message = "This label is not valid for verification.";
         blockedPayload.reasons = Array.from(new Set([...blockedReasons, ...(blockedPayload.reasons || [])]));
-        blockedPayload.warningMessage =
-          "Verify the active replacement label if it was reissued by the manufacturer or operator.";
+        blockedPayload.warningMessage = "Please use the valid label supplied with the product.";
       }
       blockedPayload.reasons = Array.from(new Set([...(blockedPayload.reasons || []), ...(baseTrustSignal.messages || [])]));
       const decision = await persistVerificationDecision({

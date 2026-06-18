@@ -242,6 +242,12 @@ export type PrintJobRow = {
     connectionType?: "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP" | string | null;
     commandLanguage?: string;
   } | null;
+  operator?: {
+    id?: string;
+    name?: string | null;
+    email?: string | null;
+    source?: string | null;
+  } | null;
   session?: {
     id?: string;
     status?: string;
@@ -253,6 +259,13 @@ export type PrintJobRow = {
     failedReason?: string | null;
     remainingToPrint?: number;
     awaitingConfirmationCount?: number;
+    recoveryNeeded?: boolean;
+    pendingUnconfirmedItems?: number;
+    nextPrintableIndex?: string | null;
+    confirmedRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
+    pendingRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
+    recoveryRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
+    failedRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
     counts?: Record<string, number>;
   } | null;
   latestDecision?: LatestDecision | null;

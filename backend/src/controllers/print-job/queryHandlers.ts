@@ -119,7 +119,13 @@ const printControlScope = (req: AuthRequest, user: NonNullable<AuthRequest["user
 const handleUserSafeError = (res: Response, error: any, fallback: string) => {
   const statusCode = typeof error?.statusCode === "number" ? error.statusCode : 500;
   const message = String(error?.message || fallback);
-  return res.status(statusCode).json({ success: false, error: statusCode >= 500 ? fallback : message });
+  const code = typeof error?.code === "string" ? error.code : undefined;
+  return res.status(statusCode).json({
+    success: false,
+    error: statusCode >= 500 ? fallback : message,
+    message: statusCode >= 500 ? fallback : message,
+    ...(code ? { code, errorCode: code } : {}),
+  });
 };
 
 export const pauseManufacturerPrintJob = async (req: AuthRequest, res: Response) => {

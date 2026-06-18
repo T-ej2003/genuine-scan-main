@@ -207,7 +207,6 @@ type PrintJobDialogProps = {
   onAbandonPrintJob: (jobId: string) => void;
   sampleScanCodeByJobId?: Record<string, string>;
   onSampleScanCodeChange?: (jobId: string, value: string) => void;
-  onConfirmPrintedLabels?: (jobId: string) => void;
   onVerifySampleScan?: (jobId: string) => void;
   onReleaseBatch?: () => void;
   onClose: () => void;
@@ -338,7 +337,6 @@ export function BatchPrintJobDialog({
   onAbandonPrintJob,
   sampleScanCodeByJobId = {},
   onSampleScanCodeChange = () => undefined,
-  onConfirmPrintedLabels = () => undefined,
   onVerifySampleScan = () => undefined,
   onReleaseBatch = () => undefined,
   onClose,
@@ -933,20 +931,8 @@ export function BatchPrintJobDialog({
                         </div>
                       ) : null}
                       {job.status === "SENT" && job.awaitingConfirmation ? (
-                        <div className="mt-2 flex flex-wrap justify-end gap-2">
-                          <ActionButton
-                            variant="outline"
-                            size="sm"
-                            onClick={() => onConfirmPrintedLabels(job.id)}
-                            state={
-                              printing
-                                ? createUiActionState("pending", "Confirming the physical print run.")
-                                : createUiActionState("enabled")
-                            }
-                            idleLabel="Labels physically printed"
-                            pendingLabel="Confirming..."
-                            showReasonBelow={false}
-                          />
+                        <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                          Waiting for connector physical confirmation. Stop and recover the run if the printer did not finish.
                         </div>
                       ) : null}
                       {job.status === "CONFIRMED" ? (

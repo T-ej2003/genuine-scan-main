@@ -185,7 +185,7 @@ const loadEvidence = async (client: ReconciliationClient, batchId: string): Prom
       client.printJob.count({
         where: {
           batchId,
-          OR: [{ status: PrintJobStatus.CONFIRMED }, { confirmedAt: { not: null } }, { completedAt: { not: null } }],
+          OR: [{ status: PrintJobStatus.CONFIRMED }, { confirmedAt: { not: null } }],
         },
       }),
       client.printSession.count({
@@ -198,9 +198,9 @@ const loadEvidence = async (client: ReconciliationClient, batchId: string): Prom
       client.printJob.findFirst({
         where: {
           batchId,
-          OR: [{ status: PrintJobStatus.CONFIRMED }, { confirmedAt: { not: null } }, { completedAt: { not: null } }],
+          OR: [{ status: PrintJobStatus.CONFIRMED }, { confirmedAt: { not: null } }],
         },
-        orderBy: [{ confirmedAt: "desc" }, { completedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+        orderBy: [{ confirmedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
         select: { id: true },
       }),
       client.qRCode.count({ where: { batchId, status: QRStatus.ALLOCATED, printJobId: null } }),

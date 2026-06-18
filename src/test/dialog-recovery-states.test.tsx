@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import { PrintProgressDialog } from "@/components/printing/PrintProgressDialog";
+import { LicenseeBatchWorkspaceDialog } from "@/components/batches/LicenseeBatchWorkspaceDialog";
 import { BatchPrintJobDialog, DeleteBatchDialog, RenameBatchDialog } from "@/features/batches/components/BatchDialogs";
 import { LicenseeDialogs } from "@/features/licensees/components/LicenseeDialogs";
 import { ManufacturerDetailsDialog } from "@/features/manufacturers/components/ManufacturerDetailsDialog";
@@ -75,6 +76,8 @@ describe("dialog recovery states", () => {
         />
       </MemoryRouter>,
     );
+
+  const noop = () => undefined;
 
   it("enables print start when an E2E local helper-ready printer is selected", () => {
     renderPrintDialog();
@@ -183,6 +186,7 @@ describe("dialog recovery states", () => {
           printMode: "LOCAL_AGENT",
           quantity: 12,
           itemCount: 12,
+          awaitingConfirmation: true,
           createdAt: new Date().toISOString(),
           printer: { name: "E2E Local Agent Printer" },
           session: { status: "ACTIVE", confirmedItems: 4, remainingToPrint: 8, failedItems: 1 },
@@ -223,8 +227,98 @@ describe("dialog recovery states", () => {
     expect(onOpenControl).toHaveBeenCalledWith("pause", expect.objectContaining({ id: "job-active" }));
     expect(onOpenControl).toHaveBeenCalledWith("stop", expect.objectContaining({ id: "job-active" }));
     expect(screen.getByRole("button", { name: "Resume printing" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Labels physically printed/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Waiting for connector physical confirmation/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Request reissue" }));
     expect(onOpenReissue).toHaveBeenCalledWith(expect.objectContaining({ id: "job-confirmed" }));
+  });
+
+  it("shows exact recovery range and captured operator in the batch operations modal", () => {
+    render(
+      <MemoryRouter>
+        <LicenseeBatchWorkspaceDialog
+          open
+          onOpenChange={noop}
+          workspace={{
+            sourceBatchId: "batch-1",
+            focusBatchId: "batch-1",
+            sourceBatchName: "Launch batch",
+            sourceBatchRow: null,
+            licensee: { id: "lic-1", name: "Acme", prefix: "ACM" },
+            sourceCreatedAt: "2026-06-18T10:00:00.000Z",
+            sourceUpdatedAt: "2026-06-18T10:00:00.000Z",
+            sourceOriginalRangeStart: "QR-000001",
+            sourceOriginalRangeEnd: "QR-000100",
+            originalTotalCodes: 100,
+            remainingUnassignedCodes: 0,
+            remainingRangeStart: null,
+            remainingRangeEnd: null,
+            assignedCodes: 100,
+            pendingPrintableCodes: 95,
+            printedCodes: 5,
+            redeemedCodes: 0,
+            blockedCodes: 0,
+            manufacturerCount: 1,
+            allocations: [],
+            manufacturerSummary: [],
+            printedAt: null,
+          }}
+          manufacturers={[]}
+          assignManufacturerId=""
+          assignQuantity=""
+          assigning={false}
+          onAssignManufacturerChange={noop}
+          onAssignQuantityChange={noop}
+          onSubmitAssign={noop}
+          onOpenRename={noop}
+          onOpenAllocationMap={noop}
+          onDownloadAudit={noop}
+          onDelete={noop}
+          canAssignManufacturer={false}
+          canDelete={false}
+          exportingAudit={false}
+          historyLoading={false}
+          historyLogs={[]}
+          historyLastUpdatedAt={null}
+          onRefreshHistory={noop}
+          recentPrintJobs={[
+            {
+              id: "job-1",
+              jobNumber: "PJ-1",
+              status: "PARTIALLY_COMPLETED",
+              pipelineState: "STOPPED",
+              printMode: "LOCAL_AGENT",
+              quantity: 10,
+              itemCount: 10,
+              createdAt: "2026-06-18T10:01:00.000Z",
+              printer: { name: "ZDesigner" },
+              operator: { name: "Priya Operator" },
+              session: {
+                confirmedItems: 5,
+                pendingUnconfirmedItems: 5,
+                failedItems: 0,
+                remainingToPrint: 5,
+                recoveryNeeded: true,
+                recoveryRange: { startCode: "QR-000006", endCode: "QR-000010", count: 5 },
+                nextPrintableIndex: "QR-000006",
+              },
+            } as any,
+          ]}
+          printJobsLoading={false}
+          canRequestReissue
+          reissueReason="Damaged stock"
+          onReissueReasonChange={noop}
+          onRequestReissue={noop}
+          reissuingJobId={null}
+          initialTab="operations"
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("Continue from QR index QR-000006.")).toBeInTheDocument();
+    expect(screen.getByText("Recover unconfirmed range QR-000006-QR-000010. Do not start a later range until this recovery is resolved.")).toBeInTheDocument();
+    expect(screen.getByText("Pending/unconfirmed 5")).toBeInTheDocument();
+    expect(screen.getByText("Operator: Priya Operator")).toBeInTheDocument();
   });
 
   it("shows active local-agent print controls without waiting for recent jobs", () => {

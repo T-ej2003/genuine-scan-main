@@ -1,10 +1,7 @@
 import { Response } from "express";
 import {
   PrintDispatchMode,
-  PrintItemEventType,
-  PrintItemState,
   PrintSessionStatus,
-  PrintPayloadType,
   QRStatus,
 } from "@prisma/client";
 
@@ -18,7 +15,6 @@ import {
   getOrCreatePrintSession,
   OPEN_PRINT_STATES,
 } from "../../services/printLifecycleService";
-import { confirmPrintItemDispatch } from "../../services/printConfirmationService";
 import { recordPrintJobSampleScan } from "../../services/printSampleScanService";
 import { assertBatchTransitionAllowedFromDb } from "../../services/batchStateMachineService";
 import {
@@ -42,11 +38,6 @@ export const confirmDirectPrintItem = async (req: AuthRequest, res: Response) =>
     error:
       "Browser-mediated direct printing has been disabled. The MSCQR connector now confirms printed labels directly with the server.",
   });
-};
-
-const toPayloadType = (value: unknown) => {
-  const normalized = String(value || "").trim().toUpperCase();
-  return (Object.values(PrintPayloadType) as string[]).includes(normalized) ? (normalized as PrintPayloadType) : null;
 };
 
 const errorMessage = (error: unknown, fallback: string) =>
@@ -140,55 +131,6 @@ export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
       actor: { userId: user.userId },
     });
 
-    if (job.printMode === PrintDispatchMode.NETWORK_DIRECT || job.printMode === PrintDispatchMode.NETWORK_IPP) {
-      const acknowledgedItems = await prisma.printItem.findMany({
-        where: {
-          printSessionId: session.id,
-          state: PrintItemState.AGENT_ACKED,
-        },
-        orderBy: [{ issueSequence: "asc" }, { code: "asc" }],
-        select: {
-          id: true,
-          dispatchMetadata: true,
-          deviceJobRef: true,
-        },
-      });
-
-      if (acknowledgedItems.length > 0) {
-        for (const item of acknowledgedItems) {
-          const metadata =
-            item.dispatchMetadata && typeof item.dispatchMetadata === "object" && !Array.isArray(item.dispatchMetadata)
-              ? (item.dispatchMetadata as Record<string, unknown>)
-              : {};
-          await confirmPrintItemDispatch({
-            printSessionId: session.id,
-            printJobId: job.id,
-            batchId: job.batchId,
-            printItemId: item.id,
-            actorUserId: user.userId,
-            dispatchMode: job.printMode,
-            payloadType: toPayloadType(metadata.payloadType) || job.payloadType || null,
-            payloadHash: typeof metadata.payloadHash === "string" ? metadata.payloadHash : job.payloadHash || null,
-            bytesWritten: Number.isFinite(Number(metadata.bytesWritten)) ? Number(metadata.bytesWritten) : null,
-            deviceJobRef: item.deviceJobRef || null,
-            dispatchMetadata: {
-              ...metadata,
-              operatorConfirmedAt: new Date().toISOString(),
-              operatorNote: parsed.data.operatorNote || null,
-              sampleScanStatus: "pending_sample_scan",
-              confirmationSource: "operator_physical_confirmation",
-            },
-            confirmationMode: "LOCAL_QUEUE",
-            confirmationEvidence: {
-              operatorConfirmed: true,
-              operatorNote: parsed.data.operatorNote || null,
-              sampleScanStatus: "pending_sample_scan",
-            },
-          });
-        }
-      }
-    }
-
     const remainingToPrint = await prisma.printItem.count({
       where: {
         printSessionId: session.id,
@@ -199,7 +141,11 @@ export const confirmPrintJob = async (req: AuthRequest, res: Response) => {
     if (remainingToPrint > 0) {
       return res.status(409).json({
         success: false,
-        error: `Cannot confirm job while ${remainingToPrint} items are not print-confirmed. Use per-item confirm or fail-stop.`,
+        error: `Cannot confirm job while ${remainingToPrint} items are waiting for connector physical confirmation.`,
+        message: `Cannot confirm job while ${remainingToPrint} items are waiting for connector physical confirmation.`,
+        code: "PHYSICAL_CONFIRMATION_REQUIRED",
+        errorCode: "PHYSICAL_CONFIRMATION_REQUIRED",
+        recoveryAction: "wait_for_connector_confirmation_or_stop_recover",
       });
     }
 

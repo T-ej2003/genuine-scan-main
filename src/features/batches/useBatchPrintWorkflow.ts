@@ -5,6 +5,7 @@ import { clearActivePrintSession, updateActivePrintSession } from "@/lib/active-
 import { getOptionalLocalStorageItem } from "@/lib/consent";
 import {
   chooseStablePrinterSelection,
+  buildPrinterReadinessDisplay,
   getPrinterDiagnosticSummary,
   type LocalPrinterAgentSnapshot,
 } from "@/lib/printer-diagnostics";
@@ -127,7 +128,7 @@ export function useBatchPrintWorkflow({
   const actionInFlightRef = useRef(new Map<string, Promise<void>>());
 
   const printJobsQuery = usePrintJobs(printBatch?.id, 8, false);
-  const printerRuntimeQuery = useManufacturerPrinterRuntime(true, printOpen && !printJobId);
+  const printerRuntimeQuery = useManufacturerPrinterRuntime(true, isManufacturer && !printJobId);
 
   const printerReady = printerStatus.connected && printerStatus.eligibleForPrinting;
   const printerHasInventory =
@@ -220,6 +221,20 @@ export function useBatchPrintWorkflow({
     selectedLocalProfileRegistrationStale,
     selectedPrinterProfile,
   ]);
+  const selectedPrinterReadinessDisplay = useMemo(
+    () =>
+      buildPrinterReadinessDisplay({
+        diagnostics: printerDiagnostics,
+        ready: Boolean(printerReady),
+        refreshPaused: Boolean((printerStatus as PrinterConnectionStatus & { refreshPaused?: boolean }).refreshPaused),
+        rateLimited: Boolean((printerStatus as PrinterConnectionStatus & { rateLimited?: boolean }).rateLimited),
+        stale: Boolean(printerStatus.stale),
+        trusted: Boolean(printerStatus.trusted),
+        compatibilityMode: Boolean(printerStatus.compatibilityMode),
+        identityLabel: selectedDetectedPrinter?.printerName || printerStatus.selectedPrinterName || printerStatus.printerName,
+      }),
+    [printerDiagnostics, printerReady, printerStatus, selectedDetectedPrinter?.printerName]
+  );
 
   const applyRegisteredPrintersSnapshot = (
     printers: RegisteredPrinterRow[],
@@ -673,50 +688,6 @@ export function useBatchPrintWorkflow({
       }
     });
   };
-  const confirmPrintedLabels = async (jobId: string) => {
-    if (printing) return;
-    const trimmedJobId = String(jobId || "").trim();
-    if (!trimmedJobId) return;
-    return runSingleFlightAction(actionInFlightRef, `confirm-print-job:${trimmedJobId}`, async () => {
-    setPrinting(true);
-    try {
-      const response = await apiClient.confirmPrintJobPrinted(trimmedJobId, {
-        operatorNote: "Operator confirmed labels physically printed from the MSCQR admin workflow.",
-      });
-      if (!response.success) {
-        toast({
-          title: "Confirmation needs attention",
-          description: formatActionablePrintWorkflowError(response, "MSCQR could not confirm this print run."),
-          variant: "destructive",
-        });
-        return;
-      }
-      toast({
-        title: "Labels confirmed",
-        description: "MSCQR marked the acknowledged labels as physically printed and updated the audit trail.",
-      });
-      await loadRecentPrintJobs();
-      await onBatchesChanged?.();
-      const status = await apiClient.getPrintJobStatus(trimmedJobId);
-      if (status.success && status.data) {
-        syncPrintJobProgress(status.data as PrintJobRow, {
-          setPrintProgressTotal,
-          setPrintProgressPrinted,
-          setPrintProgressRemaining,
-          setDirectRemainingToPrint,
-          setPrintProgressDispatchMode,
-          setPrintProgressPrinterName,
-          setPrintProgressPhase,
-          setPrintProgressError,
-          setPrintProgressOpen,
-          setPrintProgressCurrentCode,
-        });
-      }
-    } finally {
-      setPrinting(false);
-    }
-    });
-  };
   const setSampleScanCode = (jobId: string, value: string) => {
     const trimmedJobId = String(jobId || "").trim();
     if (!trimmedJobId) return;
@@ -921,6 +892,7 @@ export function useBatchPrintWorkflow({
     onOpenChange: handlePrintDialogOpenChange,
     printBatch,
     selectedPrinterNotice,
+    selectedPrinterReadinessDisplay,
     printQuantity,
     onPrintQuantityChange: setPrintQuantity,
     readyToPrintCount: printBatch ? getAvailableInventory(printBatch) : 0,
@@ -976,7 +948,6 @@ export function useBatchPrintWorkflow({
     sampleScanCodeByJobId,
     onSampleScanCodeChange: setSampleScanCode,
     onAbandonPrintJob: abandonPrintJob,
-    onConfirmPrintedLabels: confirmPrintedLabels,
     onVerifySampleScan: verifySampleScan,
     onReleaseBatch: releaseBatch,
     onClose: () => setPrintOpen(false),
