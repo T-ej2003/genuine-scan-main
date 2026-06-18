@@ -75,6 +75,26 @@ export const revokeAllUserRefreshTokens = async (input: {
   });
 };
 
+export const revokePasswordOnlyRefreshTokensForUser = async (input: {
+  userId: string;
+  reason: string;
+  now?: Date;
+}) => {
+  const now = input.now || new Date();
+  await prisma.refreshToken.updateMany({
+    where: {
+      userId: input.userId,
+      revokedAt: null,
+      mfaVerifiedAt: null,
+    },
+    data: {
+      revokedAt: now,
+      revokedReason: input.reason,
+      lastUsedAt: now,
+    },
+  });
+};
+
 export const findRefreshTokenByRaw = async (rawToken: string) => {
   const tokenHashCandidates = buildTokenHashCandidates(rawToken);
   return prisma.refreshToken.findFirst({

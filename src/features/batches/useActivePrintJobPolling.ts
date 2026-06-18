@@ -70,14 +70,28 @@ export function useActivePrintJobPolling({
     let cancelled = false;
     let inFlight = false;
     const polledJobId = printJobId;
+    const startedAt = Date.now();
     let nextDelayMs = jitterMs(pollingPolicy.activePrintJobMs);
 
     const syncLatest = async () => {
       if (cancelled || inFlight) return false;
       if (!canPollVisibleDocument()) return false;
+      if (Date.now() - startedAt > pollingPolicy.activePrintJobTimeoutMs) {
+        setPrintProgressNotice("Live status polling paused. The print run remains visible; refresh status when you need the latest connector evidence.");
+        updateActivePrintSession({
+          active: true,
+          jobId: polledJobId,
+          modalOpen: true,
+          terminal: false,
+        });
+        return true;
+      }
       inFlight = true;
       try {
-        const response = await apiClient.getPrintJobStatus(polledJobId);
+        const response = await apiClient.getPrintJobStatus(polledJobId, {
+          force: true,
+          minIntervalMs: pollingPolicy.activePrintJobStatusMinRefreshMs,
+        });
         if (cancelled) return false;
         if (!response.success || !response.data) {
           if (response.status === 429 || String(response.code || "").toUpperCase() === "RATE_LIMITED") {

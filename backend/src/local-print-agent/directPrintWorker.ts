@@ -17,11 +17,23 @@ import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } fro
 const DIRECT_PRINT_POLL_MS = Math.max(2000, Number(process.env.PRINT_AGENT_DIRECT_POLL_MS || 4000) || 4000);
 const DIRECT_PRINT_MAX_BACKOFF_MS = Math.max(
   DIRECT_PRINT_POLL_MS,
-  Number(process.env.PRINT_AGENT_DIRECT_MAX_BACKOFF_MS || 60_000) || 60_000
+  Number(process.env.PRINT_AGENT_DIRECT_MAX_BACKOFF_MS || 30_000) || 30_000
 );
 const DIRECT_PRINT_IDLE_MIN_BACKOFF_MS = Math.max(
   15_000,
   Number(process.env.PRINT_AGENT_DIRECT_IDLE_MIN_BACKOFF_MS || 20_000) || 20_000
+);
+const DIRECT_PRINT_ACTIVE_WAKE_WINDOW_MS = Math.max(
+  5_000,
+  Math.min(30_000, Number(process.env.PRINT_AGENT_DIRECT_ACTIVE_WAKE_WINDOW_MS || 15_000) || 15_000)
+);
+const DIRECT_PRINT_ACTIVE_WAKE_MAX_CLAIMS = Math.max(
+  1,
+  Math.min(6, Number(process.env.PRINT_AGENT_DIRECT_ACTIVE_WAKE_MAX_CLAIMS || 4) || 4)
+);
+const DIRECT_PRINT_ACTIVE_WAKE_RETRY_MS = Math.max(
+  750,
+  Math.min(5_000, Number(process.env.PRINT_AGENT_DIRECT_ACTIVE_WAKE_RETRY_MS || 1_000) || 1_000)
 );
 const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
@@ -46,6 +58,13 @@ export const resolveNoWorkRetryAfterMs = (serverRetryAfterMs: unknown, noWorkCou
   return Math.max(DIRECT_PRINT_IDLE_MIN_BACKOFF_MS, addRetryJitterMs(Math.max(serverRetry, idleBackoff)));
 };
 
+export const resolveActiveWakeRetryAfterMs = (attempt: number) => {
+  const exponent = Math.min(3, Math.max(0, attempt - 1));
+  const base = Math.min(5_000, Math.max(DIRECT_PRINT_POLL_MS, DIRECT_PRINT_ACTIVE_WAKE_RETRY_MS * 2 ** exponent));
+  const jitter = Math.floor(Math.random() * Math.min(500, Math.max(100, Math.floor(base * 0.1))));
+  return Math.min(5_000, base + jitter);
+};
+
 export const isCloudConnectivityError = (error: any) => {
   const code = String(error?.code || error?.cause?.code || error?.errno || "").toUpperCase();
   const message = String(error?.message || error || "").toLowerCase();
@@ -56,6 +75,8 @@ export const isCloudConnectivityError = (error: any) => {
     message.includes("timed out")
   );
 };
+
+export const isBackendRateLimitError = (error: any) => Number(error?.status || 0) === 429;
 
 export const resolveConnectivityRetryAfterMs = (failureCount: number) => {
   const exponent = Math.min(5, Math.max(0, failureCount - 1));
@@ -517,14 +538,56 @@ type DirectPrintCycleResult = {
   noWork: boolean;
 };
 
-const runOnce = async (): Promise<DirectPrintCycleResult> => {
+type TimingContext = {
+  startedAt: number;
+  claimCount: number;
+  source: "poll" | "local_wake";
+};
+
+const logPrintTiming = (event: string, details: Record<string, unknown>) => {
+  console.info(event, details);
+};
+
+const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> => {
+  const claimStartedAt = Date.now();
+  if (timing) {
+    timing.claimCount += 1;
+    logPrintTiming("print.connector.claim.started", {
+      source: timing.source,
+      claimCount: timing.claimCount,
+      elapsedMs: claimStartedAt - timing.startedAt,
+    });
+  }
   const claimed = await claimNextLocalJob();
   if (!claimed?.data) {
     const retryAfterMs = clampRetryAfterMs(claimed?.retryAfterMs);
+    if (timing) {
+      logPrintTiming("print.connector.claim.returned", {
+        source: timing.source,
+        hasWork: false,
+        claimCount: timing.claimCount,
+        durationMs: Date.now() - claimStartedAt,
+        elapsedMs: Date.now() - timing.startedAt,
+        retryAfterMs,
+      });
+    }
     return { retryAfterMs, noWork: true };
   }
 
   const payload = claimed.data;
+  if (timing) {
+    logPrintTiming("print.connector.claim.returned", {
+      source: timing.source,
+      hasWork: true,
+      claimCount: timing.claimCount,
+      durationMs: Date.now() - claimStartedAt,
+      elapsedMs: Date.now() - timing.startedAt,
+      retryAfterMs: clampRetryAfterMs(claimed?.retryAfterMs),
+      printJobId: String(payload.printJobId || "").trim() || null,
+      printSessionId: String(payload.printSessionId || "").trim() || null,
+      printItemId: String(payload.printItemId || "").trim() || null,
+    });
+  }
   console.info("local direct-print claim returned work", {
     printJobId: String(payload.printJobId || "").trim() || null,
     printSessionId: String(payload.printSessionId || "").trim() || null,
@@ -570,7 +633,6 @@ const runOnce = async (): Promise<DirectPrintCycleResult> => {
       printJobId,
       printSessionId: validated.printSessionId,
       printItemId,
-      code: validated.code,
       printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
       agentVersion: AGENT_VERSION,
       payloadDiagnostics,
@@ -630,6 +692,17 @@ const runOnce = async (): Promise<DirectPrintCycleResult> => {
       jobRef: result.jobRef || null,
       bytesWritten: result.bytesWritten ?? null,
     });
+    if (timing) {
+      logPrintTiming("print.connector.spool.submitted", {
+        source: timing.source,
+        printJobId,
+        printItemId,
+        elapsedMs: Date.now() - timing.startedAt,
+        claimCount: timing.claimCount,
+        printPath: result.printPath,
+        bytesWritten: result.bytesWritten ?? null,
+      });
+    }
 
     await ackLocalJob({
       printerId,
@@ -686,6 +759,15 @@ const runOnce = async (): Promise<DirectPrintCycleResult> => {
       printerId,
       jobRef: result.jobRef || null,
     });
+    if (timing) {
+      logPrintTiming("print.connector.confirmed", {
+        source: timing.source,
+        printJobId,
+        printItemId,
+        elapsedMs: Date.now() - timing.startedAt,
+        claimCount: timing.claimCount,
+      });
+    }
   } catch (error: any) {
     let failureReported = false;
     const shouldReportFailure = shouldReportLocalPrintFailureToBackend(error, spoolerAttempted);
@@ -734,6 +816,39 @@ const runOnce = async (): Promise<DirectPrintCycleResult> => {
 };
 
 let activeDirectPrintWorkerStop: (() => void) | null = null;
+let activeDirectPrintWorkerWake: ((reason?: string) => void) | null = null;
+
+let activeWakeUntil = 0;
+let activeWakeRemainingClaims = 0;
+let activeWakeAttempt = 0;
+
+const hasActiveWakeBudget = () =>
+  Date.now() < activeWakeUntil && activeWakeRemainingClaims > 0;
+
+const consumeActiveWakeClaim = () => {
+  if (!hasActiveWakeBudget()) return false;
+  activeWakeRemainingClaims = Math.max(0, activeWakeRemainingClaims - 1);
+  activeWakeAttempt += 1;
+  return true;
+};
+
+export const requestDirectPrintWake = (reason = "user_print_job_created") => {
+  activeWakeUntil = Date.now() + DIRECT_PRINT_ACTIVE_WAKE_WINDOW_MS;
+  activeWakeRemainingClaims = Math.max(activeWakeRemainingClaims, DIRECT_PRINT_ACTIVE_WAKE_MAX_CLAIMS);
+  activeWakeAttempt = 0;
+  console.info("print.connector.wake.sent", {
+    source: "local_helper",
+    reason,
+    wakeWindowMs: DIRECT_PRINT_ACTIVE_WAKE_WINDOW_MS,
+    maxClaimRequests: DIRECT_PRINT_ACTIVE_WAKE_MAX_CLAIMS,
+  });
+  activeDirectPrintWorkerWake?.(reason);
+  return {
+    accepted: true,
+    wakeWindowMs: DIRECT_PRINT_ACTIVE_WAKE_WINDOW_MS,
+    maxClaimRequests: DIRECT_PRINT_ACTIVE_WAKE_MAX_CLAIMS,
+  };
+};
 
 export const startDirectPrintWorker = () => {
   if (activeDirectPrintWorkerStop) return activeDirectPrintWorkerStop;
@@ -742,22 +857,51 @@ export const startDirectPrintWorker = () => {
   let connectivityFailureCount = 0;
   let noWorkCount = 0;
   let lastNoWorkLogAt = 0;
+  let sleepWake: (() => void) | null = null;
+
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => {
+      let wake = () => undefined;
+      const timer = setTimeout(() => {
+        if (sleepWake === wake) sleepWake = null;
+        resolve();
+      }, ms);
+      wake = () => {
+        clearTimeout(timer);
+        if (sleepWake === wake) sleepWake = null;
+        resolve();
+      };
+      sleepWake = wake;
+    });
+
+  activeDirectPrintWorkerWake = () => {
+    sleepWake?.();
+  };
 
   const loop = async () => {
     while (!stopped) {
+      const activeWakeClaim = consumeActiveWakeClaim();
+      const timing: TimingContext = {
+        startedAt: Date.now(),
+        claimCount: 0,
+        source: activeWakeClaim ? "local_wake" : "poll",
+      };
       try {
         if (await resolveBackendUrl()) {
-          const result = await runOnce();
+          const result = await runOnce(timing);
           connectivityFailureCount = 0;
           noWorkCount = result.noWork ? noWorkCount + 1 : 0;
-          const retryAfterMs = result.noWork
-            ? resolveNoWorkRetryAfterMs(result.retryAfterMs, noWorkCount)
-            : clampRetryAfterMs(result.retryAfterMs);
+          const retryAfterMs =
+            result.noWork && hasActiveWakeBudget()
+              ? resolveActiveWakeRetryAfterMs(activeWakeAttempt)
+              : result.noWork
+                ? resolveNoWorkRetryAfterMs(result.retryAfterMs, noWorkCount)
+                : clampRetryAfterMs(result.retryAfterMs);
           if (result.noWork && Date.now() - lastNoWorkLogAt > 60_000) {
             lastNoWorkLogAt = Date.now();
             console.debug("local direct-print claim idle", { retryAfterMs, noWorkCount });
           }
-          await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+          await sleep(retryAfterMs);
           continue;
         }
       } catch (error) {
@@ -766,6 +910,18 @@ export const startDirectPrintWorker = () => {
         const retryAfterMs = cloudConnectivityIssue
           ? resolveConnectivityRetryAfterMs(connectivityFailureCount)
           : clampRetryAfterMs((error as any)?.retryAfterMs);
+        if (isBackendRateLimitError(error)) {
+          activeWakeUntil = 0;
+          activeWakeRemainingClaims = 0;
+          console.warn("print.connector.rate_limited", {
+            source: timing.source,
+            elapsedMs: Date.now() - timing.startedAt,
+            claimCount: timing.claimCount,
+            retryAfterMs,
+            requestId: (error as any)?.requestId || null,
+            backoffDecision: "active_wake_stopped_server_retry_respected",
+          });
+        }
         console.error("local direct-print worker cycle failed:", {
           error: (error as any)?.message || error,
           errorCode: (error as any)?.errorCode || null,
@@ -781,10 +937,10 @@ export const startDirectPrintWorker = () => {
             retryAfterMs,
           });
         }
-        await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+        await sleep(retryAfterMs);
         continue;
       }
-      await new Promise((resolve) => setTimeout(resolve, DIRECT_PRINT_POLL_MS));
+      await sleep(DIRECT_PRINT_POLL_MS);
     }
   };
 
@@ -792,6 +948,8 @@ export const startDirectPrintWorker = () => {
 
   activeDirectPrintWorkerStop = () => {
     stopped = true;
+    sleepWake?.();
+    activeDirectPrintWorkerWake = null;
     activeDirectPrintWorkerStop = null;
   };
   return activeDirectPrintWorkerStop;

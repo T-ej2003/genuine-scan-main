@@ -120,6 +120,27 @@ jobs:
           write_secret SCAN_FINGERPRINT_SECRET
           write_secret AUTH_MFA_ENCRYPTION_KEY
 
+          write_backup_codes() {
+            local name="$1"
+            local joined=""
+            for attempt in 1 2 3; do
+              local raw
+              local code
+              raw="$(openssl rand -hex 5 | tr '[:lower:]' '[:upper:]')"
+              code="${raw:0:5}-${raw:5:5}"
+              echo "::add-mask::$code"
+              if [ -z "$joined" ]; then
+                joined="$code"
+              else
+                joined="${joined},${code}"
+              fi
+            done
+            echo "::add-mask::$joined"
+            printf '%s=%s\n' "$name" "$joined" >> "$GITHUB_ENV"
+          }
+
+          write_backup_codes E2E_MANUFACTURER_MFA_BACKUP_CODES
+
           E2E_DB_PROTOCOL=postgresql
           E2E_DB_USER=postgres
           E2E_DB_HOST=127.0.0.1

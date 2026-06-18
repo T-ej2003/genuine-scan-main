@@ -15,6 +15,8 @@ const mockModule = (relativePath, exportsValue) => {
 };
 
 let prismaUser = null;
+let rotateRefreshTokenResult = null;
+let passwordOnlyRefreshRevokeCount = 0;
 
 mockModule("config/database.js", {
   __esModule: true,
@@ -36,6 +38,8 @@ mockModule("services/auth/tokenService.js", {
   signAccessToken: () => "access-token",
   newCsrfToken: () => "csrf-token",
   newRefreshToken: () => "refresh-token",
+  signMfaBootstrapToken: () => "bootstrap-token",
+  getMfaBootstrapTtlMinutes: () => 10,
 });
 
 mockModule("services/auth/refreshTokenService.js", {
@@ -43,8 +47,11 @@ mockModule("services/auth/refreshTokenService.js", {
     row: { id: "session-1" },
     expiresAt: new Date("2026-03-16T12:00:00.000Z"),
   }),
-  rotateRefreshToken: async () => null,
+  rotateRefreshToken: async () => rotateRefreshTokenResult,
   revokeAllUserRefreshTokens: async () => null,
+  revokePasswordOnlyRefreshTokensForUser: async () => {
+    passwordOnlyRefreshRevokeCount += 1;
+  },
   revokeRefreshTokenByRaw: async () => null,
 });
 
@@ -66,7 +73,17 @@ mockModule("services/manufacturerScopeService.js", {
   normalizeLinkedLicensees: (links) => links,
 });
 
-const { loginWithPassword } = require("../dist/services/auth/authService");
+mockModule("services/auth/emailVerificationService.js", {
+  isVerifiedAccount: () => true,
+});
+
+let mockedMfaStatus = { enabled: false, enrolled: false, methods: [], preferredMethod: null, lastUsedAt: null };
+mockModule("services/auth/mfaService.js", {
+  getAdminMfaStatus: async () => mockedMfaStatus,
+  createAdminMfaChallenge: async () => null,
+});
+
+const { loginWithPassword, refreshSession } = require("../dist/services/auth/authService");
 
 const baseUser = {
   id: "user-1",
@@ -96,13 +113,58 @@ const run = async () => {
     userAgent: "agent",
   });
 
-  assert.strictEqual(result.accessToken, "access-token", "login should issue a normal access token");
-  assert.strictEqual(result.refreshToken, "refresh-token", "login should issue a normal refresh token");
+  assert.strictEqual(result.sessionStage, "MFA_BOOTSTRAP", "manufacturer password login should require MFA setup");
+  assert.strictEqual(result.accessToken, "bootstrap-token", "login should issue only an MFA bootstrap token");
+  assert.strictEqual(result.refreshToken, null, "login should not issue a refresh token before MFA");
   assert.ok(result.user, "login should return the authenticated user");
-  assert.strictEqual("mfaRequired" in result, false, "login should not force an MFA challenge");
-  assert.strictEqual("mfaSetupRequired" in result, false, "login should not force MFA setup");
+  assert.strictEqual(result.auth?.mfaRequired, true, "manufacturer MFA should be required");
+  assert.strictEqual(result.auth?.mfaEnrolled, false, "unenrolled manufacturer should be sent to MFA setup");
+  assert.strictEqual(result.auth?.authAssurance, "PASSWORD", "bootstrap remains password-only until MFA is completed");
 
-  console.log("auth login without MFA tests passed");
+  mockedMfaStatus = {
+    enabled: true,
+    enrolled: true,
+    methods: ["TOTP"],
+    preferredMethod: "TOTP",
+    lastUsedAt: new Date(),
+  };
+  const enrolledResult = await loginWithPassword({
+    email: prismaUser.email,
+    password: "correct-password",
+    ipHash: "ip-hash",
+    userAgent: "agent",
+  });
+
+  assert.strictEqual(enrolledResult.sessionStage, "MFA_BOOTSTRAP", "manufacturer logout/login should require MFA challenge even when MFA was used recently");
+  assert.strictEqual(enrolledResult.refreshToken, null, "manufacturer challenge session must not issue refresh before MFA");
+  assert.strictEqual(enrolledResult.auth?.mfaEnrolled, true, "enrolled manufacturer should enter challenge mode");
+
+  rotateRefreshTokenResult = {
+    ok: true,
+    userId: prismaUser.id,
+    orgId: prismaUser.orgId,
+    newRawToken: "rotated-password-only-refresh",
+    newExpiresAt: new Date("2026-03-16T12:00:00.000Z"),
+    authenticatedAt: new Date("2026-03-16T11:00:00.000Z"),
+    mfaVerifiedAt: null,
+  };
+  passwordOnlyRefreshRevokeCount = 0;
+
+  const refreshed = await refreshSession({
+    rawRefreshToken: "legacy-password-only-refresh",
+    ipHash: "ip-hash",
+    userAgent: "agent",
+  });
+
+  assert.strictEqual(refreshed.ok, true, "valid legacy refresh should convert into a bootstrap session");
+  assert.strictEqual(refreshed.sessionStage, "MFA_BOOTSTRAP", "password-only manufacturer refresh must not mint an active session");
+  assert.strictEqual(refreshed.accessToken, "bootstrap-token", "refresh should issue only an MFA bootstrap token");
+  assert.strictEqual(refreshed.refreshToken, null, "refresh bootstrap must not keep a password-only refresh token");
+  assert.strictEqual(refreshed.auth?.authAssurance, "PASSWORD", "bootstrap remains password-only until MFA succeeds");
+  assert.strictEqual(refreshed.auth?.stepUpRequired, true, "converted refresh must require MFA step-up");
+  assert.strictEqual(passwordOnlyRefreshRevokeCount, 1, "password-only refresh tokens should be revoked on conversion");
+
+  console.log("manufacturer MFA login bootstrap tests passed");
 };
 
 run().catch((error) => {

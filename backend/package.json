@@ -88,7 +88,7 @@
     "ipp": "^1.1.0",
     "jsonwebtoken": "^9.0.2",
     "jszip": "^3.10.1",
-    "multer": "^2.1.1",
+    "multer": "^2.2.0",
     "nodemailer": "^8.0.9",
     "otplib": "^13.4.1",
     "pdfkit": "^0.18.0",

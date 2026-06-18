@@ -44,12 +44,18 @@ mockModule("services/auth/authService.js", {
     role === UserRole.SUPER_ADMIN ||
     role === UserRole.PLATFORM_SUPER_ADMIN ||
     role === UserRole.LICENSEE_ADMIN ||
-    role === UserRole.ORG_ADMIN,
+    role === UserRole.ORG_ADMIN ||
+    role === UserRole.MANUFACTURER ||
+    role === UserRole.MANUFACTURER_ADMIN ||
+    role === UserRole.MANUFACTURER_USER,
   getSensitiveActionStepUpMethod: (role) =>
     role === UserRole.SUPER_ADMIN ||
     role === UserRole.PLATFORM_SUPER_ADMIN ||
     role === UserRole.LICENSEE_ADMIN ||
-    role === UserRole.ORG_ADMIN
+    role === UserRole.ORG_ADMIN ||
+    role === UserRole.MANUFACTURER ||
+    role === UserRole.MANUFACTURER_ADMIN ||
+    role === UserRole.MANUFACTURER_USER
       ? "ADMIN_MFA"
       : "PASSWORD_REAUTH",
   getAdminStepUpWindowMinutes: () => 30,
@@ -89,13 +95,14 @@ const run = async () => {
   assert.strictEqual(manufacturerBlocked.next, false);
   assert.strictEqual(manufacturerBlocked.statusCode, 428);
   assert.strictEqual(manufacturerBlocked.payload.code, "STEP_UP_REQUIRED");
-  assert.strictEqual(manufacturerBlocked.payload.data.stepUpMethod, "PASSWORD_REAUTH");
+  assert.strictEqual(manufacturerBlocked.payload.data.stepUpMethod, "ADMIN_MFA");
 
   const manufacturerAllowed = await runMiddleware({
     userId: "manufacturer-1",
     role: UserRole.MANUFACTURER,
     sessionStage: "ACTIVE",
     authenticatedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    mfaVerifiedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
   });
 
   assert.strictEqual(manufacturerAllowed.next, true);

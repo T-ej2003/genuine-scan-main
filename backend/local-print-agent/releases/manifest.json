@@ -1,8 +1,8 @@
 {
   "productName": "MSCQR Connector",
-  "latestVersion": "2026.6.15",
+  "latestVersion": "2026.6.16",
   "requiredProtocolVersion": "local-agent-direct-v2",
-  "minimumBuildVersion": "2026.6.15",
+  "minimumBuildVersion": "2026.6.16",
   "transportDiagnosticsVersion": "transport-diagnostics-v1",
   "capabilities": {
     "supportsPrinterQueueSnapshot": true,
@@ -19,6 +19,84 @@
   "helpPath": "/connector-download",
   "setupGuidePath": "/help/manufacturer",
   "releases": [
+    {
+      "version": "2026.6.16",
+      "publishedAt": "2026-06-17T22:26:06.638Z",
+      "requiredProtocolVersion": "local-agent-direct-v2",
+      "minimumBuildVersion": "2026.6.16",
+      "transportDiagnosticsVersion": "transport-diagnostics-v1",
+      "capabilities": {
+        "supportsPrinterQueueSnapshot": true,
+        "supportsWindowsTcpPortInspection": true,
+        "supportsRawTcpConnectTest": true,
+        "supportsRawTcpZplSend": true,
+        "supportsUsbRawSpooler": true,
+        "supportsSpoolJobCancel": true,
+        "supportsSpoolJobStatus": true,
+        "supportsTransportDiagnostics": true,
+        "supportsTestLabel": true
+      },
+      "summary": "Install the signed Windows connector once on the printing computer, then the MSCQR Connector starts automatically in the background.",
+      "notes": [
+        "Use the signed Windows installer on the Windows PC that is connected to the printer.",
+        "This connector advertises local-agent-direct-v2 and is compatible with the current direct-print backend.",
+        "Windows installation verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed.",
+        "Windows should show L&D Health Ltd as the verified publisher for this installer."
+      ],
+      "platforms": {
+        "windows": {
+          "label": "Windows installer",
+          "installerKind": "exe",
+          "artifactType": "windows-signed-installer",
+          "trustLevel": "production",
+          "signatureStatus": "signed",
+          "smartAppControlSafe": true,
+          "publisherName": "L&D Health Ltd",
+          "signedAt": "2026-06-17T22:26:05.958Z",
+          "signatureSubject": "CN=L&D Health Ltd, O=L&D Health Ltd, L=London, S=Surrey, C=GB",
+          "signatureIssuer": "CN=Microsoft ID Verified CS AOC CA 03, O=Microsoft Corporation, C=US",
+          "certificateThumbprint": "0B901653A4B3DB6878EBBA996EA2D6C18445ACB3",
+          "timestamped": true,
+          "timestampAuthority": "http://timestamp.acs.microsoft.com",
+          "windowsTrustMode": "trusted",
+          "filename": "MSCQR-Connector-Windows-2026.6.16.exe",
+          "relativePath": "2026.6.16/windows/MSCQR-Connector-Windows-2026.6.16.exe",
+          "contentType": "application/vnd.microsoft.portable-executable",
+          "architecture": "x64",
+          "bytes": 27012816,
+          "sha256": "046a26f561c6124b9187e5437522b1325fa0b117ed3e60d33d4d348b2d672bba",
+          "protocolVersion": "local-agent-direct-v2",
+          "buildVersion": "2026.6.16",
+          "transportDiagnosticsVersion": "transport-diagnostics-v1",
+          "capabilities": {
+            "supportsPrinterQueueSnapshot": true,
+            "supportsWindowsTcpPortInspection": true,
+            "supportsRawTcpConnectTest": true,
+            "supportsRawTcpZplSend": true,
+            "supportsUsbRawSpooler": true,
+            "supportsSpoolJobCancel": true,
+            "supportsSpoolJobStatus": true,
+            "supportsTransportDiagnostics": true,
+            "supportsTestLabel": true
+          },
+          "legalDocumentsIncluded": [
+            "legal/TERMS_AND_CONDITIONS.txt",
+            "legal/PRIVACY_POLICY.txt",
+            "legal/EULA.txt",
+            "legal/SECURITY_NOTICE.txt",
+            "legal/INSTALLATION_GUIDE.txt",
+            "legal/THIRD_PARTY_NOTICES.txt"
+          ],
+          "releaseNotesIncluded": true,
+          "notes": [
+            "Run the signed Windows installer once on the Windows computer that will print.",
+            "The installer installs the connector, configures auto-start, and verifies local printer readiness.",
+            "Publisher shown in Windows should be L&D Health Ltd.",
+            "Legal documents and release notes are included with the signed release output."
+          ]
+        }
+      }
+    },
     {
       "version": "2026.6.15",
       "publishedAt": "2026-06-13T17:45:25.076Z",
