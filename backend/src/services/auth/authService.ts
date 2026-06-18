@@ -7,7 +7,13 @@ import {
   signMfaBootstrapToken,
   getMfaBootstrapTtlMinutes,
 } from "./tokenService";
-import { createRefreshToken, rotateRefreshToken, revokeAllUserRefreshTokens, revokeRefreshTokenByRaw } from "./refreshTokenService";
+import {
+  createRefreshToken,
+  rotateRefreshToken,
+  revokeAllUserRefreshTokens,
+  revokePasswordOnlyRefreshTokensForUser,
+  revokeRefreshTokenByRaw,
+} from "./refreshTokenService";
 import { createAuditLog } from "../auditService";
 import { assessAuthSessionRisk } from "./sessionRiskService";
 import { listManufacturerLicenseeLinks, normalizeLinkedLicensees } from "../manufacturerScopeService";
@@ -217,6 +223,9 @@ type BootstrapSessionResult = {
 };
 
 export type PasswordLoginResult = SessionIssueResult | BootstrapSessionResult;
+type RefreshSessionResult =
+  | { ok: false; reason: "INVALID" | "EXPIRED" | "REVOKED" | "REUSE_DETECTED" }
+  | ({ ok: true } & (SessionIssueResult | BootstrapSessionResult));
 
 const buildBootstrapSessionForUser = async (input: {
   user: {
@@ -559,7 +568,7 @@ export const refreshSession = async (input: {
   rawRefreshToken: string;
   ipHash: string | null;
   userAgent: string | null;
-}) => {
+}): Promise<RefreshSessionResult> => {
   const rotated = await rotateRefreshToken({
     rawToken: input.rawRefreshToken,
     ipHash: input.ipHash,
@@ -581,6 +590,53 @@ export const refreshSession = async (input: {
     return { ok: false as const, reason: rotated.reason };
   }
 
+  if (!rotated.mfaVerifiedAt) {
+    const user = await prisma.user.findUnique({
+      where: { id: rotated.userId },
+      include: { licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } } },
+    });
+
+    if (!user) return { ok: false as const, reason: "INVALID" };
+    if (isDisabledUser(user)) return { ok: false as const, reason: "REVOKED" };
+
+    if (isAdminMfaRequiredRole(user.role)) {
+      const now = new Date();
+      const mfaStatus = await getAdminMfaStatus(user.id).catch(() => null);
+      await revokePasswordOnlyRefreshTokensForUser({
+        userId: user.id,
+        reason: "MFA_REQUIRED_AFTER_POLICY_CHANGE",
+        now,
+      });
+
+      const bootstrapSession = await buildBootstrapSessionForUser({
+        user,
+        ipHash: input.ipHash,
+        userAgent: input.userAgent,
+        now,
+        mfaEnrolled: Boolean(mfaStatus?.enabled || mfaStatus?.enrolled),
+        reasons: ["MFA verification is required before refreshing this session."],
+      });
+
+      await createAuditLog({
+        userId: user.id,
+        licenseeId: user.licenseeId || undefined,
+        orgId: user.orgId || undefined,
+        action: mfaStatus?.enabled ? "AUTH_REFRESH_MFA_CHALLENGE_REQUIRED" : "AUTH_REFRESH_MFA_SETUP_REQUIRED",
+        entityType: "User",
+        entityId: user.id,
+        details: {
+          role: user.role,
+          mfaEnabled: Boolean(mfaStatus?.enabled),
+          revokedPasswordOnlyRefreshTokens: true,
+        },
+        ipHash: input.ipHash || undefined,
+        userAgent: input.userAgent || undefined,
+      } as any);
+
+      return { ok: true as const, ...bootstrapSession };
+    }
+  }
+
   const session = await issueSessionForUser({
     userId: rotated.userId,
     ipHash: input.ipHash,
@@ -590,14 +646,11 @@ export const refreshSession = async (input: {
     mfaVerifiedAt: rotated.mfaVerifiedAt,
   });
 
-  // Override with rotated refresh token
   return {
     ok: true as const,
-    accessToken: session.accessToken,
+    ...session,
     refreshToken: rotated.newRawToken,
     refreshTokenExpiresAt: rotated.newExpiresAt,
-    user: session.user,
-    auth: session.auth,
   };
 };
 

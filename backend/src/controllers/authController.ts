@@ -144,17 +144,8 @@ export const refresh = async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
     }
 
-    const session = {
-      sessionStage: "ACTIVE" as const,
-      accessToken: rotated.accessToken,
-      refreshToken: rotated.refreshToken,
-      refreshTokenExpiresAt: rotated.refreshTokenExpiresAt,
-      user: rotated.user,
-      auth: rotated.auth,
-    };
-
-    setAuthCookies(res, session);
-    return res.json({ success: true, data: authResponseData(session) });
+    setAuthCookies(res, rotated);
+    return res.json({ success: true, data: authResponseData(rotated) });
   } catch (error) {
     console.error("Refresh error:", error);
     return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
