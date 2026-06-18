@@ -5,6 +5,11 @@ import { MemoryRouter } from "react-router-dom";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
+import {
+  clearActivePrintSession,
+  getActivePrintSessionSnapshot,
+  updateActivePrintSession,
+} from "@/lib/active-print-session";
 import { CONSENT_STORAGE_KEY, type ConsentState } from "@/lib/consent";
 import { renderWithQueryClient } from "@/test/render-with-query-client";
 
@@ -121,6 +126,7 @@ describe("DashboardLayout printer connection dialog", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearActivePrintSession();
     emitPrinterConnectionStatus = null;
     localStorageState.clear();
     sessionStorageState.clear();
@@ -778,5 +784,49 @@ describe("DashboardLayout printer connection dialog", () => {
     });
     expect(screen.getAllByText("ZDesigner ZT410-300dpi ZPL").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /active printer/i })).toBeInTheDocument();
+  });
+
+  it("turns the header printing status into active print progress recovery", async () => {
+    localStorageState.set(onboardingKey, "dismissed");
+    updateActivePrintSession({
+      active: true,
+      jobId: "job-live",
+      modalOpen: false,
+      terminal: false,
+    });
+
+    renderWithQueryClient(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <DashboardLayout>
+          <div>Dashboard content</div>
+        </DashboardLayout>
+      </MemoryRouter>
+    );
+
+    const recoveryButton = await screen.findByRole("button", { name: /resume print progress/i });
+    fireEvent.click(recoveryButton);
+
+    expect(getActivePrintSessionSnapshot().recoveryRequestId).toBe(1);
+    expect(apiClient.getPrinterConnectionStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps the normal printer status behavior when no active print job exists", async () => {
+    localStorageState.set(onboardingKey, "dismissed");
+
+    renderWithQueryClient(
+      <MemoryRouter>
+        <DashboardLayout>
+          <div>Dashboard content</div>
+        </DashboardLayout>
+      </MemoryRouter>
+    );
+
+    const statusButton = await screen.findByRole("button", { name: /printing needs help/i });
+    fireEvent.click(statusButton);
+
+    await waitFor(() => {
+      expect(screen.getByText("Printing Status")).toBeInTheDocument();
+    });
+    expect(getActivePrintSessionSnapshot().recoveryRequestId).toBe(0);
   });
 });

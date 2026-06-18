@@ -5,6 +5,7 @@ export type ActivePrintSessionState = {
   jobId: string | null;
   modalOpen: boolean;
   terminal: boolean;
+  recoveryRequestId: number;
   updatedAt: number;
 };
 
@@ -15,6 +16,7 @@ let state: ActivePrintSessionState = {
   jobId: null,
   modalOpen: false,
   terminal: false,
+  recoveryRequestId: 0,
   updatedAt: Date.now(),
 };
 
@@ -37,7 +39,8 @@ export const updateActivePrintSession = (next: Partial<Omit<ActivePrintSessionSt
     merged.active === state.active &&
     merged.jobId === state.jobId &&
     merged.modalOpen === state.modalOpen &&
-    merged.terminal === state.terminal
+    merged.terminal === state.terminal &&
+    merged.recoveryRequestId === state.recoveryRequestId
   ) {
     return;
   }
@@ -53,15 +56,30 @@ export const clearActivePrintSession = (jobId?: string | null) => {
     jobId: null,
     modalOpen: false,
     terminal: true,
+    recoveryRequestId: 0,
   });
 };
 
-export const isActivePrintSessionSuppressed = () => state.modalOpen && Boolean(state.jobId);
+export const requestActivePrintSessionRecovery = () => {
+  if (!state.jobId) return;
+  updateActivePrintSession({ recoveryRequestId: state.recoveryRequestId + 1 });
+};
+
+export const hasRecoverableActivePrintSession = (snapshot: ActivePrintSessionState = state) =>
+  Boolean(snapshot.jobId && (snapshot.active || snapshot.terminal));
+
+export const getActivePrintRecoveryLabel = (snapshot: ActivePrintSessionState = state) => {
+  if (!hasRecoverableActivePrintSession(snapshot)) return null;
+  if (snapshot.terminal) return "View print result";
+  return snapshot.modalOpen ? "View print progress" : "Resume print progress";
+};
+
+export const isActivePrintSessionSuppressed = () => Boolean(state.jobId && state.active && !state.terminal);
 
 export const useActivePrintSession = () =>
   useSyncExternalStore(subscribeActivePrintSession, getActivePrintSessionSnapshot, getActivePrintSessionSnapshot);
 
 export const useActivePrintSessionSuppression = () => {
   const snapshot = useActivePrintSession();
-  return snapshot.modalOpen && Boolean(snapshot.jobId);
+  return Boolean(snapshot.jobId && snapshot.active && !snapshot.terminal);
 };

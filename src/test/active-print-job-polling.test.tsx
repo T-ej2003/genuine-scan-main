@@ -24,10 +24,10 @@ const baseJob = {
   session: { status: "ACTIVE", totalItems: 10, confirmedItems: 4, remainingToPrint: 6 },
 };
 
-function PollingProbe({ job }: { job: Record<string, unknown> }) {
+function PollingProbe({ job, open = true }: { job: Record<string, unknown>; open?: boolean }) {
   useActivePrintJobPolling({
     printJobId: "job-live",
-    printProgressOpen: true,
+    printProgressOpen: open,
     printProgressPhase: "Local print session active",
     printProgressPrinted: 4,
     printProgressTotal: 10,
@@ -98,5 +98,25 @@ describe("active print job polling", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(callsAfterTimeout);
     expect(callsAfterTimeout).toBeLessThanOrEqual(38);
+  });
+
+  it("continues tracking an active print job after the progress dialog is dismissed", async () => {
+    vi.useFakeTimers();
+    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValue({ success: true, data: baseJob } as any);
+
+    render(<PollingProbe job={baseJob} open={false} />);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
+    expect(getActivePrintSessionSnapshot()).toMatchObject({
+      active: true,
+      jobId: "job-live",
+      modalOpen: false,
+      terminal: false,
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(2);
   });
 });

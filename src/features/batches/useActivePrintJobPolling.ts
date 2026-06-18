@@ -1,7 +1,7 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 
 import apiClient from "@/lib/api-client";
-import { clearActivePrintSession, updateActivePrintSession } from "@/lib/active-print-session";
+import { updateActivePrintSession } from "@/lib/active-print-session";
 import { canPollVisibleDocument, jitterMs, pollingPolicy } from "@/lib/query-polling-policy";
 
 import {
@@ -41,10 +41,7 @@ export function useActivePrintJobPolling({
   const completedRefreshJobIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
-    if (!printJobId || !printProgressOpen) {
-      clearActivePrintSession(printJobId || null);
-      return;
-    }
+    if (!printJobId) return;
     const terminal =
       isTerminalPrintProgressPhase(printProgressPhase) ||
       (printProgressTotal > 0 && printProgressPrinted >= printProgressTotal);
@@ -57,14 +54,8 @@ export function useActivePrintJobPolling({
   }, [printJobId, printProgressOpen, printProgressPhase, printProgressPrinted, printProgressTotal]);
 
   useEffect(() => {
-    return () => {
-      clearActivePrintSession(printJobId);
-    };
-  }, [printJobId]);
-
-  useEffect(() => {
     if (printing) return;
-    if (!printJobId || !printProgressOpen) return;
+    if (!printJobId) return;
     if (isTerminalPrintProgressPhase(printProgressPhase)) return;
 
     let cancelled = false;
@@ -81,7 +72,7 @@ export function useActivePrintJobPolling({
         updateActivePrintSession({
           active: true,
           jobId: polledJobId,
-          modalOpen: true,
+          modalOpen: printProgressOpen,
           terminal: false,
         });
         return true;
@@ -112,7 +103,7 @@ export function useActivePrintJobPolling({
           updateActivePrintSession({
             active: false,
             jobId: polledJobId,
-            modalOpen: true,
+            modalOpen: printProgressOpen,
             terminal: true,
           });
           const total = Number(job.session?.totalItems || job.itemCount || job.quantity || 0);
