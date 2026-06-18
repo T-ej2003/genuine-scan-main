@@ -158,8 +158,11 @@ const payload = {
   requiresCompatibilities: taskDefinition.requiresCompatibilities,
   cpu: taskDefinition.cpu,
   memory: taskDefinition.memory,
-  tags: raw.tags || [],
 };
+
+if (Array.isArray(raw.tags) && raw.tags.length > 0) {
+  payload.tags = raw.tags;
+}
 
 for (const optionalField of [
   "pidMode",

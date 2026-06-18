@@ -85,6 +85,17 @@ export const createPrintingOperationsApi = (core: ApiClientCore) => ({
     );
   },
 
+  printApprovedReissueRequest(requestId: string) {
+    const actionKey = buildPrinterActionKey("print-approved-reissue", [requestId]);
+    return controlledPrinterMutation(actionKey, () =>
+      core.request<any>(`/manufacturer/print-reissue-requests/${encodeURIComponent(requestId)}/print`, {
+        method: "POST",
+        headers: { "x-idempotency-key": actionKey },
+        suppressMutationEvent: true,
+      })
+    );
+  },
+
   pausePrintJob(jobId: string, reason: string) {
     const actionKey = buildPrinterActionKey("print-job-pause", [jobId, stablePrinterPayloadSignature(reason)]);
     return controlledPrinterMutation(actionKey, () =>

@@ -85,11 +85,31 @@ const serializeRequest = (row: any) => ({
     : null,
 });
 
+const serializeReplacementPrintStart = (row: any, idempotent = false) => ({
+  reissueRequestId: row.id,
+  replacementPrintJobId: row.replacementPrintJobId,
+  printSessionId: row.replacementPrintJob?.printSession?.id || null,
+  quantity: Number(row.replacementPrintJob?.itemCount || row.replacementPrintJob?.quantity || row.quantity || 0),
+  mode: row.replacementPrintJob?.printMode || null,
+  pipelineState: row.replacementPrintJob?.pipelineState || null,
+  idempotent,
+});
+
 const requestInclude = {
   originalPrintJob: {
     include: {
       batch: { select: { id: true, name: true, licenseeId: true } },
       printer: { select: { id: true, name: true } },
+    },
+  },
+  replacementPrintJob: {
+    select: {
+      id: true,
+      quantity: true,
+      itemCount: true,
+      printMode: true,
+      pipelineState: true,
+      printSession: { select: { id: true } },
     },
   },
   requestedByUser: { select: { id: true, name: true, email: true, role: true } },
@@ -279,23 +299,14 @@ export const decideScopedPrintReissueRequest = async (params: {
     return { request: serializeRequest(rejected), result: null };
   }
 
-  const result = await createAuthorizedPrintReissue({
-    scope: params.scope,
-    originalPrintJobId: request.originalPrintJobId,
-    reason: request.reason,
-    quantity: request.quantity,
-    ipAddress: params.ipAddress,
-    userAgent: params.userAgent,
-  });
   const approved = await prisma.printReissueRequest.update({
     where: { id: request.id },
     data: {
-      status: ReissueRequestStatus.EXECUTED,
+      status: ReissueRequestStatus.APPROVED,
       approvedByUserId: params.scope.userId,
       decisionNote,
       approvedAt: new Date(),
-      executedAt: new Date(),
-      approvalReferenceId: result.reissueRequestId,
+      approvalReferenceId: request.id,
     },
     include: requestInclude,
   });
@@ -308,9 +319,9 @@ export const decideScopedPrintReissueRequest = async (params: {
     entityId: request.id,
     details: {
       originalPrintJobId: request.originalPrintJobId,
-      replacementPrintJobId: result.replacementPrintJobId,
       decisionNote,
       targetApproverRole: request.targetApproverRole,
+      readyToPrint: true,
     },
     ipAddress: params.ipAddress || undefined,
     userAgent: params.userAgent || undefined,
@@ -325,7 +336,6 @@ export const decideScopedPrintReissueRequest = async (params: {
       data: {
         reissueRequestId: request.id,
         originalPrintJobId: request.originalPrintJobId,
-        replacementPrintJobId: result.replacementPrintJobId,
         targetRoute: "/batches",
       },
       channels: [NotificationChannel.WEB],
@@ -337,13 +347,107 @@ export const decideScopedPrintReissueRequest = async (params: {
     licenseeId: request.licenseeId,
     type: "print_reissue_approved",
     title: "Print reissue request approved",
-    body: "A replacement print run was approved and queued.",
+    body: "A replacement label request was approved and is ready to print.",
     data: {
       reissueRequestId: request.id,
-      replacementPrintJobId: result.replacementPrintJobId,
       targetRoute: "/batches",
     },
   });
 
-  return { request: serializeRequest(approved), result };
+  return { request: serializeRequest(approved), result: null };
+};
+
+export const startApprovedPrintReissueRequest = async (params: {
+  scope: PrintJobScope;
+  requestId: string;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}) => {
+  const request = await prisma.printReissueRequest.findUnique({
+    where: { id: params.requestId },
+    include: requestInclude,
+  });
+  if (!request) throw Object.assign(new Error("Reissue request not found"), { statusCode: 404 });
+
+  if (!isManufacturerRole(params.scope.role) || request.requestedByUserId !== params.scope.userId) {
+    throw Object.assign(new Error("Reissue request not found"), { statusCode: 404 });
+  }
+
+  if (request.status === ReissueRequestStatus.EXECUTED && request.replacementPrintJobId) {
+    return { request: serializeRequest(request), result: serializeReplacementPrintStart(request, true), idempotent: true };
+  }
+
+  if (request.status !== ReissueRequestStatus.APPROVED) {
+    throw Object.assign(new Error("Reissue request is not ready to print."), { statusCode: 409 });
+  }
+
+  await createAuditLog({
+    userId: params.scope.userId,
+    licenseeId: request.licenseeId || undefined,
+    action: "PRINT_REISSUE_PRINT_START_REQUESTED",
+    entityType: "PrintReissueRequest",
+    entityId: request.id,
+    details: {
+      originalPrintJobId: request.originalPrintJobId,
+      targetApproverRole: request.targetApproverRole,
+    },
+    ipAddress: params.ipAddress || undefined,
+    userAgent: params.userAgent || undefined,
+  });
+
+  let result;
+  try {
+    result = await createAuthorizedPrintReissue({
+      scope: params.scope,
+      originalPrintJobId: request.originalPrintJobId,
+      approvedReissueRequestId: request.id,
+      reason: request.reason,
+      quantity: request.quantity,
+      ipAddress: params.ipAddress,
+      userAgent: params.userAgent,
+    });
+  } catch (error: any) {
+    if (String(error?.message || "").includes("PRINTER_NOT_TRUSTED")) {
+      await createAuditLog({
+        userId: params.scope.userId,
+        licenseeId: request.licenseeId || undefined,
+        action: "PRINT_REISSUE_PRINT_BLOCKED",
+        entityType: "PrintReissueRequest",
+        entityId: request.id,
+        details: {
+          originalPrintJobId: request.originalPrintJobId,
+          code: "PRINTER_ATTESTATION_STALE",
+          recoveryAction: "refresh_printer_status",
+        },
+        ipAddress: params.ipAddress || undefined,
+        userAgent: params.userAgent || undefined,
+      });
+    }
+    throw error;
+  }
+
+  const executed = await prisma.printReissueRequest.findUnique({
+    where: { id: request.id },
+    include: requestInclude,
+  });
+
+  if (!executed) throw Object.assign(new Error("Reissue request not found"), { statusCode: 404 });
+
+  await createAuditLog({
+    userId: params.scope.userId,
+    licenseeId: request.licenseeId || undefined,
+    action: "PRINT_REISSUE_PRINT_STARTED",
+    entityType: "PrintReissueRequest",
+    entityId: request.id,
+    details: {
+      originalPrintJobId: request.originalPrintJobId,
+      replacementPrintJobId: result.replacementPrintJobId,
+      printSessionId: result.printSessionId,
+      mode: result.mode,
+    },
+    ipAddress: params.ipAddress || undefined,
+    userAgent: params.userAgent || undefined,
+  });
+
+  return { request: serializeRequest(executed), result, idempotent: false };
 };

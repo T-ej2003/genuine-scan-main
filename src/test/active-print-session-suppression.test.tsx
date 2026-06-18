@@ -4,7 +4,14 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import apiClient from "@/lib/api-client";
-import { clearActivePrintSession, updateActivePrintSession } from "@/lib/active-print-session";
+import {
+  clearActivePrintSession,
+  getActivePrintRecoveryLabel,
+  getActivePrintSessionSnapshot,
+  hasRecoverableActivePrintSession,
+  requestActivePrintSessionRecovery,
+  updateActivePrintSession,
+} from "@/lib/active-print-session";
 import { useDashboardStats } from "@/features/dashboard/hooks";
 import { useDashboardNotifications, useOperationalAttentionQueue } from "@/features/layout/hooks";
 import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
@@ -62,5 +69,45 @@ describe("active print session read suppression", () => {
     expect(apiClient.getPrinterConnectionStatus).not.toHaveBeenCalled();
     expect(apiClient.getLocalPrintAgentStatus).not.toHaveBeenCalled();
     expect(apiClient.listRegisteredPrinters).not.toHaveBeenCalled();
+  });
+
+  it("keeps active print recovery available after the modal is closed", () => {
+    updateActivePrintSession({
+      active: true,
+      jobId: "job-live",
+      modalOpen: false,
+      terminal: false,
+    });
+
+    expect(hasRecoverableActivePrintSession()).toBe(true);
+    expect(getActivePrintRecoveryLabel()).toBe("Resume print progress");
+    expect(getActivePrintSessionSnapshot().recoveryRequestId).toBe(0);
+
+    requestActivePrintSessionRecovery();
+
+    expect(getActivePrintSessionSnapshot()).toMatchObject({
+      active: true,
+      jobId: "job-live",
+      modalOpen: false,
+      terminal: false,
+      recoveryRequestId: 1,
+    });
+  });
+
+  it("exposes terminal print state recovery without suppressing normal reads forever", () => {
+    updateActivePrintSession({
+      active: false,
+      jobId: "job-terminal",
+      modalOpen: false,
+      terminal: true,
+    });
+
+    expect(hasRecoverableActivePrintSession()).toBe(true);
+    expect(getActivePrintRecoveryLabel()).toBe("View print result");
+
+    renderWithClient(<AutoReadProbe />);
+
+    expect(screen.getByText("probe ready")).toBeInTheDocument();
+    expect(apiClient.getDashboardStats).toHaveBeenCalledTimes(1);
   });
 });

@@ -30,6 +30,7 @@ import { abandonPrintJobAction, printDiagnosticTestLabelAction, relinkSelectedPr
 import { runSingleFlightAction } from "./singleFlightAction";
 import { useActivePrintJobPolling } from "./useActivePrintJobPolling";
 import { useLivePrintStatusRefresh } from "./useLivePrintStatusRefresh";
+import { useRecoverablePrintProgress } from "./useRecoverablePrintProgress";
 import {
   buildCalibrationPayload as buildBatchCalibrationPayload,
   defaultCalibrationProfileState,
@@ -864,6 +865,14 @@ export function useBatchPrintWorkflow({
     replaceRecentPrintJob,
     setPrintProgressNotice,
   });
+  useRecoverablePrintProgress({
+    printJobId,
+    setPrintJobId,
+    setPrintProgressOpen,
+    setPrintProgressPhase,
+    setPrintProgressNotice,
+    replaceRecentPrintJob,
+  });
   const createPrintJob = async () => {
     if (printing) return;
     const actionKey = `create-print-job:${printBatch?.id || "none"}:${selectedPrinterProfile?.id || "none"}:${printQuantity}`;
@@ -898,6 +907,15 @@ export function useBatchPrintWorkflow({
     });
   };
 
+  const openProgressForExistingPrintJob = (jobId: string, notice = "Print started. Waiting for connector confirmation.") => {
+    const existingJobId = String(jobId || "").trim();
+    if (!existingJobId) return;
+    setPrintJobId(existingJobId);
+    setPrintProgressOpen(true);
+    setPrintProgressPhase("Replacement labels queued");
+    setPrintProgressNotice(notice);
+    updateActivePrintSession({ active: true, jobId: existingJobId, modalOpen: true, terminal: false });
+  };
   const dialogProps = {
     open: printOpen,
     onOpenChange: handlePrintDialogOpenChange,
@@ -951,6 +969,7 @@ export function useBatchPrintWorkflow({
     onClosePrintReissueDialog: closePrintReissueDialog,
     onPrintReissueReasonChange: (reason: string) => setPrintReissueDialog((current) => ({ ...current, reason })),
     onSubmitPrintReissueRequest: submitPrintReissueRequest,
+    onOpenExistingPrintProgress: openProgressForExistingPrintJob,
     onRefreshPrintStatus: livePrintStatusRefresh.refresh,
     recentPrintJobs,
     releaseApprovalState,

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { Activity, ChevronDown, CircleHelp, Command, LogOut, Menu, Printer, Settings } from "lucide-react";
+import { Activity, ChevronDown, CircleHelp, Command, LogOut, Menu, Settings } from "lucide-react";
 
 import { APP_PATHS, getAppBreadcrumbs, getNavItemsForRole, getRoleDisplayLabel, isAppRouteActive } from "@/app/route-metadata";
 import { BrandLockup } from "@/components/brand/BrandLockup";
@@ -9,7 +9,6 @@ import { ContextualIntelligencePanel } from "@/components/platform/ContextualInt
 import { PlatformCommandPalette } from "@/components/platform/PlatformCommandPalette";
 import { SupportIssueLauncher } from "@/components/support/SupportIssueLauncher";
 import { LegalFooter } from "@/components/trust/LegalFooter";
-import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -29,6 +28,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { useAuth } from "@/contexts/AuthContext";
 import { useDashboardNotificationCenter, useOperationalAttentionQueue } from "@/features/layout/hooks";
 import { DashboardThemeToggle } from "@/features/layout/components/DashboardThemeToggle";
+import { HeaderPrinterStatusButton } from "@/features/layout/components/HeaderPrinterStatusButton";
 import { NotificationsDropdown } from "@/features/layout/components/NotificationsDropdown";
 import {
   PrinterOnboardingDialog,
@@ -38,6 +38,7 @@ import { NOTIFICATION_FETCH_LIMIT, resolveNotificationTarget, resolveWorkspaceLa
 import { useManufacturerPrinterConnection } from "@/features/layout/useManufacturerPrinterConnection";
 import { getContextualHelpRoute } from "@/help/contextual-help";
 import { useToast } from "@/hooks/use-toast";
+import { clearActivePrintSession } from "@/lib/active-print-session";
 import { cn } from "@/lib/utils";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -71,6 +72,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   const handleLogout = () => {
     printerConnection.clearPrinterDialogSession();
+    clearActivePrintSession();
     logout();
     navigate("/login");
   };
@@ -301,27 +303,16 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               onClearNotifications={notificationCenter.clearNotifications}
             />
 
-            {printerConnection.isManufacturer ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={printerConnection.openPrinterConnectionDialog}
-                className={cn("mr-1 gap-2", printerConnection.printerToneClass)}
-                title={printerConnection.printerTitle}
-              >
-                <Printer className="h-4 w-4" />
-                <span className="hidden md:inline">{`Printing ${printerConnection.printerModeLabel}`}</span>
-                <span className="md:hidden">{printerConnection.printerModeLabel}</span>
-                {printerConnection.printerDegraded ? (
-                  <Badge
-                    variant="outline"
-                    className="border-amber-300 bg-amber-100/80 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800"
-                  >
-                    Recovery mode
-                  </Badge>
-                ) : null}
-              </Button>
-            ) : null}
+            <HeaderPrinterStatusButton
+              isManufacturer={printerConnection.isManufacturer}
+              currentPath={location.pathname}
+              navigate={navigate}
+              printerToneClass={printerConnection.printerToneClass}
+              printerTitle={printerConnection.printerTitle}
+              printerModeLabel={printerConnection.printerModeLabel}
+              printerDegraded={printerConnection.printerDegraded}
+              onOpenPrinterStatus={printerConnection.openPrinterConnectionDialog}
+            />
 
             {printerConnection.isManufacturer &&
             !printerConnection.effectivePrinterReady &&

@@ -86,12 +86,17 @@ type LicenseeBatchWorkspaceDialogProps = {
   onRequestReissue: (jobId: string) => void;
   reissuingJobId: string | null;
   reissueRequests?: any[];
+  reissueRequestsMode?: "review" | "print";
   reissueRequestsLoading?: boolean;
   reissueDecisionNote?: string;
   decidingReissueRequestId?: string | null;
+  printingReissueRequestId?: string | null;
+  reissuePrintRecoveryById?: Record<string, string>;
   onReissueDecisionNoteChange?: (value: string) => void;
   onRefreshReissueRequests?: () => void;
   onDecideReissueRequest?: (requestId: string, decision: "approve" | "reject") => void;
+  onPrintApprovedReissueRequest?: (requestId: string) => void;
+  onRefreshPrinterStatus?: () => void;
 };
 
 const eventBadgeClass = (eventType?: string) => {
@@ -224,16 +229,23 @@ export function LicenseeBatchWorkspaceDialog({
   onRequestReissue,
   reissuingJobId,
   reissueRequests = [],
+  reissueRequestsMode = "review",
   reissueRequestsLoading = false,
   reissueDecisionNote = "",
   decidingReissueRequestId = null,
+  printingReissueRequestId = null,
+  reissuePrintRecoveryById = {},
   onReissueDecisionNoteChange = () => undefined,
   onRefreshReissueRequests = () => undefined,
   onDecideReissueRequest = () => undefined,
+  onPrintApprovedReissueRequest = () => undefined,
+  onRefreshPrinterStatus = () => undefined,
 }: LicenseeBatchWorkspaceDialogProps) {
   const remaining = Number(workspace?.remainingUnassignedCodes || 0);
   const assignQuantityValue = Number(assignQuantity || 0);
   const sourceBatch = workspace?.sourceBatchRow || null;
+  const showingApprovedReissueRequests =
+    reissueRequestsMode === "print" || reissueRequests.some((request) => request.status === "APPROVED");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -513,31 +525,39 @@ export function LicenseeBatchWorkspaceDialog({
                           <div className="rounded-xl border bg-muted/10 p-4">
                             <div className="flex flex-wrap items-center justify-between gap-3">
                               <div>
-                                <div className="font-medium">Pending reissue reviews</div>
+                                <div className="font-medium">
+                                  {showingApprovedReissueRequests ? "Replacement labels ready" : "Pending reissue reviews"}
+                                </div>
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                  Only requests in your approval scope are shown here.
+                                  {showingApprovedReissueRequests
+                                    ? "Approved replacement labels wait here until the manufacturer starts secure printing."
+                                    : "Only requests in your approval scope are shown here."}
                                 </div>
                               </div>
                               <Button variant="outline" size="sm" onClick={onRefreshReissueRequests} disabled={reissueRequestsLoading}>
                                 {reissueRequestsLoading ? "Refreshing..." : "Refresh"}
                               </Button>
                             </div>
-                            <div className="mt-3 space-y-2">
-                              <Label htmlFor="batch-reissue-decision-note">Decision note</Label>
-                              <Input
-                                id="batch-reissue-decision-note"
-                                value={reissueDecisionNote}
-                                onChange={(event) => onReissueDecisionNoteChange(event.target.value)}
-                                placeholder="Explain the approval or rejection"
-                              />
-                            </div>
+                            {!showingApprovedReissueRequests ? (
+                              <div className="mt-3 space-y-2">
+                                <Label htmlFor="batch-reissue-decision-note">Decision note</Label>
+                                <Input
+                                  id="batch-reissue-decision-note"
+                                  value={reissueDecisionNote}
+                                  onChange={(event) => onReissueDecisionNoteChange(event.target.value)}
+                                  placeholder="Explain the approval or rejection"
+                                />
+                              </div>
+                            ) : null}
                             {reissueRequestsLoading ? (
                               <div className="mt-3 rounded-lg border border-dashed bg-background p-3 text-sm text-muted-foreground">
                                 Loading requests...
                               </div>
                             ) : reissueRequests.length === 0 ? (
                               <div className="mt-3 rounded-lg border border-dashed bg-background p-3 text-sm text-muted-foreground">
-                                No pending reissue requests in this scope.
+                                {showingApprovedReissueRequests
+                                  ? "No approved replacement labels are ready to print."
+                                  : "No pending reissue requests in this scope."}
                               </div>
                             ) : (
                               <div className="mt-3 space-y-2">
@@ -552,25 +572,55 @@ export function LicenseeBatchWorkspaceDialog({
                                         </div>
                                         <div className="mt-2 text-xs text-muted-foreground">{request.reason}</div>
                                       </div>
-                                      <Badge variant="secondary">{request.targetApproverRole === "SUPER_ADMIN" ? "Super admin review" : "Brand admin review"}</Badge>
+                                      <Badge variant="secondary">
+                                        {request.status === "APPROVED"
+                                          ? "Ready to print"
+                                          : request.targetApproverRole === "SUPER_ADMIN"
+                                            ? "Super admin review"
+                                            : "Brand admin review"}
+                                      </Badge>
                                     </div>
-                                    <div className="mt-3 flex flex-wrap justify-end gap-2">
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={decidingReissueRequestId === request.id || reissueDecisionNote.trim().length < 8}
-                                        onClick={() => onDecideReissueRequest(request.id, "reject")}
-                                      >
-                                        Reject
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        disabled={decidingReissueRequestId === request.id || reissueDecisionNote.trim().length < 8}
-                                        onClick={() => onDecideReissueRequest(request.id, "approve")}
-                                      >
-                                        {decidingReissueRequestId === request.id ? "Saving..." : "Approve"}
-                                      </Button>
-                                    </div>
+                                    {request.status === "APPROVED" ? (
+                                      <div className="mt-3 space-y-2">
+                                        {reissuePrintRecoveryById[request.id] ? (
+                                          <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                                            {reissuePrintRecoveryById[request.id]}
+                                          </div>
+                                        ) : null}
+                                        <div className="flex flex-wrap justify-end gap-2">
+                                          {reissuePrintRecoveryById[request.id] ? (
+                                            <Button size="sm" variant="outline" onClick={onRefreshPrinterStatus}>
+                                              Refresh printer status
+                                            </Button>
+                                          ) : null}
+                                          <Button
+                                            size="sm"
+                                            disabled={printingReissueRequestId === request.id}
+                                            onClick={() => onPrintApprovedReissueRequest(request.id)}
+                                          >
+                                            {printingReissueRequestId === request.id ? "Checking printer..." : "Print replacement labels"}
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="mt-3 flex flex-wrap justify-end gap-2">
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          disabled={decidingReissueRequestId === request.id || reissueDecisionNote.trim().length < 8}
+                                          onClick={() => onDecideReissueRequest(request.id, "reject")}
+                                        >
+                                          Reject
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          disabled={decidingReissueRequestId === request.id || reissueDecisionNote.trim().length < 8}
+                                          onClick={() => onDecideReissueRequest(request.id, "approve")}
+                                        >
+                                          {decidingReissueRequestId === request.id ? "Saving..." : "Approve"}
+                                        </Button>
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                               </div>

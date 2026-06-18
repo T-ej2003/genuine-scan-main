@@ -132,7 +132,7 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
           ) : (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Keep this window open until all labels are confirmed.
+              Print is still running. If this view closes, use View progress in the top printing status area.
             </div>
           )}
 

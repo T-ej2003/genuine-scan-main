@@ -173,6 +173,8 @@ const shouldSoftSkipUnavailableReady = (error) =>
   allowDegradedReadyOnPr &&
   (error.kind === "network" || error.kind === "html" || error.status === 503 || (error.status != null && error.status >= 500));
 
+const shouldSoftSkipMissingMfaSmokeCode = () => isPullRequestSmoke && !smokeRequired && allowDegradedReadyOnPr;
+
 const formatUnavailableReadySkip = (error) => {
   const status = error.status == null ? "unreachable" : String(error.status);
   const contentType = error.contentType || "unknown";
@@ -251,6 +253,11 @@ const run = async () => {
   if (loginPayload?.data?.auth?.sessionStage === "MFA_BOOTSTRAP") {
     const mfaCode = String(process.env.SMOKE_ADMIN_MFA_CODE || "").trim();
     if (!mfaCode) {
+      if (shouldSoftSkipMissingMfaSmokeCode()) {
+        logSkip("admin MFA bootstrap completion (set SMOKE_ADMIN_MFA_CODE)");
+        logSkip("staging smoke remaining authenticated steps because SMOKE_REQUIRED=false and the smoke account requires MFA bootstrap");
+        return;
+      }
       throw new Error("Login entered MFA bootstrap mode. Set SMOKE_ADMIN_MFA_CODE to complete the smoke flow.");
     }
 
