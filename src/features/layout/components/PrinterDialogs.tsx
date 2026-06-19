@@ -381,7 +381,7 @@ export function PrinterStatusDialog({
                   )}
                 >
                   <Wifi className="h-3.5 w-3.5" />
-                  {printerStatusLive ? "Connected" : "Refreshing"}
+                  {printerStatusLive ? "Live updates" : "Refreshing"}
                 </div>
               </div>
 

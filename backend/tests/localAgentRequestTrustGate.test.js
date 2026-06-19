@@ -61,7 +61,8 @@ mockModule("config/database.js", {
 });
 
 mockModule("services/printerConnectionService.js", {
-  getPrinterConnectionStatusForUser: async () => printerStatus,
+  getPrinterConnectionStatusForRegistration: async (registrationId) =>
+    registrationId === registration.id ? printerStatus : { ...printerStatus, connected: false, trusted: false },
 });
 
 const { buildPrinterAgentActionPayload, signPrinterAgentPayload } = require("../dist/services/printerAgentSigningService");

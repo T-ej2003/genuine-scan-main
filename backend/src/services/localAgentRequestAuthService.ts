@@ -9,7 +9,7 @@ import {
   verifyPrinterAgentPayloadSignature,
 } from "./printerAgentSigningService";
 import type { LocalAgentRequestPayload } from "./localAgentAckProtocolService";
-import { getPrinterConnectionStatusForUser } from "./printerConnectionService";
+import { getPrinterConnectionStatusForRegistration } from "./printerConnectionService";
 
 const sha256Short = (value: string | null | undefined) =>
   String(value || "").trim() ? createHash("sha256").update(String(value || "").trim()).digest("hex").slice(0, 16) : null;
@@ -105,7 +105,7 @@ export const verifyLocalAgentRequest = async (
     throw Object.assign(new Error("Printer agent signature verification failed."), { statusCode: 401 });
   }
 
-  const printerStatus = await getPrinterConnectionStatusForUser(registration.userId);
+  const printerStatus = await getPrinterConnectionStatusForRegistration(registration.id);
   const activePrinterId = String(printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
   const requestedPrinterId = String(parsed.printerId || "").trim();
   const readyForThisConnector =

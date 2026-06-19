@@ -87,6 +87,12 @@ mockModule("config/database.js", {
         return registrations.find((entry) => entry.userId === identity?.userId && entry.deviceFingerprint === identity?.deviceFingerprint) || null;
       },
       findFirst: async ({ where }) => {
+        if (where?.id) {
+          const row = registrations.find(
+            (entry) => entry.id === where.id && (where.revokedAt === undefined || entry.revokedAt === where.revokedAt)
+          );
+          return row ? cloneWithAttestations(row) : null;
+        }
         if (where?.agentId && where?.deviceFingerprint) {
           return (
             registrations.find(
@@ -252,6 +258,9 @@ const signedClaim = (overrides = {}) => {
   assert.strictEqual(heartbeat.status.eligibleForPrinting, true, "fresh signed replacement heartbeat should be print eligible");
   assert.strictEqual(heartbeat.status.registrationId.startsWith("registration-new-"), true, "replacement heartbeat should create a new registration");
   assert.strictEqual(registrations.find((entry) => entry.id === "registration-old").trustStatus, PrinterTrustStatus.REVOKED, "older registration should be revoked only after replacement trust succeeds");
+  registrations = registrations.map((entry) =>
+    entry.id === "registration-old" ? { ...entry, updatedAt: new Date(Date.now() + 60_000) } : entry
+  );
   await verifyLocalAgentRequest(signedClaim(), "claim");
 
   await assert.rejects(
