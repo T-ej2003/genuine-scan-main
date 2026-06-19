@@ -141,8 +141,10 @@ const buildSessionRangeSummary = async (sessionId?: string | null) => {
       confirmationEvidence: true,
     },
   });
-  const labelCode = (row: { code: string | null; qrCode?: { displayCode?: string | null } | null }) =>
-    row.qrCode?.displayCode || row.code;
+  const labelCode = (row: { code: string | null; qrCode?: { displayCode?: string | null } | null }) => {
+    const displayCode = String(row.qrCode?.displayCode || "").trim();
+    return displayCode.length > 0 ? displayCode : row.code;
+  };
 
   const confirmedCodes = rows
     .filter((row) => row.state === PrintItemState.PRINT_CONFIRMED || row.state === PrintItemState.CLOSED || row.printConfirmedAt)

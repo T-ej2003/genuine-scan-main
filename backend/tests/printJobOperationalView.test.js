@@ -87,7 +87,8 @@ const run = async () => {
   ];
   prisma.printItem.findMany = async () => [
     {
-      code: "QR-000001",
+      code: "c_secure_internal_print_identity_000001",
+      qrCode: { displayCode: "QR-000001" },
       state: PrintItemState.CLOSED,
       printConfirmedAt: new Date("2026-03-20T09:05:00.000Z"),
       confirmationEvidence: { source: "connector" },
@@ -114,6 +115,10 @@ const run = async () => {
     assert(view.rangeStart === "QR-000001" && view.rangeEnd === "QR-000001", "Operational view should expose requested range");
     assert(view.operator.name === "Operator One", "Operational view should expose captured print operator");
     assert(view.session.confirmedRange.startCode === "QR-000001", "Operational view should expose confirmed range");
+    assert(
+      view.session.confirmedRange.startCode !== "c_secure_internal_print_identity_000001",
+      "Operational range display may use displayCode without leaking the internal QR print identity"
+    );
     assert(view.sampleScanPolicy.satisfied === true, "Operational view should expose satisfied sample scan policy");
     assert(
       lastFindFirstArgs.where.batch.is.licenseeId === "lic-1",
@@ -135,6 +140,7 @@ const run = async () => {
     assert(rows[0].reprintReason === "Damaged labels on first pass", "List rows should expose the reissue reason");
     assert(rows[0].rangeStart === "QR-000001" && rows[0].rangeEnd === "QR-000001", "List rows should expose requested range");
     assert(rows[0].operator.name === "Operator One", "List rows should expose captured print operator");
+    assert(rows[0].session.confirmedRange.startCode === "QR-000001", "List rows should expose operator-safe display range");
     assert(rows[0].sampleScanPolicy.satisfied === true, "List rows should expose satisfied sample scan policy");
     assert(
       lastFindManyArgs.where.manufacturerId === "user-1",

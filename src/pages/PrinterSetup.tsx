@@ -74,7 +74,6 @@ const NETWORK_DIRECT_LANGUAGES: ManagedRouteForm["commandLanguage"][] = [
   "CPCL",
 ];
 const REQUIRED_CONNECTOR_VERSION = "2026.6.13";
-
 type ManualFieldHelpKey = "vendor" | "model" | "host" | "port" | "resourcePath" | "printerUri";
 
 type ManualFieldGuide = {
@@ -428,7 +427,6 @@ export default function PrinterSetupPage() {
     () => (selectedPrinter && suggestion ? buildRecommendedPrinterSignature(selectedPrinter, suggestion) : ""),
     [selectedPrinter, suggestion]
   );
-
   useEffect(() => {
     if (!selectedPrinter || !suggestion || !recommendedSignature) return;
     if (lastRecommendedSignatureRef.current === recommendedSignature) return;
