@@ -132,6 +132,32 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
       return noClaimWork(res);
     }
 
+    const testClaim = await claimLocalAgentPrinterTestJob({ printerIds });
+    if (testClaim) {
+      console.info("local_agent_claim", {
+        event: "test_work_returned",
+        registrationId: registration.id,
+        agentId: registration.agentId,
+        selectedPrinterId,
+        printerIds,
+        testJobId: testClaim.testJobId,
+        payloadDiagnostics: buildPrintPayloadDiagnostics({
+          payloadType: testClaim.payloadType,
+          labelLanguage: testClaim.commandLanguage,
+          payloadContent: testClaim.payloadContent,
+        }),
+      });
+      return res.json({
+        success: true,
+        retryAfterMs: LOCAL_AGENT_BUSY_RETRY_MS,
+        protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+        data: {
+          ...testClaim,
+          protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+        },
+      });
+    }
+
     const { availableItemCount, inFlightItemCount } = await countLocalAgentClaimItems({
       printerIds,
       manufacturerId: registration.userId,
@@ -165,31 +191,6 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
     });
 
     if (!job || !job.printSession || !job.printer) {
-      const testClaim = claimLocalAgentPrinterTestJob({ printerIds });
-      if (testClaim) {
-        console.info("local_agent_claim", {
-          event: "test_work_returned",
-          registrationId: registration.id,
-          agentId: registration.agentId,
-          selectedPrinterId,
-          printerIds,
-          testJobId: testClaim.testJobId,
-          payloadDiagnostics: buildPrintPayloadDiagnostics({
-            payloadType: testClaim.payloadType,
-            labelLanguage: testClaim.commandLanguage,
-            payloadContent: testClaim.payloadContent,
-          }),
-        });
-        return res.json({
-          success: true,
-          retryAfterMs: LOCAL_AGENT_BUSY_RETRY_MS,
-          protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-          data: {
-            ...testClaim,
-            protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-          },
-        });
-      }
       logLocalAgentClaim("no_active_job", { registrationId: registration.id, agentId: registration.agentId, selectedPrinterId, printerIds, availableItemCount, inFlightItemCount, retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS });
       return noClaimWork(res, inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS);
     }

@@ -108,6 +108,19 @@ export const verifyLocalAgentRequest = async (
   const printerStatus = await getPrinterConnectionStatusForRegistration(registration.id);
   const activePrinterId = String(printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
   const requestedPrinterId = String(parsed.printerId || "").trim();
+  const requestedBackendPrinter =
+    requestedPrinterId && activePrinterId && requestedPrinterId !== activePrinterId
+      ? await prisma.printer.findFirst({
+          where: {
+            id: requestedPrinterId,
+            printerRegistrationId: registration.id,
+            nativePrinterId: activePrinterId,
+            isActive: true,
+          },
+          select: { id: true },
+        })
+      : null;
+  const selectedPrinterMatch = Boolean(!requestedPrinterId || activePrinterId === requestedPrinterId || requestedBackendPrinter);
   const readyForThisConnector =
     printerStatus.eligibleForPrinting === true &&
     printerStatus.trusted === true &&
@@ -116,7 +129,7 @@ export const verifyLocalAgentRequest = async (
     printerStatus.registrationId === registration.id &&
     printerStatus.agentId === registration.agentId &&
     printerStatus.deviceFingerprint === registration.deviceFingerprint &&
-    (!requestedPrinterId || activePrinterId === requestedPrinterId);
+    selectedPrinterMatch;
 
   if (!readyForThisConnector) {
     logLocalAgentTrust("readiness_rejected", {
@@ -130,7 +143,7 @@ export const verifyLocalAgentRequest = async (
       trusted: printerStatus.trusted === true,
       active: printerStatus.connected === true,
       approved: Boolean(registration.approvedAt || registration.trustStatus === PrinterTrustStatus.TRUSTED),
-      selectedPrinterMatch: !requestedPrinterId || activePrinterId === requestedPrinterId,
+      selectedPrinterMatch,
       claimSignatureVerified: true,
       rejectReason: "trusted_readiness_mismatch",
       trustStatus: printerStatus.trustStatus || null,

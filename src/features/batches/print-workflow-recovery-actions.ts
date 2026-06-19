@@ -81,6 +81,13 @@ export const printDiagnosticTestLabelAction = async (params: {
   try {
     const response = await apiClient.testPrinterLabel(params.selectedPrinterProfile.id);
     const data = (response.data || {}) as { outcome?: string; message?: string };
+    if (response.success && data.outcome === "queued") {
+      params.toast({
+        title: "Diagnostic test label queued",
+        description: data.message || "Keep MSCQR Connector running. Production printing unlocks after the connector prints and confirms this setup label.",
+      });
+      return;
+    }
     if (!response.success || data.outcome !== "confirmed") {
       params.toast({
         title: "Diagnostic test label needs attention",
