@@ -124,8 +124,9 @@ const res = {
   assert.strictEqual(res.body?.success, true, "heartbeat fallback should still return success");
   assert.strictEqual(res.body?.degraded, true, "heartbeat fallback should flag degraded mode");
   assert.strictEqual(res.body?.data?.connected, true, "heartbeat fallback should preserve the current connected signal");
-  assert.strictEqual(res.body?.data?.compatibilityMode, true, "heartbeat fallback should return compatibility mode");
-  assert.strictEqual(res.body?.data?.connectionClass, "COMPATIBILITY", "heartbeat fallback should avoid a dashboard-breaking blocked state");
+  assert.strictEqual(res.body?.data?.compatibilityMode, true, "heartbeat fallback should identify the visible helper as compatibility-only");
+  assert.strictEqual(res.body?.data?.eligibleForPrinting, false, "heartbeat fallback must not allow printing while trust storage is degraded");
+  assert.strictEqual(res.body?.data?.connectionClass, "BLOCKED", "heartbeat fallback should block physical printing until secure storage recovers");
 
   console.log("printer heartbeat storage fallback tests passed");
 })().catch((error) => {

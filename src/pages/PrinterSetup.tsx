@@ -23,6 +23,7 @@ import {
   type PrinterInventoryRow,
 } from "@/lib/printer-diagnostics";
 import { getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 import { createUiActionState } from "@/lib/ui-actions";
 import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
 import { pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
@@ -73,7 +74,6 @@ const NETWORK_DIRECT_LANGUAGES: ManagedRouteForm["commandLanguage"][] = [
   "CPCL",
 ];
 const REQUIRED_CONNECTOR_VERSION = "2026.6.13";
-
 type ManualFieldHelpKey = "vendor" | "model" | "host" | "port" | "resourcePath" | "printerUri";
 
 type ManualFieldGuide = {
@@ -387,7 +387,8 @@ export default function PrinterSetupPage() {
   const inventory = inventoryQuery.data || [];
   const registeredPrinters = (runtimeQuery.data?.registeredPrinters || []) as RegisteredPrinterDTO[];
   const remoteStatus = runtimeQuery.data?.remoteStatus || null;
-  const localReady = Boolean(remoteStatus?.connected && remoteStatus?.eligibleForPrinting);
+  const helperReadiness = useMemo(() => buildSecurePrintReadiness(remoteStatus), [remoteStatus]);
+  const localReady = helperReadiness.ready;
   const helperVersion = String(remoteStatus?.agentVersion || "").trim();
   const latestHelperVersion = String(connectorReleaseQuery.data?.latestVersion || "").trim();
   const detectedPlatformRelease =
@@ -426,7 +427,6 @@ export default function PrinterSetupPage() {
     () => (selectedPrinter && suggestion ? buildRecommendedPrinterSignature(selectedPrinter, suggestion) : ""),
     [selectedPrinter, suggestion]
   );
-
   useEffect(() => {
     if (!selectedPrinter || !suggestion || !recommendedSignature) return;
     if (lastRecommendedSignatureRef.current === recommendedSignature) return;
@@ -657,7 +657,7 @@ export default function PrinterSetupPage() {
                 <div>
                   <div className="font-medium">Helper status</div>
                   <div className="text-xs text-muted-foreground">
-                    {remoteStatus?.error || (localReady ? "The helper is online and can see the printer." : "MSCQR is waiting for the next printer update.")}
+                    {remoteStatus?.error || (localReady ? "The helper is online and trusted for secure printing." : helperReadiness.summary)}
                   </div>
                 </div>
                 <Badge variant={localReady ? "default" : "secondary"}>{localReady ? "Ready" : "Waiting"}</Badge>

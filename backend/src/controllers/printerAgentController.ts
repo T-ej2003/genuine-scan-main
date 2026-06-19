@@ -18,6 +18,7 @@ import { boundedJsonSchema } from "../utils/boundedJson";
 import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
 import { writeSseRealtimeEnvelope } from "../utils/realtime";
 import { getOrComputeVersionedCache } from "../services/versionedCacheService";
+import { getTrustedMtlsFingerprintHeader } from "../utils/mtlsFingerprintHeader";
 const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
   UserRole.MANUFACTURER_ADMIN,
@@ -85,8 +86,27 @@ const buildDegradedHeartbeatStatus = (input: z.infer<typeof heartbeatSchema>, cu
     compatibilityReason: connected
       ? "Heartbeat accepted in degraded mode while secure printer storage is recovering."
       : null,
-    eligibleForPrinting: connected,
-    connectionClass: connected ? "COMPATIBILITY" : "BLOCKED",
+    eligibleForPrinting: false,
+    connectionClass: "BLOCKED",
+    trustMode: currentStatus?.trustMode || "SIGNED_ATTESTATION",
+    securePrinterSession: false,
+    freshHelperHeartbeat: false,
+    helperConnection: connected,
+    eligiblePrinter: false,
+    signedAttestation: {
+      required: true,
+      present: Boolean(input.heartbeatSignature),
+      signatureValid: false,
+      fresh: false,
+      issuedAt: input.heartbeatIssuedAt || null,
+    },
+    missingFields: [
+      "freshHelperHeartbeat",
+      "eligiblePrinter",
+      "securePrinterSession",
+      ...(connected ? [] : ["helperConnection"]),
+    ],
+    recoveryAction: "refresh_printer_status",
     stale: false,
     requiredForPrinting: true,
     trustStatus: currentStatus?.trustStatus || "DEGRADED",
@@ -122,7 +142,9 @@ const buildDegradedHeartbeatStatus = (input: z.infer<typeof heartbeatSchema>, cu
       (input.calibrationProfile && typeof input.calibrationProfile === "object" ? input.calibrationProfile : null) ||
       currentStatus?.calibrationProfile ||
       null,
-    error: connected ? null : input.error || currentStatus?.error || "Local printer unavailable",
+    error: connected
+      ? "Secure printer heartbeat storage is temporarily unavailable. Printing is blocked until trust storage recovers."
+      : input.error || currentStatus?.error || "Local printer unavailable",
     degraded: true,
   };
 };
@@ -165,7 +187,7 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
         deviceFingerprint: parsed.data.deviceFingerprint || null,
         publicKeyPem: parsed.data.publicKeyPem || null,
         clientCertFingerprint: parsed.data.clientCertFingerprint || null,
-        mtlsFingerprintHeader: req.get("x-client-cert-fingerprint") || req.get("x-ssl-client-fingerprint") || null,
+        mtlsFingerprintHeader: getTrustedMtlsFingerprintHeader(req),
         heartbeatNonce: parsed.data.heartbeatNonce || null,
         heartbeatIssuedAt: parsed.data.heartbeatIssuedAt || null,
         heartbeatSignature: parsed.data.heartbeatSignature || null,
@@ -232,12 +254,12 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
       const title = update.status.connected
         ? update.status.trusted
           ? "Trusted printer connected"
-          : "Printer connected in compatibility mode"
+          : "Printer helper needs verification"
         : "Printer trust or connection lost";
       const body = update.status.connected
         ? update.status.trusted
           ? `${update.status.printerName || "Connected printer"} is cryptographically trusted and ready for secure direct-print.`
-          : `${update.status.printerName || "Connected printer"} is connected in compatibility mode. Direct-print is enabled while advanced trust enrollment is pending.`
+          : `${update.status.printerName || "Connected printer"} is visible, but secure verification must be refreshed before printing.`
         : `Printer unavailable for issuance${update.status.error ? `: ${update.status.error}` : "."} Direct-print jobs are blocked.`;
 
       await Promise.allSettled([

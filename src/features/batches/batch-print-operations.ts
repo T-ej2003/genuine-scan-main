@@ -499,7 +499,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     ) {
       toast({
         title: "Using last ready printer status",
-        description: "Printer status refresh is temporarily paused. Printing can continue.",
+        description: "Printer status refresh is temporarily paused. Last trusted status is retained.",
       });
     } else if (
       !livePrinterStatus.success ||

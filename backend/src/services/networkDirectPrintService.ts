@@ -115,6 +115,7 @@ const buildCodeRangeSummary = (codes: Array<string | null | undefined>) => {
 const buildSessionRangeSummary = async (sessionId?: string | null) => {
   if (!sessionId) {
     return {
+      requestedRange: null,
       confirmedRange: null,
       pendingRange: null,
       recoveryRange: null,
@@ -130,15 +131,24 @@ const buildSessionRangeSummary = async (sessionId?: string | null) => {
     orderBy: [{ issueSequence: "asc" }, { code: "asc" }],
     select: {
       code: true,
+      qrCode: {
+        select: {
+          displayCode: true,
+        },
+      },
       state: true,
       printConfirmedAt: true,
       confirmationEvidence: true,
     },
   });
+  const labelCode = (row: { code: string | null; qrCode?: { displayCode?: string | null } | null }) => {
+    const displayCode = String(row.qrCode?.displayCode || "").trim();
+    return displayCode.length > 0 ? displayCode : row.code;
+  };
 
   const confirmedCodes = rows
     .filter((row) => row.state === PrintItemState.PRINT_CONFIRMED || row.state === PrintItemState.CLOSED || row.printConfirmedAt)
-    .map((row) => row.code);
+    .map(labelCode);
   const pendingRows = rows.filter(
     (row) =>
       !row.printConfirmedAt &&
@@ -152,14 +162,15 @@ const buildSessionRangeSummary = async (sessionId?: string | null) => {
       !hasNonEmptyJsonEvidence(row.confirmationEvidence)
   );
   const failedRows = rows.filter((row) => row.state === PrintItemState.FAILED || row.state === PrintItemState.FROZEN);
-  const recoveryRange = buildCodeRangeSummary(recoveryRows.map((row) => row.code));
-  const pendingRange = buildCodeRangeSummary(pendingRows.map((row) => row.code));
+  const recoveryRange = buildCodeRangeSummary(recoveryRows.map(labelCode));
+  const pendingRange = buildCodeRangeSummary(pendingRows.map(labelCode));
 
   return {
+    requestedRange: buildCodeRangeSummary(rows.map(labelCode)),
     confirmedRange: buildCodeRangeSummary(confirmedCodes),
     pendingRange,
     recoveryRange,
-    failedRange: buildCodeRangeSummary(failedRows.map((row) => row.code)),
+    failedRange: buildCodeRangeSummary(failedRows.map(labelCode)),
     nextPrintableIndex: recoveryRange?.startCode || pendingRange?.startCode || null,
     recoveryNeeded: Boolean(recoveryRange),
     pendingUnconfirmedItems: pendingRows.length + recoveryRows.length,

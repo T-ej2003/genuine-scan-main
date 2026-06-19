@@ -7,6 +7,10 @@ type PrinterStatusLike = {
   compatibilityMode?: boolean | null;
   stale?: boolean | null;
   connectionClass?: string | null;
+  securePrinterSession?: boolean | null;
+  freshHelperHeartbeat?: boolean | null;
+  helperConnection?: boolean | null;
+  eligiblePrinter?: boolean | null;
   trustStatus?: string | null;
   trustReason?: string | null;
   error?: string | null;
@@ -44,6 +48,10 @@ export const isSecurePrintReady = (status?: PrinterStatusLike | null) =>
     status?.connected &&
       status?.eligibleForPrinting &&
       status?.trusted &&
+      status?.securePrinterSession !== false &&
+      status?.freshHelperHeartbeat !== false &&
+      status?.helperConnection !== false &&
+      status?.eligiblePrinter !== false &&
       !status?.compatibilityMode &&
       !status?.stale &&
       String(status?.connectionClass || "TRUSTED").toUpperCase() === "TRUSTED"

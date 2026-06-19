@@ -81,6 +81,14 @@ describe("DashboardLayout printer connection dialog", () => {
     compatibilityReason: null,
     eligibleForPrinting: true,
     connectionClass: "TRUSTED",
+    trustMode: "SIGNED_ATTESTATION",
+    securePrinterSession: true,
+    freshHelperHeartbeat: true,
+    helperConnection: true,
+    eligiblePrinter: true,
+    signedAttestation: { required: true, present: true, signatureValid: true, fresh: true, issuedAt: "2026-03-13T19:23:35.000Z" },
+    missingFields: [],
+    recoveryAction: null,
     stale: false,
     requiredForPrinting: true,
     trustStatus: "TRUSTED",
@@ -436,8 +444,16 @@ describe("DashboardLayout printer connection dialog", () => {
         compatibilityMode: true,
         degraded: true,
         compatibilityReason: "Heartbeat accepted in degraded mode while secure printer storage is recovering.",
-        eligibleForPrinting: true,
+        eligibleForPrinting: false,
         connectionClass: "COMPATIBILITY",
+        trustMode: "SIGNED_ATTESTATION",
+        securePrinterSession: false,
+        freshHelperHeartbeat: false,
+        helperConnection: true,
+        eligiblePrinter: false,
+        signedAttestation: { required: true, present: true, signatureValid: false, fresh: false, issuedAt: "2026-03-28T10:00:00.000Z" },
+        missingFields: ["freshHelperHeartbeat", "eligiblePrinter", "securePrinterSession"],
+        recoveryAction: "refresh_printer_status",
         stale: false,
         requiredForPrinting: true,
         trustStatus: "DEGRADED",
@@ -487,7 +503,15 @@ describe("DashboardLayout printer connection dialog", () => {
       trusted: false,
       compatibilityMode: true,
       compatibilityReason: "Heartbeat accepted in degraded mode while secure printer storage is recovering.",
+      eligibleForPrinting: false,
       connectionClass: "COMPATIBILITY",
+      securePrinterSession: false,
+      freshHelperHeartbeat: false,
+      helperConnection: true,
+      eligiblePrinter: false,
+      signedAttestation: { required: true, present: true, signatureValid: false, fresh: false, issuedAt: "2026-03-28T10:00:00.000Z" },
+      missingFields: ["freshHelperHeartbeat", "eligiblePrinter", "securePrinterSession"],
+      recoveryAction: "refresh_printer_status",
       trustStatus: "DEGRADED",
       trustReason: "Printer heartbeat storage is temporarily unavailable",
     });
@@ -505,7 +529,7 @@ describe("DashboardLayout printer connection dialog", () => {
     });
 
     expect(screen.getAllByText(/Printer verification expired\. Refresh printer helper before printing\./i).length).toBeGreaterThan(0);
-    expect(screen.queryByText("Recovery mode")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Recovery mode").length).toBeGreaterThan(0);
   });
 
   it("preserves last-known ready state and keeps helper closed when status refresh is rate-limited", async () => {
@@ -546,6 +570,14 @@ describe("DashboardLayout printer connection dialog", () => {
           compatibilityReason: null,
           eligibleForPrinting: true,
           connectionClass: "TRUSTED",
+          trustMode: "SIGNED_ATTESTATION",
+          securePrinterSession: true,
+          freshHelperHeartbeat: true,
+          helperConnection: true,
+          eligiblePrinter: true,
+          signedAttestation: { required: true, present: true, signatureValid: true, fresh: true, issuedAt: "2026-03-13T19:23:35.000Z" },
+          missingFields: [],
+          recoveryAction: null,
           stale: false,
           requiredForPrinting: true,
           trustStatus: "TRUSTED",
@@ -630,7 +662,7 @@ describe("DashboardLayout printer connection dialog", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /refresh status/i })[0]);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/printer status refresh is temporarily paused\. printing can continue/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/printer status refresh is temporarily paused\. last trusted status is retained/i).length).toBeGreaterThan(0);
     });
     expect(screen.queryByText("Recovery mode")).not.toBeInTheDocument();
   });
@@ -684,6 +716,14 @@ describe("DashboardLayout printer connection dialog", () => {
         compatibilityReason: null,
         eligibleForPrinting: true,
         connectionClass: "TRUSTED",
+        trustMode: "SIGNED_ATTESTATION",
+        securePrinterSession: true,
+        freshHelperHeartbeat: true,
+        helperConnection: true,
+        eligiblePrinter: true,
+        signedAttestation: { required: true, present: true, signatureValid: true, fresh: true, issuedAt: "2026-03-13T19:23:35.000Z" },
+        missingFields: [],
+        recoveryAction: null,
         stale: false,
         requiredForPrinting: true,
         trustStatus: "TRUSTED",

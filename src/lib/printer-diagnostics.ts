@@ -497,20 +497,13 @@ export const getPrinterDiagnosticSummary = (params: {
     };
   }
 
-  if (remote?.connected && remote?.eligibleForPrinting) {
-    const pendingSecureVerification =
-      !remote.trusted ||
-      remote.compatibilityMode ||
-      String(remote.trustStatus || "").toUpperCase() === "UNREGISTERED" ||
-      String(remote.trustStatus || "").toUpperCase() === "PENDING";
+  if (remote?.connected && remote?.eligibleForPrinting && remote.trusted && !remote.compatibilityMode && !remote.stale) {
     const softNotice = remote.refreshPaused
-      ? "Printer status refresh is temporarily paused. Printing can continue."
-      : pendingSecureVerification
-        ? "Secure printer verification is still finishing. Printing can continue."
-        : "The printer helper and MSCQR are both ready for this printer.";
+      ? "Printer status refresh is temporarily paused. Last trusted status is retained."
+      : "The printer helper and MSCQR are both ready for this printer.";
 
     return {
-      state: remote.trusted && !remote.compatibilityMode ? "trusted_ready" : "compatibility_ready",
+      state: "trusted_ready",
       badgeLabel: "Ready",
       title: "Printer ready",
       summary: `${selectedPrinter?.printerName || remote.selectedPrinterName || remote.printerName || "Selected printer"} is connected and ready to print.`,
@@ -519,6 +512,25 @@ export const getPrinterDiagnosticSummary = (params: {
       nextSteps: [
         "Continue to the batch workflow when you are ready to print.",
         "If output alignment changes, review the printer settings before the next run.",
+      ],
+      selectedPrinter,
+    };
+  }
+
+  if (remote?.connected && remote?.eligibleForPrinting && (!remote.trusted || remote.compatibilityMode)) {
+    return {
+      state: "trust_blocked",
+      badgeLabel: "Needs check",
+      title: "Printer verification expired",
+      summary: "Printer verification expired. Refresh printer helper before printing.",
+      detail: sanitizePrinterUiError(
+        remote.error || remote.trustReason,
+        "MSCQR needs a fresh trusted helper session before printing."
+      ),
+      tone: "warning",
+      nextSteps: [
+        "Refresh printer helper before starting a print run.",
+        "Restart MSCQR Connector if the helper does not recover.",
       ],
       selectedPrinter,
     };
@@ -691,9 +703,9 @@ export const buildPrinterReadinessDisplay = (params: {
         ? "Printer verification expired. Refresh printer helper before printing."
       : params.diagnostics.summary;
   const notice = transientRefresh
-    ? "Printer status refresh is temporarily paused. Printing can continue with the last ready status."
+    ? "Printer status refresh is temporarily paused. Last trusted status is retained."
     : params.ready && (!params.trusted || params.compatibilityMode)
-      ? "Secure printer verification is still finishing. Printing can continue."
+      ? "Printer verification expired. Refresh printer helper before printing."
       : "";
 
   const toneClass =

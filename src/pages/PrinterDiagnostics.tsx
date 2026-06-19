@@ -27,6 +27,7 @@ import {
   type PrinterInventoryRow,
 } from "@/lib/printer-diagnostics";
 import { buildPrinterSupportSummary, getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-user-facing";
+import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 
 const EMPTY_LOCAL_AGENT: LocalPrinterAgentSnapshot = {
   reachable: false,
@@ -283,6 +284,7 @@ export default function PrinterDiagnostics() {
       }),
     [detectedPrinters, localAgent, remoteStatus, selectedPrinterId]
   );
+  const cloudReadiness = useMemo(() => buildSecurePrintReadiness(remoteStatus), [remoteStatus]);
 
   const managedNetworkPrinters = useMemo(
     () => registeredPrinters.filter((printer) => printer.connectionType !== "LOCAL_AGENT" && printer.isActive),
@@ -1103,8 +1105,8 @@ export default function PrinterDiagnostics() {
             <CardContent className="space-y-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Status</span>
-                <Badge variant={remoteStatus?.connected && remoteStatus?.eligibleForPrinting ? "default" : "secondary"}>
-                  {remoteStatus?.connected && remoteStatus?.eligibleForPrinting ? "Ready" : "Needs attention"}
+                <Badge variant={cloudReadiness.ready ? "default" : "secondary"}>
+                  {cloudReadiness.ready ? "Ready" : "Needs attention"}
                 </Badge>
               </div>
               <div className="flex items-center justify-between">

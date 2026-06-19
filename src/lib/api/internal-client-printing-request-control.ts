@@ -31,7 +31,7 @@ export const PRINTER_HEARTBEAT_MIN_REFRESH_MS = 90_000;
 
 const PRINTER_RATE_LIMIT_FALLBACK_MS = 10_000;
 const PRINTER_RATE_LIMIT_NOTICE =
-  "Printer status refresh is temporarily paused. Printing can continue if the printer was already ready.";
+  "Printer status refresh is temporarily paused. Last trusted status is retained.";
 
 const printerGetCache = new Map<string, PrinterGetCacheState>();
 const printerMutationCache = new Map<string, PrinterMutationState>();

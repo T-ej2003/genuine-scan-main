@@ -6,6 +6,7 @@ const { PrinterTrustStatus, UserRole } = require("@prisma/client");
 process.env.PRINT_AGENT_REQUIRE_SIGNATURE = "true";
 process.env.PRINT_AGENT_REQUIRE_MTLS = "false";
 process.env.PRINT_AGENT_ALLOW_COMPATIBILITY_MODE = "true";
+process.env.PRINT_AGENT_MTLS_TRUSTED_PROXY_IPS = "";
 
 const distRoot = path.resolve(__dirname, "../dist");
 
@@ -195,6 +196,11 @@ const { getPrinterConnectionStatusForUser, upsertPrinterConnectionHeartbeat } = 
   assert.strictEqual(result.status.trusted, true, "rotated local-agent key should restore a trusted connection");
   assert.strictEqual(result.status.connectionClass, "TRUSTED", "restored heartbeat should exit compatibility mode");
   assert.strictEqual(result.status.compatibilityMode, false, "trusted key rotation should not remain in compatibility mode");
+  assert.strictEqual(
+    result.status.mtlsFingerprint,
+    null,
+    "connector 2026.6.16 signed attestation launch mode should not require browser-supplied mTLS"
+  );
 
   console.log("printer heartbeat key rotation tests passed");
 })().catch((error) => {

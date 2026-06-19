@@ -10,6 +10,19 @@ import { LicenseeDialogs } from "@/features/licensees/components/LicenseeDialogs
 import { ManufacturerDetailsDialog } from "@/features/manufacturers/components/ManufacturerDetailsDialog";
 
 describe("dialog recovery states", () => {
+  const manufacturerOperational = (overrides: Record<string, unknown> = {}) => ({
+    assignedLabelCount: 0,
+    confirmedPrintedCount: 0,
+    scannedCount: 0,
+    blockedCount: 0,
+    remainingLabelCount: 0,
+    originalAssignedRangeStart: null,
+    originalAssignedRangeEnd: null,
+    remainingPrintableRangeStart: null,
+    remainingPrintableRangeEnd: null,
+    nextPrintableLabelCode: null,
+    ...overrides,
+  });
   const readyBatch = {
     id: "batch-1",
     name: "Smoke batch",
@@ -261,6 +274,16 @@ describe("dialog recovery states", () => {
             manufacturerCount: 1,
             allocations: [],
             manufacturerSummary: [],
+            manufacturerOperational: manufacturerOperational({
+              assignedLabelCount: 100,
+              confirmedPrintedCount: 5,
+              remainingLabelCount: 95,
+              originalAssignedRangeStart: "QR-000001",
+              originalAssignedRangeEnd: "QR-000100",
+              remainingPrintableRangeStart: "QR-000006",
+              remainingPrintableRangeEnd: "QR-000100",
+              nextPrintableLabelCode: "QR-000006",
+            }),
             printedAt: null,
           }}
           manufacturers={[]}
@@ -315,8 +338,8 @@ describe("dialog recovery states", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("Continue from QR index QR-000006.")).toBeInTheDocument();
-    expect(screen.getByText("Recover unconfirmed range QR-000006-QR-000010. Do not start a later range until this recovery is resolved.")).toBeInTheDocument();
+    expect(screen.getByText("Continue from label QR-000006.")).toBeInTheDocument();
+    expect(screen.getByText("Recover unconfirmed label range QR-000006 to QR-000010. Do not start a later range until this recovery is resolved.")).toBeInTheDocument();
     expect(screen.getByText("Pending/unconfirmed 5")).toBeInTheDocument();
     expect(screen.getByText("Operator: Priya Operator")).toBeInTheDocument();
   });
@@ -367,6 +390,18 @@ describe("dialog recovery states", () => {
               },
             ],
             manufacturerSummary: [],
+            manufacturerOperational: manufacturerOperational({
+              assignedLabelCount: 1000,
+              confirmedPrintedCount: 74,
+              scannedCount: 1,
+              blockedCount: 0,
+              remainingLabelCount: 925,
+              originalAssignedRangeStart: "QR-000001",
+              originalAssignedRangeEnd: "QR-001000",
+              remainingPrintableRangeStart: "QR-000075",
+              remainingPrintableRangeEnd: "QR-001000",
+              nextPrintableLabelCode: "QR-000075",
+            }),
             printedAt: null,
           }}
           manufacturers={[]}
@@ -465,6 +500,17 @@ describe("dialog recovery states", () => {
             manufacturerCount: 1,
             allocations: [],
             manufacturerSummary: [],
+            manufacturerOperational: manufacturerOperational({
+              assignedLabelCount: 100,
+              confirmedPrintedCount: 75,
+              blockedCount: 2,
+              remainingLabelCount: 25,
+              originalAssignedRangeStart: "QR-000001",
+              originalAssignedRangeEnd: "QR-000100",
+              remainingPrintableRangeStart: "QR-000076",
+              remainingPrintableRangeEnd: "QR-000100",
+              nextPrintableLabelCode: "QR-000076",
+            }),
             printedAt: null,
           }}
           manufacturers={[]}
@@ -544,6 +590,32 @@ describe("dialog recovery states", () => {
     expect(onRefresh).toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Pause print run" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume print run" })).not.toBeInTheDocument();
+  });
+
+  it("shows manufacturer recovery context in start print without release checklist", () => {
+    renderPrintDialog({
+      isManufacturerMode: true,
+      manufacturerRecoveryContext: {
+        printJobId: "job-recovery",
+        jobNumber: "PJ-RECOVERY",
+        rangeLabel: "Recovery labels QR-000006 to QR-000010",
+      },
+      selectedPrinterCanPrint: false,
+      selectedPrinterNotice: {
+        title: "Printer verification expired",
+        summary: "Printer verification expired. Refresh printer helper before printing.",
+        detail: "Refresh printer helper before starting this print run.",
+        tone: "danger",
+      },
+    });
+
+    expect(screen.getByText("Manufacturer print readiness")).toBeInTheDocument();
+    expect(screen.getByText(/PJ-RECOVERY/)).toBeInTheDocument();
+    expect(screen.getByText(/Recovery labels QR-000006 to QR-000010/)).toBeInTheDocument();
+    expect(screen.queryByText("Batch release checklist")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sample verified")).not.toBeInTheDocument();
+    expect(screen.getByTestId("print-job-start-button")).toBeDisabled();
+    expect(screen.getAllByText("Refresh printer helper before starting this print run.").length).toBeGreaterThan(0);
   });
 
   it.each([0, 1, 6])("shows only stop and refresh in the progress modal at %i/10 confirmed labels", (printed) => {

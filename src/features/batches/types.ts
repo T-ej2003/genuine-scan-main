@@ -94,6 +94,21 @@ export type PrinterConnectionStatus = {
   compatibilityReason?: string | null;
   eligibleForPrinting: boolean;
   connectionClass?: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";
+  trustMode?: "SIGNED_ATTESTATION" | "STRICT_MTLS";
+  securePrinterSession?: boolean;
+  freshHelperHeartbeat?: boolean;
+  helperConnection?: boolean;
+  eligiblePrinter?: boolean;
+  signedAttestation?: {
+    required: boolean;
+    present: boolean;
+    signatureValid: boolean;
+    fresh: boolean;
+    issuedAt?: string | null;
+    [key: string]: unknown;
+  };
+  missingFields?: string[];
+  recoveryAction?: string | null;
   stale: boolean;
   requiredForPrinting: boolean;
   trustStatus?: string;
@@ -238,6 +253,11 @@ export type PrintJobRow = {
   sentAt?: string | null;
   confirmedAt?: string | null;
   completedAt?: string | null;
+  batch?: {
+    id?: string;
+    name?: string | null;
+    licenseeId?: string | null;
+  } | null;
   printer?: {
     id?: string;
     name?: string | null;
@@ -264,6 +284,7 @@ export type PrintJobRow = {
     recoveryNeeded?: boolean;
     pendingUnconfirmedItems?: number;
     nextPrintableIndex?: string | null;
+    requestedRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
     confirmedRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
     pendingRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
     recoveryRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;

@@ -78,6 +78,10 @@ describe("buildStableBatchOverviewRows", () => {
     expect(group.manufacturerCount).toBe(2);
     expect(group.sourceOriginalRangeStart).toBe("AADS0000001401");
     expect(group.sourceOriginalRangeEnd).toBe("AADS0000001700");
+    expect(group.manufacturerOperational.remainingLabelCount).toBe(67);
+    expect(group.manufacturerOperational.remainingPrintableRangeStart).toBe("AADS0000001401");
+    expect(group.manufacturerOperational.remainingPrintableRangeEnd).toBe("AADS0000001600");
+    expect(group.manufacturerOperational.nextPrintableLabelCode).toBe("AADS0000001401");
     expect(group.manufacturerSummary[0].manufacturerName).toBe("Factory A");
   });
 });

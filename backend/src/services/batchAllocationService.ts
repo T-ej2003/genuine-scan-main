@@ -184,8 +184,8 @@ const buildCountMaps = async (batchIds: string[]) => {
         status: { in: [...UNASSIGNED_STATUSES] },
       },
       _count: { _all: true },
-      _min: { code: true },
-      _max: { code: true },
+      _min: { code: true, displayCode: true },
+      _max: { code: true, displayCode: true },
     }),
     listReservableQrCodeSummaries(prisma, batchIds),
   ]);
@@ -224,8 +224,8 @@ const buildCountMaps = async (batchIds: string[]) => {
   for (const group of unassignedRanges) {
     if (!group.batchId) continue;
     unassignedRangeMap.set(group.batchId, {
-      start: group._min?.code || null,
-      end: group._max?.code || null,
+      start: group._min?.displayCode || group._min?.code || null,
+      end: group._max?.displayCode || group._max?.code || null,
     });
   }
 

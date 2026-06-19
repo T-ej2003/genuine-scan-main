@@ -15,11 +15,11 @@ describe("printer user-facing helpers", () => {
     );
 
     expect(sanitizePrinterUiError("mTLS client certificate fingerprint header missing")).toBe(
-      "Advanced secure printer verification is not set up yet. Printing can stay available while setup finishes."
+      "Printer verification expired. Refresh printer helper before printing."
     );
 
     expect(sanitizePrinterUiError("Too many printer status requests. Please wait before retrying.")).toBe(
-      "Printer status refresh is temporarily paused. Printing can continue if the printer was already ready."
+      "Printer status refresh is temporarily paused. Last trusted status is retained."
     );
 
     expect(
@@ -137,8 +137,8 @@ describe("printer user-facing helpers", () => {
       localAgent: { reachable: true, connected: true, checkedAt: "2026-05-18T17:17:40.725Z" },
       remoteStatus: {
         connected: true,
-        trusted: false,
-        compatibilityMode: true,
+        trusted: true,
+        compatibilityMode: false,
         eligibleForPrinting: true,
         stale: false,
         lastHeartbeatAt: "2026-05-18T17:17:40.725Z",

@@ -43,13 +43,13 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
     return "Another printing action is already using this batch. Please wait a moment and try again.";
   }
   if (hasAny(value, ["too many printer status requests", "too many print status reads", "too many printer heartbeat requests", "rate_limited", "rate limited", "http 429"])) {
-    return "Printer status refresh is temporarily paused. Printing can continue if the printer was already ready.";
+    return "Printer status refresh is temporarily paused. Last trusted status is retained.";
   }
   if (hasAny(value, ["127.0.0.1", "localhost", "local print agent", "printer switch failed", "calibration failed"])) {
     return "The printer helper is not available on this computer right now.";
   }
   if (hasAny(value, ["mtls client certificate fingerprint header missing", "compatibility mode active"])) {
-    return "Advanced secure printer verification is not set up yet. Printing can stay available while setup finishes.";
+    return "Printer verification expired. Refresh printer helper before printing.";
   }
   if (hasAny(value, ["mismatch", "not approved for this printer"]) && hasAny(value, ["fingerprint", "certificate", "mtls"])) {
     return "MSCQR and the printer helper are not using the same approved secure printer identity yet.";

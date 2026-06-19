@@ -94,7 +94,7 @@ export const createPrintJobRecords = async (params: {
         throw Object.assign(
           new Error(
             recoveryRange
-              ? `Recover unconfirmed range ${recoveryRange.startCode}-${recoveryRange.endCode} before starting a later print run.`
+              ? `Recover unconfirmed label range ${recoveryRange.startCode} to ${recoveryRange.endCode} before starting a later print run.`
               : "Recover unconfirmed labels before starting a later print run."
           ),
           {
@@ -104,10 +104,10 @@ export const createPrintJobRecords = async (params: {
               batchId: batch.id,
               recoveryRange,
               recoveryAction: recoveryRange
-                ? `Continue from QR index ${recoveryRange.startCode}. Recover unconfirmed range ${recoveryRange.startCode}-${recoveryRange.endCode}.`
+                ? `Continue from label ${recoveryRange.startCode}. Recover unconfirmed label range ${recoveryRange.startCode} to ${recoveryRange.endCode}.`
                 : "Recover unconfirmed labels before starting a later print run.",
               userMessage: recoveryRange
-                ? `Continue from QR index ${recoveryRange.startCode} before starting a later range.`
+                ? `Continue from label ${recoveryRange.startCode} before starting a later range.`
                 : "Recover unconfirmed labels before starting a later range.",
               canRetry: true,
             },

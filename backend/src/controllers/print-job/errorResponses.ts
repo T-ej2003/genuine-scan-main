@@ -88,12 +88,17 @@ export const buildPrintJobErrorPayload = (params: {
 });
 
 export const describeMissingPrinterReadinessFields = (printerStatus: PrinterStatusLike | null | undefined): string[] => {
+  if (Array.isArray((printerStatus as any)?.missingFields)) {
+    return Array.from(new Set((printerStatus as any).missingFields.map((field: unknown) => String(field || "").trim()).filter(Boolean)));
+  }
   const missing = new Set<string>();
   if (!printerStatus?.registrationId) missing.add("printerRegistration");
-  if (!printerStatus || printerStatus.stale) missing.add("freshHelperHeartbeat");
-  if (!printerStatus?.connected) missing.add("helperConnection");
-  if (!printerStatus?.eligibleForPrinting) missing.add("eligiblePrinter");
-  if (!printerStatus?.trusted && !printerStatus?.compatibilityMode) missing.add("securePrinterSession");
+  if (!(printerStatus as any)?.freshHelperHeartbeat && (!printerStatus || printerStatus.stale)) missing.add("freshHelperHeartbeat");
+  if (!(printerStatus as any)?.helperConnection && !printerStatus?.connected) missing.add("helperConnection");
+  if (!(printerStatus as any)?.eligiblePrinter && !printerStatus?.eligibleForPrinting) missing.add("eligiblePrinter");
+  if ((printerStatus as any)?.securePrinterSession === false || !printerStatus?.trusted || printerStatus?.compatibilityMode) {
+    missing.add("securePrinterSession");
+  }
   if (!printerStatus?.selectedPrinterId && !printerStatus?.printerId) missing.add("selectedPrinter");
   return Array.from(missing);
 };

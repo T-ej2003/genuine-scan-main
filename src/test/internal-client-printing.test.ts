@@ -248,7 +248,7 @@ describe("printing api request control", () => {
     expect(rateLimited.success).toBe(true);
     expect(rateLimited.data?.selectedPrinterName).toBe("ZDesigner ZT410-300dpi ZPL");
     expect(rateLimited.data?.refreshPaused).toBe(true);
-    expect(rateLimited.data?.notice).toBe("Printer status refresh is temporarily paused. Printing can continue if the printer was already ready.");
+    expect(rateLimited.data?.notice).toBe("Printer status refresh is temporarily paused. Last trusted status is retained.");
     expect(paused.data?.refreshPaused).toBe(true);
   });
 });
