@@ -8,6 +8,7 @@ import {
   verifyPrinterAgentPayloadSignature,
 } from "./printerAgentSigningService";
 import type { LocalAgentRequestPayload } from "./localAgentAckProtocolService";
+import { getPrinterConnectionStatusForUser } from "./printerConnectionService";
 
 export const verifyLocalAgentRequest = async (
   parsed: LocalAgentRequestPayload,
@@ -60,6 +61,27 @@ export const verifyLocalAgentRequest = async (
 
   if (!signatureValid) {
     throw Object.assign(new Error("Printer agent signature verification failed."), { statusCode: 401 });
+  }
+
+  const printerStatus = await getPrinterConnectionStatusForUser(registration.userId);
+  const activePrinterId = String(printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
+  const requestedPrinterId = String(parsed.printerId || "").trim();
+  const readyForThisConnector =
+    printerStatus.eligibleForPrinting === true &&
+    printerStatus.trusted === true &&
+    printerStatus.compatibilityMode !== true &&
+    printerStatus.stale !== true &&
+    printerStatus.registrationId === registration.id &&
+    printerStatus.agentId === registration.agentId &&
+    printerStatus.deviceFingerprint === registration.deviceFingerprint &&
+    (!requestedPrinterId || activePrinterId === requestedPrinterId);
+
+  if (!readyForThisConnector) {
+    throw Object.assign(new Error("Printer verification expired. Refresh printer helper before printing."), {
+      statusCode: 409,
+      errorCode: "PRINTER_ATTESTATION_STALE",
+      printerStatus,
+    });
   }
 
   return registration;

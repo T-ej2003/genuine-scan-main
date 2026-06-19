@@ -218,8 +218,8 @@ export const createRateLimitJsonHandler =
       ...(isPrinterScope
         ? {
             errorCode: "rate_limited",
-            printingMayContinue: true,
-            message: "Printer status refresh is temporarily paused. Printing can continue if the printer was already ready.",
+            printingMayContinue: false,
+            message: "Printer status refresh is temporarily paused. Last trusted status is retained.",
           }
         : {}),
     });

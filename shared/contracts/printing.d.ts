@@ -41,6 +41,21 @@ export type PrinterConnectionStatusDTO = {
   compatibilityReason?: string | null;
   eligibleForPrinting: boolean;
   connectionClass?: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";
+  trustMode?: "SIGNED_ATTESTATION" | "STRICT_MTLS";
+  securePrinterSession?: boolean;
+  freshHelperHeartbeat?: boolean;
+  helperConnection?: boolean;
+  eligiblePrinter?: boolean;
+  signedAttestation?: {
+    required: boolean;
+    present: boolean;
+    signatureValid: boolean;
+    fresh: boolean;
+    issuedAt?: string | null;
+    [key: string]: unknown;
+  };
+  missingFields?: string[];
+  recoveryAction?: string | null;
   stale: boolean;
   requiredForPrinting: boolean;
   trustStatus?: string;
@@ -70,12 +85,19 @@ export type PrinterConnectionStatusDTO = {
 export type PrintJobSessionDTO = {
   id?: string;
   status?: string;
+  requestedRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
+  confirmedRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
+  pendingRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
+  recoveryRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
   remainingToPrint?: number;
   confirmedItems?: number;
   frozenItems?: number;
   stoppedItems?: number;
   failedItems?: number;
   awaitingConfirmationCount?: number;
+  pendingUnconfirmedItems?: number;
+  nextPrintableIndex?: string | null;
+  recoveryNeeded?: boolean;
   counts?: Record<string, number>;
   [key: string]: unknown;
 };

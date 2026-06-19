@@ -43,6 +43,19 @@ export type BatchWorkspaceAllocation = {
   currentRangeEnd?: string | null;
 };
 
+export type ManufacturerOperationalSnapshot = {
+  assignedLabelCount: number;
+  confirmedPrintedCount: number;
+  scannedCount: number;
+  blockedCount: number;
+  remainingLabelCount: number;
+  originalAssignedRangeStart: string | null;
+  originalAssignedRangeEnd: string | null;
+  remainingPrintableRangeStart: string | null;
+  remainingPrintableRangeEnd: string | null;
+  nextPrintableLabelCode: string | null;
+};
+
 export type StableBatchOverviewRow = {
   sourceBatchId: string;
   focusBatchId: string;
@@ -63,6 +76,7 @@ export type StableBatchOverviewRow = {
   redeemedCodes: number;
   blockedCodes: number;
   manufacturerCount: number;
+  manufacturerOperational: ManufacturerOperationalSnapshot;
   allocations: BatchWorkspaceAllocation[];
   manufacturerSummary: BatchWorkspaceAllocation[];
   printedAt?: string | null;
@@ -122,6 +136,44 @@ const asNumber = (value: unknown) => {
 };
 
 const batchSourceKey = (row: BatchWorkspaceRow) => String(row.rootBatchId || row.parentBatchId || row.id).trim();
+
+const buildManufacturerOperationalSnapshot = (allocations: BatchWorkspaceAllocation[]): ManufacturerOperationalSnapshot => {
+  const assignedLabelCount = allocations.reduce((sum, allocation) => sum + allocation.allocatedCodes, 0);
+  const confirmedPrintedCount = allocations.reduce((sum, allocation) => sum + allocation.printedCodes, 0);
+  const scannedCount = allocations.reduce((sum, allocation) => sum + allocation.redeemedCodes, 0);
+  const blockedCount = allocations.reduce((sum, allocation) => sum + allocation.blockedCodes, 0);
+  const remainingLabelCount = allocations.reduce((sum, allocation) => sum + allocation.printableCodes, 0);
+  const remainingAllocations = allocations.filter((allocation) => allocation.printableCodes > 0);
+  const originalAssignedRangeStart = allocations.reduce<string | null>(
+    (current, allocation) => minCode(current, allocation.batchRangeStart),
+    null
+  );
+  const originalAssignedRangeEnd = allocations.reduce<string | null>(
+    (current, allocation) => maxCode(current, allocation.batchRangeEnd),
+    null
+  );
+  const remainingPrintableRangeStart = remainingAllocations.reduce<string | null>(
+    (current, allocation) => minCode(current, allocation.currentRangeStart || allocation.batchRangeStart),
+    null
+  );
+  const remainingPrintableRangeEnd = remainingAllocations.reduce<string | null>(
+    (current, allocation) => maxCode(current, allocation.currentRangeEnd || allocation.batchRangeEnd),
+    null
+  );
+
+  return {
+    assignedLabelCount,
+    confirmedPrintedCount,
+    scannedCount,
+    blockedCount,
+    remainingLabelCount,
+    originalAssignedRangeStart,
+    originalAssignedRangeEnd,
+    remainingPrintableRangeStart,
+    remainingPrintableRangeEnd,
+    nextPrintableLabelCode: remainingPrintableRangeStart,
+  };
+};
 
 export const buildStableBatchOverviewRows = (rows: BatchWorkspaceRow[]) => {
   const groups = new Map<string, BatchWorkspaceGroup>();
@@ -242,6 +294,7 @@ export const buildStableBatchOverviewRows = (rows: BatchWorkspaceRow[]) => {
       redeemedCodes: group.redeemedCodes,
       blockedCodes: group.blockedCodes,
       manufacturerCount: group.allocationsByManufacturer.size,
+      manufacturerOperational: buildManufacturerOperationalSnapshot(Array.from(group.allocationsByManufacturer.values())),
       allocations: group.allocations.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
       manufacturerSummary: Array.from(group.allocationsByManufacturer.values()).sort(
         (left, right) => right.allocatedCodes - left.allocatedCodes || left.manufacturerName.localeCompare(right.manufacturerName)

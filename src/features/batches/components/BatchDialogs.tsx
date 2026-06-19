@@ -143,6 +143,12 @@ export function DeleteBatchDialog({
 type PrintJobDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  isManufacturerMode?: boolean;
+  manufacturerRecoveryContext?: {
+    printJobId: string;
+    jobNumber?: string | null;
+    rangeLabel?: string | null;
+  } | null;
   printBatch: BatchRow | null;
   selectedPrinterNotice: PrinterSelectionNotice;
   printQuantity: string;
@@ -288,6 +294,8 @@ const buildPrintReleaseChecklist = (params: {
 export function BatchPrintJobDialog({
   open,
   onOpenChange,
+  isManufacturerMode = false,
+  manufacturerRecoveryContext = null,
   printBatch,
   selectedPrinterNotice,
   printQuantity,
@@ -342,7 +350,9 @@ export function BatchPrintJobDialog({
   onClose,
 }: PrintJobDialogProps) {
   const workflow = printBatch
-    ? buildPrintReleaseChecklist({
+    ? isManufacturerMode
+      ? null
+      : buildPrintReleaseChecklist({
         batch: printBatch,
         readyToPrintCount,
         recentPrintJobs,
@@ -441,7 +451,9 @@ export function BatchPrintJobDialog({
         <DialogHeader>
           <DialogTitle>Start print run</DialogTitle>
           <DialogDescription>
-            Choose how many labels to print and the saved printer MSCQR should use for this run.
+            {isManufacturerMode
+              ? "Choose the assigned label quantity and verified printer for this manufacturing run."
+              : "Choose how many labels to print and the saved printer MSCQR should use for this run."}
           </DialogDescription>
         </DialogHeader>
 
@@ -476,6 +488,39 @@ export function BatchPrintJobDialog({
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            ) : null}
+
+            {isManufacturerMode ? (
+              <div className="rounded-md border bg-background p-3 text-sm">
+                <div className="font-medium">Manufacturer print readiness</div>
+                <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                  <div>
+                    <div className="font-medium text-foreground">Assigned range</div>
+                    <div className="font-mono break-all">{printBatch.startCode} to {printBatch.endCode}</div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-foreground">Remaining labels</div>
+                    <div>{readyToPrintCount.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-foreground">Selected printer</div>
+                    <div>{selectedPrinterProfile?.name || "Choose saved printer"}</div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-foreground">Secure verification</div>
+                    <div>{selectedPrinterCanPrint ? "Fresh" : "Refresh printer helper before starting this print run."}</div>
+                  </div>
+                  {manufacturerRecoveryContext ? (
+                    <div className="sm:col-span-2">
+                      <div className="font-medium text-foreground">Recovery status</div>
+                      <div>
+                        {manufacturerRecoveryContext.jobNumber || manufacturerRecoveryContext.printJobId}
+                        {manufacturerRecoveryContext.rangeLabel ? ` · ${manufacturerRecoveryContext.rangeLabel}` : ""}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -693,7 +738,12 @@ export function BatchPrintJobDialog({
                       : batchLifecycleBlocked
                         ? createUiActionState("disabled", batchLifecycleBlockReason)
                       : !selectedPrinterCanPrint
-                        ? createUiActionState("disabled", selectedPrinterNotice.detail || "This printer needs attention before it can print.")
+                        ? createUiActionState(
+                            "disabled",
+                            isManufacturerMode
+                              ? "Refresh printer helper before starting this print run."
+                              : selectedPrinterNotice.detail || "This printer needs attention before it can print."
+                          )
                         : createUiActionState("enabled")
                 }
                 idleLabel={printJobId ? "Print run active" : "Start print run"}

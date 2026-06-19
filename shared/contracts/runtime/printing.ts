@@ -44,6 +44,23 @@ export const printerConnectionStatusSchema = z
     compatibilityReason: z.string().nullable().optional(),
     eligibleForPrinting: z.boolean(),
     connectionClass: z.enum(["TRUSTED", "COMPATIBILITY", "BLOCKED"]).optional(),
+    trustMode: z.enum(["SIGNED_ATTESTATION", "STRICT_MTLS"]).optional(),
+    securePrinterSession: z.boolean().optional(),
+    freshHelperHeartbeat: z.boolean().optional(),
+    helperConnection: z.boolean().optional(),
+    eligiblePrinter: z.boolean().optional(),
+    signedAttestation: z
+      .object({
+        required: z.boolean(),
+        present: z.boolean(),
+        signatureValid: z.boolean(),
+        fresh: z.boolean(),
+        issuedAt: z.string().nullable().optional(),
+      })
+      .passthrough()
+      .optional(),
+    missingFields: z.array(z.string()).optional(),
+    recoveryAction: z.string().nullable().optional(),
     stale: z.boolean(),
     requiredForPrinting: z.boolean(),
     trustStatus: z.string().optional(),
@@ -105,12 +122,31 @@ export const printJobSessionSchema = z
   .object({
     id: z.string().optional(),
     status: z.string().optional(),
+    requestedRange: z
+      .object({ startCode: z.string().nullable().optional(), endCode: z.string().nullable().optional(), count: z.number().optional() })
+      .nullable()
+      .optional(),
+    confirmedRange: z
+      .object({ startCode: z.string().nullable().optional(), endCode: z.string().nullable().optional(), count: z.number().optional() })
+      .nullable()
+      .optional(),
+    pendingRange: z
+      .object({ startCode: z.string().nullable().optional(), endCode: z.string().nullable().optional(), count: z.number().optional() })
+      .nullable()
+      .optional(),
+    recoveryRange: z
+      .object({ startCode: z.string().nullable().optional(), endCode: z.string().nullable().optional(), count: z.number().optional() })
+      .nullable()
+      .optional(),
     remainingToPrint: z.number().optional(),
     confirmedItems: z.number().optional(),
     frozenItems: z.number().optional(),
     stoppedItems: z.number().optional(),
     failedItems: z.number().optional(),
     awaitingConfirmationCount: z.number().optional(),
+    pendingUnconfirmedItems: z.number().optional(),
+    nextPrintableIndex: z.string().nullable().optional(),
+    recoveryNeeded: z.boolean().optional(),
     counts: z.record(z.string(), z.number()).optional(),
   })
   .passthrough();

@@ -75,9 +75,42 @@ const HEARTBEAT_TTL_MS = HEARTBEAT_TTL_SECONDS * 1000;
 const MAX_SIGNATURE_SKEW_SECONDS = parsePositiveIntEnv("PRINT_AGENT_MAX_SIGNATURE_SKEW_SECONDS", 120, 10, 900);
 
 const REQUIRE_SIGNATURE = parseBoolEnv("PRINT_AGENT_REQUIRE_SIGNATURE", true);
-const REQUIRE_MTLS = parseBoolEnv("PRINT_AGENT_REQUIRE_MTLS", true);
+const REQUIRE_MTLS = parseBoolEnv("PRINT_AGENT_REQUIRE_MTLS", false);
 const ALLOW_COMPATIBILITY_MODE = parseBoolEnv("PRINT_AGENT_ALLOW_COMPATIBILITY_MODE", true);
 const LEGACY_HEARTBEAT_SUBJECTS = ["manufacturer-browser-heartbeat"];
+const TRUST_MODE: "STRICT_MTLS" | "SIGNED_ATTESTATION" = REQUIRE_MTLS ? "STRICT_MTLS" : "SIGNED_ATTESTATION";
+
+const buildReadinessFields = (status: {
+  registrationId?: string | null;
+  stale?: boolean | null;
+  connected?: boolean | null;
+  eligibleForPrinting?: boolean | null;
+  trusted?: boolean | null;
+  compatibilityMode?: boolean | null;
+  selectedPrinterId?: string | null;
+  printerId?: string | null;
+}) => {
+  const freshHelperHeartbeat = Boolean(status.registrationId && !status.stale);
+  const helperConnection = Boolean(status.connected);
+  const eligiblePrinter = Boolean(status.eligibleForPrinting);
+  const securePrinterSession = Boolean(status.trusted && !status.compatibilityMode && freshHelperHeartbeat && helperConnection);
+  const missingFields = new Set<string>();
+  if (!status.registrationId) missingFields.add("printerRegistration");
+  if (!freshHelperHeartbeat) missingFields.add("freshHelperHeartbeat");
+  if (!helperConnection) missingFields.add("helperConnection");
+  if (!eligiblePrinter) missingFields.add("eligiblePrinter");
+  if (!securePrinterSession) missingFields.add("securePrinterSession");
+  if (!status.selectedPrinterId && !status.printerId) missingFields.add("selectedPrinter");
+  return {
+    trustMode: TRUST_MODE,
+    securePrinterSession,
+    freshHelperHeartbeat,
+    helperConnection,
+    eligiblePrinter,
+    missingFields: Array.from(missingFields),
+    recoveryAction: missingFields.size > 0 ? "refresh_printer_status" : null,
+  };
+};
 
 const normalizePem = (value: string) => String(value || "").replace(/\\n/g, "\n").trim();
 const looksLikePem = (value: string) => normalizePem(value).includes("BEGIN");
@@ -281,6 +314,7 @@ const normalizeStatusPayload = (metadata: any) => {
     transportDiagnosticsVersion: toCleanString(source.transportDiagnosticsVersion, 80) || null,
     capabilities,
     error: toCleanString(source.error, 500) || null,
+    heartbeatIssuedAt: toCleanString(source.heartbeatIssuedAt, 80) || null,
     selectedPrinterId: toCleanString(source.selectedPrinterId, 180) || null,
     selectedPrinterName: toCleanString(source.selectedPrinterName, 180) || null,
     capabilitySummary: normalizeCapabilitySummary(source.capabilitySummary || source.capabilities),
@@ -294,6 +328,16 @@ const normalizeStatusPayload = (metadata: any) => {
 
 const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefined): PrinterConnectionStatus => {
   if (!registration) {
+    const readiness = buildReadinessFields({
+      registrationId: null,
+      stale: true,
+      connected: false,
+      eligibleForPrinting: false,
+      trusted: false,
+      compatibilityMode: false,
+      selectedPrinterId: null,
+      printerId: null,
+    });
     return {
       connected: false,
       trusted: false,
@@ -301,6 +345,14 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       compatibilityReason: null,
       eligibleForPrinting: false,
       connectionClass: "BLOCKED",
+      ...readiness,
+      signedAttestation: {
+        required: REQUIRE_SIGNATURE,
+        present: false,
+        signatureValid: false,
+        fresh: false,
+        issuedAt: null,
+      },
       stale: true,
       requiredForPrinting: true,
       trustStatus: "UNREGISTERED",
@@ -358,7 +410,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       registration.trustStatus !== PrinterTrustStatus.REVOKED
   );
   const connected = payload.connected && (trusted || compatibilityMode);
-  const eligibleForPrinting = connected;
+  const eligibleForPrinting = trusted;
 
   const trustReason = trusted
     ? null
@@ -389,6 +441,24 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     : connected && compatibilityMode
       ? "COMPATIBILITY"
       : "BLOCKED";
+  const selectedPrinterId = payload.selectedPrinterId || payload.printerId || null;
+  const readiness = buildReadinessFields({
+    registrationId: registration.id,
+    stale,
+    connected,
+    eligibleForPrinting,
+    trusted,
+    compatibilityMode,
+    selectedPrinterId,
+    printerId: payload.printerId,
+  });
+  const signedAttestation = {
+    required: REQUIRE_SIGNATURE,
+    present: Boolean(latestAttestation),
+    signatureValid: Boolean(latestAttestation?.signatureValid),
+    fresh: Boolean(latestAttestation?.signatureValid && !stale && !connectorUpdateRequired),
+    issuedAt: payload.heartbeatIssuedAt,
+  };
 
   return {
     connected,
@@ -397,6 +467,8 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     compatibilityReason: compatibilityMode ? compatibilityReason : null,
     eligibleForPrinting,
     connectionClass,
+    ...readiness,
+    signedAttestation,
     stale,
     requiredForPrinting: true,
     trustStatus: registration.trustStatus,
@@ -417,7 +489,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     capabilities: payload.capabilities,
     missingCapabilities,
     connectorUpdateRequired,
-    selectedPrinterId: payload.selectedPrinterId || payload.printerId || null,
+    selectedPrinterId,
     selectedPrinterName: payload.selectedPrinterName || payload.printerName || null,
     capabilitySummary: payload.capabilitySummary,
     printers: payload.printers,
@@ -566,6 +638,7 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     transportDiagnosticsVersion: String(input.transportDiagnosticsVersion || "").trim() || null,
     capabilities: input.capabilities && typeof input.capabilities === "object" ? input.capabilities : null,
     error: String(input.error || "").trim() || null,
+    heartbeatIssuedAt,
     selectedPrinterId: toCleanString(input.selectedPrinterId, 180) || null,
     selectedPrinterName: toCleanString(input.selectedPrinterName, 180) || null,
     capabilitySummary: normalizeCapabilitySummary(input.capabilitySummary),
@@ -591,12 +664,25 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
           },
         })
       : null;
+  const existingUserRegistration = !registration
+    ? await prisma.printerRegistration.findFirst({
+        where: {
+          userId: input.userId,
+          revokedAt: null,
+        },
+        orderBy: [{ lastSeenAt: "desc" }, { updatedAt: "desc" }],
+      })
+    : null;
 
   let signatureValid = false;
   let trustValid = false;
   let rejectionReason: string | null = null;
 
-  if (!registration && deviceFingerprint && agentId) {
+  if (!registration && existingUserRegistration) {
+    rejectionReason = "Printer device fingerprint mismatch";
+  }
+
+  if (!registration && !existingUserRegistration && deviceFingerprint && agentId) {
     registration = await prisma.printerRegistration.create({
       data: {
         userId: input.userId,
@@ -616,6 +702,10 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
 
   if (!registration) {
     rejectionReason = "Missing printer registration identity";
+  }
+
+  if (registration?.agentId && agentId && registration.agentId !== agentId) {
+    rejectionReason = "Printer agent identity mismatch";
   }
 
   if (

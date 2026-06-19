@@ -21,6 +21,22 @@ import { useToast } from "@/hooks/use-toast";
 import { APP_PATHS } from "@/app/route-metadata";
 import { usePrintJobs } from "@/features/printing/hooks";
 import apiClient from "@/lib/api-client";
+import type { PrintJobRow } from "@/features/batches/types";
+
+type ManufacturerRecoveryContext = {
+  printJobId: string;
+  jobNumber?: string | null;
+  rangeLabel?: string | null;
+};
+
+const formatRecoveryRange = (job: PrintJobRow) => {
+  const range = job.session?.recoveryRange || job.session?.pendingRange || null;
+  const start = String(range?.startCode || job.session?.nextPrintableIndex || "").trim();
+  const end = String(range?.endCode || start || "").trim();
+  if (!start && !end) return null;
+  if (!end || start === end) return `Recovery label ${start}`;
+  return `Recovery labels ${start} to ${end}`;
+};
 
 export default function BatchesPage() {
   const { toast } = useToast();
@@ -42,6 +58,7 @@ export default function BatchesPage() {
   const [decidingReissueRequestId, setDecidingReissueRequestId] = useState<string | null>(null);
   const [printingReissueRequestId, setPrintingReissueRequestId] = useState<string | null>(null);
   const [reissuePrintRecoveryById, setReissuePrintRecoveryById] = useState<Record<string, string>>({});
+  const [manufacturerRecoveryContext, setManufacturerRecoveryContext] = useState<ManufacturerRecoveryContext | null>(null);
   const openedDeepLinkRef = useRef("");
 
   const operations = useBatchOperationsController({
@@ -71,8 +88,11 @@ export default function BatchesPage() {
   });
   const securePrinterReady = Boolean(printWorkflow.dialogProps.securePrintReadiness?.ready);
 
+  const workspacePrintJobsBatchId = isManufacturer
+    ? workspace.workspaceBatch?.focusBatchId || workspace.workspaceBatch?.allocations[0]?.batchId
+    : workspace.workspaceBatch?.sourceBatchRow?.id;
   const workspacePrintJobsQuery = usePrintJobs(
-    workspace.workspaceBatch?.sourceBatchRow?.id,
+    workspacePrintJobsBatchId,
     12,
     workspace.workspaceOpen && canRequestReissue
   );
@@ -252,6 +272,40 @@ export default function BatchesPage() {
     }
   };
 
+  const continuePrintRecovery = (job: PrintJobRow) => {
+    if (!securePrinterReady) {
+      toast({
+        title: "Refresh printer helper",
+        description: "Refresh printer helper before starting this print run.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const targetBatchId = String(job.batch?.id || workspace.workspaceBatch?.focusBatchId || "").trim();
+    const batch =
+      operations.rows.find((row) => row.id === targetBatchId) ||
+      operations.rows.find((row) => row.id === workspace.workspaceBatch?.focusBatchId) ||
+      null;
+    if (!batch) {
+      toast({
+        title: "Recovery unavailable",
+        description: "Refresh batches, then reopen this recovery run.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setManufacturerRecoveryContext({
+      printJobId: job.id,
+      jobNumber: job.jobNumber || null,
+      rangeLabel: formatRecoveryRange(job),
+    });
+    printWorkflow.openPrintPack(batch);
+    toast({
+      title: "Recovery print ready",
+      description: "MSCQR will continue from the pending recovery labels. It will not mark labels printed from the browser.",
+    });
+  };
+
   return (
     <DashboardLayout>
       <BatchesWorkspaceTable
@@ -278,7 +332,10 @@ export default function BatchesPage() {
         onRefreshBatches={() => {
           void operations.fetchBatches({ force: true });
         }}
-        onOpenPrintPack={printWorkflow.openPrintPack}
+        onOpenPrintPack={(batch) => {
+          setManufacturerRecoveryContext(null);
+          printWorkflow.openPrintPack(batch);
+        }}
         onOpenWorkspace={(stableWorkspace) => {
           void workspace.openWorkspace(stableWorkspace);
         }}
@@ -362,6 +419,9 @@ export default function BatchesPage() {
         onPrintApprovedReissueRequest={(requestId) => {
           void printApprovedReissueRequest(requestId);
         }}
+        onContinuePrintRecovery={(job) => {
+          continuePrintRecovery(job);
+        }}
         onRefreshPrinterStatus={printWorkflow.dialogProps.onRefreshPrinters}
         initialTab={searchParams.get("tab") === "audit" ? "audit" : searchParams.get("tab") === "reissue" ? "operations" : "overview"}
         highlightedReissueRequestId={searchParams.get("reissueRequestId")}
@@ -397,6 +457,8 @@ export default function BatchesPage() {
 
       <BatchPrintJobDialog
         {...printWorkflow.dialogProps}
+        isManufacturerMode={isManufacturer}
+        manufacturerRecoveryContext={isManufacturer ? manufacturerRecoveryContext : null}
       />
 
       <BatchAllocationMapDialog

@@ -50,6 +50,9 @@ type ToastLike = (options: {
   variant?: "default" | "destructive";
 }) => unknown;
 
+const isSecurePrinterStatusReady = (status?: PrinterConnectionStatusDTO | null) =>
+  buildSecurePrintReadiness(status).ready;
+
 type UseManufacturerPrinterConnectionParams = {
   user: User | null;
   contextualHelpRoute: string;
@@ -123,7 +126,7 @@ export function useManufacturerPrinterConnection({
     const mergedPrinters = remotePrinters.length > 0 ? remotePrinters : fallbackPrinters;
 
     setPrinterStatus((previous) => {
-      const ready = Boolean(nextStatus.connected && nextStatus.eligibleForPrinting);
+      const ready = isSecurePrinterStatusReady(nextStatus);
       const merged = {
         ...previous,
         ...nextStatus,
@@ -153,7 +156,7 @@ export function useManufacturerPrinterConnection({
     printers: Array<{ printerId: string; printerName: string }>;
   }) => {
     if (!user || user.role !== "manufacturer") return;
-    const remoteReady = Boolean(params.remoteStatus?.connected && params.remoteStatus?.eligibleForPrinting);
+    const remoteReady = isSecurePrinterStatusReady(params.remoteStatus);
     if (remoteReady) {
       printerFailureReportRef.current = { signature: "", at: 0 };
       return;
@@ -334,14 +337,14 @@ export function useManufacturerPrinterConnection({
     if (heartbeatStatus) {
       const degradedStatus: PrinterConnectionStatusDTO = {
         ...heartbeatStatus,
-        degraded: heartbeatDegraded && !(heartbeatStatus.connected && heartbeatStatus.eligibleForPrinting),
+        degraded: heartbeatDegraded && !isSecurePrinterStatusReady(heartbeatStatus),
       };
       applyPrinterStatusSnapshot(degradedStatus, {
         fallbackPrinters: localPrinters,
         updatedAt: degradedStatus.lastHeartbeatAt || new Date().toISOString(),
       });
 
-      if (!(degradedStatus.connected && degradedStatus.eligibleForPrinting)) {
+      if (!isSecurePrinterStatusReady(degradedStatus)) {
         void maybeAutoReportPrinterFailure({
           localResult: local,
           remoteStatus: degradedStatus,
@@ -355,10 +358,7 @@ export function useManufacturerPrinterConnection({
     if (remote.success && remote.data) {
       const nextStatus = {
         ...(remote.data as PrinterConnectionStatusDTO),
-        degraded: Boolean((remote.data as PrinterConnectionStatusDTO).degraded) && !(
-          (remote.data as PrinterConnectionStatusDTO).connected &&
-          (remote.data as PrinterConnectionStatusDTO).eligibleForPrinting
-        ),
+        degraded: Boolean((remote.data as PrinterConnectionStatusDTO).degraded) && !isSecurePrinterStatusReady(remote.data as PrinterConnectionStatusDTO),
       } satisfies PrinterConnectionStatusDTO;
       applyPrinterStatusSnapshot(nextStatus, {
         fallbackPrinters: localPrinters,
@@ -369,7 +369,7 @@ export function useManufacturerPrinterConnection({
         normalizeLocalPrinterRows(nextStatus.printers || []).length > 0
           ? normalizeLocalPrinterRows(nextStatus.printers || [])
           : localPrinters;
-      const nowConnected = Boolean(nextStatus.connected && nextStatus.eligibleForPrinting);
+      const nowConnected = isSecurePrinterStatusReady(nextStatus);
       if (!nowConnected) {
         void maybeAutoReportPrinterFailure({
           localResult: local,
@@ -381,7 +381,7 @@ export function useManufacturerPrinterConnection({
     }
 
     const previous = printerStatusRef.current;
-    if (previous.connected && previous.eligibleForPrinting) {
+    if (isSecurePrinterStatusReady(previous)) {
       applyPrinterStatusSnapshot(
         {
           ...previous,
@@ -390,7 +390,7 @@ export function useManufacturerPrinterConnection({
           degraded: false,
           refreshPaused: true,
           rateLimited: remote.status === 429 || String(remote.code || "").toUpperCase() === "RATE_LIMITED",
-          notice: "Printer status refresh is temporarily paused. Printing can continue.",
+          notice: "Printer status refresh is temporarily paused. Last trusted status is retained.",
         } as PrinterConnectionStatusDTO,
         {
           fallbackPrinters: previous.printers && previous.printers.length > 0 ? previous.printers : localPrinters,
@@ -593,7 +593,7 @@ export function useManufacturerPrinterConnection({
   const printerDegradedMessage = printerDegraded
     ? sanitizePrinterUiError(
         printerStatus.compatibilityReason || printerStatus.trustReason || printerStatus.error,
-        "MSCQR is keeping printing available while secure printer settings catch up."
+        "MSCQR needs a fresh trusted helper session before printing."
       )
     : "";
   const printerNoticeMessage = printerRefreshPaused

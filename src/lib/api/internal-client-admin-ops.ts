@@ -230,6 +230,20 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
         compatibilityReason?: string | null;
         eligibleForPrinting: boolean;
         connectionClass: "TRUSTED" | "COMPATIBILITY" | "BLOCKED";
+        trustMode?: "SIGNED_ATTESTATION" | "STRICT_MTLS";
+        securePrinterSession?: boolean;
+        freshHelperHeartbeat?: boolean;
+        helperConnection?: boolean;
+        eligiblePrinter?: boolean;
+        signedAttestation?: {
+          required: boolean;
+          present: boolean;
+          signatureValid: boolean;
+          fresh: boolean;
+          issuedAt?: string | null;
+        };
+        missingFields?: string[];
+        recoveryAction?: string | null;
         stale: boolean;
         requiredForPrinting: boolean;
         trustStatus: string;
