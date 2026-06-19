@@ -652,6 +652,20 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   const sourceIpHash = hashIp(input.sourceIp || null);
   const normalizedUa = normalizeUserAgent(input.userAgent || null);
   const userAgentHash = normalizedUa ? hashToken(`ua:${normalizedUa}`) : null;
+  const heartbeatIssuedAtMs = heartbeatIssuedAt ? new Date(heartbeatIssuedAt).getTime() : NaN;
+  const heartbeatIssuedAtValid = Number.isFinite(heartbeatIssuedAtMs);
+  const heartbeatSkewSeconds = heartbeatIssuedAtValid ? Math.abs(Date.now() - heartbeatIssuedAtMs) / 1000 : NaN;
+  const signedPayloadCandidates = heartbeatIssuedAt
+    ? buildHeartbeatSignedPayloadCandidates({
+        userId: input.userId,
+        agentId,
+        deviceFingerprint,
+        printerId: metadata.printerId || "unknown-printer",
+        connected: Boolean(input.connected),
+        heartbeatNonce,
+        heartbeatIssuedAt,
+      })
+    : [];
 
   let registration =
     deviceFingerprint
@@ -677,9 +691,50 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   let signatureValid = false;
   let trustValid = false;
   let rejectionReason: string | null = null;
+  let verifiedHeartbeatPayload: string | null = null;
 
   if (!registration && existingUserRegistration) {
-    rejectionReason = "Printer device fingerprint mismatch";
+    const replacementPublicKeyChanged =
+      Boolean(incomingPublicKeyPem) &&
+      incomingPublicKeyPem !== normalizePem(String(existingUserRegistration.publicKeyPem || ""));
+    const replacementSignedPayload =
+      replacementPublicKeyChanged && heartbeatSignature && heartbeatIssuedAtValid && heartbeatSkewSeconds <= MAX_SIGNATURE_SKEW_SECONDS
+        ? verifyAgentSignatureAcrossPayloads({
+            publicKeyPem: incomingPublicKeyPem,
+            signature: heartbeatSignature,
+            signedPayloads: signedPayloadCandidates,
+          })
+        : null;
+    if (replacementSignedPayload && deviceFingerprint && agentId) {
+      verifiedHeartbeatPayload = replacementSignedPayload;
+      registration = await prisma.printerRegistration.create({
+        data: {
+          userId: input.userId,
+          orgId: input.orgId || null,
+          licenseeId: input.licenseeId || null,
+          deviceFingerprint,
+          agentId,
+          publicKeyPem: incomingPublicKeyPem,
+          certFingerprint: clientCertFingerprint || mtlsFingerprintHeader || null,
+          trustStatus: PrinterTrustStatus.PENDING,
+          trustReason: "Awaiting first successful cryptographic attestation",
+        },
+      });
+      console.info("printer_agent_heartbeat_registration", {
+        event: "replacement_registration_created",
+        registrationFound: false,
+        previousRegistrationId: existingUserRegistration.id,
+        newRegistrationId: registration.id,
+        agentIdHash: sha256Hex(agentId).slice(0, 16),
+        deviceFingerprintHash: sha256Hex(deviceFingerprint).slice(0, 16),
+        publicKeyFingerprint: sha256Hex(incomingPublicKeyPem).slice(0, 16),
+        licenseeScopePresent: Boolean(input.licenseeId),
+        orgScopePresent: Boolean(input.orgId),
+        rejectReason: null,
+      });
+    } else {
+      rejectionReason = "Printer device fingerprint mismatch";
+    }
   }
 
   if (!registration && !existingUserRegistration && deviceFingerprint && agentId) {
@@ -717,24 +772,7 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     rejectionReason = "Printer public key mismatch";
   }
 
-  const signedPayloadCandidates =
-    registration && heartbeatIssuedAt
-      ? buildHeartbeatSignedPayloadCandidates({
-          userId: input.userId,
-          agentId: agentId || registration.agentId,
-          deviceFingerprint: deviceFingerprint || registration.deviceFingerprint,
-          printerId: metadata.printerId || "unknown-printer",
-          connected: Boolean(input.connected),
-          heartbeatNonce,
-          heartbeatIssuedAt,
-        })
-      : [];
-  const heartbeatIssuedAtMs = heartbeatIssuedAt ? new Date(heartbeatIssuedAt).getTime() : NaN;
-  const heartbeatIssuedAtValid = Number.isFinite(heartbeatIssuedAtMs);
-  const heartbeatSkewSeconds = heartbeatIssuedAtValid ? Math.abs(Date.now() - heartbeatIssuedAtMs) / 1000 : NaN;
-
   let resolvedPublicKeyPem = normalizePem(String(registration?.publicKeyPem || ""));
-  let verifiedHeartbeatPayload: string | null = null;
   const canRotateTrustedKey =
     Boolean(registration) &&
     Boolean(incomingPublicKeyPem) &&
@@ -851,6 +889,39 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
         approvedAt: trustValid ? registration.approvedAt || now : registration.approvedAt,
         lastSeenAt: now,
       },
+    });
+
+    if (trustValid && existingUserRegistration && existingUserRegistration.id !== registration.id) {
+      await prisma.printerRegistration.updateMany({
+        where: {
+          userId: input.userId,
+          revokedAt: null,
+          id: { not: registration.id },
+        },
+        data: {
+          trustStatus: PrinterTrustStatus.REVOKED,
+          trustReason: "Replaced by a newer signed connector registration",
+          revokedAt: now,
+        },
+      });
+    }
+
+    console.info("printer_agent_heartbeat_registration", {
+      event: "heartbeat_attested",
+      registrationFound: true,
+      registrationId: registration.id,
+      agentIdHash: sha256Hex(agentId || registration.agentId).slice(0, 16),
+      deviceFingerprintHash: sha256Hex(deviceFingerprint || registration.deviceFingerprint).slice(0, 16),
+      publicKeyFingerprint: looksLikePem(resolvedPublicKeyPem) ? sha256Hex(resolvedPublicKeyPem).slice(0, 16) : null,
+      licenseeScopePresent: Boolean(input.licenseeId || registration.licenseeId),
+      orgScopePresent: Boolean(input.orgId || registration.orgId),
+      heartbeatAgeSeconds: heartbeatIssuedAtValid ? Math.round(heartbeatSkewSeconds) : null,
+      trusted: trustValid,
+      trustStatus: registration.trustStatus,
+      selectedPrinterIdPresent: Boolean(metadata.selectedPrinterId || metadata.printerId),
+      heartbeatSignatureVerified: signatureValid,
+      rejectReason: rejectionReason,
+      replacementRegistration: Boolean(existingUserRegistration && existingUserRegistration.id !== registration.id),
     });
 
     const hashSource = verifiedHeartbeatPayload || signedPayloadCandidates[0] || stableStringify(metadata);

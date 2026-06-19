@@ -9,6 +9,7 @@ const regularPrintSource = read("backend/src/controllers/print-job/createPrintJo
 const replacementPrintSource = read("backend/src/services/printReissueService.ts");
 const connectorActionAuthSource = read("backend/src/services/localAgentRequestAuthService.ts");
 const directBrowserConfirmSource = read("backend/src/controllers/print-job/directPrintConfirmationHandlers.ts");
+const localAgentClaimSource = read("backend/src/controllers/printerAgentJobController.ts");
 
 assert(
   regularPrintSource.includes("ensureSelectedPrinterReady"),
@@ -25,6 +26,10 @@ assert(
 assert(
   connectorActionAuthSource.includes("PRINTER_ATTESTATION_STALE"),
   "stale connector action trust must fail with PRINTER_ATTESTATION_STALE"
+);
+assert(
+  localAgentClaimSource.includes("manufacturerId: registration.userId"),
+  "local-agent claim selection must stay scoped to the trusted registration manufacturer"
 );
 assert(
   !directBrowserConfirmSource
