@@ -8,13 +8,15 @@ import apiClient from "@/lib/api-client";
 import { renderWithQueryClient } from "@/test/render-with-query-client";
 import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
 
+const toastMock = vi.hoisted(() => vi.fn());
+
 vi.mock("@/components/layout/DashboardLayout", () => ({
   DashboardLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({
-    toast: vi.fn(),
+    toast: toastMock,
   }),
 }));
 
@@ -184,6 +186,55 @@ describe("PrinterSetupPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Use USB Zebra" }));
     await waitFor(() => {
       expect(apiClient.selectLocalPrinter).toHaveBeenCalledWith("ZDesigner ZT410-300dpi ZPL");
+    });
+  });
+
+  it("shows a queued setup test label as pending connector confirmation", async () => {
+    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({
+      data: {
+        registeredPrinters: [
+          {
+            id: "printer-profile-zebra",
+            name: "ZDesigner ZT410-300dpi ZPL",
+            deliveryMode: "DIRECT",
+            commandLanguage: "ZPL",
+            isDefault: true,
+            registryStatus: { state: "READY", summary: "Ready", detail: "Printer route saved." },
+          },
+        ],
+        remoteStatus: {
+          connected: true,
+          eligibleForPrinting: true,
+          agentVersion: "2026.6.16",
+        },
+      },
+      refetch: vi.fn().mockResolvedValue(undefined),
+    } as any);
+    vi.mocked(apiClient.testPrinterLabel).mockResolvedValue({
+      success: true,
+      data: {
+        outcome: "queued",
+        message: "Live setup test label queued. Keep MSCQR Connector 2026.6.16 running until it prints and confirms.",
+      },
+    } as any);
+
+    renderWithQueryClient(
+      <MemoryRouter>
+        <PrinterSetupPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /print live test label/i }));
+
+    await waitFor(() => {
+      expect(apiClient.testPrinterLabel).toHaveBeenCalledWith("printer-profile-zebra");
+      expect(toastMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Live test label queued",
+          description: expect.stringMatching(/prints and confirms/i),
+          variant: "default",
+        })
+      );
     });
   });
 });

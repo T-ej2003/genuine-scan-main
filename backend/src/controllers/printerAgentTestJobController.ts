@@ -6,8 +6,11 @@ import {
 } from "../services/localAgentAckProtocolService";
 import {
   acknowledgeGatewayPrinterTestJob,
+  acknowledgeLocalAgentPrinterTestJob,
   confirmGatewayPrinterTestJob,
+  confirmLocalAgentPrinterTestJob as confirmLocalAgentPrinterTestJobState,
   failGatewayPrinterTestJob,
+  failLocalAgentPrinterTestJob as failLocalAgentPrinterTestJobState,
 } from "../services/printerTestLabelService";
 import { verifyLocalAgentRequest } from "../services/localAgentRequestAuthService";
 import { localAgentErrorResponse } from "./printerAgentJobController";
@@ -20,17 +23,29 @@ export const ackLocalAgentPrinterTestJob = async (req: Request, res: Response) =
     }
 
     await verifyLocalAgentRequest(parsed.data, "ack");
-    const acknowledged = acknowledgeGatewayPrinterTestJob({
-      printerId: parsed.data.printerId,
-      testJobId: parsed.data.testJobId,
-      metadata: {
-        payloadHash: String(parsed.data.payloadHash || "").trim() || null,
-        bytesWritten: parsed.data.bytesWritten || null,
-        deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
-        payloadType: String(parsed.data.payloadType || "").trim() || null,
-        agentMetadata: parsed.data.agentMetadata || null,
-      },
-    });
+    const acknowledged =
+      (await acknowledgeLocalAgentPrinterTestJob({
+        printerId: parsed.data.printerId,
+        testJobId: parsed.data.testJobId,
+        metadata: {
+          payloadHash: String(parsed.data.payloadHash || "").trim() || null,
+          bytesWritten: parsed.data.bytesWritten || null,
+          deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
+          payloadType: String(parsed.data.payloadType || "").trim() || null,
+          agentMetadata: parsed.data.agentMetadata || null,
+        },
+      })) ||
+      acknowledgeGatewayPrinterTestJob({
+        printerId: parsed.data.printerId,
+        testJobId: parsed.data.testJobId,
+        metadata: {
+          payloadHash: String(parsed.data.payloadHash || "").trim() || null,
+          bytesWritten: parsed.data.bytesWritten || null,
+          deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
+          payloadType: String(parsed.data.payloadType || "").trim() || null,
+          agentMetadata: parsed.data.agentMetadata || null,
+        },
+      });
     if (!acknowledged) return res.status(404).json({ success: false, error: "Printer test job not found." });
     return res.json({ success: true, data: { testJobId: parsed.data.testJobId, acknowledged: true } });
   } catch (error: any) {
@@ -47,18 +62,31 @@ export const confirmLocalAgentPrinterTestJob = async (req: Request, res: Respons
     }
 
     await verifyLocalAgentRequest(parsed.data, "confirm");
-    const confirmed = confirmGatewayPrinterTestJob({
-      printerId: parsed.data.printerId,
-      testJobId: parsed.data.testJobId,
-      payloadType: parsed.data.payloadType as any,
-      deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
-      confirmationMode: "LOCAL_QUEUE",
-      metadata: {
-        payloadHash: String(parsed.data.payloadHash || "").trim() || null,
-        bytesWritten: parsed.data.bytesWritten || null,
-        agentMetadata: parsed.data.agentMetadata || null,
-      },
-    });
+    const confirmed =
+      (await confirmLocalAgentPrinterTestJobState({
+        printerId: parsed.data.printerId,
+        testJobId: parsed.data.testJobId,
+        payloadType: parsed.data.payloadType as any,
+        deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
+        confirmationMode: "LOCAL_QUEUE",
+        metadata: {
+          payloadHash: String(parsed.data.payloadHash || "").trim() || null,
+          bytesWritten: parsed.data.bytesWritten || null,
+          agentMetadata: parsed.data.agentMetadata || null,
+        },
+      })) ||
+      confirmGatewayPrinterTestJob({
+        printerId: parsed.data.printerId,
+        testJobId: parsed.data.testJobId,
+        payloadType: parsed.data.payloadType as any,
+        deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
+        confirmationMode: "LOCAL_QUEUE",
+        metadata: {
+          payloadHash: String(parsed.data.payloadHash || "").trim() || null,
+          bytesWritten: parsed.data.bytesWritten || null,
+          agentMetadata: parsed.data.agentMetadata || null,
+        },
+      });
     if (!confirmed) return res.status(404).json({ success: false, error: "Printer test job not found." });
     return res.json({ success: true, data: { testJobId: parsed.data.testJobId, confirmed: true } });
   } catch (error: any) {
@@ -75,11 +103,17 @@ export const failLocalAgentPrinterTestJob = async (req: Request, res: Response) 
     }
 
     await verifyLocalAgentRequest(parsed.data, "fail");
-    const failed = failGatewayPrinterTestJob({
-      printerId: parsed.data.printerId,
-      testJobId: parsed.data.testJobId,
-      reason: parsed.data.reason,
-    });
+    const failed =
+      (await failLocalAgentPrinterTestJobState({
+        printerId: parsed.data.printerId,
+        testJobId: parsed.data.testJobId,
+        reason: parsed.data.reason,
+      })) ||
+      failGatewayPrinterTestJob({
+        printerId: parsed.data.printerId,
+        testJobId: parsed.data.testJobId,
+        reason: parsed.data.reason,
+      });
     if (!failed) return res.status(404).json({ success: false, error: "Printer test job not found." });
     return res.json({ success: true, data: { testJobId: parsed.data.testJobId, failed: true } });
   } catch (error: any) {

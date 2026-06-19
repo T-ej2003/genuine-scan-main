@@ -46,7 +46,7 @@ type ManagedRouteForm = {
 };
 
 type PrinterTestLabelResponse = {
-  outcome?: "confirmed" | "needs_attention";
+  outcome?: "queued" | "confirmed" | "needs_attention";
   message?: string | null;
 };
 
@@ -544,49 +544,48 @@ export default function PrinterSetupPage() {
       setTestingPrinterId(printerId);
       const testResponse = await apiClient.testPrinterLabel(printerId);
       const testData = (testResponse.data as PrinterTestLabelResponse | undefined) || undefined;
-      if (testResponse.success && testData?.outcome === "confirmed") {
-        toast({
-          title: "Printer is ready",
-          description: testData.message || "The recommended route was saved and the live test label completed successfully.",
-        });
-      } else {
-        toast({
-          title: "Printer saved, but the live test needs attention",
-          description: sanitizePrinterUiError(
-            testData?.message || testResponse.error,
-            "The profile was saved, but the live test label still needs attention."
-          ),
-          variant: "destructive",
-        });
-      }
+      const queued = testResponse.success && testData?.outcome === "queued";
+      const confirmed = testResponse.success && testData?.outcome === "confirmed";
+      toast({
+        title: confirmed ? "Printer is ready" : queued ? "Live test label queued" : "Printer saved, but the live test needs attention",
+        description: confirmed
+          ? testData.message || "The recommended route was saved and the live test label completed successfully."
+          : queued
+            ? testData.message || "Keep MSCQR Connector running. This printer is ready after the connector prints and confirms the setup label."
+            : sanitizePrinterUiError(testData?.message || testResponse.error, "The profile was saved, but the live test label still needs attention."),
+        variant: confirmed || queued ? "default" : "destructive",
+      });
 
       await runtimeQuery.refetch();
     } finally {
       setTestingPrinterId(null);
       setSaving(false);
     }
-    });
+  });
   };
 
   const testExistingPrinter = async (printerId: string) => {
     if (testingPrinterId === printerId) return;
     return runSingleFlightAction(`test-existing-printer:${printerId}`, async () => {
-    setTestingPrinterId(printerId);
-    try {
-      const response = await apiClient.testPrinterLabel(printerId);
-      const data = (response.data as PrinterTestLabelResponse | undefined) || undefined;
-      toast({
-        title: response.success && data?.outcome === "confirmed" ? "Live test label printed" : "Printer needs attention",
-        description:
-          response.success && data?.outcome === "confirmed"
+      setTestingPrinterId(printerId);
+      try {
+        const response = await apiClient.testPrinterLabel(printerId);
+        const data = (response.data as PrinterTestLabelResponse | undefined) || undefined;
+        const queued = response.success && data?.outcome === "queued";
+        const confirmed = response.success && data?.outcome === "confirmed";
+        toast({
+          title: confirmed ? "Live test label printed" : queued ? "Live test label queued" : "Printer needs attention",
+          description: confirmed
             ? data.message || "MSCQR printed the live test label and the printer confirmed completion."
-            : sanitizePrinterUiError(data?.message || response.error, "This printer route still needs attention."),
-        variant: response.success && data?.outcome === "confirmed" ? "default" : "destructive",
-      });
-      await runtimeQuery.refetch();
-    } finally {
-      setTestingPrinterId(null);
-    }
+            : queued
+              ? data.message || "Keep MSCQR Connector running until it prints and confirms the setup label."
+              : sanitizePrinterUiError(data?.message || response.error, "This printer route still needs attention."),
+          variant: confirmed || queued ? "default" : "destructive",
+        });
+        await runtimeQuery.refetch();
+      } finally {
+        setTestingPrinterId(null);
+      }
     });
   };
 

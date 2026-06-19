@@ -173,6 +173,9 @@ mockModule("config/database.js", {
         return row;
       },
     },
+    printer: {
+      findFirst: async () => null,
+    },
   },
 });
 

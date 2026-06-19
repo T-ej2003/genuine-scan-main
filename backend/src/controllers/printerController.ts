@@ -477,18 +477,17 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
     }
 
     try {
-      const result = await printTestLabelForRegisteredPrinter({
-        printer: printer as any,
-        actorUserId: scope.userId,
-      });
-      await markPrinterTestLabelConfirmed({
-        printer, confirmedAt: result.confirmedAt, connectionType: result.connectionType, deviceJobRef: result.deviceJobRef,
-      });
+      const result = await printTestLabelForRegisteredPrinter({ printer: printer as any, actorUserId: scope.userId });
+      if (result.outcome === "confirmed") {
+        await markPrinterTestLabelConfirmed({
+          printer, confirmedAt: result.confirmedAt, connectionType: result.connectionType, deviceJobRef: result.deviceJobRef,
+        });
+      }
 
       await createAuditLog({
         userId: scope.userId,
         licenseeId: scope.licenseeId || undefined,
-        action: "PRINTER_TEST_LABEL_CONFIRMED",
+        action: result.outcome === "confirmed" ? "PRINTER_TEST_LABEL_CONFIRMED" : "PRINTER_TEST_LABEL_QUEUED",
         entityType: "Printer",
         entityId: printer.id,
         details: {
