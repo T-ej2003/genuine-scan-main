@@ -335,8 +335,14 @@ export function useManufacturerPrinterConnection({
     const heartbeatDegraded = Boolean(heartbeat.degraded || heartbeatStatus?.degraded);
 
     if (heartbeatStatus) {
+      const localSelectedPrinter = resolvePreferredLocalPrinter(localPrinters, localData);
       const degradedStatus: PrinterConnectionStatusDTO = {
         ...heartbeatStatus,
+        printers: localPrinters.length > 0 ? localPrinters : heartbeatStatus.printers,
+        printerName: localSelectedPrinter?.printerName || heartbeatStatus.printerName,
+        printerId: localSelectedPrinter?.printerId || heartbeatStatus.printerId,
+        selectedPrinterId: localSelectedPrinter?.printerId || heartbeatStatus.selectedPrinterId,
+        selectedPrinterName: localSelectedPrinter?.printerName || heartbeatStatus.selectedPrinterName,
         degraded: heartbeatDegraded && !isSecurePrinterStatusReady(heartbeatStatus),
       };
       applyPrinterStatusSnapshot(degradedStatus, {
@@ -528,6 +534,9 @@ export function useManufacturerPrinterConnection({
   );
   const printerHasInventory =
     detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId);
+  const localHelperHasPrinter =
+    localPrinterAgent.reachable &&
+    (detectedPrinters.length > 0 || Boolean(printerStatus.selectedPrinterId || printerStatus.printerId));
   const printerDiagnostics = useMemo(
     () =>
       getPrinterDiagnosticSummary({
@@ -540,6 +549,7 @@ export function useManufacturerPrinterConnection({
   );
   const shouldUseManagedPrinterSummary = Boolean(
     managedPrinterDiagnostics &&
+      !localHelperHasPrinter &&
       (!printerReady ||
         shouldPreferNetworkDirectSummary({
           printers: detectedPrinters,
@@ -572,7 +582,7 @@ export function useManufacturerPrinterConnection({
       : selectedPrinter?.model || null,
     deviceName: shouldUseManagedPrinterSummary ? null : printerStatus.deviceName,
   });
-  const printerFeedLabel = printerStatusLive ? "Live status" : "Checking status";
+  const printerFeedLabel = printerStatusLive ? "Live updates" : "Checking status";
   const printerUpdatedLabel = formatPrinterTimestamp(printerStatusUpdatedAt || printerStatus.lastHeartbeatAt);
   const printerRefreshPaused = Boolean((printerStatus as PrinterConnectionStatusDTO & { refreshPaused?: boolean }).refreshPaused);
   const printerRateLimited = Boolean((printerStatus as PrinterConnectionStatusDTO & { rateLimited?: boolean }).rateLimited);
@@ -679,8 +689,8 @@ export function useManufacturerPrinterConnection({
     printerStatusLive,
     localPrinterAgent,
     printerHasInventory,
-    selectedPrinterName: printerStatus.selectedPrinterName || printerStatus.printerName || "None yet",
-    printerName: printerStatus.printerName,
+    selectedPrinterName: selectedPrinter?.printerName || printerStatus.selectedPrinterName || printerStatus.printerName || "None yet",
+    printerName: selectedPrinter?.printerName || printerStatus.printerName,
     openPrinterConnectionDialog,
     refreshPrinterConnectionStatus,
     dismissPrinterOnboarding,

@@ -20,8 +20,8 @@ assert(
   "replacement print creation must use the same secure printer readiness gate as regular print"
 );
 assert(
-  connectorActionAuthSource.includes("getPrinterConnectionStatusForUser"),
-  "connector claim/ack/confirm auth must re-check current trusted connector state"
+  connectorActionAuthSource.includes("getPrinterConnectionStatusForRegistration"),
+  "connector claim/ack/confirm auth must re-check current trusted connector state for the signed registration"
 );
 assert(
   connectorActionAuthSource.includes("PRINTER_ATTESTATION_STALE"),

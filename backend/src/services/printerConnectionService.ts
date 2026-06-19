@@ -47,6 +47,44 @@ type PrinterRegistrationWithLatest = {
   }>;
 };
 
+const findSelectedPrinter = (payload: ReturnType<typeof normalizeStatusPayload>) => {
+  const selectedId = String(payload.selectedPrinterId || payload.printerId || "").trim();
+  const selectedName = String(payload.selectedPrinterName || payload.printerName || "").trim();
+  if (!Array.isArray(payload.printers) || payload.printers.length === 0) return null;
+  return (
+    payload.printers.find((printer) => selectedId && printer.printerId === selectedId) ||
+    payload.printers.find((printer) => selectedName && printer.printerName === selectedName) ||
+    null
+  );
+};
+
+const assessSelectedPrinterEligibility = (payload: ReturnType<typeof normalizeStatusPayload>) => {
+  const selectedPrinterId = payload.selectedPrinterId || payload.printerId || null;
+  const selectedPrinter = findSelectedPrinter(payload);
+  if (!payload.connected) {
+    return { eligible: false, reason: "Printer helper reported disconnected." };
+  }
+  if (!selectedPrinterId) {
+    return { eligible: false, reason: "No selected printer reported by helper." };
+  }
+  if (!payload.printers.length) {
+    return { eligible: true, reason: null };
+  }
+  if (!selectedPrinter) {
+    return { eligible: false, reason: "Selected printer was not present in helper inventory." };
+  }
+  if (selectedPrinter.online === false) {
+    return { eligible: false, reason: "Selected printer is offline." };
+  }
+  if (selectedPrinter.queueHasErrors) {
+    return { eligible: false, reason: "Selected printer queue has errors." };
+  }
+  if (Number(selectedPrinter.stuckJobCount || 0) > 0) {
+    return { eligible: false, reason: "Selected printer queue has stuck jobs." };
+  }
+  return { eligible: true, reason: null };
+};
+
 export type PrinterConnectionRealtimeEvent = {
   userId: string;
   status: PrinterConnectionStatus;
@@ -398,6 +436,9 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
 
   const trustedRegistration = registration.trustStatus === PrinterTrustStatus.TRUSTED && !registration.revokedAt;
   const trustedAttestation = Boolean(latestAttestation?.trustValid && latestAttestation?.signatureValid);
+  const selectedPrinterId = payload.selectedPrinterId || payload.printerId || null;
+  const printerEligibility = assessSelectedPrinterEligibility(payload);
+  const helperConnection = Boolean(payload.connected && latestAttestation && !stale && !connectorUpdateRequired);
   const trusted = trustedRegistration && trustedAttestation && !stale && !connectorUpdateRequired;
   const compatibilityReason =
     latestAttestation?.rejectionReason || registration.trustReason || payload.error || "Compatibility mode fallback";
@@ -409,8 +450,8 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       !stale &&
       registration.trustStatus !== PrinterTrustStatus.REVOKED
   );
-  const connected = payload.connected && (trusted || compatibilityMode);
-  const eligibleForPrinting = trusted;
+  const connected = helperConnection;
+  const eligibleForPrinting = Boolean(trusted && helperConnection && printerEligibility.eligible);
 
   const trustReason = trusted
     ? null
@@ -426,7 +467,8 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       ? `Compatibility mode active: ${compatibilityReason}`
       : connectorUpdateRequired
         ? `${CONNECTOR_UPDATE_REQUIRED_MESSAGE} Expected protocol ${LOCAL_AGENT_DIRECT_PROTOCOL_VERSION}, build ${LOCAL_AGENT_MIN_VERSION_HINT}, and transport diagnostics ${LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION}.`
-      : payload.error ||
+      : printerEligibility.reason ||
+        payload.error ||
         (stale
           ? "Printer attestation stale"
           : !latestAttestation
@@ -441,7 +483,6 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     : connected && compatibilityMode
       ? "COMPATIBILITY"
       : "BLOCKED";
-  const selectedPrinterId = payload.selectedPrinterId || payload.printerId || null;
   const readiness = buildReadinessFields({
     registrationId: registration.id,
     stale,
@@ -456,7 +497,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     required: REQUIRE_SIGNATURE,
     present: Boolean(latestAttestation),
     signatureValid: Boolean(latestAttestation?.signatureValid),
-    fresh: Boolean(latestAttestation?.signatureValid && !stale && !connectorUpdateRequired),
+    fresh: Boolean(latestAttestation?.signatureValid && latestAttestation?.trustValid && !stale && !connectorUpdateRequired),
     issuedAt: payload.heartbeatIssuedAt,
   };
 
@@ -500,8 +541,20 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
 
 const loadLatestRegistrationForUser = async (userId: string): Promise<PrinterRegistrationWithLatest | null> => {
   return prisma.printerRegistration.findFirst({
-    where: { userId },
+    where: { userId, revokedAt: null },
     orderBy: [{ lastSeenAt: "desc" }, { updatedAt: "desc" }],
+    include: {
+      attestations: {
+        orderBy: [{ createdAt: "desc" }],
+        take: 1,
+      },
+    },
+  }) as Promise<PrinterRegistrationWithLatest | null>;
+};
+
+const loadRegistrationById = async (registrationId: string): Promise<PrinterRegistrationWithLatest | null> => {
+  return prisma.printerRegistration.findFirst({
+    where: { id: registrationId, revokedAt: null },
     include: {
       attestations: {
         orderBy: [{ createdAt: "desc" }],
@@ -564,6 +617,11 @@ export const onPrinterConnectionEvent = (listener: (event: PrinterConnectionReal
 
 export const getPrinterConnectionStatusForUser = async (userId: string): Promise<PrinterConnectionStatus> => {
   const registration = await loadLatestRegistrationForUser(userId);
+  return buildStatus(registration);
+};
+
+export const getPrinterConnectionStatusForRegistration = async (registrationId: string): Promise<PrinterConnectionStatus> => {
+  const registration = await loadRegistrationById(registrationId);
   return buildStatus(registration);
 };
 

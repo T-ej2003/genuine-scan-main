@@ -826,6 +826,72 @@ describe("DashboardLayout printer connection dialog", () => {
     expect(screen.getByRole("button", { name: /active printer/i })).toBeInTheDocument();
   });
 
+  it("shows the fresh local Zebra instead of stale backend saved printer fields", async () => {
+    localStorageState.set(onboardingKey, "dismissed");
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
+      success: true,
+      data: {
+        connected: true,
+        printerName: "ZDesigner ZT410-300dpi ZPL",
+        printerId: "zdesigner-zt410",
+        selectedPrinterId: "zdesigner-zt410",
+        selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
+        deviceName: "Factory Windows",
+        agentVersion: "2026.6.16",
+        printers: [
+          {
+            printerId: "zdesigner-zt410",
+            printerName: "ZDesigner ZT410-300dpi ZPL",
+            model: "ZT410",
+            connection: "USB",
+            online: true,
+            isDefault: true,
+            protocols: ["raw-9100"],
+            languages: ["ZPL"],
+            mediaSizes: ["Label"],
+            dpi: 300,
+          },
+        ],
+      },
+    } as Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>);
+    vi.mocked(apiClient.reportPrinterHeartbeat).mockResolvedValue({
+      success: true,
+      data: {
+        ...trustedPrinterStatus,
+        connected: false,
+        trusted: false,
+        eligibleForPrinting: false,
+        connectionClass: "BLOCKED",
+        securePrinterSession: false,
+        helperConnection: false,
+        eligiblePrinter: false,
+        trustReason: "Printer verification expired. Refresh printer helper before printing.",
+        printerName: "Canon TS4100i series",
+        printerId: "canon-old",
+        selectedPrinterId: "canon-old",
+        selectedPrinterName: "Canon TS4100i series",
+        printers: [{ printerId: "canon-old", printerName: "Canon TS4100i series", online: true }],
+      },
+    } as Awaited<ReturnType<typeof apiClient.reportPrinterHeartbeat>>);
+
+    renderWithQueryClient(
+      <MemoryRouter>
+        <DashboardLayout>
+          <div>Dashboard content</div>
+        </DashboardLayout>
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /printing needs review/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Printing Status")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("ZDesigner ZT410-300dpi ZPL").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Canon TS4100i series")).not.toBeInTheDocument();
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+  });
+
   it("turns the header printing status into active print progress recovery", async () => {
     localStorageState.set(onboardingKey, "dismissed");
     updateActivePrintSession({
