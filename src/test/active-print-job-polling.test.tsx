@@ -1,14 +1,16 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 
 import apiClient from "@/lib/api-client";
 import { clearActivePrintSession, getActivePrintSessionSnapshot } from "@/lib/active-print-session";
 import { useActivePrintJobPolling } from "@/features/batches/useActivePrintJobPolling";
+import { getPrintJobRealtimeDebugState, resetPrintJobRealtimeStoreForTests } from "@/lib/print-job-realtime-store";
 
 vi.mock("@/lib/api-client", () => ({
   default: {
     getPrintJobStatus: vi.fn(),
+    streamPrintJobStatus: vi.fn(),
   },
 }));
 
@@ -55,9 +57,17 @@ function PollingProbe({ job, open = true }: { job: Record<string, unknown>; open
 describe("active print job polling", () => {
   afterEach(() => {
     clearActivePrintSession();
+    resetPrintJobRealtimeStoreForTests();
     vi.useRealTimers();
     vi.clearAllMocks();
   });
+
+  const flush = async () => {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
 
   it.each([
     ["PARTIALLY_COMPLETED status", { ...baseJob, status: "PARTIALLY_COMPLETED" }],
@@ -69,8 +79,7 @@ describe("active print job polling", () => {
 
     render(<PollingProbe job={job} />);
 
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
     expect(getActivePrintSessionSnapshot()).toMatchObject({
       active: false,
@@ -79,25 +88,52 @@ describe("active print job polling", () => {
       terminal: true,
     });
 
-    await vi.advanceTimersByTimeAsync(30_000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
     expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
   });
 
-  it("backs active polling off after the bounded observation window", async () => {
+  it("uses a slow fallback polling interval instead of tight polling", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-06-17T21:14:32.000Z"));
     vi.mocked(apiClient.getPrintJobStatus).mockResolvedValue({ success: true, data: baseJob } as any);
 
     render(<PollingProbe job={baseJob} />);
 
-    await Promise.resolve();
-    await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(190_000);
-    const callsAfterTimeout = vi.mocked(apiClient.getPrintJobStatus).mock.calls.length;
+    await flush();
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(callsAfterTimeout);
-    expect(callsAfterTimeout).toBeLessThanOrEqual(38);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(40_000);
+    });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("backs fallback polling off on 429", async () => {
+    vi.useFakeTimers();
+    vi.mocked(apiClient.getPrintJobStatus)
+      .mockResolvedValueOnce({ success: false, status: 429, retryAfterSec: 10, code: "RATE_LIMITED" } as any)
+      .mockResolvedValue({ success: true, data: baseJob } as any);
+
+    render(<PollingProbe job={baseJob} />);
+
+    await flush();
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(55_000);
+    });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(2);
   });
 
   it("continues tracking an active print job after the progress dialog is dismissed", async () => {
@@ -106,8 +142,7 @@ describe("active print job polling", () => {
 
     render(<PollingProbe job={baseJob} open={false} />);
 
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
     expect(getActivePrintSessionSnapshot()).toMatchObject({
       active: true,
@@ -116,7 +151,58 @@ describe("active print job polling", () => {
       terminal: false,
     });
 
-    await vi.advanceTimersByTimeAsync(10_000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(70_000);
+    });
     expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("receives realtime print job updates through one shared stream", async () => {
+    vi.useFakeTimers();
+    let realtimeMessage: ((payload: any) => void) | null = null;
+    const streamStop = vi.fn();
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation((_jobId: string, onMessage: (payload: any) => void) => {
+      realtimeMessage = onMessage;
+      return streamStop;
+    });
+    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValue({ success: true, data: baseJob } as any);
+
+    const first = render(<PollingProbe job={baseJob} />);
+    const second = render(<PollingProbe job={baseJob} open={false} />);
+    await flush();
+
+    expect(apiClient.streamPrintJobStatus).toHaveBeenCalledTimes(1);
+    expect(getPrintJobRealtimeDebugState().subscriptions).toEqual([{ jobId: "job-live", refs: 2 }]);
+
+    await act(async () => {
+      realtimeMessage?.({ view: { ...baseJob, status: "PARTIALLY_COMPLETED", session: { ...baseJob.session, remainingToPrint: 6 } } });
+    });
+    expect(getActivePrintSessionSnapshot()).toMatchObject({ active: false, terminal: true });
+
+    first.unmount();
+    expect(getPrintJobRealtimeDebugState().subscriptions).toEqual([{ jobId: "job-live", refs: 1 }]);
+    second.unmount();
+    expect(streamStop).toHaveBeenCalledTimes(1);
+    expect(getPrintJobRealtimeDebugState().subscriptions).toEqual([]);
+  });
+
+  it("clears fallback timers and realtime subscriptions after unmount", async () => {
+    vi.useFakeTimers();
+    const streamStop = vi.fn();
+    vi.mocked(apiClient.streamPrintJobStatus).mockReturnValue(streamStop);
+    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValue({ success: true, data: baseJob } as any);
+
+    const view = render(<PollingProbe job={baseJob} />);
+    await flush();
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    expect(streamStop).toHaveBeenCalledTimes(1);
+    expect(getPrintJobRealtimeDebugState().subscriptions).toEqual([]);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
   });
 });

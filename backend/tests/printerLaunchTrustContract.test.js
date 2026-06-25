@@ -7,6 +7,7 @@ process.env.PRINT_AGENT_REQUIRE_SIGNATURE = "true";
 process.env.PRINT_AGENT_REQUIRE_MTLS = "false";
 process.env.PRINT_AGENT_ALLOW_COMPATIBILITY_MODE = "true";
 process.env.PRINT_AGENT_MTLS_TRUSTED_PROXY_IPS = "";
+process.env.PRINT_AGENT_SESSION_MODE = "rest";
 
 const distRoot = path.resolve(__dirname, "../dist");
 

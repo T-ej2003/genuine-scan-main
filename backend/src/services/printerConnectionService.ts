@@ -10,10 +10,13 @@ import prisma from "../config/database";
 import { hashIp, hashToken, normalizeUserAgent, randomOpaqueToken } from "../utils/security";
 import {
   CONNECTOR_UPDATE_REQUIRED_MESSAGE,
+  CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE,
   getMissingTransportDiagnosticsCapabilities,
   isLocalAgentTransportDiagnosticsCurrent,
+  isLocalAgentPersistentSessionCapable,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
   LOCAL_AGENT_MIN_VERSION_HINT,
+  LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION,
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "./localAgentProtocol";
 import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
@@ -44,6 +47,19 @@ type PrinterRegistrationWithLatest = {
     mtlsFingerprint: string | null;
     metadata: any;
     createdAt: Date;
+  }>;
+  agentSessions?: Array<{
+    id: string;
+    connectionState: string;
+    selectedPrinterId: string | null;
+    selectedPrinterName: string | null;
+    connectorVersion: string | null;
+    trustMode: string;
+    printerHealth: any;
+    lastSeenAt: Date;
+    lastSignedHeartbeatAt: Date;
+    expiresAt: Date;
+    revokedAt: Date | null;
   }>;
 };
 
@@ -117,6 +133,7 @@ const REQUIRE_MTLS = parseBoolEnv("PRINT_AGENT_REQUIRE_MTLS", false);
 const ALLOW_COMPATIBILITY_MODE = parseBoolEnv("PRINT_AGENT_ALLOW_COMPATIBILITY_MODE", true);
 const LEGACY_HEARTBEAT_SUBJECTS = ["manufacturer-browser-heartbeat"];
 const TRUST_MODE: "STRICT_MTLS" | "SIGNED_ATTESTATION" = REQUIRE_MTLS ? "STRICT_MTLS" : "SIGNED_ATTESTATION";
+const PERSISTENT_SESSION_REQUIRED = String(process.env.PRINT_AGENT_SESSION_MODE || "websocket").trim().toLowerCase() !== "rest";
 
 const buildReadinessFields = (status: {
   registrationId?: string | null;
@@ -418,7 +435,36 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
   }
 
   const latestAttestation = registration.attestations[0] || null;
-  const payload = normalizeStatusPayload(latestAttestation?.metadata || {});
+  const latestSession = registration.agentSessions?.[0] || null;
+  const nowMs = Date.now();
+  const sessionHeartbeatMs = latestSession?.lastSignedHeartbeatAt ? new Date(latestSession.lastSignedHeartbeatAt).getTime() : NaN;
+  const sessionExpiresMs = latestSession?.expiresAt ? new Date(latestSession.expiresAt).getTime() : NaN;
+  const sessionFresh = Boolean(
+    latestSession &&
+      latestSession.connectionState === "CONNECTED" &&
+      !latestSession.revokedAt &&
+      Number.isFinite(sessionHeartbeatMs) &&
+      nowMs - sessionHeartbeatMs <= HEARTBEAT_TTL_MS &&
+      (!Number.isFinite(sessionExpiresMs) || sessionExpiresMs > nowMs)
+  );
+  const sessionHealth =
+    latestSession?.printerHealth && typeof latestSession.printerHealth === "object"
+      ? (latestSession.printerHealth as Record<string, unknown>)
+      : {};
+  const payload = normalizeStatusPayload(
+    sessionFresh
+      ? {
+          ...(latestAttestation?.metadata && typeof latestAttestation.metadata === "object" ? latestAttestation.metadata : {}),
+          ...sessionHealth,
+          connected: true,
+          selectedPrinterId: latestSession?.selectedPrinterId || (sessionHealth as any).selectedPrinterId,
+          selectedPrinterName: latestSession?.selectedPrinterName || (sessionHealth as any).selectedPrinterName,
+          printerId: latestSession?.selectedPrinterId || (sessionHealth as any).printerId,
+          printerName: latestSession?.selectedPrinterName || (sessionHealth as any).printerName,
+          buildVersion: latestSession?.connectorVersion || (sessionHealth as any).buildVersion,
+        }
+      : latestAttestation?.metadata || {}
+  );
   const missingCapabilities = getMissingTransportDiagnosticsCapabilities(payload.capabilities);
   const connectorUpdateRequired = Boolean(
     payload.connected &&
@@ -429,23 +475,26 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
         capabilities: payload.capabilities,
       })
   );
-  const nowMs = Date.now();
+  const persistentSessionCapable = isLocalAgentPersistentSessionCapable(payload.buildVersion || latestSession?.connectorVersion);
+  const persistentSessionUpdateRequired = Boolean(PERSISTENT_SESSION_REQUIRED && payload.connected && !persistentSessionCapable);
   const attestedMs = latestAttestation?.attestedAt ? new Date(latestAttestation.attestedAt).getTime() : NaN;
   const ageMs = Number.isFinite(attestedMs) ? Math.max(0, nowMs - attestedMs) : null;
-  const stale = ageMs == null ? true : ageMs > HEARTBEAT_TTL_MS;
+  const stale = sessionFresh ? false : ageMs == null ? true : ageMs > HEARTBEAT_TTL_MS;
 
   const trustedRegistration = registration.trustStatus === PrinterTrustStatus.TRUSTED && !registration.revokedAt;
   const trustedAttestation = Boolean(latestAttestation?.trustValid && latestAttestation?.signatureValid);
+  const trustedPersistentSession = Boolean(sessionFresh && trustedRegistration);
   const selectedPrinterId = payload.selectedPrinterId || payload.printerId || null;
   const printerEligibility = assessSelectedPrinterEligibility(payload);
-  const helperConnection = Boolean(payload.connected && latestAttestation && !stale && !connectorUpdateRequired);
-  const trusted = trustedRegistration && trustedAttestation && !stale && !connectorUpdateRequired;
+  const helperConnection = Boolean(payload.connected && (latestAttestation || sessionFresh) && !stale && !connectorUpdateRequired);
+  const trusted = trustedRegistration && (trustedAttestation || trustedPersistentSession) && !stale && !connectorUpdateRequired && !persistentSessionUpdateRequired;
   const compatibilityReason =
     latestAttestation?.rejectionReason || registration.trustReason || payload.error || "Compatibility mode fallback";
   const compatibilityMode = Boolean(
       ALLOW_COMPATIBILITY_MODE &&
       payload.connected &&
       !connectorUpdateRequired &&
+      !persistentSessionUpdateRequired &&
       !trusted &&
       !stale &&
       registration.trustStatus !== PrinterTrustStatus.REVOKED
@@ -457,13 +506,17 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     ? null
     : registration.revokedAt
       ? "Printer registration revoked"
+      : persistentSessionUpdateRequired
+        ? CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE
       : connectorUpdateRequired
         ? CONNECTOR_UPDATE_REQUIRED_MESSAGE
       : latestAttestation?.rejectionReason || registration.trustReason || null;
 
   const error = trusted
     ? null
-    : connected && compatibilityMode
+    : persistentSessionUpdateRequired
+      ? CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE
+      : connected && compatibilityMode
       ? `Compatibility mode active: ${compatibilityReason}`
       : connectorUpdateRequired
         ? `${CONNECTOR_UPDATE_REQUIRED_MESSAGE} Expected protocol ${LOCAL_AGENT_DIRECT_PROTOCOL_VERSION}, build ${LOCAL_AGENT_MIN_VERSION_HINT}, and transport diagnostics ${LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION}.`
@@ -495,10 +548,10 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
   });
   const signedAttestation = {
     required: REQUIRE_SIGNATURE,
-    present: Boolean(latestAttestation),
-    signatureValid: Boolean(latestAttestation?.signatureValid),
-    fresh: Boolean(latestAttestation?.signatureValid && latestAttestation?.trustValid && !stale && !connectorUpdateRequired),
-    issuedAt: payload.heartbeatIssuedAt,
+    present: Boolean(latestAttestation || sessionFresh),
+    signatureValid: Boolean(latestAttestation?.signatureValid || trustedPersistentSession),
+    fresh: Boolean(((latestAttestation?.signatureValid && latestAttestation?.trustValid) || trustedPersistentSession) && !stale && !connectorUpdateRequired),
+    issuedAt: sessionFresh ? latestSession?.lastSignedHeartbeatAt?.toISOString?.() || null : payload.heartbeatIssuedAt,
   };
 
   return {
@@ -514,8 +567,12 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     requiredForPrinting: true,
     trustStatus: registration.trustStatus,
     trustReason,
-    lastHeartbeatAt: latestAttestation?.attestedAt ? latestAttestation.attestedAt.toISOString() : null,
-    ageSeconds: ageMs == null ? null : Math.floor(ageMs / 1000),
+    lastHeartbeatAt: sessionFresh
+      ? latestSession?.lastSignedHeartbeatAt?.toISOString?.() || null
+      : latestAttestation?.attestedAt
+        ? latestAttestation.attestedAt.toISOString()
+        : null,
+    ageSeconds: sessionFresh && Number.isFinite(sessionHeartbeatMs) ? Math.floor(Math.max(0, nowMs - sessionHeartbeatMs) / 1000) : ageMs == null ? null : Math.floor(ageMs / 1000),
     registrationId: registration.id,
     agentId: registration.agentId || null,
     deviceFingerprint: registration.deviceFingerprint || null,
@@ -530,6 +587,10 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     capabilities: payload.capabilities,
     missingCapabilities,
     connectorUpdateRequired,
+    persistentSessionRequired: PERSISTENT_SESSION_REQUIRED,
+    persistentSessionCapable,
+    persistentSessionMinimumBuildVersion: LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION,
+    persistentSessionUpdateRequired,
     selectedPrinterId,
     selectedPrinterName: payload.selectedPrinterName || payload.printerName || null,
     capabilitySummary: payload.capabilitySummary,
@@ -548,6 +609,11 @@ const loadLatestRegistrationForUser = async (userId: string): Promise<PrinterReg
         orderBy: [{ createdAt: "desc" }],
         take: 1,
       },
+      agentSessions: {
+        where: { connectionState: "CONNECTED", revokedAt: null },
+        orderBy: [{ lastSignedHeartbeatAt: "desc" }, { lastSeenAt: "desc" }],
+        take: 1,
+      },
     },
   }) as Promise<PrinterRegistrationWithLatest | null>;
 };
@@ -558,6 +624,11 @@ const loadRegistrationById = async (registrationId: string): Promise<PrinterRegi
     include: {
       attestations: {
         orderBy: [{ createdAt: "desc" }],
+        take: 1,
+      },
+      agentSessions: {
+        where: { connectionState: "CONNECTED", revokedAt: null },
+        orderBy: [{ lastSignedHeartbeatAt: "desc" }, { lastSeenAt: "desc" }],
         take: 1,
       },
     },

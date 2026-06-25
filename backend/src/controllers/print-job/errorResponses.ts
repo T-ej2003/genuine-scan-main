@@ -24,6 +24,7 @@ type PrintJobErrorCode =
   | "printer_selection_mismatch"
   | "printer_status_unavailable"
   | "PRINTER_TEST_LABEL_REQUIRED"
+  | "PRINT_QUANTITY_EXCEEDS_RUN_LIMIT"
   | "RECOVERY_REQUIRED_BEFORE_NEW_PRINT"
   | "print_job_conflict"
   | "print_job_transaction_failed"

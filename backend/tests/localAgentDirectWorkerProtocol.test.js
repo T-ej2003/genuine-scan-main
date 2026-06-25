@@ -10,13 +10,17 @@ const {
 const {
   getMissingTransportDiagnosticsCapabilities,
   hasRequiredTransportDiagnosticsCapabilities,
+  isLocalAgentPersistentSessionCapable,
   isLocalAgentTransportDiagnosticsCurrent,
   isLocalAgentProtocolCompatible,
   LOCAL_AGENT_CAPABILITIES,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
   LOCAL_AGENT_MIN_VERSION_HINT,
+  LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION,
+  LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION,
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } = require("../dist/services/localAgentProtocol");
+const { validatePrintJobRunQuantity } = require("../dist/services/printJobRunLimitService");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -34,11 +38,23 @@ const run = () => {
   assert(
     isLocalAgentTransportDiagnosticsCurrent({
       protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-      buildVersion: LOCAL_AGENT_MIN_VERSION_HINT,
+      buildVersion: LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION,
       transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
       capabilities: LOCAL_AGENT_CAPABILITIES,
     }),
-    "Current connector build and transport diagnostics should satisfy the production worker gate"
+    "REST fallback connector build and transport diagnostics should satisfy the production worker gate"
+  );
+  assert(
+    LOCAL_AGENT_MIN_VERSION_HINT === LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION,
+    "REST fallback minimum should remain the compatibility version hint"
+  );
+  assert(
+    !isLocalAgentPersistentSessionCapable(LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION),
+    "Old REST fallback connector must not be eligible for persistent WebSocket sessions"
+  );
+  assert(
+    isLocalAgentPersistentSessionCapable(LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION),
+    "New connector build must be eligible for persistent WebSocket sessions"
   );
   assert(
     !isLocalAgentTransportDiagnosticsCurrent({
@@ -69,6 +85,46 @@ const run = () => {
   );
   assert(resolveActiveWakeRetryAfterMs(1) >= 4000, "Explicit wake retries should reuse the connector claim floor");
   assert(resolveActiveWakeRetryAfterMs(4) <= 5000, "Explicit wake retry burst must stay capped");
+
+  const zeroQuantity = validatePrintJobRunQuantity({
+    quantity: 0,
+    remainingPrintableCount: 919,
+    maxConfiguredRunLabels: 2000,
+  });
+  assert(!zeroQuantity.ok && zeroQuantity.errorCode === "PRINT_QUANTITY_EXCEEDS_RUN_LIMIT", "Quantity 0 must be rejected");
+
+  const aboveRemaining = validatePrintJobRunQuantity({
+    quantity: 920,
+    remainingPrintableCount: 919,
+    maxConfiguredRunLabels: 2000,
+  });
+  assert(!aboveRemaining.ok, "Quantity above remaining printable labels must be rejected");
+
+  const screenshotCase = validatePrintJobRunQuantity({
+    quantity: 2000,
+    remainingPrintableCount: 919,
+    maxConfiguredRunLabels: 2000,
+  });
+  assert(
+    !screenshotCase.ok &&
+      screenshotCase.errorCode === "PRINT_QUANTITY_EXCEEDS_RUN_LIMIT" &&
+      screenshotCase.maxRunQuantity === 919,
+    "Remaining 919 plus quantity 2000 must be rejected with maxRunQuantity 919"
+  );
+
+  const cappedValid = validatePrintJobRunQuantity({
+    quantity: 2000,
+    remainingPrintableCount: 5000,
+    maxConfiguredRunLabels: 2000,
+  });
+  assert(cappedValid.ok && cappedValid.maxRunQuantity === 2000, "Remaining 5000 plus quantity 2000 must pass");
+
+  const aboveCap = validatePrintJobRunQuantity({
+    quantity: 2001,
+    remainingPrintableCount: 5000,
+    maxConfiguredRunLabels: 2000,
+  });
+  assert(!aboveCap.ok && aboveCap.maxRunQuantity === 2000, "Quantity above configured per-run cap must be rejected");
 
   const payloadContent = "^XA\n^XZ";
   const valid = validateClaimedLocalPrintJobForAttempt({

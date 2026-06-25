@@ -97,6 +97,7 @@
     "qrcode": "^1.5.4",
     "qs": "6.15.2",
     "rate-limit-redis": "^4.3.1",
+    "ws": "^8.21.0",
     "zod": "^3.22.4"
   },
   "overrides": {
@@ -120,6 +121,7 @@
     "@types/multer": "^2.0.0",
     "@types/node": "^24.12.4",
     "@types/nodemailer": "^8.0.0",
+    "@types/ws": "^8.18.1",
     "@yao-pkg/pkg": "^6.20.0",
     "tar": "^7.5.16",
     "tsx": "^4.22.3",

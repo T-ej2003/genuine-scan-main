@@ -180,6 +180,7 @@ import {
   resumeManufacturerPrintJob,
   stopManufacturerPrintJob,
 } from "../controllers/printJobController";
+import { printJobEvents } from "../controllers/printJobEventsController";
 import {
   getPrinterConnectionStatus,
   printerConnectionEvents,
@@ -1878,6 +1879,15 @@ protectedReadRouter.get(
   protectedReadRouteLimiter,
   enforceTenantIsolation,
   listManufacturerPrintJobs
+);
+protectedReadRouter.get(
+  "/manufacturer/print-jobs/:id/events",
+  authenticateSSE,
+  requireOpsUser,
+  printReadRouteLimiter,
+  protectedReadRouteLimiter,
+  enforceTenantIsolation,
+  printJobEvents
 );
 protectedReadRouter.get(
   "/manufacturer/print-jobs/:id",

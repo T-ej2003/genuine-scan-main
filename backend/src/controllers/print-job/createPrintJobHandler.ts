@@ -5,35 +5,27 @@ import prisma from "../../config/database";
 import { AuthRequest } from "../../middleware/auth";
 import { createAuditLog } from "../../services/auditService";
 import { createUserNotification } from "../../services/notificationService";
-import {
-  supportsNetworkDirectPayloadType,
-} from "../../services/printPayloadService";
+import { supportsNetworkDirectPayloadType } from "../../services/printPayloadService";
 import { startNetworkDirectDispatch } from "../../services/networkDirectPrintService";
 import { startNetworkIppDispatch } from "../../services/networkIppPrintService";
 import { completeIdempotentAction } from "../../services/idempotencyService";
 import { createPrintJobRecords } from "../../services/printJobCreationTransactionService";
+import { publishPrintJobViewEvent } from "../../services/printJobRealtimeService";
 import {
   buildAndLogPrintJobCreateFailure,
   getPrintJobCreateRequestId,
   getPrintJobCreateRequestShape,
   logPrintJobCreateEvent,
 } from "./createPrintJobObservability";
+import { buildPrintJobErrorPayload, describePrintJobCreateFailure } from "./errorResponses";
 import {
-  buildPrintJobErrorPayload,
-  describePrintJobCreateFailure,
-} from "./errorResponses";
-import {
-  beginPrintActionIdempotency,
-  createPrintJobSchema,
-  describePrintDispatchMode,
-  ensureManufacturerUser,
-  ensureSelectedPrinterReady,
-  getLockExpiresAt,
-  handleIdempotencyError,
-  hashLockToken,
-  notifySystemPrintEvent,
+  beginPrintActionIdempotency, createPrintJobSchema, describePrintDispatchMode, ensureManufacturerUser,
+  ensureSelectedPrinterReady, getLockExpiresAt, handleIdempotencyError, hashLockToken, notifySystemPrintEvent,
   replayIdempotentResponseIfAny,
 } from "./shared";
+import { countReservableQrCodesForPrint } from "../../services/printReservationService";
+import { PRINT_JOB_MAX_RUN_LABELS, validatePrintJobRunQuantity } from "../../services/printJobRunLimitService";
+import { rejectPrintJobRunQuantity } from "./runLimitResponse";
 
 const getRequestId = getPrintJobCreateRequestId;
 const getRequestShape = getPrintJobCreateRequestShape;
@@ -137,6 +129,21 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       licenseeId: batch.licenseeId,
       manufacturerId: batch.manufacturerId,
     });
+
+    failureStage = "quantity_limit";
+    const remainingPrintableCount = await countReservableQrCodesForPrint(prisma as any, {
+      batchId: batch.id,
+      rangeStart,
+      rangeEnd,
+    });
+    const quantityLimit = validatePrintJobRunQuantity({
+      quantity,
+      remainingPrintableCount,
+      maxConfiguredRunLabels: PRINT_JOB_MAX_RUN_LABELS,
+    });
+    if (!quantityLimit.ok) {
+      return rejectPrintJobRunQuantity({ req, res, batchId: batch.id, quantity, failureStage, quantityLimit });
+    }
 
     failureStage = "active_job_check";
     const activeJob = await prisma.printJob.findFirst({
@@ -370,6 +377,15 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
       keyHash: idempotency.keyHash,
       statusCode: 201,
       responsePayload,
+    });
+
+    void publishPrintJobViewEvent({
+      printJobId: created.job.id,
+      manufacturerId: user.userId,
+      licenseeId: batch.licenseeId || null,
+      batchId: batch.id,
+      type: "print_job.created",
+      reason: "print_job_created",
     });
 
     try {

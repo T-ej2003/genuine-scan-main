@@ -1,6 +1,7 @@
 import { type ApiClientCore } from "@/lib/api/internal-client-core";
 import { createLocalAgentPrintingApi } from "@/lib/api/internal-client-local-agent";
 import { createPrintingOperationsApi } from "@/lib/api/internal-client-printing-operations";
+import { subscribeManagedEventSource } from "@/lib/api/managed-event-source";
 import {
   controlledPrinterMutation,
   controlledPrinterGet,
@@ -221,6 +222,31 @@ export const createPrintingApi = (core: ApiClientCore) => ({
       options?.minIntervalMs ?? 30_000,
       () => core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`),
       options
+    );
+  },
+
+  streamPrintJobStatus(
+    jobId: string,
+    onMessage: (payload: any) => void,
+    options: { onError?: () => void; onOpen?: () => void } = {}
+  ) {
+    const encoded = encodeURIComponent(jobId);
+    return subscribeManagedEventSource(
+      `manufacturer-print-job:${encoded}:events`,
+      `/api/manufacturer/print-jobs/${encoded}/events`,
+      (event) => {
+        try {
+          onMessage(JSON.parse(event.data));
+        } catch {
+          // Ignore malformed realtime frames; the slow REST fallback remains available.
+        }
+      },
+      {
+        eventName: "printJob",
+        onError: options.onError,
+        onOpen: options.onOpen,
+        pauseWhenHidden: false,
+      }
     );
   },
 

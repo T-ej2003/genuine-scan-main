@@ -6,6 +6,7 @@ import { chooseStablePrinterSelection } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { canPollVisibleDocument, jitterMs, pollingPolicy } from "@/lib/query-polling-policy";
 
+import { resolveMaxPrintRunQuantity } from "./print-run-limits";
 import { defaultPrinterStatus } from "./print-workflow-utils";
 import type {
   BatchRow,
@@ -438,6 +439,15 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
   }
 
   const availableInventory = getAvailableInventory(printBatch);
+  const maxRunQuantity = resolveMaxPrintRunQuantity(availableInventory);
+  if (quantity > maxRunQuantity) {
+    toast({
+      title: "Quantity too large",
+      description: `Maximum per run: ${maxRunQuantity.toLocaleString()} labels.`,
+      variant: "destructive",
+    });
+    return;
+  }
   if (availableInventory > 0 && quantity > availableInventory) {
     toast({
       title: "Quantity too large",

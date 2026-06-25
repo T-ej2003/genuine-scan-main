@@ -30,6 +30,7 @@ import {
 import { createPrintJob as executeCreatePrintJob, formatActionablePrintWorkflowError, syncProgressFromPrintJob as syncPrintJobProgress } from "./batch-print-operations";
 import { abandonPrintJobAction, printDiagnosticTestLabelAction, relinkSelectedPrinterAction } from "./print-workflow-recovery-actions";
 import { runSingleFlightAction } from "./singleFlightAction";
+import { clampPrintRunQuantityInput, resolveMaxPrintRunQuantity } from "./print-run-limits";
 import { useActivePrintJobPolling } from "./useActivePrintJobPolling";
 import { useLivePrintStatusRefresh } from "./useLivePrintStatusRefresh";
 import { useRecoverablePrintProgress } from "./useRecoverablePrintProgress";
@@ -240,6 +241,12 @@ export function useBatchPrintWorkflow({
       }),
     [printerDiagnostics, printerReady, printerStatus, selectedDetectedPrinter?.printerName]
   );
+  const remainingPrintableCount = printBatch ? getAvailableInventory(printBatch) : 0;
+  const maxRunQuantity = resolveMaxPrintRunQuantity(remainingPrintableCount);
+  const connectorVersionLabel = String(printerStatus.buildVersion || printerStatus.agentVersion || "").trim();
+  const handlePrintQuantityChange = (value: string) => {
+    setPrintQuantity(clampPrintRunQuantityInput(value, remainingPrintableCount));
+  };
 
   const applyRegisteredPrintersSnapshot = (
     printers: RegisteredPrinterRow[],
@@ -897,11 +904,13 @@ export function useBatchPrintWorkflow({
     onOpenChange: handlePrintDialogOpenChange,
     printBatch,
     selectedPrinterNotice,
+    connectorVersionLabel,
     securePrintReadiness,
     selectedPrinterReadinessDisplay,
     printQuantity,
-    onPrintQuantityChange: setPrintQuantity,
-    readyToPrintCount: printBatch ? getAvailableInventory(printBatch) : 0,
+    onPrintQuantityChange: handlePrintQuantityChange,
+    readyToPrintCount: remainingPrintableCount,
+    maxRunQuantity,
     registeredPrinters,
     onRefreshPrinters: () => {
       void loadPrinterStatus({ force: true });

@@ -20,12 +20,8 @@ import {
   reserveLocalAgentItem,
 } from "../services/localAgentClaimService";
 import {
-  CONNECTOR_UPDATE_REQUIRED_CODE,
-  CONNECTOR_UPDATE_REQUIRED_MESSAGE,
-  getMissingTransportDiagnosticsCapabilities,
-  isLocalAgentTransportDiagnosticsCurrent,
-  LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-  LOCAL_AGENT_MIN_VERSION_HINT,
+  CONNECTOR_UPDATE_REQUIRED_CODE, CONNECTOR_UPDATE_REQUIRED_MESSAGE, getMissingTransportDiagnosticsCapabilities,
+  isLocalAgentTransportDiagnosticsCurrent, LOCAL_AGENT_DIRECT_PROTOCOL_VERSION, LOCAL_AGENT_MIN_VERSION_HINT,
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "../services/localAgentProtocol";
 import { ensurePrinterProfileForPrinter, resolvePrinterPreflight } from "../printing/registry/printerProfileService";
@@ -41,9 +37,16 @@ import {
 import { buildPrintPayloadDiagnostics } from "../services/printPayloadService";
 import { claimLocalAgentPrinterTestJob } from "../services/printerTestLabelService";
 import { verifyLocalAgentRequest } from "../services/localAgentRequestAuthService";
+import { publishPrintJobViewEvent } from "../services/printJobRealtimeService";
 
 const noClaimWork = (res: Response, retryAfterMs = LOCAL_AGENT_NO_WORK_RETRY_MS) => res.json({ success: true, data: null, retryAfterMs });
 const LOCAL_AGENT_UPGRADE_RETRY_MS = Math.max(60_000, LOCAL_AGENT_NO_WORK_RETRY_MS);
+const publishLocalAgentJobEvent = (job: any, type: string, reason: string) =>
+  void publishPrintJobViewEvent({
+    printJobId: job.id, manufacturerId: job.manufacturerId,
+    licenseeId: job.batch.licenseeId || null,
+    batchId: job.batchId, type, reason,
+  });
 
 export const localAgentErrorResponse = (res: Response, error: any) =>
   res.status(error?.statusCode || 500).json({
@@ -485,6 +488,8 @@ export const ackLocalAgentPrintJob = async (req: Request, res: Response) => {
       userAgent: req.get("user-agent") || undefined,
     });
 
+    publishLocalAgentJobEvent(job, "local_agent.ack", "local_agent_rest_ack");
+
     return res.json({
       success: true,
       data: {
@@ -611,6 +616,8 @@ export const confirmLocalAgentPrintJob = async (req: Request, res: Response) => 
       userAgent: req.get("user-agent") || undefined,
     });
 
+    publishLocalAgentJobEvent(job, "local_agent.confirm", "local_agent_rest_confirm");
+
     return res.json({
       success: true,
       data: {
@@ -687,6 +694,8 @@ export const failLocalAgentPrintJob = async (req: Request, res: Response) => {
       reasonLength: parsed.data.reason.length,
       frozenCount: result.frozenCount,
     });
+
+    publishLocalAgentJobEvent(job, "local_agent.fail", "local_agent_rest_fail");
 
     return res.json({
       success: true,

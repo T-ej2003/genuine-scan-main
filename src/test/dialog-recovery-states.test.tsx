@@ -59,6 +59,7 @@ describe("dialog recovery states", () => {
           printQuantity="1"
           onPrintQuantityChange={() => undefined}
           readyToPrintCount={10}
+          maxRunQuantity={10}
           registeredPrinters={[readyLocalPrinterProfile as any]}
           onRefreshPrinters={() => undefined}
           selectedPrinterProfileId="printer-profile-1"
@@ -89,6 +90,32 @@ describe("dialog recovery states", () => {
         />
       </MemoryRouter>,
     );
+
+  it("shows max per-run print quantity and constrains the quantity input", () => {
+    renderPrintDialog({ readyToPrintCount: 919, maxRunQuantity: 919, printQuantity: "919" });
+
+    const input = screen.getByTestId("print-job-quantity-input");
+    expect(input).toHaveAttribute("max", "919");
+    expect(screen.getByText("Maximum per run: 919 labels")).toBeInTheDocument();
+    expect(screen.getByText("QR labels ready to print: 919")).toBeInTheDocument();
+  });
+
+  it("allows 2000 labels when more than 2000 remain", () => {
+    renderPrintDialog({ readyToPrintCount: 5000, maxRunQuantity: 2000, printQuantity: "2000" });
+
+    const input = screen.getByTestId("print-job-quantity-input");
+    expect(input).toHaveAttribute("max", "2000");
+    expect(input).toHaveValue(2000);
+    expect(screen.getByText("Maximum per run: 2,000 labels")).toBeInTheDocument();
+  });
+
+  it("passes typed quantity changes through the caller clamp", () => {
+    const onPrintQuantityChange = vi.fn();
+    renderPrintDialog({ readyToPrintCount: 5000, maxRunQuantity: 2000, printQuantity: "2000", onPrintQuantityChange });
+
+    fireEvent.change(screen.getByTestId("print-job-quantity-input"), { target: { value: "2001" } });
+    expect(onPrintQuantityChange).toHaveBeenCalledWith("2001");
+  });
 
   const noop = () => undefined;
 
@@ -899,6 +926,7 @@ describe("dialog recovery states", () => {
           printQuantity=""
           onPrintQuantityChange={() => undefined}
           readyToPrintCount={0}
+          maxRunQuantity={0}
           registeredPrinters={[]}
           onRefreshPrinters={() => undefined}
           selectedPrinterProfileId=""
