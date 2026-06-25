@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS "PrintJobChunk" (
 
 CREATE UNIQUE INDEX IF NOT EXISTS "PrinterAgentSession_connectionId_key"
   ON "PrinterAgentSession"("connectionId");
-CREATE INDEX IF NOT EXISTS "PrinterAgentSession_registrationId_connectionState_lastSeenAt_idx"
+CREATE INDEX IF NOT EXISTS "PrinterAgentSession_registrationId_connectionState_lastSeen_idx"
   ON "PrinterAgentSession"("registrationId", "connectionState", "lastSeenAt");
 CREATE INDEX IF NOT EXISTS "PrinterAgentSession_agentId_deviceFingerprint_idx"
   ON "PrinterAgentSession"("agentId", "deviceFingerprint");
