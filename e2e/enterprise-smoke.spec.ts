@@ -294,10 +294,17 @@ const refreshE2EPrinterHeartbeat = async (page: Page) => {
     const statusBody = await status.json().catch(() => null);
     const data = statusBody?.data || {};
     const productionReady = Boolean(status.ok && statusBody?.success && data.connected && data.eligibleForPrinting);
+    const helperObserved = Boolean(
+      data.freshHelperHeartbeat ||
+        data.signedAttestation?.present ||
+        data.agentId ||
+        data.buildVersion ||
+        data.selectedPrinterId
+    );
     const sessionGateEnforced = Boolean(
       status.ok &&
         statusBody?.success &&
-        data.connected &&
+        helperObserved &&
         data.persistentSessionRequired &&
         (data.persistentSessionDisconnected ||
           data.persistentSessionUpdateRequired ||
