@@ -91,7 +91,7 @@ mockModule("services/printerConnectionService.js", {
 });
 
 const { buildPrinterAgentSessionPayload, signPrinterAgentPayload } = require("../dist/services/printerAgentSigningService");
-const { openTrustedPrinterAgentSession } = require("../dist/services/printerAgentSessionService");
+const { openTrustedPrinterAgentSession, sessionClientMessageSchema } = require("../dist/services/printerAgentSessionService");
 
 const signedHello = (overrides = {}) => {
   const issuedAt = new Date().toISOString();
@@ -137,6 +137,27 @@ const signedHello = (overrides = {}) => {
     () => openTrustedPrinterAgentSession(signedHello({ connectorVersion: "2026.6.16" })),
     (error) => error.statusCode === 426 && error.errorCode === "persistent_session_connector_update_required",
     "old connector version must not open persistent WebSocket mode"
+  );
+
+  const heartbeatFrame = {
+    type: "heartbeat",
+    sessionId: "11111111-1111-4111-8111-111111111111",
+    messageSeq: 1,
+    nonce: "session-heartbeat-nonce-1",
+    issuedAt: new Date().toISOString(),
+    signature: "signed-session-heartbeat-frame",
+  };
+  assert.equal(sessionClientMessageSchema.safeParse(heartbeatFrame).success, true, "post-hello heartbeat frames should match the strict session schema");
+  assert.equal(
+    sessionClientMessageSchema.safeParse({
+      ...heartbeatFrame,
+      agentId: registration.agentId,
+      deviceFingerprint: registration.deviceFingerprint,
+      selectedPrinterId: printer.nativePrinterId,
+      connectorVersion: "2026.6.25",
+    }).success,
+    false,
+    "post-hello frames must not include hello-only connector identity fields"
   );
 
   console.log("printer agent persistent session runtime tests passed");

@@ -264,10 +264,6 @@ const buildSignedSessionMessage = async (params: {
   });
   const common = {
     type: params.type,
-    agentId: state.agentId,
-    deviceFingerprint: state.deviceFingerprint,
-    selectedPrinterId: params.selectedPrinterId,
-    connectorVersion,
     nonce,
     issuedAt,
     signature: signPrinterAgentPayload(state.privateKeyPem, signedPayload),
@@ -275,6 +271,10 @@ const buildSignedSessionMessage = async (params: {
   if (params.type === "hello") {
     return {
       ...common,
+      agentId: state.agentId,
+      deviceFingerprint: state.deviceFingerprint,
+      selectedPrinterId: params.selectedPrinterId,
+      connectorVersion,
       registrationId: null,
       selectedPrinterName: params.selectedPrinterName || null,
       printerHealth: params.printerHealth || null,

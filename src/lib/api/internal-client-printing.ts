@@ -242,7 +242,7 @@ export const createPrintingApi = (core: ApiClientCore) => ({
         }
       },
       {
-        eventName: "printJob",
+        eventName: "realtime",
         onError: options.onError,
         onOpen: options.onOpen,
         pauseWhenHidden: false,
