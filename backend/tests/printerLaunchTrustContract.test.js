@@ -155,9 +155,9 @@ const signedHeartbeatInput = (overrides = {}) => {
     selectedPrinterId: printerId,
     selectedPrinterName: "Zebra ZD421",
     deviceName: "Factory Mac",
-    agentVersion: LOCAL_AGENT_MIN_VERSION_HINT,
+    agentVersion: overrides.agentVersion || LOCAL_AGENT_MIN_VERSION_HINT,
     protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-    buildVersion: LOCAL_AGENT_MIN_VERSION_HINT,
+    buildVersion: overrides.buildVersion || LOCAL_AGENT_MIN_VERSION_HINT,
     transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
     capabilities: LOCAL_AGENT_CAPABILITIES,
     sourceIp: "198.51.100.10",
@@ -176,12 +176,29 @@ const signedHeartbeatInput = (overrides = {}) => {
   resetState();
   const valid = await upsertPrinterConnectionHeartbeat(signedHeartbeatInput());
   assert.strictEqual(valid.status.trustMode, "SIGNED_ATTESTATION", "launch mode should be signed attestation");
-  assert.strictEqual(valid.status.trusted, true, "valid connector 2026.6.16 signed attestation should be trusted");
-  assert.strictEqual(valid.status.eligibleForPrinting, true, "valid signed attestation should be print-eligible");
-  assert.strictEqual(valid.status.securePrinterSession, true, "valid signed attestation should create secure printer session");
+  assert.strictEqual(valid.status.trusted, false, "signed heartbeat alone must not satisfy production print trust");
+  assert.strictEqual(valid.status.eligibleForPrinting, false, "production print eligibility requires a connected persistent session");
+  assert.strictEqual(valid.status.persistentSessionDisconnected, true, "valid connector should still wait for persistent session");
+  assert.strictEqual(valid.status.securePrinterSession, false, "secure print session requires the WebSocket session gate");
   assert.strictEqual(valid.status.signedAttestation.signatureValid, true, "signature must validate");
   assert.strictEqual(valid.status.signedAttestation.fresh, true, "heartbeat must be fresh");
-  assert.deepStrictEqual(valid.status.missingFields, [], "fresh trusted connector status should have no missing readiness fields");
+  assert(
+    valid.status.missingFields.includes("helperConnection") || valid.status.missingFields.includes("securePrinterSession"),
+    "fresh signed heartbeat should still report the missing persistent-session readiness field"
+  );
+
+  resetState();
+  const oldConnector = await upsertPrinterConnectionHeartbeat(
+    signedHeartbeatInput({ agentVersion: "2026.6.16", buildVersion: "2026.6.16" })
+  );
+  assert.strictEqual(oldConnector.status.trusted, false, "old connector must not be production print trusted");
+  assert.strictEqual(oldConnector.status.eligibleForPrinting, false, "old connector must not be print-eligible");
+  assert.strictEqual(oldConnector.status.persistentSessionUpdateRequired, true, "old connector should report update-required");
+  assert.match(
+    oldConnector.status.error || "",
+    /persistent print session mode/i,
+    "old connector should show persistent session update guidance"
+  );
 
   resetState();
   const missingSignature = await upsertPrinterConnectionHeartbeat(signedHeartbeatInput({ omitSignature: true }));
@@ -193,12 +210,20 @@ const signedHeartbeatInput = (overrides = {}) => {
   const staleIssuedAt = new Date(Date.now() - 10 * 60_000).toISOString();
   const stale = await upsertPrinterConnectionHeartbeat(signedHeartbeatInput({ heartbeatIssuedAt: staleIssuedAt }));
   assert.strictEqual(stale.status.trusted, false, "stale heartbeat timestamp must not be trusted");
-  assert.match(stale.status.trustReason || "", /timestamp skew/i, "stale heartbeat should explain timestamp skew");
+  assert.match(
+    stale.status.signedAttestation.rejectReason || "",
+    /timestamp skew/i,
+    "stale heartbeat should explain timestamp skew in attestation details"
+  );
 
   resetState();
   const wrongAgent = await upsertPrinterConnectionHeartbeat(signedHeartbeatInput({ agentId: "agent-attacker" }));
   assert.strictEqual(wrongAgent.status.trusted, false, "wrong agent id must not be trusted");
-  assert.match(wrongAgent.status.trustReason || "", /agent identity mismatch/i, "wrong agent should be diagnosed");
+  assert.match(
+    wrongAgent.status.signedAttestation.rejectReason || "",
+    /agent identity mismatch/i,
+    "wrong agent should be diagnosed in attestation details"
+  );
 
   resetState();
   const wrongDevice = await upsertPrinterConnectionHeartbeat(signedHeartbeatInput({ deviceFingerprint: "device-attacker" }));

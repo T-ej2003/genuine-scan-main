@@ -12,6 +12,7 @@ import {
   CONNECTOR_UPDATE_REQUIRED_MESSAGE,
   CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE,
   getMissingTransportDiagnosticsCapabilities,
+  isPersistentPrintSessionRequiredForProduction,
   isLocalAgentTransportDiagnosticsCurrent,
   isLocalAgentPersistentSessionCapable,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
@@ -133,7 +134,7 @@ const REQUIRE_MTLS = parseBoolEnv("PRINT_AGENT_REQUIRE_MTLS", false);
 const ALLOW_COMPATIBILITY_MODE = parseBoolEnv("PRINT_AGENT_ALLOW_COMPATIBILITY_MODE", true);
 const LEGACY_HEARTBEAT_SUBJECTS = ["manufacturer-browser-heartbeat"];
 const TRUST_MODE: "STRICT_MTLS" | "SIGNED_ATTESTATION" = REQUIRE_MTLS ? "STRICT_MTLS" : "SIGNED_ATTESTATION";
-const PERSISTENT_SESSION_REQUIRED = String(process.env.PRINT_AGENT_SESSION_MODE || "websocket").trim().toLowerCase() !== "rest";
+const PERSISTENT_SESSION_REQUIRED = isPersistentPrintSessionRequiredForProduction();
 
 const buildReadinessFields = (status: {
   registrationId?: string | null;
@@ -407,6 +408,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
         signatureValid: false,
         fresh: false,
         issuedAt: null,
+        rejectReason: null,
       },
       stale: true,
       requiredForPrinting: true,
@@ -468,6 +470,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
   const missingCapabilities = getMissingTransportDiagnosticsCapabilities(payload.capabilities);
   const connectorUpdateRequired = Boolean(
     payload.connected &&
+      !sessionFresh &&
       !isLocalAgentTransportDiagnosticsCurrent({
         protocolVersion: payload.protocolVersion,
         buildVersion: payload.buildVersion,
@@ -486,12 +489,24 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
   const trustedPersistentSession = Boolean(sessionFresh && trustedRegistration);
   const selectedPrinterId = payload.selectedPrinterId || payload.printerId || null;
   const printerEligibility = assessSelectedPrinterEligibility(payload);
-  const helperConnection = Boolean(payload.connected && (latestAttestation || sessionFresh) && !stale && !connectorUpdateRequired);
-  const trusted = trustedRegistration && (trustedAttestation || trustedPersistentSession) && !stale && !connectorUpdateRequired && !persistentSessionUpdateRequired;
+  const persistentSessionDisconnected = Boolean(
+    PERSISTENT_SESSION_REQUIRED &&
+      payload.connected &&
+      persistentSessionCapable &&
+      !persistentSessionUpdateRequired &&
+      !sessionFresh
+  );
+  const helperConnection = PERSISTENT_SESSION_REQUIRED
+    ? Boolean(payload.connected && sessionFresh && !connectorUpdateRequired && !persistentSessionUpdateRequired)
+    : Boolean(payload.connected && (latestAttestation || sessionFresh) && !stale && !connectorUpdateRequired);
+  const trusted = PERSISTENT_SESSION_REQUIRED
+    ? Boolean(trustedPersistentSession && !connectorUpdateRequired && !persistentSessionUpdateRequired)
+    : Boolean(trustedRegistration && (trustedAttestation || trustedPersistentSession) && !stale && !connectorUpdateRequired);
   const compatibilityReason =
     latestAttestation?.rejectionReason || registration.trustReason || payload.error || "Compatibility mode fallback";
   const compatibilityMode = Boolean(
       ALLOW_COMPATIBILITY_MODE &&
+      !PERSISTENT_SESSION_REQUIRED &&
       payload.connected &&
       !connectorUpdateRequired &&
       !persistentSessionUpdateRequired &&
@@ -508,6 +523,8 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       ? "Printer registration revoked"
       : persistentSessionUpdateRequired
         ? CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE
+      : persistentSessionDisconnected
+        ? "Persistent printer session is disconnected."
       : connectorUpdateRequired
         ? CONNECTOR_UPDATE_REQUIRED_MESSAGE
       : latestAttestation?.rejectionReason || registration.trustReason || null;
@@ -516,6 +533,8 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     ? null
     : persistentSessionUpdateRequired
       ? CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE
+      : persistentSessionDisconnected
+        ? "Persistent printer session is disconnected."
       : connected && compatibilityMode
       ? `Compatibility mode active: ${compatibilityReason}`
       : connectorUpdateRequired
@@ -552,6 +571,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     signatureValid: Boolean(latestAttestation?.signatureValid || trustedPersistentSession),
     fresh: Boolean(((latestAttestation?.signatureValid && latestAttestation?.trustValid) || trustedPersistentSession) && !stale && !connectorUpdateRequired),
     issuedAt: sessionFresh ? latestSession?.lastSignedHeartbeatAt?.toISOString?.() || null : payload.heartbeatIssuedAt,
+    rejectReason: latestAttestation?.rejectionReason || null,
   };
 
   return {
@@ -591,6 +611,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     persistentSessionCapable,
     persistentSessionMinimumBuildVersion: LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION,
     persistentSessionUpdateRequired,
+    persistentSessionDisconnected,
     selectedPrinterId,
     selectedPrinterName: payload.selectedPrinterName || payload.printerName || null,
     capabilitySummary: payload.capabilitySummary,
@@ -689,6 +710,17 @@ export const onPrinterConnectionEvent = (listener: (event: PrinterConnectionReal
 export const getPrinterConnectionStatusForUser = async (userId: string): Promise<PrinterConnectionStatus> => {
   const registration = await loadLatestRegistrationForUser(userId);
   return buildStatus(registration);
+};
+
+export const publishPrinterConnectionStatusForUser = async (userId: string) => {
+  void bumpCacheNamespaceVersion("printer-status").catch(() => undefined);
+  const status = await getPrinterConnectionStatusForUser(userId);
+  emitConnectionEvent({
+    userId,
+    status,
+    changedAt: new Date().toISOString(),
+  });
+  return status;
 };
 
 export const getPrinterConnectionStatusForRegistration = async (registrationId: string): Promise<PrinterConnectionStatus> => {

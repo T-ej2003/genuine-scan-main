@@ -41,7 +41,7 @@ describe("printer user-facing helpers", () => {
 
   it("maps structured print-job creation errors to specific user guidance", () => {
     expect(printJobCreateFailureMessage({ errorCode: "missing_printer_session" })).toBe(
-      "Refresh the printer connection, then start the print run again."
+      "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.25 or newer, then retry."
     );
     expect(printJobCreateFailureMessage({ errorCode: "printer_not_verified" })).toBe(
       "Finish printer verification or choose a verified printer before starting this print run."

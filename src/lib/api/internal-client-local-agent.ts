@@ -55,6 +55,10 @@ export const createLocalAgentPrintingApi = () => {
             heartbeatIssuedAt: String((data as any).heartbeatIssuedAt || "").trim() || null,
             heartbeatSignature: String((data as any).heartbeatSignature || "").trim() || null,
             compatibilityMode: Boolean((data as any).compatibilityMode),
+            websocket:
+              (data as any).websocket && typeof (data as any).websocket === "object"
+                ? ((data as any).websocket as Record<string, unknown>)
+                : null,
             capabilitySummary:
               (data as any).capabilitySummary && typeof (data as any).capabilitySummary === "object"
                 ? ((data as any).capabilitySummary as Record<string, unknown>)

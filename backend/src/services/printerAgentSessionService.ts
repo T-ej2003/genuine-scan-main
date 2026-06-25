@@ -15,6 +15,7 @@ import { buildApprovedPrintPayload } from "./printPayloadService";
 import { acknowledgePrintItemDispatch, buildPrintConfirmationDeadline, confirmPrintItemDispatch, resolvePrinterConfirmationMode } from "./printConfirmationService";
 import { getPrinterAgentIssuedAtSkewSeconds, isPrinterAgentIssuedAtFresh, buildPrinterAgentSessionPayload, verifyPrinterAgentPayloadSignature } from "./printerAgentSigningService";
 import { publishPrintJobViewEvent } from "./printJobRealtimeService";
+import { publishPrinterConnectionStatusForUser } from "./printerConnectionService";
 import { markBatchPrintAcknowledged } from "./batchStateMachineService";
 import {
   CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE,
@@ -242,6 +243,19 @@ export const openTrustedPrinterAgentSession = async (
   const now = new Date();
   const connectionId = randomUUID();
   const publicKeyFingerprint = sha256Hex(registration.publicKeyPem);
+  const superseded = await prisma.printerAgentSession.updateMany({
+    where: {
+      registrationId: registration.id,
+      selectedPrinterId: printer.nativePrinterId || hello.selectedPrinterId,
+      connectionState: "CONNECTED",
+      revokedAt: null,
+    },
+    data: {
+      connectionState: "SUPERSEDED",
+      disconnectedAt: now,
+      closeReason: "superseded_by_new_persistent_session",
+    },
+  });
   const session = await prisma.printerAgentSession.create({
     data: {
       connectionId,
@@ -264,6 +278,18 @@ export const openTrustedPrinterAgentSession = async (
       },
     },
   });
+
+  console.info("printer_session_connected", {
+    agentSessionId: session.id,
+    connectionId,
+    registrationId: registration.id,
+    agentId: registration.agentId,
+    selectedPrinterId: printer.nativePrinterId || hello.selectedPrinterId,
+    connectorVersion: hello.connectorVersion || null,
+    supersededSessionCount: superseded.count,
+    trustMode: PRINT_AGENT_REQUIRE_MTLS ? "STRICT_MTLS" : "SIGNED_ATTESTATION",
+  });
+  void publishPrinterConnectionStatusForUser(registration.userId).catch(() => undefined);
 
   return {
     id: session.id,
@@ -290,6 +316,17 @@ export const closeTrustedPrinterAgentSession = async (sessionId: string, reason:
       closeReason: reason.slice(0, 500),
     },
   });
+  console.info("printer_session_disconnected", {
+    agentSessionId: sessionId,
+    reason: reason.slice(0, 120),
+  });
+  const session = await prisma.printerAgentSession.findUnique({
+    where: { id: sessionId },
+    select: { registration: { select: { userId: true } } },
+  });
+  if (session?.registration?.userId) {
+    void publishPrinterConnectionStatusForUser(session.registration.userId).catch(() => undefined);
+  }
 };
 
 const loadActiveSession = async (session: TrustedPrinterAgentSession) => {
@@ -342,6 +379,13 @@ export const recordTrustedSessionHeartbeat = async (
       printerHealth: message.printerHealth || undefined,
     },
   });
+  console.debug("printer_session_heartbeat", {
+    agentSessionId: session.id,
+    registrationId: session.registrationId,
+    agentId: session.agentId,
+    selectedPrinterId: session.selectedPrinterId,
+  });
+  void publishPrinterConnectionStatusForUser(session.manufacturerId).catch(() => undefined);
 };
 
 const reserveChunkItems = async (params: {
@@ -629,6 +673,16 @@ export const buildNextPrintChunkForSession = async (
     type: "chunk.sent",
     reason: "printer_session_chunk_sent",
   });
+  console.info("printer_session_work_sent", {
+    agentSessionId: session.id,
+    registrationId: session.registrationId,
+    printJobId: job.id,
+    printSessionId: job.printSession.id,
+    chunkId: chunk.id,
+    startSequence: chunk.startSequence,
+    endSequence: chunk.endSequence,
+    itemCount: labels.length,
+  });
 
   return {
     type: "print_chunk" as const,
@@ -777,6 +831,13 @@ export const handleTrustedSessionProgressMessage = async (
       where: { id: chunk.id, status: { in: ["SENT", "ASSIGNED", "CREATED"] } },
       data: { status: "ACKED", acknowledgedAt: now, lastMessageSeq: message.messageSeq },
     });
+    console.info("printer_session_chunk_ack", {
+      agentSessionId: session.id,
+      registrationId: session.registrationId,
+      printJobId: job.id,
+      chunkId: chunk.id,
+      messageSeq: message.messageSeq,
+    });
   } else if (message.type === "chunk_spooled") {
     await prisma.printJobChunk.update({
       where: { id: chunk.id },
@@ -786,6 +847,14 @@ export const handleTrustedSessionProgressMessage = async (
     await prisma.printJobChunk.update({
       where: { id: chunk.id },
       data: { status: "CONFIRMED", confirmedAt: now, confirmedCount: chunk.itemCount, lastMessageSeq: message.messageSeq },
+    });
+    console.info("printer_session_chunk_confirm", {
+      agentSessionId: session.id,
+      registrationId: session.registrationId,
+      printJobId: job.id,
+      chunkId: chunk.id,
+      confirmedCount: chunk.itemCount,
+      messageSeq: message.messageSeq,
     });
   } else if (message.type === "chunk_failed") {
     await prisma.printJobChunk.update({
@@ -862,6 +931,12 @@ export const handleTrustedSessionProgressMessage = async (
       await prisma.printerAgentSession.updateMany({
         where: { id: session.id, activePrintJobId: job.id },
         data: { activePrintJobId: null },
+      });
+      console.info("printer_session_job_completed", {
+        agentSessionId: session.id,
+        registrationId: session.registrationId,
+        printJobId: job.id,
+        printSessionId: job.printSession.id,
       });
     }
   } else if (message.type === "label_failed" && printItemId) {

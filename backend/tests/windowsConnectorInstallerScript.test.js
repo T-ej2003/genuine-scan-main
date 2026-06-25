@@ -233,8 +233,39 @@ const run = async () => {
   assert(
     installScript.includes("Stop-RunningAgent") &&
       installScript.includes("Remove-LegacyRuntimeFiles") &&
-      installScript.includes("Remove-LegacyStartupEntries"),
+      installScript.includes("Remove-LegacyStartupEntries") &&
+      installScript.includes("Cleanup-LegacyServices") &&
+      installScript.includes("Remove-LegacyRunRegistryEntries"),
     "Windows installer should stop old connectors and remove stale runtime/startup paths before installing"
+  );
+  assert(
+    installScript.includes('Join-Path $env:LOCALAPPDATA "MSCQR\\local-print-agent"') &&
+      installScript.includes('Join-Path $env:LOCALAPPDATA "Programs\\MSCQR Connector"') &&
+      installScript.includes('Join-Path $env:PROGRAMDATA "Genuine Scan"'),
+    "Windows installer should use one canonical path and clean legacy MSCQR/Genuine Scan install roots"
+  );
+  assert(
+    installScript.includes("agentId") === false &&
+      installScript.includes("privateKeyPem") === false &&
+      installScript.includes("publicKeyPem") === false,
+    "Windows installer script should not read or log connector private identity material"
+  );
+  assert(
+    installScript.includes("heartbeat-cache.json") &&
+      installScript.includes("active-job.json") &&
+      installScript.includes("release-metadata.json") &&
+      installScript.includes("mscqr-local-print-agent.lock"),
+    "Windows installer should clear stale runtime state that can confuse readiness"
+  );
+  assert(
+    installScript.includes("supportsPersistentPrintSession") &&
+      installScript.includes("websocket.supported") &&
+      installScript.includes("websocketCapability"),
+    "Windows installer should verify persistent WebSocket capability in local status and install result"
+  );
+  assert(
+    installerTemplate.includes("DefaultDirName={localappdata}\\MSCQR\\local-print-agent"),
+    "Windows installer should install into the canonical connector path rather than a side-by-side Programs path"
   );
   assert(
     installScript.includes("agentVersion") &&

@@ -48,6 +48,12 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
   if (hasAny(value, ["127.0.0.1", "localhost", "local print agent", "printer switch failed", "calibration failed"])) {
     return "The printer helper is not available on this computer right now.";
   }
+  if (hasAny(value, ["connector_update_required", "persistent session connector update", "update mscqr connector", "persistent print session mode"])) {
+    return "Connector update required. Install the latest MSCQR printer connector, then refresh printer status.";
+  }
+  if (hasAny(value, ["printer_session_required", "printer_session_disconnected", "persistent printer session"])) {
+    return "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.25 or newer, then retry.";
+  }
   if (hasAny(value, ["mtls client certificate fingerprint header missing", "compatibility mode active"])) {
     return "Printer verification expired. Refresh printer helper before printing.";
   }

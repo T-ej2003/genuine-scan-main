@@ -188,11 +188,13 @@ const {
 const {
   LOCAL_AGENT_CAPABILITIES,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+  LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION,
   LOCAL_AGENT_MIN_VERSION_HINT,
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } = require("../dist/services/localAgentProtocol");
 const { upsertPrinterConnectionHeartbeat } = require("../dist/services/printerConnectionService");
 const { verifyLocalAgentRequest } = require("../dist/services/localAgentRequestAuthService");
+const { claimLocalAgentPrintJob } = require("../dist/controllers/printerAgentJobController");
 
 const signedHeartbeatInput = (overrides = {}) => {
   const agentId = overrides.agentId || "agent-951f9252-f7e6-4cec-8c06-ce871f75f0c6";
@@ -251,21 +253,61 @@ const signedClaim = (overrides = {}) => {
   });
   return {
     ...body,
+    protocolVersion: overrides.protocolVersion || LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+    buildVersion: overrides.buildVersion || LOCAL_AGENT_MIN_VERSION_HINT,
+    transportDiagnosticsVersion: overrides.transportDiagnosticsVersion || LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+    capabilities: overrides.capabilities || LOCAL_AGENT_CAPABILITIES,
+    agentVersion: overrides.agentVersion || overrides.buildVersion || LOCAL_AGENT_MIN_VERSION_HINT,
     signature: overrides.signature || signPrinterAgentPayload(overrides.privateKeyPem || newKeys.privateKeyPem, payload),
   };
+};
+
+const invokeClaim = async (body) => {
+  const res = {
+    statusCode: 200,
+    body: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.body = payload;
+      return this;
+    },
+  };
+  await claimLocalAgentPrintJob({ body }, res);
+  return res;
 };
 
 (async () => {
   resetState();
   const heartbeat = await upsertPrinterConnectionHeartbeat(signedHeartbeatInput());
-  assert.strictEqual(heartbeat.status.trusted, true, "fresh signed replacement heartbeat should be trusted");
-  assert.strictEqual(heartbeat.status.eligibleForPrinting, true, "fresh signed replacement heartbeat should be print eligible");
+  assert.strictEqual(heartbeat.status.trusted, false, "fresh signed replacement heartbeat alone should not be production trusted");
+  assert.strictEqual(heartbeat.status.eligibleForPrinting, false, "fresh signed replacement heartbeat alone should not be print eligible");
+  assert.strictEqual(heartbeat.status.persistentSessionDisconnected, true, "production printing should require a connected persistent session");
   assert.strictEqual(heartbeat.status.registrationId.startsWith("registration-new-"), true, "replacement heartbeat should create a new registration");
   assert.strictEqual(registrations.find((entry) => entry.id === "registration-old").trustStatus, PrinterTrustStatus.REVOKED, "older registration should be revoked only after replacement trust succeeds");
   registrations = registrations.map((entry) =>
     entry.id === "registration-old" ? { ...entry, updatedAt: new Date(Date.now() + 60_000) } : entry
   );
-  await verifyLocalAgentRequest(signedClaim(), "claim");
+  await assert.rejects(
+    () => verifyLocalAgentRequest(signedClaim(), "claim"),
+    (error) => error.statusCode === 409 && error.errorCode === "PRINTER_ATTESTATION_STALE",
+    "REST local-agent claim must not be trusted without a connected persistent session"
+  );
+
+  const oldClaimResponse = await invokeClaim(
+    signedClaim({
+      agentVersion: LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION,
+      buildVersion: LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION,
+    })
+  );
+  assert.strictEqual(oldClaimResponse.statusCode, 426, "old REST connector claim should require update");
+  assert.strictEqual(oldClaimResponse.body.errorCode, "CONNECTOR_UPDATE_REQUIRED", "old REST connector claim should return update-required code");
+
+  const newRestClaimResponse = await invokeClaim(signedClaim());
+  assert.strictEqual(newRestClaimResponse.statusCode, 409, "new connector must use WebSocket session instead of REST claim");
+  assert.strictEqual(newRestClaimResponse.body.errorCode, "PRINTER_SESSION_REQUIRED", "REST claim path should require persistent printer session");
 
   await assert.rejects(
     () => verifyLocalAgentRequest(signedClaim({ agentId: "agent-unknown", deviceFingerprint: "device-unknown" }), "claim"),
