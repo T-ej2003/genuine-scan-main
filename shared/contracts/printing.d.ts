@@ -74,6 +74,10 @@ export type PrinterConnectionStatusDTO = {
   agentVersion?: string | null;
   protocolVersion?: string | null;
   buildVersion?: string | null;
+  persistentSessionRequired?: boolean;
+  persistentSessionCapable?: boolean;
+  persistentSessionMinimumBuildVersion?: string | null;
+  persistentSessionUpdateRequired?: boolean;
   connectorUpdateRequired?: boolean;
   capabilitySummary?: PrinterCapabilitySummaryDTO | null;
   printers?: LocalPrinterDTO[];

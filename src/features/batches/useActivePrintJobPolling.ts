@@ -2,6 +2,7 @@ import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 
 import apiClient from "@/lib/api-client";
 import { updateActivePrintSession } from "@/lib/active-print-session";
+import { usePrintJobRealtime } from "@/lib/print-job-realtime-store";
 import { canPollVisibleDocument, jitterMs, pollingPolicy } from "@/lib/query-polling-policy";
 
 import {
@@ -39,6 +40,7 @@ export function useActivePrintJobPolling({
   onBatchesChanged,
 }: ActivePrintJobPollingParams) {
   const completedRefreshJobIdsRef = useRef(new Set<string>());
+  const realtime = usePrintJobRealtime(printJobId);
 
   useEffect(() => {
     if (!printJobId) return;
@@ -52,6 +54,22 @@ export function useActivePrintJobPolling({
       terminal,
     });
   }, [printJobId, printProgressOpen, printProgressPhase, printProgressPrinted, printProgressTotal]);
+
+  useEffect(() => {
+    if (!printJobId || !realtime.job) return;
+    const job = realtime.job as PrintJobRow;
+    syncPrintJobProgress(job, progressStateSetters);
+    if (isPrintJobServerSettled(job) && !completedRefreshJobIdsRef.current.has(printJobId)) {
+      completedRefreshJobIdsRef.current.add(printJobId);
+      updateActivePrintSession({
+        active: false,
+        jobId: printJobId,
+        modalOpen: printProgressOpen,
+        terminal: true,
+      });
+      void Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
+    }
+  }, [loadRecentPrintJobs, onBatchesChanged, printJobId, printProgressOpen, progressStateSetters, realtime.job]);
 
   useEffect(() => {
     if (printing) return;
@@ -68,7 +86,7 @@ export function useActivePrintJobPolling({
       if (cancelled || inFlight) return false;
       if (!canPollVisibleDocument()) return false;
       if (Date.now() - startedAt > pollingPolicy.activePrintJobTimeoutMs) {
-        setPrintProgressNotice("Live status polling paused. The print run remains visible; refresh status when you need the latest connector evidence.");
+        setPrintProgressNotice("Realtime status remains active. Slow fallback polling is paused for this long-running print run.");
         updateActivePrintSession({
           active: true,
           jobId: polledJobId,
@@ -80,14 +98,13 @@ export function useActivePrintJobPolling({
       inFlight = true;
       try {
         const response = await apiClient.getPrintJobStatus(polledJobId, {
-          force: true,
           minIntervalMs: pollingPolicy.activePrintJobStatusMinRefreshMs,
         });
         if (cancelled) return false;
         if (!response.success || !response.data) {
           if (response.status === 429 || String(response.code || "").toUpperCase() === "RATE_LIMITED") {
             const seconds = Math.max(1, Math.ceil(Number(response.retryAfterSec || 10)));
-            nextDelayMs = seconds * 1000;
+            nextDelayMs = Math.max(seconds * 1000, pollingPolicy.activePrintJobMs);
             setPrintProgressNotice(`Status refresh paused for ${seconds} seconds. The print run remains active.`);
           }
           return false;

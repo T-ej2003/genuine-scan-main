@@ -151,9 +151,11 @@ type PrintJobDialogProps = {
   } | null;
   printBatch: BatchRow | null;
   selectedPrinterNotice: PrinterSelectionNotice;
+  connectorVersionLabel?: string | null;
   printQuantity: string;
   onPrintQuantityChange: (value: string) => void;
   readyToPrintCount: number;
+  maxRunQuantity: number;
   registeredPrinters: RegisteredPrinterRow[];
   onRefreshPrinters: () => void;
   selectedPrinterProfileId: string;
@@ -298,9 +300,11 @@ export function BatchPrintJobDialog({
   manufacturerRecoveryContext = null,
   printBatch,
   selectedPrinterNotice,
+  connectorVersionLabel,
   printQuantity,
   onPrintQuantityChange,
   readyToPrintCount,
+  maxRunQuantity,
   registeredPrinters,
   onRefreshPrinters,
   selectedPrinterProfileId,
@@ -512,6 +516,10 @@ export function BatchPrintJobDialog({
                     <div className="font-medium text-foreground">Secure verification</div>
                     <div>{selectedPrinterCanPrint ? "Fresh" : "Refresh printer helper before starting this print run."}</div>
                   </div>
+                  <div>
+                    <div className="font-medium text-foreground">Connector version</div>
+                    <div>{connectorVersionLabel || "Not reported"}</div>
+                  </div>
                   {manufacturerRecoveryContext ? (
                     <div className="sm:col-span-2">
                       <div className="font-medium text-foreground">Recovery status</div>
@@ -559,11 +567,15 @@ export function BatchPrintJobDialog({
                 data-testid="print-job-quantity-input"
                 type="number"
                 min={1}
+                max={maxRunQuantity || undefined}
                 value={printQuantity}
                 onChange={(event) => onPrintQuantityChange(event.target.value)}
                 placeholder="Enter quantity"
               />
-              <div className="text-xs text-muted-foreground">QR labels ready to print: {readyToPrintCount}</div>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <div>QR labels ready to print: {readyToPrintCount.toLocaleString()}</div>
+                <div>Maximum per run: {maxRunQuantity.toLocaleString()} labels</div>
+              </div>
               {batchLifecycleBlocked ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
                   {batchLifecycleBlockReason}
@@ -741,7 +753,7 @@ export function BatchPrintJobDialog({
                         ? createUiActionState(
                             "disabled",
                             isManufacturerMode
-                              ? "Refresh printer helper before starting this print run."
+                              ? selectedPrinterNotice.detail || selectedPrinterNotice.summary || "Refresh printer helper before starting this print run."
                               : selectedPrinterNotice.detail || "This printer needs attention before it can print."
                           )
                         : createUiActionState("enabled")

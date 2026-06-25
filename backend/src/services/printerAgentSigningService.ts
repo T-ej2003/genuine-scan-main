@@ -64,6 +64,53 @@ export const buildPrinterAgentActionPayload = (input: {
     input.issuedAt,
   ].join("|");
 
+export const buildPrinterAgentSessionPayload = (input: {
+  messageType:
+    | "hello"
+    | "heartbeat"
+    | "chunk_ack"
+    | "chunk_spooled"
+    | "chunk_confirmed"
+    | "chunk_failed"
+    | "label_spooled"
+    | "label_confirmed"
+    | "label_failed"
+    | "test_ack"
+    | "test_confirmed"
+    | "test_failed";
+  registrationId?: string | null;
+  agentId: string;
+  deviceFingerprint: string;
+  selectedPrinterId: string;
+  connectorVersion?: string | null;
+  sessionId?: string | null;
+  chunkId?: string | null;
+  printJobId?: string | null;
+  printItemId?: string | null;
+  testJobId?: string | null;
+  messageSeq?: number | null;
+  nonce: string;
+  issuedAt: string;
+}) =>
+  [
+    "v1",
+    "session",
+    input.messageType,
+    input.registrationId || "",
+    input.agentId,
+    input.deviceFingerprint,
+    input.selectedPrinterId,
+    input.connectorVersion || "",
+    input.sessionId || "",
+    input.chunkId || "",
+    input.printJobId || "",
+    input.printItemId || "",
+    input.testJobId || "",
+    input.messageSeq == null ? "" : String(input.messageSeq),
+    input.nonce,
+    input.issuedAt,
+  ].join("|");
+
 export const signPrinterAgentPayload = (privateKeyPem: string, payload: string) => {
   const key = createPrivateKey(normalizePem(privateKeyPem));
   const data = Buffer.from(payload, "utf8");

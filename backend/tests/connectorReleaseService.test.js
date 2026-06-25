@@ -58,8 +58,11 @@ const run = async () => {
   const latestManifestRelease = manifest.releases.find((release) => release.version === manifest.latestVersion);
   assert(latestManifestRelease, "Manifest latestVersion should reference a published release");
   const latestSignedWindows = latestManifestRelease.platforms.windows || null;
-  const latestManifestWindows = latestSignedWindows || latestManifestRelease.platforms.windowsUnsignedTest;
-  assert(latestManifestWindows, "Latest manifest release should include a signed Windows package or internal validation package");
+  const latestManifestWindows = latestSignedWindows || latestManifestRelease.platforms.windowsUnsignedTest || null;
+  const latestPackagedRelease = manifest.releases.find((release) => release.platforms.windows || release.platforms.windowsUnsignedTest);
+  const latestPackagedWindows =
+    latestPackagedRelease && (latestPackagedRelease.platforms.windows || latestPackagedRelease.platforms.windowsUnsignedTest);
+  assert(latestPackagedRelease && latestPackagedWindows, "At least one installable Windows connector release should remain available");
   const latest = getLatestConnectorRelease("https://mscqr.example.com/api");
   const latestInternal = getLatestConnectorRelease("https://mscqr.example.com/api", { includeInternalArtifacts: true });
   const latestFromWebOrigin = getLatestConnectorRelease("https://mscqr.example.com");
@@ -104,7 +107,7 @@ const run = async () => {
     assert(latest.release.platforms.windows.signedAt === latestManifestWindows.signedAt, "Signed Windows releases should report the signed timestamp");
     assert(latest.release.platforms.windows.installerKind === "exe", "Signed Windows release should be exposed as an EXE installer");
     assert(latest.release.platforms.windows.legalDocumentsIncluded.length >= 6, "Signed Windows release should include legal docs metadata");
-  } else {
+  } else if (latestManifestWindows) {
     assert(latest.release.platforms.windows === null, "Normal users should not receive unsigned ZIP as the Windows download");
     assert(latest.release.platforms.windowsUnsignedTest === null, "Normal users should not receive internal ZIP metadata");
     assert(
@@ -113,30 +116,41 @@ const run = async () => {
     );
     assert(latestInternal.release.platforms.windowsUnsignedTest.trustLevel === "internal-test", "Internal view exposes unsigned ZIP as internal-test");
     assert(latestInternal.release.platforms.windowsUnsignedTest.internalOnly === true, "Internal ZIP should be marked internal-only");
+  } else {
+    assert(latest.release.productionSignedAvailable === false, "Pending latest release should report no signed Windows connector yet");
+    assert(latest.release.platforms.windows === null, "Pending latest release should not expose stale Windows packages");
+    assert(latest.release.platforms.windowsUnsignedTest === null, "Pending latest release should not expose internal Windows packages");
+    assert(latestInternal.release.platforms.windowsUnsignedTest === null, "Pending latest release should not invent an internal package");
+    assert(
+      /Signed Windows connector is pending release/i.test(latest.release.productionSignedMessage),
+      "Pending latest release should return a safe signed-artifact message"
+    );
   }
-  assert(
-    (latest.release.platforms.windows || latestInternal.release.platforms.windowsUnsignedTest).filename === latestManifestWindows.filename,
-    "Windows package metadata should come from the latest manifest release"
-  );
-  const exposedWindows = latest.release.platforms.windows || latestInternal.release.platforms.windowsUnsignedTest;
-  assert(
-    exposedWindows.protocolVersion === LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-    "Windows download metadata should advertise the backend-required protocol"
-  );
-  assert(
-    exposedWindows.buildVersion === sourceVersion,
-    "Windows download metadata should advertise the latest connector build version"
-  );
-  assert(
-    exposedWindows.transportDiagnosticsVersion === "transport-diagnostics-v1",
-    "Windows download metadata should advertise transport diagnostics v1"
-  );
-  assert(
-    exposedWindows.capabilities.supportsTransportDiagnostics === true &&
-      exposedWindows.capabilities.supportsPrinterQueueSnapshot === true &&
-      exposedWindows.capabilities.supportsRawTcpConnectTest === true,
-    "Windows download metadata should advertise transport-aware diagnostics capabilities"
-  );
+  if (latestManifestWindows) {
+    assert(
+      (latest.release.platforms.windows || latestInternal.release.platforms.windowsUnsignedTest).filename === latestManifestWindows.filename,
+      "Windows package metadata should come from the latest manifest release"
+    );
+    const exposedWindows = latest.release.platforms.windows || latestInternal.release.platforms.windowsUnsignedTest;
+    assert(
+      exposedWindows.protocolVersion === LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+      "Windows download metadata should advertise the backend-required protocol"
+    );
+    assert(
+      exposedWindows.buildVersion === sourceVersion,
+      "Windows download metadata should advertise the latest connector build version"
+    );
+    assert(
+      exposedWindows.transportDiagnosticsVersion === "transport-diagnostics-v1",
+      "Windows download metadata should advertise transport diagnostics v1"
+    );
+    assert(
+      exposedWindows.capabilities.supportsTransportDiagnostics === true &&
+        exposedWindows.capabilities.supportsPrinterQueueSnapshot === true &&
+        exposedWindows.capabilities.supportsRawTcpConnectTest === true,
+      "Windows download metadata should advertise transport-aware diagnostics capabilities"
+    );
+  }
   if (latestSignedWindows) {
     assert(
       latest.release.platforms.windows.downloadUrl ===
@@ -164,25 +178,25 @@ const run = async () => {
   assert(webOriginWindowsOk, "Windows download URL should still resolve from the web origin");
 
   const windowsPackage = resolveConnectorDownload(
-    manifest.latestVersion,
-    latestSignedWindows ? "windows" : "windowsUnsignedTest",
-    { allowInternalArtifacts: !latestSignedWindows }
+    latestPackagedRelease.version,
+    latestPackagedRelease.platforms.windows ? "windows" : "windowsUnsignedTest",
+    { allowInternalArtifacts: !latestPackagedRelease.platforms.windows }
   );
   assert(
-    windowsPackage.filename === latestManifestWindows.filename,
-    "Windows package should resolve to the latest manifest artifact"
+    windowsPackage.filename === latestPackagedWindows.filename,
+    "Windows package should resolve to the latest installable manifest artifact"
   );
-  assert(windowsPackage.contentType === latestManifestWindows.contentType, "Windows package content type should come from the manifest");
+  assert(windowsPackage.contentType === latestPackagedWindows.contentType, "Windows package content type should come from the manifest");
   assert(
-    windowsPackage.sha256 === latestManifestWindows.sha256,
+    windowsPackage.sha256 === latestPackagedWindows.sha256,
     "Windows package checksum should match the published artifact"
   );
-  assert(windowsPackage.bytes === latestManifestWindows.bytes, "Windows package bytes should match the published artifact");
-  await assertWindowsDownloadIsInstallable(windowsPackage, latestManifestWindows);
-  if (!latestSignedWindows) {
+  assert(windowsPackage.bytes === latestPackagedWindows.bytes, "Windows package bytes should match the published artifact");
+  await assertWindowsDownloadIsInstallable(windowsPackage, latestPackagedWindows);
+  if (!latestPackagedRelease.platforms.windows) {
     let blocked = false;
     try {
-      resolveConnectorDownload(manifest.latestVersion, "windowsUnsignedTest");
+      resolveConnectorDownload(latestPackagedRelease.version, "windowsUnsignedTest");
     } catch {
       blocked = true;
     }

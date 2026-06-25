@@ -125,6 +125,11 @@ export type PrinterConnectionStatus = {
   selectedPrinterName?: string | null;
   deviceName?: string | null;
   agentVersion?: string | null;
+  buildVersion?: string | null;
+  persistentSessionRequired?: boolean;
+  persistentSessionCapable?: boolean;
+  persistentSessionMinimumBuildVersion?: string | null;
+  persistentSessionUpdateRequired?: boolean;
   capabilitySummary?: {
     transports: string[];
     protocols: string[];

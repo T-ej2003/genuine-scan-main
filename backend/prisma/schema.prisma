@@ -809,6 +809,7 @@ model PrintJob {
   qrCodes QRCode[]
   renderTokens PrintRenderToken[]
   printSession PrintSession?
+  chunks PrintJobChunk[]
   reissueRequests PrintReissueRequest[] @relation("OriginalPrintJobReissueRequests")
   replacementForReissueRequest PrintReissueRequest? @relation("ReplacementPrintJobReissueRequest")
 
@@ -934,6 +935,7 @@ model PrintSession {
   completedAt DateTime?
 
   items PrintItem[]
+  chunks PrintJobChunk[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -942,6 +944,91 @@ model PrintSession {
   @@index([batchId, status])
   @@index([printerRegistrationId])
   @@index([printerId])
+}
+
+model PrinterAgentSession {
+  id String @id @default(uuid())
+
+  connectionId String @unique
+  registrationId String
+  registration PrinterRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  printerProfileId String?
+  agentId String
+  deviceFingerprint String
+  publicKeyFingerprint String
+  selectedPrinterId String
+  selectedPrinterName String?
+
+  connectionState String @default("CONNECTED")
+  trustMode String @default("SIGNED_ATTESTATION")
+  connectorVersion String?
+  printerHealth Json?
+  activePrintJobId String?
+
+  connectedAt DateTime @default(now())
+  disconnectedAt DateTime?
+  lastSeenAt DateTime @default(now())
+  lastSignedHeartbeatAt DateTime @default(now())
+  expiresAt DateTime?
+  revokedAt DateTime?
+  closeReason String?
+  metadata Json?
+
+  chunks PrintJobChunk[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([registrationId, connectionState, lastSeenAt])
+  @@index([agentId, deviceFingerprint])
+  @@index([selectedPrinterId, connectionState])
+  @@index([activePrintJobId])
+  @@index([expiresAt])
+}
+
+model PrintJobChunk {
+  id String @id @default(uuid())
+
+  printJobId String
+  printJob PrintJob @relation(fields: [printJobId], references: [id], onDelete: Cascade)
+
+  printSessionId String
+  printSession PrintSession @relation(fields: [printSessionId], references: [id], onDelete: Cascade)
+
+  agentSessionId String?
+  agentSession PrinterAgentSession? @relation(fields: [agentSessionId], references: [id], onDelete: SetNull)
+
+  registrationId String
+  printerId String?
+  idempotencyKey String @unique
+  status String @default("CREATED")
+
+  startSequence Int
+  endSequence Int
+  itemCount Int
+  acknowledgedCount Int @default(0)
+  confirmedCount Int @default(0)
+  failedCount Int @default(0)
+  itemIds Json
+  rangeStartCode String?
+  rangeEndCode String?
+
+  assignedAt DateTime?
+  sentAt DateTime?
+  acknowledgedAt DateTime?
+  confirmedAt DateTime?
+  failedAt DateTime?
+  failureReason String?
+  lastMessageSeq Int @default(0)
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([printJobId, status, createdAt])
+  @@index([printSessionId, status, startSequence])
+  @@index([agentSessionId, status])
+  @@index([registrationId, status, createdAt])
 }
 
 model PrintItem {
@@ -1051,6 +1138,7 @@ model PrinterRegistration {
   lastSeenAt DateTime?
 
   attestations PrinterAttestation[]
+  agentSessions PrinterAgentSession[]
   printSessions PrintSession[]
   printers Printer[]
 

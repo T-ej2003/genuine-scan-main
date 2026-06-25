@@ -1,10 +1,11 @@
 import os from "os";
 import { createHash } from "crypto";
+import WebSocket from "ws";
 
 import { listLocalPrinters, resolveSelectedPrinter, waitForLocalPrintJobCompletion } from "./cups";
 import { printLabel } from "./render";
 import { loadAgentState } from "./state";
-import { buildPrinterAgentActionPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
+import { buildPrinterAgentActionPayload, buildPrinterAgentSessionPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
 import {
   LOCAL_AGENT_CAPABILITIES,
   LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
@@ -35,6 +36,9 @@ const DIRECT_PRINT_ACTIVE_WAKE_RETRY_MS = Math.max(
   750,
   Math.min(5_000, Number(process.env.PRINT_AGENT_DIRECT_ACTIVE_WAKE_RETRY_MS || 1_000) || 1_000)
 );
+const PRINT_AGENT_SESSION_MODE = String(process.env.PRINT_AGENT_SESSION_MODE || "websocket").trim().toLowerCase();
+const PRINT_AGENT_SESSION_HEARTBEAT_MS = Math.max(10_000, Number(process.env.PRINT_AGENT_SESSION_HEARTBEAT_MS || 15_000) || 15_000);
+const PRINT_AGENT_SESSION_RECONNECT_MAX_MS = Math.max(15_000, Number(process.env.PRINT_AGENT_SESSION_RECONNECT_MAX_MS || 60_000) || 60_000);
 const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -158,6 +162,124 @@ const postBackend = async <T>(path: string, body: Record<string, unknown>) => {
     throw error;
   }
   return payload as T;
+};
+
+type SessionProgressType =
+  | "heartbeat"
+  | "chunk_ack"
+  | "chunk_spooled"
+  | "chunk_confirmed"
+  | "chunk_failed"
+  | "label_spooled"
+  | "label_confirmed"
+  | "label_failed"
+  | "test_ack"
+  | "test_confirmed"
+  | "test_failed";
+
+type SessionContext = {
+  sessionId: string;
+  registrationId: string;
+  selectedPrinterId: string;
+  connectorVersion: string;
+  messageSeq: number;
+};
+
+const resolveSessionUrl = (backendUrl: string) => {
+  const url = new URL(`${backendUrl.replace(/\/+$/, "")}/api/printer-agent/session`);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+};
+
+const buildSignedSessionMessage = async (params: {
+  type: "hello" | SessionProgressType;
+  session?: SessionContext | null;
+  selectedPrinterId: string;
+  selectedPrinterName?: string | null;
+  chunkId?: string | null;
+  printJobId?: string | null;
+  printItemId?: string | null;
+  testJobId?: string | null;
+  deviceJobRef?: string | null;
+  payloadHash?: string | null;
+  bytesWritten?: number | null;
+  printPath?: string | null;
+  labelLanguage?: string | null;
+  payloadType?: string | null;
+  error?: string | null;
+  printerHealth?: Record<string, unknown> | null;
+}) => {
+  const state = await loadAgentState();
+  const issuedAt = new Date().toISOString();
+  const nonce = randomOpaqueToken(12);
+  const messageSeq = params.type === "hello" ? null : (params.session!.messageSeq += 1);
+  const connectorVersion = AGENT_BUILD_VERSION || AGENT_VERSION;
+  const signedPayload = buildPrinterAgentSessionPayload({
+    messageType: params.type,
+    registrationId: params.session?.registrationId || null,
+    agentId: state.agentId,
+    deviceFingerprint: state.deviceFingerprint,
+    selectedPrinterId: params.selectedPrinterId,
+    connectorVersion,
+    sessionId: params.session?.sessionId || null,
+    chunkId: params.chunkId || null,
+    printJobId: params.printJobId || null,
+    printItemId: params.printItemId || null,
+    testJobId: params.testJobId || null,
+    messageSeq,
+    nonce,
+    issuedAt,
+  });
+  const common = {
+    type: params.type,
+    agentId: state.agentId,
+    deviceFingerprint: state.deviceFingerprint,
+    selectedPrinterId: params.selectedPrinterId,
+    connectorVersion,
+    nonce,
+    issuedAt,
+    signature: signPrinterAgentPayload(state.privateKeyPem, signedPayload),
+  };
+  if (params.type === "hello") {
+    return {
+      ...common,
+      registrationId: null,
+      selectedPrinterName: params.selectedPrinterName || null,
+      printerHealth: params.printerHealth || null,
+    };
+  }
+  return {
+    ...common,
+    sessionId: params.session!.sessionId,
+    chunkId: params.chunkId || null,
+    printJobId: params.printJobId || null,
+    printItemId: params.printItemId || null,
+    testJobId: params.testJobId || null,
+    messageSeq,
+    ...(params.deviceJobRef ? { deviceJobRef: params.deviceJobRef } : {}),
+    ...(params.payloadHash ? { payloadHash: params.payloadHash } : {}),
+    ...(params.bytesWritten ? { bytesWritten: Math.floor(params.bytesWritten) } : {}),
+    ...(params.printPath ? { printPath: params.printPath } : {}),
+    ...(params.labelLanguage ? { labelLanguage: params.labelLanguage } : {}),
+    ...(params.payloadType ? { payloadType: params.payloadType } : {}),
+    ...(params.error ? { error: params.error } : {}),
+    ...(params.printerHealth ? { printerHealth: params.printerHealth } : {}),
+  };
+};
+
+const sendSessionMessage = async (
+  ws: WebSocket,
+  session: SessionContext,
+  selectedPrinterId: string,
+  params: Omit<Parameters<typeof buildSignedSessionMessage>[0], "session" | "selectedPrinterId">
+) => {
+  if (ws.readyState !== WebSocket.OPEN) throw new Error("Printer session is not connected.");
+  const body = await buildSignedSessionMessage({
+    ...params,
+    session,
+    selectedPrinterId,
+  });
+  ws.send(JSON.stringify(body));
 };
 
 const optionalString = (value: unknown) => {
@@ -533,6 +655,223 @@ const runLocalDiagnosticTestJob = async (payload: any, printerId: string) => {
   }
 };
 
+const runPersistentDiagnosticTestJob = async (
+  ws: WebSocket,
+  session: SessionContext,
+  payload: any,
+  selectedPrinterId: string
+) => {
+  const testJobId = String(payload?.testJobId || "").trim();
+  const payloadContent = typeof payload?.payloadContent === "string" ? payload.payloadContent : "";
+  const payloadHash = String(payload?.payloadHash || "").trim();
+  if (!testJobId || !payloadContent || !payloadHash) {
+    throw Object.assign(new Error("Persistent diagnostic test is missing its approved payload."), {
+      errorCode: "test_claim_payload_missing",
+    });
+  }
+  if (sha256Hex(payloadContent) !== payloadHash) {
+    throw Object.assign(new Error("Persistent diagnostic test payload hash mismatch."), {
+      errorCode: "test_payload_hash_mismatch",
+    });
+  }
+  const payloadDiagnostics = buildPrintPayloadDiagnostics({
+    payloadType: payload.payloadType || "ZPL",
+    labelLanguage: payload.commandLanguage || "ZPL",
+    payloadContent,
+  });
+  try {
+    const result = await printLabel({
+      printerId: selectedPrinterId,
+      printerName: String(payload.printer?.name || payload.selectedPrinterName || selectedPrinterId).trim(),
+      printerLanguages: ["ZPL"],
+      calibrationProfile: null,
+      request: {
+        code: String(payload.code || "MSCQR-TEST").trim(),
+        scanUrl: String(payload.scanUrl || "MSCQR-DIAGNOSTIC-TEST").trim(),
+        payloadType: payload.payloadType || "ZPL",
+        payloadContent,
+        payloadHash,
+        previewLabel: payload.previewLabel || "MSCQR TEST",
+        copies: 1,
+        printPath: "label-language",
+        labelLanguage: payload.commandLanguage || "ZPL",
+      },
+    });
+    await sendSessionMessage(ws, session, selectedPrinterId, {
+      type: "test_ack",
+      testJobId,
+      payloadHash,
+      payloadType: payload.payloadType || "ZPL",
+      printPath: result.printPath,
+      labelLanguage: result.labelLanguage,
+      deviceJobRef: result.jobRef,
+      bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
+    });
+    await sendSessionMessage(ws, session, selectedPrinterId, {
+      type: "test_confirmed",
+      testJobId,
+      payloadHash,
+      payloadType: payload.payloadType || "ZPL",
+      printPath: result.printPath,
+      labelLanguage: result.labelLanguage,
+      deviceJobRef: result.jobRef,
+      bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
+    });
+    console.info("persistent printer session test label confirmed", {
+      sessionId: session.sessionId,
+      testJobId,
+      selectedPrinterId,
+      printPath: result.printPath,
+    });
+  } catch (error: any) {
+    await sendSessionMessage(ws, session, selectedPrinterId, {
+      type: "test_failed",
+      testJobId,
+      error: error?.message || "Persistent diagnostic test label failed.",
+    }).catch(() => undefined);
+    throw error;
+  }
+};
+
+const runPersistentPrintChunk = async (
+  ws: WebSocket,
+  session: SessionContext,
+  payload: any,
+  selectedPrinterId: string
+) => {
+  const chunkId = String(payload?.chunkId || "").trim();
+  const printJobId = String(payload?.printJobId || "").trim();
+  const labels = Array.isArray(payload?.labels) ? payload.labels : [];
+  if (!chunkId || !printJobId || !labels.length) {
+    throw Object.assign(new Error("Persistent print chunk is missing required identity or labels."), {
+      errorCode: "chunk_payload_missing",
+    });
+  }
+  const printer = payload.printer && typeof payload.printer === "object" ? payload.printer : {};
+  const printerName = String(printer.name || printer.selectedPrinterName || selectedPrinterId).trim();
+  const calibrationProfile =
+    payload.calibrationProfile && typeof payload.calibrationProfile === "object"
+      ? (payload.calibrationProfile as Record<string, unknown>)
+      : null;
+
+  await sendSessionMessage(ws, session, selectedPrinterId, {
+    type: "chunk_ack",
+    chunkId,
+    printJobId,
+  });
+
+  for (const label of labels) {
+    const printItemId = String(label?.printItemId || "").trim();
+    const code = String(label?.code || "").trim();
+    const scanUrl = String(label?.scanUrl || "").trim();
+    const payloadContent = typeof label?.payloadContent === "string" ? label.payloadContent : "";
+    const payloadHash = String(label?.payloadHash || "").trim();
+    if (!printItemId || !code || !scanUrl || !payloadContent || !payloadHash) {
+      throw Object.assign(new Error("Persistent chunk label is missing required approved print fields."), {
+        errorCode: "chunk_label_payload_missing",
+      });
+    }
+    if (sha256Hex(payloadContent) !== payloadHash) {
+      throw Object.assign(new Error("Persistent chunk label approved payload hash mismatch."), {
+        errorCode: "chunk_label_payload_hash_mismatch",
+      });
+    }
+
+    const payloadDiagnostics = buildPrintPayloadDiagnostics({
+      payloadType: label.payloadType || null,
+      labelLanguage: label.commandLanguage || null,
+      payloadContent,
+    });
+    console.info("persistent printer session spool start", {
+      sessionId: session.sessionId,
+      chunkId,
+      printJobId,
+      printItemId,
+      payloadDiagnostics,
+    });
+    try {
+      const result = await printLabel({
+        printerId: selectedPrinterId,
+        printerName,
+        printerLanguages: Array.isArray(printer.languages) ? printer.languages : [],
+        calibrationProfile,
+        request: {
+          code,
+          scanUrl,
+          payloadType: label.payloadType || null,
+          payloadContent,
+          payloadHash,
+          previewLabel: label.previewLabel || null,
+          copies: 1,
+          printPath: label.printPath || "auto",
+          labelLanguage: label.commandLanguage || null,
+        },
+      });
+      await sendSessionMessage(ws, session, selectedPrinterId, {
+        type: "label_spooled",
+        chunkId,
+        printJobId,
+        printItemId,
+        payloadHash,
+        printPath: result.printPath,
+        labelLanguage: result.labelLanguage,
+        deviceJobRef: result.jobRef,
+        bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
+      });
+
+      const completion = await waitForLocalPrintJobCompletion({
+        printerId: selectedPrinterId,
+        jobRef: result.jobRef,
+      });
+      if ((completion as any)?.confirmationUnavailable || (completion as any)?.confirmed === false) {
+        throw Object.assign(new Error("Local queue did not provide terminal print confirmation."), {
+          errorCode: "queue_confirmation_unavailable",
+        });
+      }
+
+      await sendSessionMessage(ws, session, selectedPrinterId, {
+        type: "label_confirmed",
+        chunkId,
+        printJobId,
+        printItemId,
+        payloadHash,
+        printPath: result.printPath,
+        labelLanguage: result.labelLanguage,
+        deviceJobRef: result.jobRef,
+        bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
+      });
+    } catch (error: any) {
+      await sendSessionMessage(ws, session, selectedPrinterId, {
+        type: "label_failed",
+        chunkId,
+        printJobId,
+        printItemId,
+        payloadHash,
+        error: error?.message || "Persistent print label failed.",
+      }).catch(() => undefined);
+      await sendSessionMessage(ws, session, selectedPrinterId, {
+        type: "chunk_failed",
+        chunkId,
+        printJobId,
+        error: error?.message || "Persistent print chunk failed.",
+      }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  await sendSessionMessage(ws, session, selectedPrinterId, {
+    type: "chunk_confirmed",
+    chunkId,
+    printJobId,
+  });
+  console.info("persistent printer session chunk confirmed", {
+    sessionId: session.sessionId,
+    chunkId,
+    printJobId,
+    labels: labels.length,
+  });
+};
+
 type DirectPrintCycleResult = {
   retryAfterMs: number;
   noWork: boolean;
@@ -850,8 +1189,198 @@ export const requestDirectPrintWake = (reason = "user_print_job_created") => {
   };
 };
 
+const startPersistentPrintSessionWorker = () => {
+  let stopped = false;
+  let activeSocket: WebSocket | null = null;
+  let reconnectAttempt = 0;
+  let sleepWake: (() => void) | null = null;
+
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => {
+      let wake = () => undefined;
+      const timer = setTimeout(() => {
+        if (sleepWake === wake) sleepWake = null;
+        resolve();
+      }, ms);
+      wake = () => {
+        clearTimeout(timer);
+        if (sleepWake === wake) sleepWake = null;
+        resolve();
+      };
+      sleepWake = wake;
+    });
+
+  activeDirectPrintWorkerWake = () => {
+    sleepWake?.();
+  };
+
+  const resolveSelection = async () => {
+    const state = await loadAgentState();
+    const inventory = await listLocalPrinters();
+    const selection = resolveSelectedPrinter(inventory.printers, state.selectedPrinterId);
+    const selectedPrinterId = String(selection.printerId || "").trim();
+    if (!selectedPrinterId || !state.selectedPrinterId) return null;
+    return {
+      state,
+      inventory,
+      selection,
+      selectedPrinterId,
+      selectedPrinterName: optionalString(selection.printerName) || selectedPrinterId,
+    };
+  };
+
+  const loop = async () => {
+    while (!stopped) {
+      const backendUrl = await resolveBackendUrl();
+      const selection = backendUrl ? await resolveSelection().catch(() => null) : null;
+      if (!backendUrl || !selection) {
+        await sleep(DIRECT_PRINT_IDLE_MIN_BACKOFF_MS);
+        continue;
+      }
+
+      let heartbeatTimer: NodeJS.Timeout | null = null;
+      let session: SessionContext | null = null;
+      let processing = false;
+      const ws = new WebSocket(resolveSessionUrl(backendUrl));
+      activeSocket = ws;
+
+      const closeSession = () => {
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+        if (activeSocket === ws) activeSocket = null;
+      };
+
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          closeSession();
+          resolve();
+        };
+
+        ws.on("open", () => {
+          reconnectAttempt = 0;
+          void buildSignedSessionMessage({
+            type: "hello",
+            selectedPrinterId: selection.selectedPrinterId,
+            selectedPrinterName: selection.selectedPrinterName,
+            printerHealth: {
+              deviceName: os.hostname(),
+              agentVersion: AGENT_VERSION,
+              buildVersion: AGENT_BUILD_VERSION,
+              protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+              selectedPrinterId: selection.selectedPrinterId,
+              selectedPrinterName: selection.selectedPrinterName,
+              printers: selection.inventory.printers.length,
+            },
+          }).then((hello) => ws.send(JSON.stringify(hello))).catch((error) => {
+            console.error("persistent printer session hello failed", { error: error?.message || error });
+            ws.close();
+          });
+        });
+
+        ws.on("message", (raw: any) => {
+          void (async () => {
+            let payload: any;
+            try {
+              payload = JSON.parse(String(raw));
+            } catch {
+              return;
+            }
+            if (payload?.type === "session_ready") {
+              session = {
+                sessionId: String(payload.sessionId || "").trim(),
+                registrationId: String(payload.registrationId || "").trim(),
+                selectedPrinterId: selection.selectedPrinterId,
+                connectorVersion: AGENT_BUILD_VERSION || AGENT_VERSION,
+                messageSeq: 0,
+              };
+              if (!session.sessionId || !session.registrationId) {
+                ws.close();
+                return;
+              }
+              heartbeatTimer = setInterval(() => {
+                if (!session || ws.readyState !== WebSocket.OPEN) return;
+                void sendSessionMessage(ws, session, selection.selectedPrinterId, {
+                  type: "heartbeat",
+                  printerHealth: {
+                    deviceName: os.hostname(),
+                    selectedPrinterId: selection.selectedPrinterId,
+                    selectedPrinterName: selection.selectedPrinterName,
+                  },
+                }).catch(() => undefined);
+              }, PRINT_AGENT_SESSION_HEARTBEAT_MS);
+              console.info("persistent printer session connected", {
+                sessionId: session.sessionId,
+                registrationId: session.registrationId,
+                selectedPrinterId: selection.selectedPrinterId,
+              });
+              return;
+            }
+            if (!session || processing) return;
+            if (payload?.type === "test_label") {
+              processing = true;
+              try {
+                await runPersistentDiagnosticTestJob(ws, session, payload, selection.selectedPrinterId);
+              } catch (error: any) {
+                console.error("persistent printer session test failed", { error: error?.message || error });
+              } finally {
+                processing = false;
+              }
+              return;
+            }
+            if (payload?.type === "print_chunk") {
+              processing = true;
+              try {
+                await runPersistentPrintChunk(ws, session, payload, selection.selectedPrinterId);
+              } catch (error: any) {
+                console.error("persistent printer session chunk failed", {
+                  chunkId: String(payload?.chunkId || "").trim() || null,
+                  printJobId: String(payload?.printJobId || "").trim() || null,
+                  error: error?.message || error,
+                  errorCode: error?.errorCode || null,
+                });
+              } finally {
+                processing = false;
+              }
+            }
+          })();
+        });
+
+        ws.on("close", finish);
+        ws.on("error", (error: any) => {
+          console.error("persistent printer session socket error", { error: (error as any)?.message || error });
+          finish();
+        });
+      });
+
+      if (stopped) break;
+      reconnectAttempt += 1;
+      const backoff = Math.min(
+        PRINT_AGENT_SESSION_RECONNECT_MAX_MS,
+        DIRECT_PRINT_POLL_MS * 2 ** Math.min(5, Math.max(0, reconnectAttempt - 1))
+      );
+      await sleep(addRetryJitterMs(backoff));
+    }
+  };
+
+  void loop();
+
+  activeDirectPrintWorkerStop = () => {
+    stopped = true;
+    sleepWake?.();
+    activeSocket?.close();
+    activeDirectPrintWorkerWake = null;
+    activeDirectPrintWorkerStop = null;
+  };
+  return activeDirectPrintWorkerStop;
+};
+
 export const startDirectPrintWorker = () => {
   if (activeDirectPrintWorkerStop) return activeDirectPrintWorkerStop;
+  if (PRINT_AGENT_SESSION_MODE !== "rest" && PRINT_AGENT_SESSION_MODE !== "polling") {
+    return startPersistentPrintSessionWorker();
+  }
 
   let stopped = false;
   let connectivityFailureCount = 0;

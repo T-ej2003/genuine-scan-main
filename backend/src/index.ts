@@ -16,6 +16,7 @@ import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintSer
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
 import { startPrintConfirmationReconciler } from "./services/printConfirmationReconciler";
 import { startAnalyticsRollupWorker } from "./services/analyticsRollupService";
+import { attachPrinterAgentSessionWebSocket } from "./services/printerAgentSessionSocket";
 import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
 import { hasConfiguredSecret } from "./utils/secretConfig";
@@ -326,6 +327,7 @@ const startServer = async () => {
     logger.info(`📚 API available at http://localhost:${PORT}/api`);
     logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
     logger.info(`⏱️ Latency summary at http://localhost:${PORT}/health/latency`);
+    attachPrinterAgentSessionWebSocket(server!);
     if (runBackgroundWorkers) {
       startAuditLogOutboxWorker();
       startSecurityEventOutboxWorker();

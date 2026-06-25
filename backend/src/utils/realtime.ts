@@ -1,6 +1,6 @@
 import type { Response } from "express";
 
-type RealtimeChannel = "dashboard" | "notifications" | "printer";
+type RealtimeChannel = "dashboard" | "notifications" | "printer" | "printJob";
 
 export const writeSseRealtimeEnvelope = <TPayload>(
   res: Response,

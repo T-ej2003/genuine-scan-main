@@ -19,6 +19,7 @@ const connectorCapabilitiesSchema = z
     supportsSpoolJobStatus: z.boolean().optional(),
     supportsTransportDiagnostics: z.boolean().optional(),
     supportsTestLabel: z.boolean().optional(),
+    supportsPersistentPrintSession: z.boolean().optional(),
   })
   .passthrough();
 

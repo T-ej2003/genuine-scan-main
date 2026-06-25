@@ -19,6 +19,11 @@ type PrinterStatusLike = {
   selectedPrinterId?: string | null;
   printerId?: string | null;
   agentVersion?: string | null;
+  buildVersion?: string | null;
+  persistentSessionRequired?: boolean | null;
+  persistentSessionCapable?: boolean | null;
+  persistentSessionMinimumBuildVersion?: string | null;
+  persistentSessionUpdateRequired?: boolean | null;
 };
 
 export type SecurePrintReadiness = {
@@ -27,6 +32,7 @@ export type SecurePrintReadiness = {
     | "READY"
     | "VERIFICATION_EXPIRED"
     | "HELPER_OFFLINE"
+    | "CONNECTOR_UPDATE_REQUIRED"
     | "SECURE_SESSION_MISSING"
     | "PRINTER_NOT_ELIGIBLE";
   badgeLabel: "Ready" | "Needs check" | "Blocked";
@@ -71,6 +77,21 @@ export const buildSecurePrintReadiness = (status?: PrinterStatusLike | null): Se
     };
   }
 
+  if (status?.persistentSessionUpdateRequired) {
+    const minimum = String(status.persistentSessionMinimumBuildVersion || "2026.6.25").trim();
+    const detected = String(status.buildVersion || status.agentVersion || "unknown").trim();
+    return {
+      ready: false,
+      reasonCode: "CONNECTOR_UPDATE_REQUIRED",
+      badgeLabel: "Blocked",
+      tone: "danger",
+      summary: "MSCQR Connector update required.",
+      detail: `Update MSCQR Connector to use persistent print session mode. Required ${minimum}; detected ${detected}.`,
+      recoveryAction: "refresh_printer_helper",
+      canRetry: true,
+    };
+  }
+
   if (!status?.connected) {
     const expired = Boolean(status?.stale || hasMtlsMissingReason(status));
     return {
@@ -81,7 +102,7 @@ export const buildSecurePrintReadiness = (status?: PrinterStatusLike | null): Se
       summary: "Printer verification expired. Refresh printer helper before printing.",
       detail: sanitizePrinterUiError(
         status?.trustReason || status?.error,
-        "Ensure MSCQR Connector 2026.6.16 is running, refresh printer helper status, and restart the connector if this does not recover."
+        "Ensure MSCQR Connector 2026.6.25 is running, refresh printer helper status, and restart the connector if this does not recover."
       ),
       recoveryAction: "refresh_printer_helper",
       canRetry: true,

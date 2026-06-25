@@ -180,6 +180,7 @@ import {
   resumeManufacturerPrintJob,
   stopManufacturerPrintJob,
 } from "../controllers/printJobController";
+import { printJobEvents } from "../controllers/printJobEventsController";
 import {
   getPrinterConnectionStatus,
   printerConnectionEvents,
@@ -505,6 +506,14 @@ const printReadRouteLimiter = createSharedRateLimiter({
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "print.read", (currentReq: any) => currentReq.user?.userId || null),
   handler: createRateLimitJsonHandler("print.read", "Too many print status reads. Please wait before retrying."),
+});
+const printReadPreAuthRouteLimiter = createSharedRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 180,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => buildPublicActorRateLimitKey(req, "print.read.pre-auth", protectedPreAuthActor),
+  handler: createRateLimitJsonHandler("print.read.pre-auth", "Too many print status reads. Please wait before retrying."),
 });
 
 const printExportRouteLimiter = createSharedRateLimiter({
@@ -1878,6 +1887,16 @@ protectedReadRouter.get(
   protectedReadRouteLimiter,
   enforceTenantIsolation,
   listManufacturerPrintJobs
+);
+protectedReadRouter.get(
+  "/manufacturer/print-jobs/:id/events",
+  printReadPreAuthRouteLimiter,
+  authenticateSSE,
+  requireOpsUser,
+  printReadRouteLimiter,
+  protectedReadRouteLimiter,
+  enforceTenantIsolation,
+  printJobEvents
 );
 protectedReadRouter.get(
   "/manufacturer/print-jobs/:id",

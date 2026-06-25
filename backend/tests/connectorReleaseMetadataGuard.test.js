@@ -69,18 +69,32 @@ const run = async () => {
   const latestRelease = manifest.releases.find((release) => release.version === manifest.latestVersion);
   const signedWindows = latestRelease?.platforms?.windows || null;
   const windows = signedWindows || latestRelease?.platforms?.windowsUnsignedTest;
+  const latestPackagedRelease = manifest.releases.find((release) => release.platforms?.windows || release.platforms?.windowsUnsignedTest);
+  const latestPackagedWindows =
+    latestPackagedRelease && (latestPackagedRelease.platforms.windows || latestPackagedRelease.platforms.windowsUnsignedTest);
   const latest = getLatestConnectorRelease("https://mscqr.example.com/api");
-  const resolved = resolveConnectorDownload(sourceVersion, signedWindows ? "windows" : "windowsUnsignedTest", {
-    allowInternalArtifacts: !signedWindows,
-  });
+  assert(latestPackagedRelease && latestPackagedWindows, "At least one installable Windows connector release must remain available");
+  const resolved = resolveConnectorDownload(
+    latestPackagedRelease.version,
+    latestPackagedRelease.platforms.windows ? "windows" : "windowsUnsignedTest",
+    { allowInternalArtifacts: !latestPackagedRelease.platforms.windows }
+  );
 
   assert(compareConnectorVersions(sourceVersion, "2026.5.19") > 0, "Connector source version must be newer than 2026.5.19");
   assert(manifest.latestVersion === sourceVersion, "Connector manifest latestVersion must match source buildVersion");
   assert(manifest.minimumBuildVersion === sourceVersion, "Connector manifest minimumBuildVersion must match source buildVersion");
   assert(latestRelease, "Connector manifest latestVersion must reference a release");
-  assert(windows, "Latest connector manifest release must include a signed Windows artifact or internal validation artifact");
+  if (!windows) {
+    assert(latest.release.productionSignedAvailable === false, "Pending latest release should report no signed Windows connector yet");
+    assert(latest.release.platforms.windows === null, "Pending latest release should not expose a stale Windows package");
+    assert(latest.release.platforms.windowsUnsignedTest === null, "Pending latest release should not expose an invented internal package");
+    assert(
+      /Signed Windows connector is pending release/i.test(latest.release.productionSignedMessage),
+      "Pending latest release should return a safe signed-artifact message"
+    );
+  }
   assert(!latest.release.platforms.windows || latest.release.platforms.windows.signatureStatus === "signed", "Public latest API must not expose unsigned Windows ZIP as production");
-  if (!signedWindows) {
+  if (!signedWindows && windows) {
     assert(latest.release.productionSignedAvailable === false, "Public latest API should report signed Windows connector unavailable");
     assert(latest.release.platforms.windows === null, "Public latest API should hide unsigned Windows package from normal users");
     assert(latest.release.platforms.windowsUnsignedTest === null, "Public latest API should hide internal Windows package by default");
@@ -91,40 +105,46 @@ const run = async () => {
       "Unsigned package must be internal-test only"
     );
   }
-  assert(windows.buildVersion === sourceVersion, "Latest Windows artifact buildVersion must match source buildVersion");
-  assert(windows.transportDiagnosticsVersion === "transport-diagnostics-v1", "Latest Windows artifact must advertise transport diagnostics v1");
-  assert(windows.capabilities?.supportsTransportDiagnostics === true, "Latest Windows artifact must advertise transport diagnostics support");
-  assert(windows.capabilities?.supportsPrinterQueueSnapshot === true, "Latest Windows artifact must advertise queue snapshot support");
-  assert(windows.capabilities?.supportsRawTcpConnectTest === true, "Latest Windows artifact must advertise RAW TCP connection testing");
-  assert(windows.capabilities?.supportsTestLabel === true, "Latest Windows artifact must advertise explicit test-label support");
-  assert(windows.filename.includes(sourceVersion), "Latest Windows artifact filename must include source buildVersion");
-  assert(!windows.filename.includes("2026.5.19"), "Latest Windows artifact filename must not point at the stale 2026.5.19 installer");
+  if (windows) {
+    assert(windows.buildVersion === sourceVersion, "Latest Windows artifact buildVersion must match source buildVersion");
+    assert(windows.transportDiagnosticsVersion === "transport-diagnostics-v1", "Latest Windows artifact must advertise transport diagnostics v1");
+    assert(windows.capabilities?.supportsTransportDiagnostics === true, "Latest Windows artifact must advertise transport diagnostics support");
+    assert(windows.capabilities?.supportsPrinterQueueSnapshot === true, "Latest Windows artifact must advertise queue snapshot support");
+    assert(windows.capabilities?.supportsRawTcpConnectTest === true, "Latest Windows artifact must advertise RAW TCP connection testing");
+    assert(windows.capabilities?.supportsTestLabel === true, "Latest Windows artifact must advertise explicit test-label support");
+    assert(windows.filename.includes(sourceVersion), "Latest Windows artifact filename must include source buildVersion");
+    assert(!windows.filename.includes("2026.5.19"), "Latest Windows artifact filename must not point at the stale 2026.5.19 installer");
+  }
   assert(latest.latestVersion === sourceVersion, "Connector download API latestVersion must match source buildVersion");
   const exposedWindows = latest.release.platforms.windows || getLatestConnectorRelease("https://mscqr.example.com/api", {
     includeInternalArtifacts: true,
   }).release.platforms.windowsUnsignedTest;
-  assert(exposedWindows.buildVersion === sourceVersion, "Connector download API must expose source buildVersion");
-  assert(
-    exposedWindows.transportDiagnosticsVersion === "transport-diagnostics-v1",
-    "Connector download API must expose the transport diagnostics contract"
-  );
-  assert(
-    exposedWindows.capabilities.supportsTransportDiagnostics === true,
-    "Connector download API must expose transport diagnostics capability"
-  );
-  assert(
-    exposedWindows.capabilities.supportsRawTcpConnectTest === true,
-    "Connector download API must expose RAW TCP test capability"
-  );
-  assert(
-    exposedWindows.filename === windows.filename,
-    "Connector download API filename must come from latest manifest metadata"
-  );
-  assert(resolved.filename === windows.filename, "Resolved Windows download must serve the latest source-versioned artifact");
-  assert(fs.existsSync(resolved.filePath), "Resolved Windows connector artifact must exist on disk");
-  if (signedWindows) {
-    assert(resolveConnectorDownload(sourceVersion, "windows").filename === windows.filename, "Explicit latest signed Windows download must resolve");
+  if (windows) {
+    assert(exposedWindows.buildVersion === sourceVersion, "Connector download API must expose source buildVersion");
+    assert(
+      exposedWindows.transportDiagnosticsVersion === "transport-diagnostics-v1",
+      "Connector download API must expose the transport diagnostics contract"
+    );
+    assert(
+      exposedWindows.capabilities.supportsTransportDiagnostics === true,
+      "Connector download API must expose transport diagnostics capability"
+    );
+    assert(
+      exposedWindows.capabilities.supportsRawTcpConnectTest === true,
+      "Connector download API must expose RAW TCP test capability"
+    );
+    assert(
+      exposedWindows.filename === windows.filename,
+      "Connector download API filename must come from latest manifest metadata"
+    );
   } else {
+    assert(exposedWindows === null, "Pending latest release should not expose Windows metadata until an artifact is published");
+  }
+  assert(resolved.filename === latestPackagedWindows.filename, "Resolved Windows download must serve the latest installable artifact");
+  assert(fs.existsSync(resolved.filePath), "Resolved Windows connector artifact must exist on disk");
+  if (signedWindows && windows) {
+    assert(resolveConnectorDownload(sourceVersion, "windows").filename === windows.filename, "Explicit latest signed Windows download must resolve");
+  } else if (windows) {
     let blocked = false;
     try {
       resolveConnectorDownload(sourceVersion, "windowsUnsignedTest");
@@ -137,7 +157,7 @@ const run = async () => {
       "Explicit internal latest Windows test download must resolve with internal permission"
     );
   }
-  await assertInstallableWindowsArtifact(resolved, windows);
+  await assertInstallableWindowsArtifact(resolved, latestPackagedWindows);
 
   console.log("connector release metadata guard tests passed");
 };
