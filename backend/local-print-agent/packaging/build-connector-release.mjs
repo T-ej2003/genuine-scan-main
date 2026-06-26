@@ -6,7 +6,11 @@ import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { readConnectorSourceVersion } from "./source-version.mjs";
+import {
+  readConnectorSourceVersion,
+  readLocalAgentCapabilities,
+  readLocalAgentProtocolString,
+} from "./source-version.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,26 +22,10 @@ const buildRoot = path.join(backendRoot, ".connector-build");
 const defaultVersion = readConnectorSourceVersion(backendRoot);
 const version = String(process.env.CONNECTOR_RELEASE_VERSION || defaultVersion).trim();
 const publishedAt = new Date().toISOString();
-const protocolSource = fs.readFileSync(path.join(backendRoot, "src", "services", "localAgentProtocol.ts"), "utf8");
-const readExportedString = (name) => {
-  const match = protocolSource.match(new RegExp(`export\\s+const\\s+${name}\\s*=\\s*"([^"]+)"`));
-  if (!match) throw new Error(`Could not read ${name} from localAgentProtocol.ts`);
-  return match[1];
-};
-const requiredProtocolVersion = readExportedString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION");
-const transportDiagnosticsVersion = readExportedString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION");
+const requiredProtocolVersion = readLocalAgentProtocolString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION", backendRoot);
+const transportDiagnosticsVersion = readLocalAgentProtocolString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION", backendRoot);
 const minimumBuildVersion = version;
-const connectorCapabilities = {
-  supportsPrinterQueueSnapshot: true,
-  supportsWindowsTcpPortInspection: true,
-  supportsRawTcpConnectTest: true,
-  supportsRawTcpZplSend: true,
-  supportsUsbRawSpooler: true,
-  supportsSpoolJobCancel: true,
-  supportsSpoolJobStatus: true,
-  supportsTransportDiagnostics: true,
-  supportsTestLabel: true,
-};
+const connectorCapabilities = readLocalAgentCapabilities(backendRoot);
 const pkgBinary = process.platform === "win32"
   ? path.join(backendRoot, "node_modules", ".bin", "pkg.cmd")
   : path.join(backendRoot, "node_modules", ".bin", "pkg");
