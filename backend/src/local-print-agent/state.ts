@@ -29,6 +29,10 @@ const LEGACY_STATE_FILE = path.join(os.homedir(), ".authenticqr", "local-print-a
 const STATE_FILE = process.env.PRINT_AGENT_STATE_FILE || DEFAULT_STATE_FILE;
 
 const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
+const normalizeBackendUrl = (value: string | null) => {
+  const trimmed = String(value || "").trim().replace(/\/+$/, "");
+  return trimmed ? trimmed.replace(/\/api$/i, "") : null;
+};
 
 const sanitizeCalibrationProfile = (value: unknown): CalibrationProfile => {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -79,7 +83,7 @@ export const loadAgentState = async (): Promise<AgentState> => {
       agentId: String(parsed?.agentId || fallback.agentId),
       deviceFingerprint: String(parsed?.deviceFingerprint || fallback.deviceFingerprint),
       selectedPrinterId: parsed?.selectedPrinterId ? String(parsed.selectedPrinterId) : null,
-      backendUrl: parsed?.backendUrl ? String(parsed.backendUrl) : null,
+      backendUrl: normalizeBackendUrl(parsed?.backendUrl ? String(parsed.backendUrl) : null),
       publicKeyPem: String(parsed?.publicKeyPem || fallback.publicKeyPem),
       privateKeyPem: String(parsed?.privateKeyPem || fallback.privateKeyPem),
       calibrationProfiles:
@@ -140,5 +144,5 @@ export const mergeCalibrationProfile = (
 
 export const setAgentBackendUrl = (state: AgentState, backendUrl: string | null): AgentState => ({
   ...state,
-  backendUrl: backendUrl ? String(backendUrl).trim().replace(/\/+$/, "") : null,
+  backendUrl: normalizeBackendUrl(backendUrl),
 });

@@ -3,10 +3,12 @@ const {
   isCloudConnectivityError,
   isBackendRateLimitError,
   resolveActiveWakeRetryAfterMs,
-  resolveConnectivityRetryAfterMs,
-  resolveNoWorkRetryAfterMs,
-  validateClaimedLocalPrintJobForAttempt,
-} = require("../dist/local-print-agent/directPrintWorker");
+	  resolveConnectivityRetryAfterMs,
+	  resolveNoWorkRetryAfterMs,
+	  normalizeBackendBaseUrl,
+	  resolveSessionUrl,
+	  validateClaimedLocalPrintJobForAttempt,
+	} = require("../dist/local-print-agent/directPrintWorker");
 const {
   getMissingTransportDiagnosticsCapabilities,
   hasRequiredTransportDiagnosticsCapabilities,
@@ -88,7 +90,15 @@ const run = () => {
     "Repeated no-work claims should not become more aggressive"
   );
   assert(resolveActiveWakeRetryAfterMs(1) >= 4000, "Explicit wake retries should reuse the connector claim floor");
-  assert(resolveActiveWakeRetryAfterMs(4) <= 5000, "Explicit wake retry burst must stay capped");
+	  assert(resolveActiveWakeRetryAfterMs(4) <= 5000, "Explicit wake retry burst must stay capped");
+	  assert(
+	    normalizeBackendBaseUrl("https://www.mscqr.com/api") === "https://www.mscqr.com",
+	    "Connector should store the backend origin, not a doubled /api base"
+	  );
+	  assert(
+	    resolveSessionUrl("https://www.mscqr.com/api") === "wss://www.mscqr.com/api/printer-agent/session",
+	    "Persistent WebSocket URL must not duplicate /api when backendUrl already includes it"
+	  );
 
   const zeroQuantity = validatePrintJobRunQuantity({
     quantity: 0,

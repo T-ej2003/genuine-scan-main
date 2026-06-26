@@ -6,6 +6,7 @@ import {
   buildNextPrintChunkForSession,
   closeTrustedPrinterAgentSession,
   handleTrustedSessionProgressMessage,
+  logPrinterSessionResolverOutcome,
   openTrustedPrinterAgentSession,
   recordTrustedSessionHeartbeat,
   sessionClientMessageSchema,
@@ -18,6 +19,12 @@ type SessionSocketState = {
   dispatching: boolean;
   closed: boolean;
 };
+
+const SESSION_SOCKET_PATHS = new Set([
+  "/api/printer-agent/session",
+  "/api/api/printer-agent/session",
+  "/printer-agent/session",
+]);
 
 const sendJson = (ws: WebSocket, payload: Record<string, unknown>) => {
   if (ws.readyState !== WebSocket.OPEN) return;
@@ -61,7 +68,7 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url || "/", "http://localhost");
-    if (url.pathname !== "/api/printer-agent/session") return;
+    if (!SESSION_SOCKET_PATHS.has(url.pathname)) return;
     wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
       wss.emit("connection", ws, request);
     });
@@ -92,12 +99,32 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
         if (!state.trusted) {
           const parsed = sessionHelloSchema.safeParse(payload);
           if (!parsed.success) {
+            const url = new URL(request.url || "/", "http://localhost");
+            logPrinterSessionResolverOutcome("printer_session_rejected", {
+              reasonCode: "invalid_session_hello",
+              requestPath: url.pathname,
+              agentIdHash: null,
+              deviceFingerprintHash: null,
+              registrationCandidateCount: 0,
+              trustedCandidateCount: 0,
+              revokedCandidateCount: 0,
+              selectedRegistrationIdHashOrShortId: null,
+              selectedTrustStatus: null,
+              signatureVerified: false,
+              selectedPrinterIdPresent: false,
+              selectedPrinterMatch: false,
+              buildVersion: null,
+              supportsPersistentPrintSession: false,
+              connectorVersionAccepted: false,
+              httpStatus: 403,
+            });
             sendJson(ws, { type: "error", error: parsed.error.errors[0]?.message || "Invalid session hello.", errorCode: "invalid_session_hello" });
             closeWithReason(ws, 4002, "invalid_session_hello");
             return;
           }
 
           try {
+            const url = new URL(request.url || "/", "http://localhost");
             const trusted = await openTrustedPrinterAgentSession(parsed.data, {
               mtlsFingerprintHeader: getTrustedMtlsFingerprintHeader({
                 ip: String(request.headers["x-forwarded-for"] || request.socket.remoteAddress || "").split(",")[0]?.trim() || "",
@@ -109,6 +136,11 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
               } as any),
             });
             state.trusted = trusted;
+            console.info("printer_session_socket_ready", {
+              sessionId: trusted.id,
+              registrationIdHashOrShortId: trusted.registrationId ? trusted.registrationId.slice(0, 8) : null,
+              requestPath: url.pathname,
+            });
             sendJson(ws, {
               type: "session_ready",
               sessionId: trusted.id,
@@ -119,6 +151,29 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
             });
             void dispatchNextChunk(ws, state);
           } catch (error: any) {
+            const url = new URL(request.url || "/", "http://localhost");
+            const summary = error?.resolverSummary;
+            logPrinterSessionResolverOutcome("printer_session_rejected", {
+              ...(summary && typeof summary === "object" ? summary : {
+                reasonCode: error?.errorCode || "session_rejected",
+                agentIdHash: null,
+                deviceFingerprintHash: null,
+                registrationCandidateCount: 0,
+                trustedCandidateCount: 0,
+                revokedCandidateCount: 0,
+                selectedRegistrationIdHashOrShortId: null,
+                selectedTrustStatus: null,
+                signatureVerified: false,
+                selectedPrinterIdPresent: false,
+                selectedPrinterMatch: false,
+                buildVersion: null,
+                supportsPersistentPrintSession: false,
+                connectorVersionAccepted: false,
+                httpStatus: Number(error?.statusCode || 403),
+              }),
+              requestPath: url.pathname,
+              httpStatus: Number(error?.statusCode || summary?.httpStatus || 403),
+            });
             sendJson(ws, errorPayload(error));
             closeWithReason(ws, Number(error?.statusCode || 0) === 409 ? 4009 : 4003, error?.errorCode || "session_rejected");
           }

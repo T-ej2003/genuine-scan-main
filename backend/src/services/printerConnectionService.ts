@@ -623,8 +623,8 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
 
 const loadLatestRegistrationForUser = async (userId: string): Promise<PrinterRegistrationWithLatest | null> => {
   return prisma.printerRegistration.findFirst({
-    where: { userId, revokedAt: null },
-    orderBy: [{ lastSeenAt: "desc" }, { updatedAt: "desc" }],
+    where: { userId, revokedAt: null, trustStatus: { not: PrinterTrustStatus.REVOKED } },
+    orderBy: [{ approvedAt: "desc" }, { lastSeenAt: "desc" }, { updatedAt: "desc" }],
     include: {
       attestations: {
         orderBy: [{ createdAt: "desc" }],
@@ -641,7 +641,7 @@ const loadLatestRegistrationForUser = async (userId: string): Promise<PrinterReg
 
 const loadRegistrationById = async (registrationId: string): Promise<PrinterRegistrationWithLatest | null> => {
   return prisma.printerRegistration.findFirst({
-    where: { id: registrationId, revokedAt: null },
+    where: { id: registrationId, revokedAt: null, trustStatus: { not: PrinterTrustStatus.REVOKED } },
     include: {
       attestations: {
         orderBy: [{ createdAt: "desc" }],
@@ -1021,8 +1021,8 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     trustValid = Boolean(signatureValid && mtlsValid && registration && registration.trustStatus !== PrinterTrustStatus.REVOKED);
   }
 
-  if (registration) {
-    let nextTrustStatus = registration.trustStatus;
+	  if (registration) {
+	    let nextTrustStatus = registration.trustStatus;
     if (trustValid) {
       nextTrustStatus = PrinterTrustStatus.TRUSTED;
     } else if (input.connected && registration.trustStatus !== PrinterTrustStatus.REVOKED) {
@@ -1067,8 +1067,8 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
       });
     }
 
-    console.info("printer_agent_heartbeat_registration", {
-      event: "heartbeat_attested",
+	    console.info("printer_agent_heartbeat_registration", {
+	      event: "heartbeat_attested",
       registrationFound: true,
       registrationId: registration.id,
       agentIdHash: sha256Hex(agentId || registration.agentId).slice(0, 16),
@@ -1082,10 +1082,46 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
       selectedPrinterIdPresent: Boolean(metadata.selectedPrinterId || metadata.printerId),
       heartbeatSignatureVerified: signatureValid,
       rejectReason: rejectionReason,
-      replacementRegistration: Boolean(existingUserRegistration && existingUserRegistration.id !== registration.id),
-    });
+	      replacementRegistration: Boolean(existingUserRegistration && existingUserRegistration.id !== registration.id),
+	    });
 
-    const hashSource = verifiedHeartbeatPayload || signedPayloadCandidates[0] || stableStringify(metadata);
+	    const printerRegistrationDelegate = prisma.printerRegistration as typeof prisma.printerRegistration & {
+	      findMany?: typeof prisma.printerRegistration.findMany;
+	    };
+	    const heartbeatCandidates = agentId && deviceFingerprint && typeof printerRegistrationDelegate.findMany === "function"
+	      ? await printerRegistrationDelegate.findMany({
+	          where: { agentId, deviceFingerprint },
+	          select: { id: true, trustStatus: true, revokedAt: true, publicKeyPem: true },
+	          orderBy: [{ lastSeenAt: "desc" }, { updatedAt: "desc" }],
+	        })
+	      : [{ id: registration.id, trustStatus: registration.trustStatus, revokedAt: registration.revokedAt, publicKeyPem: registration.publicKeyPem }];
+	    console.info("printer_session_heartbeat_resolver", {
+	      reasonCode: trustValid ? "heartbeat_resolved" : rejectionReason || "heartbeat_rejected",
+	      requestPath: "/api/manufacturer/printer-agent/heartbeat",
+	      agentIdHash: sha256Hex(agentId || registration.agentId).slice(0, 16),
+	      deviceFingerprintHash: sha256Hex(deviceFingerprint || registration.deviceFingerprint).slice(0, 16),
+	      registrationCandidateCount: heartbeatCandidates.length || 1,
+	      trustedCandidateCount: heartbeatCandidates.filter(
+	        (candidate) =>
+	          candidate.trustStatus === PrinterTrustStatus.TRUSTED &&
+	          !candidate.revokedAt &&
+	          looksLikePem(String(candidate.publicKeyPem || ""))
+	      ).length,
+	      revokedCandidateCount: heartbeatCandidates.filter(
+	        (candidate) => candidate.trustStatus === PrinterTrustStatus.REVOKED || Boolean(candidate.revokedAt)
+	      ).length,
+	      selectedRegistrationIdHashOrShortId: sha256Hex(registration.id).slice(0, 16),
+	      selectedTrustStatus: registration.trustStatus,
+	      signatureVerified: signatureValid,
+	      selectedPrinterIdPresent: Boolean(metadata.selectedPrinterId || metadata.printerId),
+	      selectedPrinterMatch: Boolean(metadata.selectedPrinterId || metadata.printerId),
+	      buildVersion: metadata.buildVersion,
+	      supportsPersistentPrintSession: metadata.capabilities?.supportsPersistentPrintSession === true,
+	      connectorVersionAccepted: isLocalAgentPersistentSessionCapable(metadata.buildVersion),
+	      httpStatus: trustValid ? 200 : 403,
+	    });
+
+	    const hashSource = verifiedHeartbeatPayload || signedPayloadCandidates[0] || stableStringify(metadata);
     await prisma.printerAttestation.create({
       data: {
         printerRegistrationId: registration.id,
