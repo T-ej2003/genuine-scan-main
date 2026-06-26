@@ -42,6 +42,118 @@ const PRINT_AGENT_SESSION_RECONNECT_MAX_MS = Math.max(15_000, Number(process.env
 const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
+const sha256Short = (value: unknown) => {
+  const normalized = String(value || "").trim();
+  return normalized ? sha256Hex(normalized).slice(0, 16) : null;
+};
+
+const safeDiagnosticValue = (value: unknown, max = 160) => {
+  const source = Array.isArray(value) ? value.join(",") : String(value || "");
+  const normalized = source.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+  return normalized ? normalized.slice(0, max) : null;
+};
+
+const safeDiagnosticToken = (value: unknown, max = 64) =>
+  String(safeDiagnosticValue(value, max) || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, max) || null;
+
+const safeRejectHeaderNames = [
+  "server",
+  "via",
+  "x-cache",
+  "x-amz-cf-pop",
+  "x-amz-cf-id",
+  "date",
+  "content-type",
+  "content-length",
+  "x-request-id",
+];
+
+export const buildSafePersistentSessionRejectHeaders = (headers: Record<string, unknown> = {}) => {
+  const safeHeaders: Record<string, string> = {};
+  for (const name of safeRejectHeaderNames) {
+    const value = safeDiagnosticValue(headers[name], name === "x-amz-cf-id" ? 120 : 160);
+    if (value) safeHeaders[name] = value;
+  }
+  return safeHeaders;
+};
+
+export const buildPersistentSessionRejectReasonCode = (statusCode: number | null, headers: Record<string, unknown> = {}) => {
+  const explicit = safeDiagnosticToken(headers["x-mscqr-reject-code"], 80);
+  if (explicit) return explicit;
+  const parts = [`http_${statusCode || "upgrade_rejected"}`];
+  const xCache = safeDiagnosticToken(headers["x-cache"], 48);
+  const server = safeDiagnosticToken(headers.server, 32);
+  if (xCache) parts.push(`xcache_${xCache}`);
+  if (server) parts.push(`server_${server}`);
+  return parts.join(";").slice(0, 180);
+};
+
+export const sanitizePersistentSessionRejectBodyPreview = (body: string, maxChars = 500) =>
+  String(body || "")
+    .replace(/-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g, "<redacted-pem>")
+    .replace(
+      /("(?:privateKeyPem|publicKeyPem|heartbeatSignature|signature|token|cookie|csrf|authorization)"\s*:\s*")[^"]*(")/gi,
+      "$1<redacted>$2"
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer <redacted>")
+    .slice(0, maxChars);
+
+export const readPersistentSessionRejectBodyPreview = (response: any, maxChars = 500) =>
+  new Promise<string | null>((resolve) => {
+    let preview = "";
+    let settled = false;
+    let timer: NodeJS.Timeout | null = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(sanitizePersistentSessionRejectBodyPreview(preview, maxChars).trim() || null);
+    };
+    timer = setTimeout(finish, 2_000);
+    try {
+      response?.setEncoding?.("utf8");
+      response?.on?.("data", (chunk: unknown) => {
+        if (preview.length >= maxChars) return;
+        preview += String(chunk || "").slice(0, maxChars - preview.length);
+      });
+      response?.on?.("end", finish);
+      response?.on?.("error", finish);
+      response?.on?.("aborted", finish);
+      if (response?.readableEnded || response?.complete) finish();
+    } catch {
+      finish();
+    }
+  });
+
+export const buildPersistentSessionConnectDiagnostics = (params: {
+  backendUrl: string;
+  sessionUrl: string;
+  selectedPrinterId: string;
+  agentId: string;
+  deviceFingerprint: string;
+}) => {
+  const session = new URL(params.sessionUrl);
+  const backend = new URL(normalizeBackendBaseUrl(params.backendUrl));
+  return {
+    sessionUrlOrigin: session.origin,
+    sessionUrlPathname: session.pathname,
+    backendBaseOrigin: backend.origin,
+    selectedPrinterId: params.selectedPrinterId,
+    agentIdHash: sha256Short(params.agentId),
+    deviceFingerprintHash: sha256Short(params.deviceFingerprint),
+    buildVersion: AGENT_BUILD_VERSION || AGENT_VERSION,
+    supportsPersistentPrintSession: LOCAL_AGENT_CAPABILITIES.supportsPersistentPrintSession === true,
+    proxyEnvPresent: {
+      HTTPS_PROXY: Boolean(process.env.HTTPS_PROXY),
+      HTTP_PROXY: Boolean(process.env.HTTP_PROXY),
+      NO_PROXY: Boolean(process.env.NO_PROXY),
+    },
+  };
+};
 
 const clampRetryAfterMs = (value: unknown) => {
   const parsed = Number(value);
@@ -1290,6 +1402,16 @@ const startPersistentPrintSessionWorker = () => {
       let processing = false;
       const sessionUrl = resolveSessionUrl(backendUrl);
       const sessionPath = new URL(sessionUrl).pathname;
+      console.info(
+        "persistent printer session opening",
+        buildPersistentSessionConnectDiagnostics({
+          backendUrl,
+          sessionUrl,
+          selectedPrinterId: selection.selectedPrinterId,
+          agentId: selection.state.agentId,
+          deviceFingerprint: selection.state.deviceFingerprint,
+        })
+      );
       const ws = new WebSocket(sessionUrl);
       activeSocket = ws;
 
@@ -1309,7 +1431,10 @@ const startPersistentPrintSessionWorker = () => {
       };
 
       await new Promise<void>((resolve) => {
+        let finished = false;
         const finish = () => {
+          if (finished) return;
+          finished = true;
           closeSession();
           resolve();
         };
@@ -1434,23 +1559,28 @@ const startPersistentPrintSessionWorker = () => {
         ws.on("close", finish);
         ws.on("unexpected-response", (_request: any, response: any) => {
           const statusCode = Number(response?.statusCode || 0) || null;
-          const reasonCode = String(response?.headers?.["x-mscqr-reject-code"] || "").trim() || `http_${statusCode || "upgrade_rejected"}`;
+          const safeHeaders = buildSafePersistentSessionRejectHeaders(response?.headers || {});
+          const reasonCode = buildPersistentSessionRejectReasonCode(statusCode, response?.headers || {});
           const message = `Persistent session upgrade rejected on ${sessionPath}${statusCode ? ` with HTTP ${statusCode}` : ""}.`;
-          console.error("persistent printer session upgrade rejected", {
-            path: sessionPath,
-            statusCode,
-            reasonCode,
+          void readPersistentSessionRejectBodyPreview(response).then((bodyPreview) => {
+            console.error("persistent printer session upgrade rejected", {
+              path: sessionPath,
+              statusCode,
+              reasonCode,
+              responseHeaders: safeHeaders,
+              responseBodyPreview: bodyPreview,
+            });
+            updatePersistentSessionStatus({
+              connected: false,
+              sessionId: null,
+              registrationId: null,
+              selectedPrinterId: selection.selectedPrinterId,
+              lastDisconnectedAt: new Date().toISOString(),
+              lastError: message,
+              lastRejectReasonCode: reasonCode,
+            });
+            finish();
           });
-          updatePersistentSessionStatus({
-            connected: false,
-            sessionId: null,
-            registrationId: null,
-            selectedPrinterId: selection.selectedPrinterId,
-            lastDisconnectedAt: new Date().toISOString(),
-            lastError: message,
-            lastRejectReasonCode: reasonCode,
-          });
-          finish();
         });
         ws.on("error", (error: any) => {
           console.error("persistent printer session socket error", { path: sessionPath, error: (error as any)?.message || error });

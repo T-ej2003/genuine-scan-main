@@ -1,9 +1,13 @@
 const { createHash } = require("crypto");
 const {
+  buildPersistentSessionConnectDiagnostics,
+  buildPersistentSessionRejectReasonCode,
+  buildSafePersistentSessionRejectHeaders,
   isCloudConnectivityError,
   isBackendRateLimitError,
+  sanitizePersistentSessionRejectBodyPreview,
   resolveActiveWakeRetryAfterMs,
-	  resolveConnectivityRetryAfterMs,
+  resolveConnectivityRetryAfterMs,
 	  resolveNoWorkRetryAfterMs,
 	  normalizeBackendBaseUrl,
 	  resolveSessionUrl,
@@ -99,8 +103,63 @@ const run = () => {
 	    resolveSessionUrl("https://www.mscqr.com/api") === "wss://www.mscqr.com/api/printer-agent/session",
 	    "Persistent WebSocket URL must not duplicate /api when backendUrl already includes it"
 	  );
+  const safeUpgradeHeaders = buildSafePersistentSessionRejectHeaders({
+    server: "CloudFront",
+    via: "1.1 cloudfront",
+    "x-cache": "Error from cloudfront",
+    "x-amz-cf-pop": "LHR61-P7",
+    "x-amz-cf-id": "cloudfront-request-id-value",
+    date: "Fri, 26 Jun 2026 15:00:00 GMT",
+    "content-type": "text/html",
+    "content-length": "123",
+    "x-request-id": "request-id-value",
+    "set-cookie": "session=secret",
+    authorization: "Bearer raw-token",
+  });
+  assert(safeUpgradeHeaders.server === "CloudFront", "Safe WebSocket reject diagnostics should keep server header");
+  assert(safeUpgradeHeaders["x-cache"] === "Error from cloudfront", "Safe WebSocket reject diagnostics should keep x-cache header");
+  assert(!("set-cookie" in safeUpgradeHeaders), "Safe WebSocket reject diagnostics must not include set-cookie");
+  assert(!("authorization" in safeUpgradeHeaders), "Safe WebSocket reject diagnostics must not include authorization");
 
-  const zeroQuantity = validatePrintJobRunQuantity({
+  const rejectReason = buildPersistentSessionRejectReasonCode(403, {
+    server: "CloudFront",
+    "x-cache": "Error from cloudfront",
+  });
+  assert(
+    rejectReason.includes("http_403") && rejectReason.includes("xcache_error_from_cloudfront"),
+    "Persistent session reject reason should include status and safe proxy source"
+  );
+
+  const connectDiagnostics = buildPersistentSessionConnectDiagnostics({
+    backendUrl: "https://www.mscqr.com/api",
+    sessionUrl: "wss://www.mscqr.com/api/printer-agent/session?secret=must-not-log",
+    selectedPrinterId: "ZDesigner ZT410-300dpi ZPL",
+    agentId: "agent-raw-value",
+    deviceFingerprint: "device-raw-value",
+  });
+  const connectDiagnosticsText = JSON.stringify(connectDiagnostics);
+  assert(connectDiagnostics.sessionUrlOrigin === "wss://www.mscqr.com", "Session diagnostic should log URL origin");
+  assert(connectDiagnostics.sessionUrlPathname === "/api/printer-agent/session", "Session diagnostic should log URL pathname only");
+  assert(connectDiagnostics.backendBaseOrigin === "https://www.mscqr.com", "Backend diagnostic should log normalized backend origin");
+  assert(!connectDiagnosticsText.includes("secret=must-not-log"), "Session diagnostic must not log URL query strings");
+  assert(!connectDiagnosticsText.includes("agent-raw-value"), "Session diagnostic must hash raw agent id");
+  assert(!connectDiagnosticsText.includes("device-raw-value"), "Session diagnostic must hash raw device fingerprint");
+
+  const redactedBody = sanitizePersistentSessionRejectBodyPreview(
+    JSON.stringify({
+      privateKeyPem: "-----BEGIN PRIVATE KEY-----raw-private-key-----END PRIVATE KEY-----",
+      heartbeatSignature: "raw-heartbeat-signature",
+      signature: "raw-session-signature",
+      token: "raw-token-value",
+      error: "blocked",
+    })
+  );
+  assert(!redactedBody.includes("raw-private-key"), "Reject body preview must redact private keys");
+  assert(!redactedBody.includes("raw-heartbeat-signature"), "Reject body preview must redact heartbeat signatures");
+  assert(!redactedBody.includes("raw-session-signature"), "Reject body preview must redact session signatures");
+  assert(!redactedBody.includes("raw-token-value"), "Reject body preview must redact raw tokens");
+
+	  const zeroQuantity = validatePrintJobRunQuantity({
     quantity: 0,
     remainingPrintableCount: 919,
     maxConfiguredRunLabels: 2000,
