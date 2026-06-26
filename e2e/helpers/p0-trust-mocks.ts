@@ -62,6 +62,15 @@ const roleUser = (role: FrontendRole) => {
   };
 };
 
+const authSessionPayload = (role: FrontendRole) => {
+  const user = roleUser(role);
+  return {
+    user,
+    auth: user.auth,
+    accessToken: `p0-${role}-access-token`,
+  };
+};
+
 const batchRows = [
   {
     id: "batch-p0-source",
@@ -229,6 +238,11 @@ export async function installP0TrustMocks(page: Page, options: TrustMockOptions 
     if (path === "/events/dashboard" || path === "/events/notifications") return route.abort();
     if (path === "/audit/stream") return route.fulfill({ status: 200, contentType: "text/event-stream", body: "" });
     if (path === "/telemetry/route-transition" || path === "/telemetry/csp-report") return json(route, { success: true });
+    if (path === "/auth/refresh") {
+      return authenticated
+        ? json(route, { success: true, data: authSessionPayload(role) })
+        : json(route, { success: false, error: "Invalid or expired token" }, 401);
+    }
     if (path === "/auth/me") {
       return authenticated
         ? json(route, { success: true, data: roleUser(role) })

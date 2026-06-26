@@ -68,6 +68,21 @@ This let protected TanStack queries and polling surface raw authentication failu
 - `npm run build`
 - `git diff --check`
 
+## CI Follow-up: P0 Access-Control Smoke
+
+The frontend quality gate later timed out in `e2e/p0-access-control.spec.ts` after the auth bootstrap hardening. This was not a production auth regression. The Playwright P0 mock intercepted `/api/auth/me`, but did not model the new `/api/auth/refresh` bootstrap contract. Its generic fallback returned `{ success: true, data: {} }` for `/api/auth/refresh`.
+
+`AuthContext` treats a successful response with data as a restored session payload, so the malformed empty object was normalized into a default manufacturer-like test user. That made anonymous protected-route tests fail to redirect and made super-admin-only route checks behave like manufacturer access checks until the Playwright smoke suite exhausted the job timeout.
+
+Fix:
+
+- `e2e/helpers/p0-trust-mocks.ts` now returns a valid test auth-refresh payload with `user`, `auth`, and a non-secret fake `accessToken` when authenticated.
+- The same helper now returns `401 Invalid or expired token` for `/api/auth/refresh` when unauthenticated.
+
+Focused validation:
+
+- `npm run test:e2e -- e2e/p0-access-control.spec.ts`
+
 ## Manual Validation Steps
 
 1. Sign in with MFA and open a protected page such as `/batches`.
