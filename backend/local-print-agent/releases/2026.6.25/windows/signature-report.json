@@ -9,7 +9,7 @@
   "notAfter": "2026-06-27T23:33:20.0000000Z",
   "timestamped": true,
   "timestampAuthority": "http://timestamp.acs.microsoft.com",
-  "signedAt": "2026-06-26T12:17:32.0398861Z",
+  "signedAt": "2026-06-26T15:24:28.5076713Z",
   "publisherName": "L&D Health Ltd",
   "azureSigningEndpoint": "https://weu.codesigning.azure.net/",
   "azureSigningAccount": "mscqrsigning",

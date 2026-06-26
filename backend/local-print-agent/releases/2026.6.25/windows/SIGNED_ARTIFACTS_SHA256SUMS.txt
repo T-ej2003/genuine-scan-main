@@ -1,1 +1,1 @@
-dd88e46dbdb3ed25fd09cc44407016ab9c3c8e708875f63480e0be3301839f82  MSCQR-Connector-Windows-2026.6.25.exe
+2f41a3f0330eedd90cf0ee3ffd5c478118d8a26844282f0af47b9abff1996a27  MSCQR-Connector-Windows-2026.6.25.exe
