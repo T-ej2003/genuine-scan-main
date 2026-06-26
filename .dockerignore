@@ -32,6 +32,27 @@ backend/certs
 backend/*.zip
 backend/src.zip
 backend/prisma.zip
+# Backend images serve only the latest connector release payload assembled by
+# backend/scripts/create-connector-runtime-assets.mjs. Keep historical release
+# binaries out of the Docker context; do not remove them from the repository.
+backend/local-print-agent/releases/*
+!backend/local-print-agent/releases/manifest.json
+!backend/local-print-agent/releases/2026.6.25
+!backend/local-print-agent/releases/2026.6.25/**
+backend/local-print-agent/releases/*/macos
+
+# Local IaC/plugin/debug artifacts
+infra/aws/terraform/.terraform
+*.log
+*.tmp
+*.trace
+*.har
+*.webm
+*.tgz
+*-debug.zip
+*-logs.zip
+test-results
+playwright-report
 
 # Local secrets/config
 .env
