@@ -508,20 +508,20 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     const refreshRateLimited =
       livePrinterStatus.status === 429 || String(livePrinterStatus.code || "").toUpperCase() === "RATE_LIMITED";
     const effectiveLiveStatus = (livePrinterStatus.data || printerStatus) as PrinterConnectionStatus;
-	    if (
-	      refreshRateLimited &&
-	      buildSecurePrintReadiness(printerStatus).ready &&
-	      detectedPrinters.some((row) => row.printerId === selectedPrinterId && row.online !== false)
-	    ) {
+    if (
+      refreshRateLimited &&
+      buildSecurePrintReadiness(printerStatus).ready &&
+      detectedPrinters.some((row) => row.printerId === selectedPrinterId && row.online !== false)
+    ) {
       toast({
         title: "Using last ready printer status",
         description: "Printer status refresh is temporarily paused. Last trusted status is retained.",
       });
-	    } else if (
-	      !livePrinterStatus.success ||
-	      !livePrinterStatus.data ||
-	      !buildSecurePrintReadiness(effectiveLiveStatus).ready
-	    ) {
+    } else if (
+      !livePrinterStatus.success ||
+      !livePrinterStatus.data ||
+      !buildSecurePrintReadiness(effectiveLiveStatus).ready
+    ) {
       setPrinterStatus({
         ...defaultPrinterStatus,
         printers: detectedPrinters,
