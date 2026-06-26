@@ -25,7 +25,11 @@ COPY backend/tsconfig.json ./tsconfig.json
 COPY backend/src ./src
 COPY backend/tests ./tests
 COPY backend/scripts ./scripts
-COPY backend/local-print-agent ./local-print-agent
+# Connector release binaries are large and historical installers are not needed in
+# the backend image. Build a latest-only runtime payload so production cannot
+# accidentally serve old connector releases as the launch-required connector.
+COPY backend/local-print-agent/releases ./local-print-agent/releases
+RUN node scripts/create-connector-runtime-assets.mjs ./local-print-agent/releases ./local-print-agent-runtime
 COPY shared ../shared
 RUN if [ "$RUN_VERIFY" = "true" ]; then npm test; else npm run build; fi \
   && npm prune --omit=dev --no-audit --no-fund
@@ -49,7 +53,10 @@ COPY --chown=node:node backend/package*.json ./
 COPY --chown=node:node backend/prisma ./prisma
 COPY --chown=node:node backend/prisma.config.ts ./prisma.config.ts
 COPY --chown=node:node backend/scripts ./scripts
-COPY --chown=node:node backend/local-print-agent ./local-print-agent
+# Runtime only needs the connector release manifest plus latest-release assets.
+# Historical installers stay out of /app to reduce image size and avoid stale
+# connector downloads while WebSocket production printing requires 2026.6.25+.
+COPY --from=builder --chown=node:node /workspace/backend/local-print-agent-runtime ./local-print-agent
 COPY --chown=node:node backend/docker/start-runtime.sh /usr/local/bin/start-runtime.sh
 COPY --from=builder --chown=node:node /workspace/backend/node_modules ./node_modules
 COPY --from=builder --chown=node:node /workspace/backend/dist ./dist
