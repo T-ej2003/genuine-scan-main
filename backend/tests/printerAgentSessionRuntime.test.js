@@ -37,6 +37,17 @@ const registration = {
   updatedAt: new Date(),
 };
 
+const revokedRegistration = {
+  ...registration,
+  id: "registration-session-revoked",
+  publicKeyPem: "compat:revoked-null-key",
+  trustStatus: PrinterTrustStatus.REVOKED,
+  approvedAt: null,
+  revokedAt: null,
+  lastSeenAt: new Date(Date.now() + 1000),
+  updatedAt: new Date(Date.now() + 1000),
+};
+
 const printer = {
   id: "printer-session-1",
   name: "ZDesigner ZT410-300dpi ZPL",
@@ -48,19 +59,24 @@ const printer = {
 
 let createdSessions = [];
 let supersedeCalls = [];
+let activeRegistrations = [revokedRegistration, registration];
 
 mockModule("config/database.js", {
   __esModule: true,
   default: {
-    printerRegistration: {
-      findFirst: async ({ where }) => {
-        if (where?.agentId === registration.agentId && where?.deviceFingerprint === registration.deviceFingerprint) {
-          return registration;
-        }
-        return null;
-      },
-      findUnique: async ({ where }) => (where?.id === registration.id ? registration : null),
-    },
+	    printerRegistration: {
+	      findMany: async ({ where }) => {
+	        const ids = new Set((where?.OR || []).map((item) => item.id).filter(Boolean));
+	        return activeRegistrations.filter(
+	          (row) =>
+	            ids.has(row.id) ||
+	            (where?.OR || []).some(
+	              (item) => item.agentId === row.agentId && item.deviceFingerprint === row.deviceFingerprint
+	            )
+	        );
+	      },
+	      findUnique: async ({ where }) => (where?.id === registration.id ? registration : null),
+	    },
     printer: {
       findFirst: async ({ where }) => {
         const selected = where?.OR?.some((item) => item.nativePrinterId === printer.nativePrinterId || item.id === printer.id);
@@ -113,18 +129,25 @@ const signedHello = (overrides = {}) => {
     agentId: registration.agentId,
     deviceFingerprint: registration.deviceFingerprint,
     selectedPrinterId,
-    selectedPrinterName: printer.name,
-    connectorVersion,
-    nonce: "session-hello-nonce-1",
-    issuedAt,
-    signature: signPrinterAgentPayload(privateKeyPem, payload),
-  };
-};
+	    selectedPrinterName: printer.name,
+	    connectorVersion,
+	    nonce: "session-hello-nonce-1",
+	    issuedAt,
+	    signature: signPrinterAgentPayload(privateKeyPem, payload),
+	    printerHealth: {
+	      buildVersion: connectorVersion,
+	      capabilities: {
+	        supportsPersistentPrintSession: overrides.supportsPersistentPrintSession !== false,
+	      },
+	    },
+	  };
+	};
 
 (async () => {
-  const first = await openTrustedPrinterAgentSession(signedHello());
-  assert.equal(first.registrationId, registration.id, "valid signed hello should open a trusted session");
-  assert.equal(first.connectorVersion, "2026.6.25", "trusted session should retain connector version");
+	  const first = await openTrustedPrinterAgentSession(signedHello());
+	  assert.equal(first.registrationId, registration.id, "valid signed hello should open a trusted session");
+	  assert.equal(first.connectorVersion, "2026.6.25", "trusted session should retain connector version");
+	  assert.equal(first.publicKeyFingerprint.length, 64, "trusted session should bind the enrolled public-key fingerprint");
 
   const second = await openTrustedPrinterAgentSession(signedHello({ connectorVersion: "2026.6.26" }));
   assert.equal(second.registrationId, registration.id, "second valid signed hello should open a trusted session");
@@ -133,11 +156,38 @@ const signedHello = (overrides = {}) => {
     "new session should supersede older connected sessions for the same registration/printer"
   );
 
-  await assert.rejects(
-    () => openTrustedPrinterAgentSession(signedHello({ connectorVersion: "2026.6.16" })),
-    (error) => error.statusCode === 426 && error.errorCode === "persistent_session_connector_update_required",
-    "old connector version must not open persistent WebSocket mode"
-  );
+	  await assert.rejects(
+	    () => openTrustedPrinterAgentSession(signedHello({ connectorVersion: "2026.6.16" })),
+	    (error) => error.statusCode === 426 && error.errorCode === "persistent_session_connector_update_required",
+	    "old connector version must not open persistent WebSocket mode"
+	  );
+
+	  await assert.rejects(
+	    () => openTrustedPrinterAgentSession(signedHello({ supportsPersistentPrintSession: false })),
+	    (error) => error.statusCode === 403 && error.errorCode === "persistent_session_capability_required",
+	    "connector must advertise persistent WebSocket capability"
+	  );
+
+	  await assert.rejects(
+	    () => openTrustedPrinterAgentSession({ ...signedHello(), signature: "not-a-valid-signature" }),
+	    (error) => error.statusCode === 403 && error.errorCode === "bad_session_signature",
+	    "invalid session signature must be rejected"
+	  );
+
+	  await assert.rejects(
+	    () => openTrustedPrinterAgentSession(signedHello({ selectedPrinterId: "missing-printer" })),
+	    (error) => error.statusCode === 403 && error.errorCode === "selected_printer_mismatch",
+	    "selected printer mismatch must be rejected"
+	  );
+
+	  const previousRegistrations = activeRegistrations;
+	  activeRegistrations = [revokedRegistration];
+	  await assert.rejects(
+	    () => openTrustedPrinterAgentSession(signedHello()),
+	    (error) => error.statusCode === 403 && error.errorCode === "registration_not_trusted",
+	    "session admission must reject when only revoked registrations exist"
+	  );
+	  activeRegistrations = previousRegistrations;
 
   const heartbeatFrame = {
     type: "heartbeat",

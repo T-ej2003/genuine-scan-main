@@ -555,7 +555,7 @@ function Get-AgentProcessCandidates {
     Write-UpgradeLog "Could not inspect running connector processes: $($_.Exception.Message)"
   }
 
-  return @($agentProcesses | Sort-Object ProcessId -Unique)
+  return ,@($agentProcesses | Sort-Object ProcessId -Unique)
 }
 
 function Stop-RunningAgent {
@@ -648,15 +648,15 @@ function Start-AgentProcess {
 }
 
 function Assert-PostInstallProcessState {
-  $activeAgents = Get-AgentProcessCandidates
+  $activeAgents = @(Get-AgentProcessCandidates)
   if ($activeAgents.Count -ne 1) {
     $summary = ($activeAgents | ForEach-Object { "pid=$($_.ProcessId) path=$($_.ExecutablePath)" }) -join "; "
     throw "Post-install verification expected exactly one MSCQR connector process, found $($activeAgents.Count). $summary"
   }
 
   $activePath = [string]$activeAgents[0].ExecutablePath
-  Write-UpgradeLog "Post-install active connector process: pid=$($activeAgents[0].ProcessId) path=$activePath"
-  if ([string]::IsNullOrWhiteSpace($activePath) -or $activePath -ne $CanonicalAgentExe) {
+  Write-UpgradeLog "Post-install verification found exactly one MSCQR connector process: pid=$($activeAgents[0].ProcessId) path=$activePath"
+  if ([string]::IsNullOrWhiteSpace($activePath) -or -not (Test-SamePath -Left $activePath -Right $CanonicalAgentExe)) {
     throw "Post-install verification found connector running from '$activePath' instead of canonical path '$CanonicalAgentExe'."
   }
 }

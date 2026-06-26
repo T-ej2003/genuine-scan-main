@@ -26,4 +26,48 @@ describe("secure printer readiness", () => {
     expect(readiness.detail).toContain("detected 2026.6.16");
     expect(readiness.detail).not.toContain("Refresh printer helper before starting this print run");
   });
+
+  it("blocks production readiness when the persistent session is disconnected", () => {
+    const readiness = buildSecurePrintReadiness({
+      connected: false,
+      trusted: false,
+      eligibleForPrinting: false,
+      stale: false,
+      compatibilityMode: false,
+      connectionClass: "BLOCKED",
+      buildVersion: "2026.6.25",
+      persistentSessionRequired: true,
+      persistentSessionCapable: true,
+      persistentSessionDisconnected: true,
+      selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.reasonCode).toBe("SECURE_SESSION_MISSING");
+    expect(readiness.summary).toBe("Persistent session is not connected.");
+    expect(readiness.detail).toContain("Helper installed and printer detected are not enough");
+  });
+
+  it("shows ready only for a trusted backend persistent session", () => {
+    const readiness = buildSecurePrintReadiness({
+      connected: true,
+      trusted: true,
+      eligibleForPrinting: true,
+      securePrinterSession: true,
+      freshHelperHeartbeat: true,
+      helperConnection: true,
+      eligiblePrinter: true,
+      stale: false,
+      compatibilityMode: false,
+      connectionClass: "TRUSTED",
+      persistentSessionRequired: true,
+      persistentSessionCapable: true,
+      persistentSessionDisconnected: false,
+      selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
+    });
+
+    expect(readiness.ready).toBe(true);
+    expect(readiness.reasonCode).toBe("READY");
+    expect(readiness.summary).toContain("ready to print");
+  });
 });

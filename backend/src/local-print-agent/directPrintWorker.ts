@@ -96,7 +96,7 @@ const resolveBackendUrl = async () => {
   )
     .trim()
     .replace(/\/+$/, "");
-  return configured || null;
+  return configured ? normalizeBackendBaseUrl(configured) : null;
 };
 
 const buildSignedBody = async (params: {
@@ -196,6 +196,7 @@ type PersistentPrintSessionStatus = {
   lastHeartbeatAt: string | null;
   lastDisconnectedAt: string | null;
   lastError: string | null;
+  lastRejectReasonCode: string | null;
 };
 
 const persistentPrintSessionStatus: PersistentPrintSessionStatus = {
@@ -209,6 +210,7 @@ const persistentPrintSessionStatus: PersistentPrintSessionStatus = {
   lastHeartbeatAt: null,
   lastDisconnectedAt: null,
   lastError: null,
+  lastRejectReasonCode: null,
 };
 
 export const getPersistentPrintSessionStatus = () => ({ ...persistentPrintSessionStatus });
@@ -217,8 +219,13 @@ const updatePersistentSessionStatus = (patch: Partial<PersistentPrintSessionStat
   Object.assign(persistentPrintSessionStatus, patch);
 };
 
-const resolveSessionUrl = (backendUrl: string) => {
-  const url = new URL(`${backendUrl.replace(/\/+$/, "")}/api/printer-agent/session`);
+export const normalizeBackendBaseUrl = (backendUrl: string) => {
+  const trimmed = String(backendUrl || "").trim().replace(/\/+$/, "");
+  return trimmed.replace(/\/api$/i, "");
+};
+
+export const resolveSessionUrl = (backendUrl: string) => {
+  const url = new URL(`${normalizeBackendBaseUrl(backendUrl)}/api/printer-agent/session`);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
 };
@@ -1272,6 +1279,7 @@ const startPersistentPrintSessionWorker = () => {
           registrationId: null,
           selectedPrinterId: selection?.selectedPrinterId || null,
           lastError: backendUrl ? "No selected local printer available for persistent session." : "Backend URL is not configured.",
+          lastRejectReasonCode: null,
         });
         await sleep(DIRECT_PRINT_IDLE_MIN_BACKOFF_MS);
         continue;
@@ -1280,7 +1288,9 @@ const startPersistentPrintSessionWorker = () => {
       let heartbeatTimer: NodeJS.Timeout | null = null;
       let session: SessionContext | null = null;
       let processing = false;
-      const ws = new WebSocket(resolveSessionUrl(backendUrl));
+      const sessionUrl = resolveSessionUrl(backendUrl);
+      const sessionPath = new URL(sessionUrl).pathname;
+      const ws = new WebSocket(sessionUrl);
       activeSocket = ws;
 
       const closeSession = () => {
@@ -1306,6 +1316,7 @@ const startPersistentPrintSessionWorker = () => {
 
         ws.on("open", () => {
           reconnectAttempt = 0;
+          updatePersistentSessionStatus({ lastRejectReasonCode: null });
           void buildSignedSessionMessage({
             type: "hello",
             selectedPrinterId: selection.selectedPrinterId,
@@ -1383,8 +1394,10 @@ const startPersistentPrintSessionWorker = () => {
               return;
             }
             if (payload?.type === "error") {
+              const reasonCode = String(payload.errorCode || "").trim() || null;
               updatePersistentSessionStatus({
                 lastError: String(payload.error || payload.errorCode || "Persistent session error").slice(0, 500),
+                lastRejectReasonCode: reasonCode,
               });
               return;
             }
@@ -1419,8 +1432,28 @@ const startPersistentPrintSessionWorker = () => {
         });
 
         ws.on("close", finish);
+        ws.on("unexpected-response", (_request: any, response: any) => {
+          const statusCode = Number(response?.statusCode || 0) || null;
+          const reasonCode = String(response?.headers?.["x-mscqr-reject-code"] || "").trim() || `http_${statusCode || "upgrade_rejected"}`;
+          const message = `Persistent session upgrade rejected on ${sessionPath}${statusCode ? ` with HTTP ${statusCode}` : ""}.`;
+          console.error("persistent printer session upgrade rejected", {
+            path: sessionPath,
+            statusCode,
+            reasonCode,
+          });
+          updatePersistentSessionStatus({
+            connected: false,
+            sessionId: null,
+            registrationId: null,
+            selectedPrinterId: selection.selectedPrinterId,
+            lastDisconnectedAt: new Date().toISOString(),
+            lastError: message,
+            lastRejectReasonCode: reasonCode,
+          });
+          finish();
+        });
         ws.on("error", (error: any) => {
-          console.error("persistent printer session socket error", { error: (error as any)?.message || error });
+          console.error("persistent printer session socket error", { path: sessionPath, error: (error as any)?.message || error });
           updatePersistentSessionStatus({ lastError: (error as any)?.message || "Persistent session socket error." });
           finish();
         });

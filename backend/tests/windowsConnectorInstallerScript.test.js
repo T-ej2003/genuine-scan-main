@@ -274,12 +274,18 @@ const run = async () => {
       installScript.includes("local-agent-direct-v2"),
     "Windows installer should verify the status endpoint is running the expected connector version and protocol"
   );
-  assert(
-    installScript.includes("Assert-PostInstallProcessState") &&
-      installScript.includes("exactly one MSCQR connector process") &&
-      installScript.includes("canonical path"),
-    "Windows installer should verify exactly one active connector process at the canonical binary path"
-  );
+	  assert(
+	    installScript.includes("Assert-PostInstallProcessState") &&
+	      installScript.includes("exactly one MSCQR connector process") &&
+	      installScript.includes("canonical path"),
+	    "Windows installer should verify exactly one active connector process at the canonical binary path"
+	  );
+	  assert(
+	    installScript.includes("return ,@($agentProcesses | Sort-Object ProcessId -Unique)") &&
+	      installScript.includes("$activeAgents = @(Get-AgentProcessCandidates)") &&
+	      installScript.includes("Post-install verification found exactly one MSCQR connector process"),
+	    "Windows installer post-install process detection should treat one process as a one-item array"
+	  );
   assert(
     installScript.includes('Start-Process $TargetUrl'),
     "Windows installer should attempt to open Printer Setup after success or partial success"

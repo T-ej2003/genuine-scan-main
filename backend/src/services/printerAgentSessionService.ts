@@ -30,6 +30,10 @@ import {
 } from "./printerTestLabelService";
 
 const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
+const sha256Short = (value: unknown) => {
+  const normalized = String(value || "").trim();
+  return normalized ? sha256Hex(normalized).slice(0, 16) : null;
+};
 const toCleanString = (value: unknown, max = 500) => String(value || "").trim().slice(0, max);
 const toJsonArray = (value: unknown): string[] => Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
 const toJsonRecord = (value: unknown): Record<string, unknown> | null =>
@@ -117,6 +121,111 @@ export type TrustedPrinterAgentSession = {
   manufacturerId: string;
 };
 
+type PrinterSessionRegistrationCandidate = {
+  id: string;
+  userId: string;
+  agentId: string;
+  deviceFingerprint: string;
+  publicKeyPem: string;
+  certFingerprint: string | null;
+  trustStatus: PrinterTrustStatus;
+  approvedAt: Date | null;
+  revokedAt: Date | null;
+  lastSeenAt: Date | null;
+  updatedAt: Date;
+};
+
+type PrinterSessionResolverSummary = {
+  reasonCode: string;
+  requestPath?: string | null;
+  agentIdHash: string | null;
+  deviceFingerprintHash: string | null;
+  registrationCandidateCount: number;
+  trustedCandidateCount: number;
+  revokedCandidateCount: number;
+  selectedRegistrationIdHashOrShortId: string | null;
+  selectedTrustStatus: string | null;
+  signatureVerified: boolean;
+  selectedPrinterIdPresent: boolean;
+  selectedPrinterMatch: boolean;
+  buildVersion: string | null;
+  supportsPersistentPrintSession: boolean;
+  connectorVersionAccepted: boolean;
+  httpStatus: number;
+};
+
+type TrustedPrinterAgentRegistrationResolution = {
+  registration: PrinterSessionRegistrationCandidate;
+  printer: {
+    id: string;
+    name: string;
+    nativePrinterId: string | null;
+    connectionType: string;
+    profile?: { id: string } | null;
+  };
+  publicKeyFingerprint: string;
+  summary: PrinterSessionResolverSummary;
+};
+
+const resolveCapabilities = (hello: SessionHello) => {
+  const health = toJsonRecord(hello.printerHealth);
+  const capabilities = toJsonRecord(health?.capabilities);
+  return {
+    supportsPersistentPrintSession: capabilities?.supportsPersistentPrintSession === true,
+  };
+};
+
+const buildSessionResolverSummary = (params: {
+  reasonCode: string;
+  hello: SessionHello;
+  candidates: PrinterSessionRegistrationCandidate[];
+  selected?: PrinterSessionRegistrationCandidate | null;
+  signatureVerified?: boolean;
+  selectedPrinterMatch?: boolean;
+  httpStatus?: number;
+}) => {
+  const capabilities = resolveCapabilities(params.hello);
+  return {
+    reasonCode: params.reasonCode,
+    agentIdHash: sha256Short(params.hello.agentId),
+    deviceFingerprintHash: sha256Short(params.hello.deviceFingerprint),
+    registrationCandidateCount: params.candidates.length,
+    trustedCandidateCount: params.candidates.filter(
+      (candidate) =>
+        candidate.trustStatus === PrinterTrustStatus.TRUSTED &&
+        !candidate.revokedAt &&
+        String(candidate.publicKeyPem || "").includes("BEGIN")
+    ).length,
+    revokedCandidateCount: params.candidates.filter(
+      (candidate) => candidate.trustStatus === PrinterTrustStatus.REVOKED || Boolean(candidate.revokedAt)
+    ).length,
+    selectedRegistrationIdHashOrShortId: params.selected ? sha256Short(params.selected.id) : null,
+    selectedTrustStatus: params.selected?.trustStatus || null,
+    signatureVerified: params.signatureVerified === true,
+    selectedPrinterIdPresent: Boolean(toCleanString(params.hello.selectedPrinterId, 180)),
+    selectedPrinterMatch: params.selectedPrinterMatch === true,
+    buildVersion: toCleanString(params.hello.connectorVersion, 80) || null,
+    supportsPersistentPrintSession: capabilities.supportsPersistentPrintSession,
+    connectorVersionAccepted: isLocalAgentPersistentSessionCapable(params.hello.connectorVersion),
+    httpStatus: params.httpStatus || 403,
+  } satisfies PrinterSessionResolverSummary;
+};
+
+const sessionResolverError = (message: string, summary: PrinterSessionResolverSummary, extra: Record<string, unknown> = {}) =>
+  Object.assign(new Error(message), {
+    statusCode: summary.httpStatus,
+    errorCode: summary.reasonCode,
+    resolverSummary: summary,
+    ...extra,
+  });
+
+export const logPrinterSessionResolverOutcome = (
+  event: "printer_session_rejected" | "printer_session_connected" | "printer_session_resolved",
+  summary: PrinterSessionResolverSummary & Record<string, unknown>
+) => {
+  console.info(event, summary);
+};
+
 const verifySessionSignature = (params: {
   publicKeyPem: string;
   type: SessionHello["type"] | SessionClientMessage["type"];
@@ -172,77 +281,11 @@ export const openTrustedPrinterAgentSession = async (
   hello: SessionHello,
   options: { mtlsFingerprintHeader?: string | null } = {}
 ): Promise<TrustedPrinterAgentSession> => {
-  const registration = await prisma.printerRegistration.findFirst({
-    where: {
-      ...(hello.registrationId ? { id: hello.registrationId } : {}),
-      agentId: hello.agentId,
-      deviceFingerprint: hello.deviceFingerprint,
-      revokedAt: null,
-    },
-    orderBy: [{ lastSeenAt: "desc" }, { updatedAt: "desc" }],
-  });
-
-  if (!registration || registration.trustStatus === PrinterTrustStatus.REVOKED) {
-    throw Object.assign(new Error("Printer registration not trusted."), { statusCode: 401, errorCode: "registration_not_trusted" });
-  }
-  if (registration.trustStatus !== PrinterTrustStatus.TRUSTED || !registration.approvedAt) {
-    throw Object.assign(new Error("Printer registration is not approved for persistent sessions."), { statusCode: 401, errorCode: "registration_not_approved" });
-  }
-  if (!String(registration.publicKeyPem || "").includes("BEGIN")) {
-    throw Object.assign(new Error("Printer registration public key is not enrolled."), { statusCode: 401, errorCode: "public_key_not_enrolled" });
-  }
-  if (!isLocalAgentPersistentSessionCapable(hello.connectorVersion)) {
-    throw Object.assign(new Error(CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE), {
-      statusCode: 426,
-      errorCode: "persistent_session_connector_update_required",
-      minimumConnectorVersion: LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION,
-    });
-  }
-  if (PRINT_AGENT_REQUIRE_MTLS) {
-    const headerFingerprint = toCleanString(options.mtlsFingerprintHeader, 256);
-    if (!headerFingerprint || (registration.certFingerprint && registration.certFingerprint !== headerFingerprint)) {
-      throw Object.assign(new Error("mTLS client certificate is required for printer session."), { statusCode: 401, errorCode: "mtls_required" });
-    }
-  }
-
-  verifySessionSignature({
-    publicKeyPem: registration.publicKeyPem,
-    type: "hello",
-    registrationId: hello.registrationId || null,
-    agentId: hello.agentId,
-    deviceFingerprint: hello.deviceFingerprint,
-    selectedPrinterId: hello.selectedPrinterId,
-    connectorVersion: hello.connectorVersion || null,
-    nonce: hello.nonce,
-    issuedAt: hello.issuedAt,
-    signature: hello.signature,
-  });
-
-  const printer = await prisma.printer.findFirst({
-    where: {
-      printerRegistrationId: registration.id,
-      isActive: true,
-      OR: [{ nativePrinterId: hello.selectedPrinterId }, { id: hello.selectedPrinterId }],
-    },
-    include: { profile: true },
-    orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
-  });
-  if (!printer) {
-    throw Object.assign(new Error("Selected printer is not registered for this connector."), {
-      statusCode: 409,
-      errorCode: "selected_printer_mismatch",
-    });
-  }
-  if (printer.connectionType !== "LOCAL_AGENT") {
-    throw Object.assign(new Error("Persistent printer sessions are only available for local-agent printers."), {
-      statusCode: 409,
-      errorCode: "printer_transport_mismatch",
-    });
-  }
+  const resolved = await resolveTrustedPrinterAgentRegistrationForSession(hello, options);
+  const { registration, printer, publicKeyFingerprint } = resolved;
 
   const now = new Date();
   const connectionId = randomUUID();
-  const publicKeyFingerprint = sha256Hex(registration.publicKeyPem);
   const superseded = await prisma.printerAgentSession.updateMany({
     where: {
       registrationId: registration.id,
@@ -279,13 +322,15 @@ export const openTrustedPrinterAgentSession = async (
     },
   });
 
-  console.info("printer_session_connected", {
+  logPrinterSessionResolverOutcome("printer_session_connected", {
+    ...resolved.summary,
+    reasonCode: "session_connected",
+    httpStatus: 101,
     agentSessionId: session.id,
+    sessionId: session.id,
     connectionId,
-    registrationId: registration.id,
-    agentId: registration.agentId,
-    selectedPrinterId: printer.nativePrinterId || hello.selectedPrinterId,
-    connectorVersion: hello.connectorVersion || null,
+    registrationIdHashOrShortId: sha256Short(registration.id),
+    selectedPrinterIdHashOrSafeName: sha256Short(printer.nativePrinterId || hello.selectedPrinterId),
     supersededSessionCount: superseded.count,
     trustMode: PRINT_AGENT_REQUIRE_MTLS ? "STRICT_MTLS" : "SIGNED_ATTESTATION",
   });
@@ -305,6 +350,189 @@ export const openTrustedPrinterAgentSession = async (
     publicKeyFingerprint,
     manufacturerId: registration.userId,
   };
+};
+
+export const resolveTrustedPrinterAgentRegistrationForSession = async (
+  hello: SessionHello,
+  options: { mtlsFingerprintHeader?: string | null } = {}
+): Promise<TrustedPrinterAgentRegistrationResolution> => {
+  const capabilities = resolveCapabilities(hello);
+  const emptyCandidates: PrinterSessionRegistrationCandidate[] = [];
+  if (!isLocalAgentPersistentSessionCapable(hello.connectorVersion)) {
+    const summary = buildSessionResolverSummary({
+      reasonCode: "persistent_session_connector_update_required",
+      hello,
+      candidates: emptyCandidates,
+      httpStatus: 426,
+    });
+    throw sessionResolverError(CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE, summary, {
+      minimumConnectorVersion: LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION,
+    });
+  }
+  if (!capabilities.supportsPersistentPrintSession) {
+    const summary = buildSessionResolverSummary({
+      reasonCode: "persistent_session_capability_required",
+      hello,
+      candidates: emptyCandidates,
+      httpStatus: 403,
+    });
+    throw sessionResolverError("Connector must advertise persistent print session support.", summary);
+  }
+
+  const candidates = await prisma.printerRegistration.findMany({
+    where: {
+      OR: [
+        {
+          agentId: hello.agentId,
+          deviceFingerprint: hello.deviceFingerprint,
+        },
+        ...(hello.registrationId ? [{ id: hello.registrationId }] : []),
+      ],
+    },
+    orderBy: [{ lastSeenAt: "desc" }, { updatedAt: "desc" }],
+  }) as PrinterSessionRegistrationCandidate[];
+
+  let lastSummary = buildSessionResolverSummary({
+    reasonCode: "registration_not_trusted",
+    hello,
+    candidates,
+  });
+  let sawSignatureFailure = false;
+  let sawPrinterMismatch = false;
+  let sawTrustedCandidate = false;
+
+  for (const candidate of candidates) {
+    const selectedBase = buildSessionResolverSummary({
+      reasonCode: "registration_not_trusted",
+      hello,
+      candidates,
+      selected: candidate,
+    });
+
+    if (
+      candidate.agentId !== hello.agentId ||
+      candidate.deviceFingerprint !== hello.deviceFingerprint ||
+      candidate.trustStatus === PrinterTrustStatus.REVOKED ||
+      candidate.revokedAt
+    ) {
+      lastSummary = selectedBase;
+      continue;
+    }
+
+    if (candidate.trustStatus !== PrinterTrustStatus.TRUSTED || !candidate.approvedAt) {
+      lastSummary = { ...selectedBase, reasonCode: "registration_not_approved" };
+      continue;
+    }
+    sawTrustedCandidate = true;
+
+    if (!String(candidate.publicKeyPem || "").includes("BEGIN")) {
+      lastSummary = { ...selectedBase, reasonCode: "public_key_not_enrolled" };
+      continue;
+    }
+
+    const publicKeyFingerprint = sha256Hex(candidate.publicKeyPem);
+    if (!publicKeyFingerprint) {
+      lastSummary = { ...selectedBase, reasonCode: "public_key_fingerprint_missing" };
+      continue;
+    }
+
+    if (PRINT_AGENT_REQUIRE_MTLS) {
+      const headerFingerprint = toCleanString(options.mtlsFingerprintHeader, 256);
+      if (!headerFingerprint || (candidate.certFingerprint && candidate.certFingerprint !== headerFingerprint)) {
+        lastSummary = { ...selectedBase, reasonCode: "mtls_required" };
+        continue;
+      }
+    }
+
+    try {
+      verifySessionSignature({
+        publicKeyPem: candidate.publicKeyPem,
+        type: "hello",
+        registrationId: hello.registrationId || null,
+        agentId: hello.agentId,
+        deviceFingerprint: hello.deviceFingerprint,
+        selectedPrinterId: hello.selectedPrinterId,
+        connectorVersion: hello.connectorVersion || null,
+        nonce: hello.nonce,
+        issuedAt: hello.issuedAt,
+        signature: hello.signature,
+      });
+    } catch (error: any) {
+      sawSignatureFailure = true;
+      lastSummary = {
+        ...selectedBase,
+        reasonCode: error?.errorCode || "bad_session_signature",
+        signatureVerified: false,
+        httpStatus: Number(error?.statusCode || 403),
+      };
+      continue;
+    }
+
+    const printer = await prisma.printer.findFirst({
+      where: {
+        printerRegistrationId: candidate.id,
+        isActive: true,
+        OR: [{ nativePrinterId: hello.selectedPrinterId }, { id: hello.selectedPrinterId }],
+      },
+      include: { profile: true },
+      orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
+    });
+    if (!printer) {
+      sawPrinterMismatch = true;
+      lastSummary = {
+        ...selectedBase,
+        reasonCode: "selected_printer_mismatch",
+        signatureVerified: true,
+        selectedPrinterMatch: false,
+        httpStatus: 403,
+      };
+      continue;
+    }
+    if (printer.connectionType !== "LOCAL_AGENT") {
+      lastSummary = {
+        ...selectedBase,
+        reasonCode: "printer_transport_mismatch",
+        signatureVerified: true,
+        selectedPrinterMatch: true,
+        httpStatus: 403,
+      };
+      continue;
+    }
+
+    return {
+      registration: candidate,
+      printer,
+      publicKeyFingerprint,
+      summary: {
+        ...selectedBase,
+        reasonCode: "session_resolved",
+        signatureVerified: true,
+        selectedPrinterMatch: true,
+        httpStatus: 101,
+      },
+    };
+  }
+
+  const reasonCode = sawPrinterMismatch
+    ? "selected_printer_mismatch"
+    : sawSignatureFailure
+      ? "bad_session_signature"
+      : sawTrustedCandidate
+        ? lastSummary.reasonCode
+        : "registration_not_trusted";
+  const summary = {
+    ...lastSummary,
+    reasonCode,
+    httpStatus: reasonCode === "agent_timestamp_expired" ? 403 : 403,
+  };
+  throw sessionResolverError(
+    reasonCode === "selected_printer_mismatch"
+      ? "Selected printer is not registered for this connector."
+      : reasonCode === "bad_session_signature"
+        ? "Printer agent session signature verification failed."
+        : "Printer registration not trusted.",
+    summary
+  );
 };
 
 export const closeTrustedPrinterAgentSession = async (sessionId: string, reason: string) => {

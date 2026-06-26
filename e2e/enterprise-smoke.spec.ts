@@ -410,7 +410,9 @@ test.describe.serial("Enterprise smoke flows", () => {
       return;
     }
 
-    await expect(printDialog).toContainText(/Connector update required|Persistent printer session/i, { timeout: 30_000 });
+    await expect(printDialog).toContainText(/Connector update required|Persistent session is not connected/i, {
+      timeout: 30_000,
+    });
     await expect(startButton).toBeDisabled({ timeout: 30_000 });
   });
 

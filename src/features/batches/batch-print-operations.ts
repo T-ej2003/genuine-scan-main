@@ -5,6 +5,7 @@ import { setOptionalLocalStorageItem } from "@/lib/consent";
 import { chooseStablePrinterSelection } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { canPollVisibleDocument, jitterMs, pollingPolicy } from "@/lib/query-polling-policy";
+import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 
 import { resolveMaxPrintRunQuantity } from "./print-run-limits";
 import { defaultPrinterStatus } from "./print-workflow-utils";
@@ -509,8 +510,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     const effectiveLiveStatus = (livePrinterStatus.data || printerStatus) as PrinterConnectionStatus;
     if (
       refreshRateLimited &&
-      printerStatus.connected &&
-      printerStatus.eligibleForPrinting &&
+      buildSecurePrintReadiness(printerStatus).ready &&
       detectedPrinters.some((row) => row.printerId === selectedPrinterId && row.online !== false)
     ) {
       toast({
@@ -520,8 +520,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     } else if (
       !livePrinterStatus.success ||
       !livePrinterStatus.data ||
-      !effectiveLiveStatus.connected ||
-      !effectiveLiveStatus.eligibleForPrinting
+      !buildSecurePrintReadiness(effectiveLiveStatus).ready
     ) {
       setPrinterStatus({
         ...defaultPrinterStatus,

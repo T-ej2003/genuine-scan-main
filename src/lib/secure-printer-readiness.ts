@@ -24,6 +24,7 @@ type PrinterStatusLike = {
   persistentSessionCapable?: boolean | null;
   persistentSessionMinimumBuildVersion?: string | null;
   persistentSessionUpdateRequired?: boolean | null;
+  persistentSessionDisconnected?: boolean | null;
 };
 
 export type SecurePrintReadiness = {
@@ -54,12 +55,13 @@ export const isSecurePrintReady = (status?: PrinterStatusLike | null) =>
     status?.connected &&
       status?.eligibleForPrinting &&
       status?.trusted &&
-      status?.securePrinterSession !== false &&
-      status?.freshHelperHeartbeat !== false &&
-      status?.helperConnection !== false &&
-      status?.eligiblePrinter !== false &&
-      !status?.compatibilityMode &&
-      !status?.stale &&
+	      status?.securePrinterSession !== false &&
+	      status?.freshHelperHeartbeat !== false &&
+	      status?.helperConnection !== false &&
+	      status?.eligiblePrinter !== false &&
+	      status?.persistentSessionDisconnected !== true &&
+	      !status?.compatibilityMode &&
+	      !status?.stale &&
       String(status?.connectionClass || "TRUSTED").toUpperCase() === "TRUSTED"
   );
 
@@ -93,6 +95,18 @@ export const buildSecurePrintReadiness = (status?: PrinterStatusLike | null): Se
   }
 
   if (!status?.connected) {
+    if (status?.persistentSessionRequired && status?.persistentSessionCapable && status?.persistentSessionDisconnected !== false) {
+      return {
+        ready: false,
+        reasonCode: "SECURE_SESSION_MISSING",
+        badgeLabel: "Blocked",
+        tone: "danger",
+        summary: "Persistent session is not connected.",
+        detail: "Helper installed and printer detected are not enough for production printing. Keep MSCQR Connector 2026.6.25 running until Cloud trust and the persistent session are connected.",
+        recoveryAction: "refresh_printer_helper",
+        canRetry: true,
+      };
+    }
     const expired = Boolean(status?.stale || hasMtlsMissingReason(status));
     return {
       ready: false,
