@@ -1,6 +1,9 @@
+import { createHash } from "crypto";
 import type { IncomingMessage, Server } from "http";
+import type { Duplex } from "stream";
 import { WebSocketServer, WebSocket } from "ws";
 
+import { releaseMetadata } from "../observability/release";
 import { getTrustedMtlsFingerprintHeader } from "../utils/mtlsFingerprintHeader";
 import {
   buildNextPrintChunkForSession,
@@ -25,6 +28,70 @@ const SESSION_SOCKET_PATHS = new Set([
   "/api/api/printer-agent/session",
   "/printer-agent/session",
 ]);
+
+const sha256Short = (value: unknown) => {
+  const normalized = String(value || "").trim();
+  return normalized ? createHash("sha256").update(normalized).digest("hex").slice(0, 16) : null;
+};
+
+const safeHeaderValue = (value: unknown, max = 120) => {
+  const source = Array.isArray(value) ? value.join(",") : String(value || "");
+  const normalized = source.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+  return normalized ? normalized.slice(0, max) : null;
+};
+
+const safeWebSocketProtocolPresence = (value: unknown) => {
+  const normalized = safeHeaderValue(value, 160);
+  const looksSensitive =
+    /\b(bearer|token|jwt|secret|signature|cookie|csrf)\b/i.test(normalized || "") ||
+    /\beyJ[a-z0-9_-]{20,}/i.test(normalized || "");
+  return {
+    present: Boolean(normalized),
+    value: normalized && looksSensitive ? "<redacted>" : normalized,
+  };
+};
+
+const safeUserAgentFamily = (value: unknown) => {
+  const normalized = safeHeaderValue(value, 160);
+  if (!normalized) return null;
+  const family = normalized.split(/[\/\s;]/)[0]?.trim() || normalized;
+  return family.slice(0, 80);
+};
+
+const isSessionLikeUpgradePath = (pathname: string) =>
+  pathname.includes("/printer-agent/session") || pathname.includes("printer-agent") && pathname.includes("session");
+
+export const buildPrinterSessionUpgradeDiagnostics = (request: IncomingMessage) => {
+  const url = new URL(request.url || "/", "http://localhost");
+  const forwardedFor = safeHeaderValue(request.headers["x-forwarded-for"], 512);
+  return {
+    requestPath: url.pathname,
+    method: safeHeaderValue(request.method, 16),
+    host: safeHeaderValue(request.headers.host, 160),
+    originPresent: Boolean(safeHeaderValue(request.headers.origin, 512)),
+    userAgentFamily: safeUserAgentFamily(request.headers["user-agent"]),
+    connectionHeader: safeHeaderValue(request.headers.connection, 120),
+    upgradeHeader: safeHeaderValue(request.headers.upgrade, 80),
+    secWebSocketVersion: safeHeaderValue(request.headers["sec-websocket-version"], 16),
+    secWebSocketProtocol: safeWebSocketProtocolPresence(request.headers["sec-websocket-protocol"]),
+    xForwardedForPresent: Boolean(forwardedFor),
+    xForwardedForHash: sha256Short(forwardedFor),
+    release: releaseMetadata.release,
+  };
+};
+
+const writeUpgradeFailureAndDestroy = (socket: Duplex, statusCode: number, reason: string) => {
+  if (socket.destroyed) return;
+  try {
+    socket.write(
+      `HTTP/1.1 ${statusCode} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`
+    );
+  } catch {
+    // Best effort only; the socket is destroyed immediately below.
+  } finally {
+    socket.destroy();
+  }
+};
 
 const sendJson = (ws: WebSocket, payload: Record<string, unknown>) => {
   if (ws.readyState !== WebSocket.OPEN) return;
@@ -68,10 +135,31 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url || "/", "http://localhost");
-    if (!SESSION_SOCKET_PATHS.has(url.pathname)) return;
-    wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
-      wss.emit("connection", ws, request);
-    });
+    if (!SESSION_SOCKET_PATHS.has(url.pathname)) {
+      if (isSessionLikeUpgradePath(url.pathname)) {
+        console.warn("printer_session_upgrade_unhandled_path", {
+          ...buildPrinterSessionUpgradeDiagnostics(request),
+          httpStatus: 404,
+          socketDestroyed: true,
+        });
+        writeUpgradeFailureAndDestroy(socket, 404, "Not Found");
+      }
+      return;
+    }
+    console.info("printer_session_upgrade_seen", buildPrinterSessionUpgradeDiagnostics(request));
+    try {
+      wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
+        wss.emit("connection", ws, request);
+      });
+    } catch (error: any) {
+      console.error("printer_session_upgrade_handle_error", {
+        ...buildPrinterSessionUpgradeDiagnostics(request),
+        error: safeHeaderValue(error?.message || error, 240),
+        httpStatus: 400,
+        socketDestroyed: true,
+      });
+      writeUpgradeFailureAndDestroy(socket, 400, "Bad Request");
+    }
   });
 
   wss.on("connection", (ws: WebSocket, request: IncomingMessage) => {

@@ -1,14 +1,20 @@
 const { createHash } = require("crypto");
+const { PassThrough } = require("stream");
 const {
+  buildPersistentSessionConnectDiagnostics,
+  buildPersistentSessionRejectReasonCode,
+  buildSafePersistentSessionRejectHeaders,
   isCloudConnectivityError,
   isBackendRateLimitError,
+  readPersistentSessionRejectBodyPreview,
+  sanitizePersistentSessionRejectBodyPreview,
   resolveActiveWakeRetryAfterMs,
-	  resolveConnectivityRetryAfterMs,
-	  resolveNoWorkRetryAfterMs,
-	  normalizeBackendBaseUrl,
-	  resolveSessionUrl,
-	  validateClaimedLocalPrintJobForAttempt,
-	} = require("../dist/local-print-agent/directPrintWorker");
+  resolveConnectivityRetryAfterMs,
+  resolveNoWorkRetryAfterMs,
+  normalizeBackendBaseUrl,
+  resolveSessionUrl,
+  validateClaimedLocalPrintJobForAttempt,
+} = require("../dist/local-print-agent/directPrintWorker");
 const {
   getMissingTransportDiagnosticsCapabilities,
   hasRequiredTransportDiagnosticsCapabilities,
@@ -30,7 +36,7 @@ const assert = (condition, message) => {
 
 const sha256Hex = (value) => createHash("sha256").update(value).digest("hex");
 
-const run = () => {
+const run = async () => {
   assert(
     isLocalAgentProtocolCompatible(LOCAL_AGENT_DIRECT_PROTOCOL_VERSION),
     "Current direct-print protocol should be accepted"
@@ -99,6 +105,82 @@ const run = () => {
 	    resolveSessionUrl("https://www.mscqr.com/api") === "wss://www.mscqr.com/api/printer-agent/session",
 	    "Persistent WebSocket URL must not duplicate /api when backendUrl already includes it"
 	  );
+  const safeUpgradeHeaders = buildSafePersistentSessionRejectHeaders({
+    server: "CloudFront",
+    via: "1.1 cloudfront",
+    "x-cache": "Error from cloudfront",
+    "x-amz-cf-pop": "LHR61-P7",
+    "x-amz-cf-id": "cloudfront-request-id-value",
+    date: "Fri, 26 Jun 2026 15:00:00 GMT",
+    "content-type": "text/html",
+    "content-length": "123",
+    "x-request-id": "request-id-value",
+    "set-cookie": "session=secret",
+    authorization: "Bearer raw-token",
+  });
+  assert(safeUpgradeHeaders.server === "CloudFront", "Safe WebSocket reject diagnostics should keep server header");
+  assert(safeUpgradeHeaders["x-cache"] === "Error from cloudfront", "Safe WebSocket reject diagnostics should keep x-cache header");
+  assert(!("set-cookie" in safeUpgradeHeaders), "Safe WebSocket reject diagnostics must not include set-cookie");
+  assert(!("authorization" in safeUpgradeHeaders), "Safe WebSocket reject diagnostics must not include authorization");
+
+  const rejectReason = buildPersistentSessionRejectReasonCode(403, {
+    server: "CloudFront",
+    "x-cache": "Error from cloudfront",
+  });
+  assert(
+    rejectReason.includes("http_403") && rejectReason.includes("xcache_error_from_cloudfront"),
+    "Persistent session reject reason should include status and safe proxy source"
+  );
+
+  const connectDiagnostics = buildPersistentSessionConnectDiagnostics({
+    backendUrl: "https://www.mscqr.com/api",
+    sessionUrl: "wss://www.mscqr.com/api/printer-agent/session?secret=must-not-log",
+    selectedPrinterId: "ZDesigner ZT410-300dpi ZPL",
+    agentId: "agent-raw-value",
+    deviceFingerprint: "device-raw-value",
+  });
+  const connectDiagnosticsText = JSON.stringify(connectDiagnostics);
+  assert(connectDiagnostics.sessionUrlOrigin === "wss://www.mscqr.com", "Session diagnostic should log URL origin");
+  assert(connectDiagnostics.sessionUrlPathname === "/api/printer-agent/session", "Session diagnostic should log URL pathname only");
+  assert(connectDiagnostics.backendBaseOrigin === "https://www.mscqr.com", "Backend diagnostic should log normalized backend origin");
+  assert(!connectDiagnosticsText.includes("secret=must-not-log"), "Session diagnostic must not log URL query strings");
+  assert(!connectDiagnosticsText.includes("agent-raw-value"), "Session diagnostic must hash raw agent id");
+  assert(!connectDiagnosticsText.includes("device-raw-value"), "Session diagnostic must hash raw device fingerprint");
+
+  const redactedBody = sanitizePersistentSessionRejectBodyPreview(
+    JSON.stringify({
+      heartbeatSignature: "SENSITIVE_HEARTBEAT_SIGNATURE_SENTINEL",
+      signature: "SENSITIVE_SESSION_SIGNATURE_SENTINEL",
+      token: "SENSITIVE_TOKEN_SENTINEL",
+      authorization: "Bearer SENSITIVE_AUTHORIZATION_SENTINEL",
+      error: "blocked",
+    })
+  );
+  assert(!redactedBody.includes("SENSITIVE_HEARTBEAT_SIGNATURE_SENTINEL"), "Reject body preview must redact heartbeat signatures");
+  assert(!redactedBody.includes("SENSITIVE_SESSION_SIGNATURE_SENTINEL"), "Reject body preview must redact session signatures");
+  assert(!redactedBody.includes("SENSITIVE_TOKEN_SENTINEL"), "Reject body preview must redact raw tokens");
+  assert(!redactedBody.includes("SENSITIVE_AUTHORIZATION_SENTINEL"), "Reject body preview must redact authorization values");
+
+  const longTokenPrefix = "SENSITIVE_TOKEN_PREFIX_MUST_NOT_LOG";
+  const truncatedSensitiveBody = `{"token":"${longTokenPrefix}${"a".repeat(5_000)}`;
+  const redactedTruncatedBody = sanitizePersistentSessionRejectBodyPreview(truncatedSensitiveBody, 80);
+  assert(!redactedTruncatedBody.includes(longTokenPrefix), "Unterminated reject preview token values must be redacted");
+
+  const longSignaturePrefix = "SENSITIVE_SIGNATURE_PREFIX_MUST_NOT_LOG";
+  const redactedTruncatedSignature = sanitizePersistentSessionRejectBodyPreview(
+    `{"signature":"${longSignaturePrefix}${"b".repeat(5_000)}`,
+    80
+  );
+  assert(!redactedTruncatedSignature.includes(longSignaturePrefix), "Unterminated reject preview signature values must be redacted");
+
+  const responseStream = new PassThrough();
+  const streamedPreviewPromise = readPersistentSessionRejectBodyPreview(responseStream, 80);
+  responseStream.write(`{"token":"${longTokenPrefix}`);
+  responseStream.write(`${"c".repeat(5_000)}`);
+  responseStream.end("\"}");
+  const streamedPreview = await streamedPreviewPromise;
+  assert(streamedPreview && streamedPreview.length <= 80, "Streamed reject body preview must respect max preview length");
+  assert(!streamedPreview.includes(longTokenPrefix), "Streamed reject body preview must redact long token prefixes before truncating");
 
   const zeroQuantity = validatePrintJobRunQuantity({
     quantity: 0,
@@ -189,4 +271,7 @@ const run = () => {
   console.log("local agent direct worker protocol tests passed");
 };
 
-run();
+run().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
