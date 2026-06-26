@@ -4,23 +4,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import JSZip from "jszip";
-import { backendRoot, readConnectorSourceVersion } from "./source-version.mjs";
+import {
+  backendRoot,
+  readConnectorSourceVersion,
+  readLocalAgentCapabilities,
+  readLocalAgentProtocolString,
+} from "./source-version.mjs";
 
 const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const manifestPath = path.join(releaseRoot, "manifest.json");
-const protocolSource = fs.readFileSync(path.join(backendRoot, "src", "services", "localAgentProtocol.ts"), "utf8");
 const minWindowsArtifactBytes = 1_000_000;
-const requiredCapabilities = [
-  "supportsPrinterQueueSnapshot",
-  "supportsWindowsTcpPortInspection",
-  "supportsRawTcpConnectTest",
-  "supportsRawTcpZplSend",
-  "supportsUsbRawSpooler",
-  "supportsSpoolJobCancel",
-  "supportsSpoolJobStatus",
-  "supportsTransportDiagnostics",
-  "supportsTestLabel",
-];
+const requiredCapabilities = Object.keys(readLocalAgentCapabilities(backendRoot));
 const requiredZipEntries = [
   "Install Connector.cmd",
   "Uninstall Connector.cmd",
@@ -36,12 +30,6 @@ const requiredZipEntries = [
   "legal/INSTALLATION_GUIDE.txt",
   "legal/THIRD_PARTY_NOTICES.txt",
 ];
-
-const readExportedString = (name) => {
-  const match = protocolSource.match(new RegExp(`export\\s+const\\s+${name}\\s*=\\s*"([^"]+)"`));
-  if (!match) throw new Error(`Could not read ${name} from localAgentProtocol.ts`);
-  return match[1];
-};
 
 const sha256ForFile = (filePath) => crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 
@@ -77,7 +65,7 @@ const assertSelfTestOutput = (label, output) => {
   if (parsed.buildVersion !== sourceVersion) {
     throw new Error(`${label} self-test buildVersion ${parsed.buildVersion} does not match ${sourceVersion}.`);
   }
-  if (parsed.transportDiagnosticsVersion !== readExportedString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION")) {
+  if (parsed.transportDiagnosticsVersion !== readLocalAgentProtocolString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION", backendRoot)) {
     throw new Error(`${label} self-test did not report the current transport diagnostics version.`);
   }
   for (const capability of requiredCapabilities) {
@@ -163,8 +151,8 @@ const isSignedProductionWindows = (windows) =>
   );
 
 const assertLatestContract = (manifest, latestRelease, windows, sourceVersion) => {
-  const requiredProtocolVersion = readExportedString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION");
-  const transportDiagnosticsVersion = readExportedString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION");
+  const requiredProtocolVersion = readLocalAgentProtocolString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION", backendRoot);
+  const transportDiagnosticsVersion = readLocalAgentProtocolString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION", backendRoot);
 
   if (manifest.latestVersion !== sourceVersion) {
     throw new Error(`Connector manifest latestVersion ${manifest.latestVersion} does not match source version ${sourceVersion}.`);

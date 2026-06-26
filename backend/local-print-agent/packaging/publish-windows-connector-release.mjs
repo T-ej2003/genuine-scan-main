@@ -3,37 +3,25 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { assertConnectorVersionMatchesSource, readConnectorSourceVersion } from "./source-version.mjs";
+import {
+  assertConnectorVersionMatchesSource,
+  readConnectorSourceVersion,
+  readLocalAgentCapabilities,
+  readLocalAgentProtocolString,
+} from "./source-version.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const backendRoot = path.resolve(__dirname, "../..");
 const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const legalRoot = path.resolve(backendRoot, "..", "documents", "legal", "connector");
-const protocolSource = fs.readFileSync(path.join(backendRoot, "src", "services", "localAgentProtocol.ts"), "utf8");
-
-const readExportedString = (name) => {
-  const match = protocolSource.match(new RegExp(`export\\s+const\\s+${name}\\s*=\\s*"([^"]+)"`));
-  if (!match) throw new Error(`Could not read ${name} from localAgentProtocol.ts`);
-  return match[1];
-};
 
 const normalize = (value) => String(value || "").trim();
 const sourceVersion = readConnectorSourceVersion(backendRoot);
-const requiredProtocolVersion = readExportedString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION");
-const transportDiagnosticsVersion = readExportedString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION");
+const requiredProtocolVersion = readLocalAgentProtocolString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION", backendRoot);
+const transportDiagnosticsVersion = readLocalAgentProtocolString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION", backendRoot);
 const minimumBuildVersion = sourceVersion;
-const connectorCapabilities = {
-  supportsPrinterQueueSnapshot: true,
-  supportsWindowsTcpPortInspection: true,
-  supportsRawTcpConnectTest: true,
-  supportsRawTcpZplSend: true,
-  supportsUsbRawSpooler: true,
-  supportsSpoolJobCancel: true,
-  supportsSpoolJobStatus: true,
-  supportsTransportDiagnostics: true,
-  supportsTestLabel: true,
-};
+const connectorCapabilities = readLocalAgentCapabilities(backendRoot);
 const version = normalize(process.env.CONNECTOR_RELEASE_VERSION) || sourceVersion;
 const signedInstallerSource = normalize(process.env.WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH);
 const signatureReportSource = normalize(process.env.WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH);
