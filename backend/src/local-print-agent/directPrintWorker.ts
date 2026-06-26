@@ -92,18 +92,21 @@ export const buildPersistentSessionRejectReasonCode = (statusCode: number | null
   return parts.join(";").slice(0, 180);
 };
 
+const SENSITIVE_REJECT_BODY_FIELDS = "privateKeyPem|publicKeyPem|heartbeatSignature|signature|token|cookie|csrf|authorization";
+
 export const sanitizePersistentSessionRejectBodyPreview = (body: string, maxChars = 500) =>
   String(body || "")
-    .replace(/-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g, "<redacted-pem>")
+    .replace(/-----BEGIN [^-]+-----[\s\S]*?(?:-----END [^-]+-----|$)/g, "<redacted-pem>")
     .replace(
-      /("(?:privateKeyPem|publicKeyPem|heartbeatSignature|signature|token|cookie|csrf|authorization)"\s*:\s*")[^"]*(")/gi,
-      "$1<redacted>$2"
+      new RegExp(`("(?:${SENSITIVE_REJECT_BODY_FIELDS})"\\s*:\\s*")[^"]*(?:"|$)`, "gi"),
+      (match, prefix) => `${prefix}<redacted>${match.endsWith("\"") ? "\"" : ""}`
     )
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer <redacted>")
     .slice(0, maxChars);
 
 export const readPersistentSessionRejectBodyPreview = (response: any, maxChars = 500) =>
   new Promise<string | null>((resolve) => {
+    const rawPreviewMaxChars = Math.max(maxChars * 8, 4_096);
     let preview = "";
     let settled = false;
     let timer: NodeJS.Timeout | null = null;
@@ -117,8 +120,8 @@ export const readPersistentSessionRejectBodyPreview = (response: any, maxChars =
     try {
       response?.setEncoding?.("utf8");
       response?.on?.("data", (chunk: unknown) => {
-        if (preview.length >= maxChars) return;
-        preview += String(chunk || "").slice(0, maxChars - preview.length);
+        if (preview.length >= rawPreviewMaxChars) return;
+        preview += String(chunk || "").slice(0, rawPreviewMaxChars - preview.length);
       });
       response?.on?.("end", finish);
       response?.on?.("error", finish);

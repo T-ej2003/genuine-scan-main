@@ -1,18 +1,20 @@
 const { createHash } = require("crypto");
+const { PassThrough } = require("stream");
 const {
   buildPersistentSessionConnectDiagnostics,
   buildPersistentSessionRejectReasonCode,
   buildSafePersistentSessionRejectHeaders,
   isCloudConnectivityError,
   isBackendRateLimitError,
+  readPersistentSessionRejectBodyPreview,
   sanitizePersistentSessionRejectBodyPreview,
   resolveActiveWakeRetryAfterMs,
   resolveConnectivityRetryAfterMs,
-	  resolveNoWorkRetryAfterMs,
-	  normalizeBackendBaseUrl,
-	  resolveSessionUrl,
-	  validateClaimedLocalPrintJobForAttempt,
-	} = require("../dist/local-print-agent/directPrintWorker");
+  resolveNoWorkRetryAfterMs,
+  normalizeBackendBaseUrl,
+  resolveSessionUrl,
+  validateClaimedLocalPrintJobForAttempt,
+} = require("../dist/local-print-agent/directPrintWorker");
 const {
   getMissingTransportDiagnosticsCapabilities,
   hasRequiredTransportDiagnosticsCapabilities,
@@ -34,7 +36,7 @@ const assert = (condition, message) => {
 
 const sha256Hex = (value) => createHash("sha256").update(value).digest("hex");
 
-const run = () => {
+const run = async () => {
   assert(
     isLocalAgentProtocolCompatible(LOCAL_AGENT_DIRECT_PROTOCOL_VERSION),
     "Current direct-print protocol should be accepted"
@@ -159,7 +161,28 @@ const run = () => {
   assert(!redactedBody.includes("raw-session-signature"), "Reject body preview must redact session signatures");
   assert(!redactedBody.includes("raw-token-value"), "Reject body preview must redact raw tokens");
 
-	  const zeroQuantity = validatePrintJobRunQuantity({
+  const longTokenPrefix = "secret-token-prefix-that-must-not-log";
+  const truncatedSensitiveBody = `{"token":"${longTokenPrefix}${"a".repeat(5_000)}`;
+  const redactedTruncatedBody = sanitizePersistentSessionRejectBodyPreview(truncatedSensitiveBody, 80);
+  assert(!redactedTruncatedBody.includes(longTokenPrefix), "Unterminated reject preview token values must be redacted");
+
+  const longPemPrefix = "raw-private-key-prefix-that-must-not-log";
+  const redactedTruncatedPem = sanitizePersistentSessionRejectBodyPreview(
+    `{"privateKeyPem":"-----BEGIN PRIVATE KEY-----${longPemPrefix}${"b".repeat(5_000)}`,
+    80
+  );
+  assert(!redactedTruncatedPem.includes(longPemPrefix), "Unterminated reject preview PEM values must be redacted");
+
+  const responseStream = new PassThrough();
+  const streamedPreviewPromise = readPersistentSessionRejectBodyPreview(responseStream, 80);
+  responseStream.write(`{"token":"${longTokenPrefix}`);
+  responseStream.write(`${"c".repeat(5_000)}`);
+  responseStream.end("\"}");
+  const streamedPreview = await streamedPreviewPromise;
+  assert(streamedPreview && streamedPreview.length <= 80, "Streamed reject body preview must respect max preview length");
+  assert(!streamedPreview.includes(longTokenPrefix), "Streamed reject body preview must redact long token prefixes before truncating");
+
+  const zeroQuantity = validatePrintJobRunQuantity({
     quantity: 0,
     remainingPrintableCount: 919,
     maxConfiguredRunLabels: 2000,
@@ -248,4 +271,7 @@ const run = () => {
   console.log("local agent direct worker protocol tests passed");
 };
 
-run();
+run().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
