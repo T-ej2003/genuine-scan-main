@@ -95,20 +95,22 @@ jobs:
         # no vulnerabilities found.
         run: ./osv-scanner --recursive --no-resolve .
 
-      - name: Install Gitleaks
-        shell: bash
-        run: |
-          set -euo pipefail
-          GITLEAKS_VERSION="$(curl -sSfL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | node -e "let data=''; process.stdin.on('data', c => data += c); process.stdin.on('end', () => console.log(JSON.parse(data).tag_name.replace(/^v/, '')));")"
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
-          tar -xzf gitleaks.tar.gz gitleaks
-          chmod +x gitleaks
-          ./gitleaks version
+      - name: Pull Gitleaks
+        run: docker pull ghcr.io/gitleaks/gitleaks:v8.24.2
 
       - name: Gitleaks secrets scan
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./gitleaks detect --source . --redact --baseline-path .gitleaks-baseline.json --report-format sarif --report-path audit-artifacts/gitleaks.sarif
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" \
+            ghcr.io/gitleaks/gitleaks:v8.24.2 \
+            detect \
+              --source /repo \
+              --redact \
+              --baseline-path /repo/.gitleaks-baseline.json \
+              --report-format sarif \
+              --report-path /repo/audit-artifacts/gitleaks.sarif
 
       - name: Detect IaC files
         id: iac-detect

@@ -11,6 +11,8 @@ interface AuthContextType {
   user: User | null;
   pendingAuth: PendingAuthSession | null;
   isLoading: boolean;
+  authReady: boolean;
+  authBootstrapStatus: "bootstrapping" | "authenticated" | "unauthenticated";
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string; sessionStage?: "ACTIVE" | "MFA_BOOTSTRAP" }>;
   logout: () => void;
@@ -76,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [pendingAuth, setPendingAuth] = useState<PendingAuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [authBootstrapStatus, setAuthBootstrapStatus] = useState<"bootstrapping" | "authenticated" | "unauthenticated">("bootstrapping");
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const lastRefreshAttemptAtRef = useRef(0);
   const lastRefreshSuccessAtRef = useRef(0);
@@ -83,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearSession = () => {
     setUser(null);
     setPendingAuth(null);
+    setAuthBootstrapStatus("unauthenticated");
     apiClient.logout();
     clearRequestCoordinator();
   };
@@ -95,12 +99,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setPendingAuth(null);
     setUser(normalizeUser({ ...payload.user, auth: payload.auth || payload.user?.auth || null }));
+    setAuthBootstrapStatus("authenticated");
   };
 
   const setAuthStateFromPayload = (payload: { user?: any; auth?: AuthState | null } | null) => {
     if (!payload?.user) {
       clearSession();
-      return;
+      return false;
     }
 
     const auth = payload.auth || payload.user?.auth || null;
@@ -109,25 +114,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (auth?.sessionStage === "MFA_BOOTSTRAP") {
       setUser(null);
       setPendingAuth({ user: normalized, auth });
-      return;
+      setAuthBootstrapStatus("unauthenticated");
+      return true;
     }
 
     setPendingAuth(null);
     setUser(normalized);
+    setAuthBootstrapStatus("authenticated");
+    return true;
+  };
+
+  const authPayloadFromResponseData = (data: any): { user?: any; auth?: AuthState | null } | null => {
+    if (!data) return null;
+    if (data.user) return { user: data.user, auth: data.auth || data.user?.auth || null };
+    return { user: data, auth: data.auth || null };
   };
 
   const refresh = async () => {
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
     refreshInFlightRef.current = (async () => {
       lastRefreshAttemptAtRef.current = Date.now();
-      const res = await apiClient.getCurrentUser();
-      if (!res.success || !res.data) {
-        clearSession();
-        return;
+
+      const canRefreshSession = typeof apiClient.refreshSession === "function";
+      const canGetCurrentUser = typeof apiClient.getCurrentUser === "function";
+      const refreshSession = () =>
+        canRefreshSession
+          ? apiClient.refreshSession()
+          : Promise.resolve({ success: false, error: "Session refresh is unavailable" });
+      const getCurrentUser = () =>
+        canGetCurrentUser
+          ? apiClient.getCurrentUser()
+          : Promise.resolve({ success: false, error: "Current session lookup is unavailable" });
+      const restoreAttempts: Array<() => Promise<any>> = apiClient.getToken?.()
+        ? [getCurrentUser, refreshSession]
+        : [refreshSession, getCurrentUser];
+
+      for (const attempt of restoreAttempts) {
+        const res = await attempt().catch((error: unknown) => ({
+          success: false,
+          error: error instanceof Error ? error.message : "Session restore failed",
+        }));
+        if (!res?.success || !res.data) continue;
+
+        lastRefreshSuccessAtRef.current = Date.now();
+        if (setAuthStateFromPayload(authPayloadFromResponseData(res.data))) return;
       }
 
-      lastRefreshSuccessAtRef.current = Date.now();
-      setAuthStateFromPayload({ user: res.data, auth: (res.data as any)?.auth ?? null });
+      clearSession();
     })().finally(() => {
       refreshInFlightRef.current = null;
     });
@@ -144,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!shouldBootstrapCurrentUser(location.pathname)) {
       setIsLoading(false);
+      setAuthBootstrapStatus(user ? "authenticated" : "unauthenticated");
       return;
     }
 
@@ -202,13 +236,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       pendingAuth,
       isLoading,
+      authReady: !isLoading,
+      authBootstrapStatus,
       isAuthenticated: !!user && user.auth?.sessionStage !== "MFA_BOOTSTRAP",
       login,
       logout,
       refresh,
       completeMfaSession,
     }),
-    [user, pendingAuth, isLoading]
+    [user, pendingAuth, isLoading, authBootstrapStatus]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -129,4 +129,86 @@ describe("internal client core HTML error handling", () => {
     expect(response.status).toBe(0);
     expect(response.unknownOutcome).toBe(true);
   });
+
+  it("refreshes after a 401 even when refresh cookies are HttpOnly and invisible to document.cookie", async () => {
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      writable: true,
+      value: "aq_csrf=csrf-1",
+    });
+
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ success: false, error: "No token provided" }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ success: true, data: { user: { id: "user-1" }, auth: { sessionStage: "ACTIVE" } } }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ success: true, data: [] }),
+      } as Response);
+
+    const client = createApiClientCore();
+    const response = await client.request("/qr/batches", { method: "GET" });
+
+    expect(response.success).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+    expect(String(vi.mocked(globalThis.fetch).mock.calls[1][0])).toBe("/api/auth/refresh");
+    expect((vi.mocked(globalThis.fetch).mock.calls[1][1]?.headers as Record<string, string>)["x-csrf-token"]).toBe("csrf-1");
+  });
+
+  it("clears stale bearer state before retrying a protected request after session restore", async () => {
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      writable: true,
+      value: "aq_csrf=csrf-2",
+    });
+
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ success: false, error: "No token provided" }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          success: true,
+          data: { user: { id: "user-1" }, auth: { sessionStage: "ACTIVE" }, accessToken: "fresh-token" },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ success: true, data: [] }),
+      } as Response);
+
+    const client = createApiClientCore();
+    client.setToken("stale-token");
+
+    const response = await client.request("/qr/batches", { method: "GET" });
+
+    expect(response.success).toBe(true);
+    const firstHeaders = vi.mocked(globalThis.fetch).mock.calls[0][1]?.headers as Record<string, string>;
+    const refreshHeaders = vi.mocked(globalThis.fetch).mock.calls[1][1]?.headers as Record<string, string>;
+    const retryHeaders = vi.mocked(globalThis.fetch).mock.calls[2][1]?.headers as Record<string, string>;
+    expect(firstHeaders.Authorization).toBe("Bearer stale-token");
+    expect(refreshHeaders.Authorization).toBeUndefined();
+    expect(retryHeaders.Authorization).toBe("Bearer fresh-token");
+  });
 });
