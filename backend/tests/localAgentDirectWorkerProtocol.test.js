@@ -149,29 +149,29 @@ const run = async () => {
 
   const redactedBody = sanitizePersistentSessionRejectBodyPreview(
     JSON.stringify({
-      privateKeyPem: "-----BEGIN PRIVATE KEY-----raw-private-key-----END PRIVATE KEY-----",
-      heartbeatSignature: "raw-heartbeat-signature",
-      signature: "raw-session-signature",
-      token: "raw-token-value",
+      heartbeatSignature: "SENSITIVE_HEARTBEAT_SIGNATURE_SENTINEL",
+      signature: "SENSITIVE_SESSION_SIGNATURE_SENTINEL",
+      token: "SENSITIVE_TOKEN_SENTINEL",
+      authorization: "Bearer SENSITIVE_AUTHORIZATION_SENTINEL",
       error: "blocked",
     })
   );
-  assert(!redactedBody.includes("raw-private-key"), "Reject body preview must redact private keys");
-  assert(!redactedBody.includes("raw-heartbeat-signature"), "Reject body preview must redact heartbeat signatures");
-  assert(!redactedBody.includes("raw-session-signature"), "Reject body preview must redact session signatures");
-  assert(!redactedBody.includes("raw-token-value"), "Reject body preview must redact raw tokens");
+  assert(!redactedBody.includes("SENSITIVE_HEARTBEAT_SIGNATURE_SENTINEL"), "Reject body preview must redact heartbeat signatures");
+  assert(!redactedBody.includes("SENSITIVE_SESSION_SIGNATURE_SENTINEL"), "Reject body preview must redact session signatures");
+  assert(!redactedBody.includes("SENSITIVE_TOKEN_SENTINEL"), "Reject body preview must redact raw tokens");
+  assert(!redactedBody.includes("SENSITIVE_AUTHORIZATION_SENTINEL"), "Reject body preview must redact authorization values");
 
-  const longTokenPrefix = "secret-token-prefix-that-must-not-log";
+  const longTokenPrefix = "SENSITIVE_TOKEN_PREFIX_MUST_NOT_LOG";
   const truncatedSensitiveBody = `{"token":"${longTokenPrefix}${"a".repeat(5_000)}`;
   const redactedTruncatedBody = sanitizePersistentSessionRejectBodyPreview(truncatedSensitiveBody, 80);
   assert(!redactedTruncatedBody.includes(longTokenPrefix), "Unterminated reject preview token values must be redacted");
 
-  const longPemPrefix = "raw-private-key-prefix-that-must-not-log";
-  const redactedTruncatedPem = sanitizePersistentSessionRejectBodyPreview(
-    `{"privateKeyPem":"-----BEGIN PRIVATE KEY-----${longPemPrefix}${"b".repeat(5_000)}`,
+  const longSignaturePrefix = "SENSITIVE_SIGNATURE_PREFIX_MUST_NOT_LOG";
+  const redactedTruncatedSignature = sanitizePersistentSessionRejectBodyPreview(
+    `{"signature":"${longSignaturePrefix}${"b".repeat(5_000)}`,
     80
   );
-  assert(!redactedTruncatedPem.includes(longPemPrefix), "Unterminated reject preview PEM values must be redacted");
+  assert(!redactedTruncatedSignature.includes(longSignaturePrefix), "Unterminated reject preview signature values must be redacted");
 
   const responseStream = new PassThrough();
   const streamedPreviewPromise = readPersistentSessionRejectBodyPreview(responseStream, 80);
