@@ -83,6 +83,55 @@ function Write-UpgradeLog {
   Write-Host $Message
 }
 
+function Normalize-PathForCompare {
+  param(
+    [string]$PathValue
+  )
+
+  if ([string]::IsNullOrWhiteSpace($PathValue)) {
+    return $null
+  }
+
+  try {
+    return [System.IO.Path]::GetFullPath($PathValue).TrimEnd(
+      [System.IO.Path]::DirectorySeparatorChar,
+      [System.IO.Path]::AltDirectorySeparatorChar
+    ).ToUpperInvariant()
+  } catch {
+    return $null
+  }
+}
+
+function Test-SamePath {
+  param(
+    [string]$Left,
+    [string]$Right
+  )
+
+  $leftNormalized = Normalize-PathForCompare -PathValue $Left
+  $rightNormalized = Normalize-PathForCompare -PathValue $Right
+
+  return (
+    -not [string]::IsNullOrWhiteSpace($leftNormalized) -and
+    -not [string]::IsNullOrWhiteSpace($rightNormalized) -and
+    $leftNormalized -eq $rightNormalized
+  )
+}
+
+function Test-IsProtectedInstallerPath {
+  param(
+    [string]$PathValue
+  )
+
+  foreach ($protectedPath in @($ScriptRoot, $PackageRoot)) {
+    if (Test-SamePath -Left $PathValue -Right $protectedPath) {
+      return $true
+    }
+  }
+
+  return $false
+}
+
 function Write-InstallResult {
   param(
     [string]$Outcome,
@@ -356,12 +405,40 @@ function Install-StandaloneAgentFiles {
 function Install-PackagedAgentFiles {
   $SourceExe = Join-Path $PackageRoot "bin\mscqr-local-print-agent.exe"
   if (-not (Test-Path $SourceExe)) {
-    throw "Connector package is incomplete. mscqr-local-print-agent.exe was not found."
+    Write-UpgradeLog "ERROR packaged connector binary missing. source=$SourceExe destination=$CanonicalAgentExe packageRoot=$PackageRoot"
+    throw "Connector package is incomplete. mscqr-local-print-agent.exe was not found at '$SourceExe'."
   }
 
   $TargetExe = $CanonicalAgentExe
   Write-UpgradeLog "Installing new connector binary to canonical path: $TargetExe"
-  Copy-Item -Path $SourceExe -Destination $TargetExe -Force
+  if (Test-SamePath -Left $SourceExe -Right $TargetExe) {
+    Write-UpgradeLog "Packaged connector binary is already staged at canonical path: $TargetExe"
+  } else {
+    try {
+      Copy-Item -Path $SourceExe -Destination $TargetExe -Force -ErrorAction Stop
+    } catch {
+      Write-UpgradeLog "ERROR packaged connector binary copy failed. source=$SourceExe destination=$TargetExe error=$($_.Exception.Message)"
+      throw "Connector package could not copy mscqr-local-print-agent.exe from '$SourceExe' to '$TargetExe'."
+    }
+  }
+
+  if (-not (Test-Path $TargetExe)) {
+    Write-UpgradeLog "ERROR canonical connector binary missing after install. source=$SourceExe destination=$TargetExe"
+    throw "Connector package did not install mscqr-local-print-agent.exe at '$TargetExe'."
+  }
+
+  try {
+    $versionOutput = & $TargetExe --version 2>&1
+    $installedVersion = [string]$versionOutput
+    if ($LASTEXITCODE -ne 0 -or $installedVersion.Trim() -ne $ResolvedVersion) {
+      Write-UpgradeLog "ERROR canonical connector binary version check failed. expected=$ResolvedVersion actual=$($installedVersion.Trim()) exitCode=$LASTEXITCODE path=$TargetExe"
+      throw "Installed connector binary reported version '$($installedVersion.Trim())' instead of '$ResolvedVersion'."
+    }
+    Write-UpgradeLog "Canonical connector binary version verified: $ResolvedVersion"
+  } catch {
+    Write-UpgradeLog "ERROR canonical connector binary version check failed. path=$TargetExe error=$($_.Exception.Message)"
+    throw
+  }
 
   $ExecutableCommand = """$TargetExe"""
   $WrapperBody = Get-WrapperBody -ExecutableCommand $ExecutableCommand -WorkingDirectory $BinDir -AgentVersion $ResolvedVersion
@@ -537,11 +614,15 @@ function Remove-LegacyRuntimeFiles {
     }
 
     Write-UpgradeLog "Found install path during upgrade cleanup: $root"
-    if ($root -eq $AgentHome) {
+    if (Test-SamePath -Left $root -Right $AgentHome) {
       $oldBin = Join-Path $root "bin"
       if (Test-Path $oldBin) {
-        Write-UpgradeLog "Removing old connector runtime files from: $oldBin"
-        Remove-Item -Path $oldBin -Recurse -Force -ErrorAction Stop
+        if (Test-IsProtectedInstallerPath -PathValue $root) {
+          Write-UpgradeLog "Preserving current installer payload bin during cleanup: $oldBin"
+        } else {
+          Write-UpgradeLog "Removing old connector runtime files from: $oldBin"
+          Remove-Item -Path $oldBin -Recurse -Force -ErrorAction Stop
+        }
       }
       foreach ($runtimeName in @("queue", "work", "tmp", "cache", "runtime", "active-job.json", "heartbeat-cache.json", "release-metadata.json", "mscqr-local-print-agent.lock")) {
         $runtimePath = Join-Path $root $runtimeName
@@ -551,6 +632,10 @@ function Remove-LegacyRuntimeFiles {
         }
       }
     } else {
+      if (Test-IsProtectedInstallerPath -PathValue $root) {
+        Write-UpgradeLog "Skipping current installer payload path during legacy cleanup: $root"
+        continue
+      }
       Write-UpgradeLog "Removing legacy connector install path: $root"
       Remove-Item -Path $root -Recurse -Force -ErrorAction Stop
     }
@@ -702,6 +787,7 @@ try {
 } catch {
   $logPath = Join-Path $LogDir "agent.log"
   $message = "MSCQR Connector setup did not complete.`n`n$($_.Exception.Message)`n`nReview the local log at:`n$logPath"
+  Write-UpgradeLog "ERROR setup failed: $($_.Exception.Message)"
   Write-Error $_
   Complete-Install -ExitCode 1 -State "FAILED" -Message $message -Icon "Error" -PrinterName $null -PrinterId $null -PrinterSetupUrl (Get-PrinterSetupUrl)
 }

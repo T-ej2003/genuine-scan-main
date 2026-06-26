@@ -13,6 +13,7 @@ import {
 
 const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const manifestPath = path.join(releaseRoot, "manifest.json");
+const windowsInstallRoot = path.join(backendRoot, "local-print-agent", "install", "windows");
 const minWindowsArtifactBytes = 1_000_000;
 const requiredCapabilities = Object.keys(readLocalAgentCapabilities(backendRoot));
 const requiredZipEntries = [
@@ -261,6 +262,34 @@ const assertTrustMetadata = (windows) => {
   throw new Error(`Unsupported Windows connector installerKind: ${windows.installerKind}`);
 };
 
+const assertWindowsInstallerUpgradeSafety = () => {
+  const installScriptPath = path.join(windowsInstallRoot, "install-startup-task.ps1");
+  const innoTemplatePath = path.join(windowsInstallRoot, "MSCQR-Connector.iss.template");
+  const installScript = fs.readFileSync(installScriptPath, "utf8");
+  const innoTemplate = fs.readFileSync(innoTemplatePath, "utf8");
+
+  const requiredScriptFragments = [
+    "function Test-IsProtectedInstallerPath",
+    "Preserving current installer payload bin during cleanup",
+    "Skipping current installer payload path during legacy cleanup",
+    "Packaged connector binary is already staged at canonical path",
+    "ERROR packaged connector binary copy failed",
+    "ERROR canonical connector binary missing after install",
+    "Canonical connector binary version verified",
+    "ERROR setup failed:",
+  ];
+
+  for (const fragment of requiredScriptFragments) {
+    if (!installScript.includes(fragment)) {
+      throw new Error(`Windows installer startup script is missing upgrade-safety guard: ${fragment}`);
+    }
+  }
+
+  if (!/DefaultDirName=\{localappdata\}\\MSCQR\\local-print-agent/i.test(innoTemplate)) {
+    throw new Error("Windows installer template must install into the canonical local-print-agent path.");
+  }
+};
+
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const sourceVersion = readConnectorSourceVersion(backendRoot);
 const latestRelease = Array.isArray(manifest.releases)
@@ -292,6 +321,7 @@ if (!artifactPath || !stat) {
 
 assertManifestMatchesFile(windows, artifactPath, stat);
 assertTrustMetadata(windows);
+assertWindowsInstallerUpgradeSafety();
 
 if (windows.installerKind === "zip") {
   await assertZipStructure(artifactPath);

@@ -22,7 +22,7 @@
   "releases": [
     {
       "version": "2026.6.25",
-      "publishedAt": "2026-06-26T11:20:48.186Z",
+      "publishedAt": "2026-06-26T12:17:32.614Z",
       "requiredProtocolVersion": "local-agent-direct-v2",
       "minimumBuildVersion": "2026.6.25",
       "transportDiagnosticsVersion": "transport-diagnostics-v1",
@@ -54,7 +54,7 @@
           "signatureStatus": "signed",
           "smartAppControlSafe": true,
           "publisherName": "L&D Health Ltd",
-          "signedAt": "2026-06-26T11:20:47.474Z",
+          "signedAt": "2026-06-26T12:17:32.039Z",
           "signatureSubject": "CN=L&D Health Ltd, O=L&D Health Ltd, L=London, S=Surrey, C=GB",
           "signatureIssuer": "CN=Microsoft ID Verified CS EOC CA 03, O=Microsoft Corporation, C=US",
           "certificateThumbprint": "3AF5C666B353A7BF820BB6E43B2F7DC7DC50B3B1",
@@ -65,8 +65,8 @@
           "relativePath": "2026.6.25/windows/MSCQR-Connector-Windows-2026.6.25.exe",
           "contentType": "application/vnd.microsoft.portable-executable",
           "architecture": "x64",
-          "bytes": 27095784,
-          "sha256": "efd6737aef8fec6e0dca7dd75865b1c3e7779d2673cde53d24fa270abc5f9c7f",
+          "bytes": 27092328,
+          "sha256": "dd88e46dbdb3ed25fd09cc44407016ab9c3c8e708875f63480e0be3301839f82",
           "protocolVersion": "local-agent-direct-v2",
           "buildVersion": "2026.6.25",
           "transportDiagnosticsVersion": "transport-diagnostics-v1",
