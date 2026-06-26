@@ -25,6 +25,7 @@ type PrintJobErrorCode =
   | "printer_status_unavailable"
   | "PRINTER_TEST_LABEL_REQUIRED"
   | "PRINT_QUANTITY_EXCEEDS_RUN_LIMIT"
+  | "CONNECTOR_UPDATE_REQUIRED" | "PRINTER_SESSION_REQUIRED" | "PRINTER_SESSION_DISCONNECTED"
   | "RECOVERY_REQUIRED_BEFORE_NEW_PRINT"
   | "print_job_conflict"
   | "print_job_transaction_failed"
@@ -135,6 +136,15 @@ const batchStateErrorCodes = new Set<PrintJobErrorCode>([
 ]);
 
 const classifyPrinterReadinessError = (printerStatus: PrinterStatusLike | null | undefined): PrintJobErrorCode => {
+  if ((printerStatus as any)?.persistentSessionUpdateRequired || (printerStatus as any)?.connectorUpdateRequired) {
+    return "CONNECTOR_UPDATE_REQUIRED";
+  }
+  if ((printerStatus as any)?.persistentSessionRequired && (printerStatus as any)?.persistentSessionCapable && !printerStatus?.connected) {
+    return "PRINTER_SESSION_DISCONNECTED";
+  }
+  if ((printerStatus as any)?.persistentSessionRequired && !printerStatus?.eligibleForPrinting) {
+    return "PRINTER_SESSION_REQUIRED";
+  }
   const missing = describeMissingPrinterReadinessFields(printerStatus);
   if (
     missing.includes("printerRegistration") ||
@@ -245,7 +255,13 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
       payload: withFailureContext({
         code,
         message:
-          code === "missing_printer_session"
+          code === "CONNECTOR_UPDATE_REQUIRED"
+            ? "Update MSCQR Connector to use persistent print session mode."
+            : code === "PRINTER_SESSION_DISCONNECTED"
+              ? "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.25 or newer, then retry."
+          : code === "PRINTER_SESSION_REQUIRED"
+            ? "Persistent printer session is required for production printing. Start MSCQR Connector 2026.6.25 or newer, then retry."
+          : code === "missing_printer_session"
             ? "Refresh the printer connection, then start the print run again."
             : "Finish printer verification or choose a verified printer before starting this print run.",
         details: { missingFields: describeMissingPrinterReadinessFields(printerStatus) },

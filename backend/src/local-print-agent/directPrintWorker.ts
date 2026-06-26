@@ -185,6 +185,38 @@ type SessionContext = {
   messageSeq: number;
 };
 
+type PersistentPrintSessionStatus = {
+  mode: "websocket" | "rest" | "polling";
+  supported: boolean;
+  connected: boolean;
+  sessionId: string | null;
+  registrationId: string | null;
+  selectedPrinterId: string | null;
+  lastConnectedAt: string | null;
+  lastHeartbeatAt: string | null;
+  lastDisconnectedAt: string | null;
+  lastError: string | null;
+};
+
+const persistentPrintSessionStatus: PersistentPrintSessionStatus = {
+  mode: "websocket",
+  supported: true,
+  connected: false,
+  sessionId: null,
+  registrationId: null,
+  selectedPrinterId: null,
+  lastConnectedAt: null,
+  lastHeartbeatAt: null,
+  lastDisconnectedAt: null,
+  lastError: null,
+};
+
+export const getPersistentPrintSessionStatus = () => ({ ...persistentPrintSessionStatus });
+
+const updatePersistentSessionStatus = (patch: Partial<PersistentPrintSessionStatus>) => {
+  Object.assign(persistentPrintSessionStatus, patch);
+};
+
 const resolveSessionUrl = (backendUrl: string) => {
   const url = new URL(`${backendUrl.replace(/\/+$/, "")}/api/printer-agent/session`);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -232,10 +264,6 @@ const buildSignedSessionMessage = async (params: {
   });
   const common = {
     type: params.type,
-    agentId: state.agentId,
-    deviceFingerprint: state.deviceFingerprint,
-    selectedPrinterId: params.selectedPrinterId,
-    connectorVersion,
     nonce,
     issuedAt,
     signature: signPrinterAgentPayload(state.privateKeyPem, signedPayload),
@@ -243,6 +271,10 @@ const buildSignedSessionMessage = async (params: {
   if (params.type === "hello") {
     return {
       ...common,
+      agentId: state.agentId,
+      deviceFingerprint: state.deviceFingerprint,
+      selectedPrinterId: params.selectedPrinterId,
+      connectorVersion,
       registrationId: null,
       selectedPrinterName: params.selectedPrinterName || null,
       printerHealth: params.printerHealth || null,
@@ -1234,6 +1266,13 @@ const startPersistentPrintSessionWorker = () => {
       const backendUrl = await resolveBackendUrl();
       const selection = backendUrl ? await resolveSelection().catch(() => null) : null;
       if (!backendUrl || !selection) {
+        updatePersistentSessionStatus({
+          connected: false,
+          sessionId: null,
+          registrationId: null,
+          selectedPrinterId: selection?.selectedPrinterId || null,
+          lastError: backendUrl ? "No selected local printer available for persistent session." : "Backend URL is not configured.",
+        });
         await sleep(DIRECT_PRINT_IDLE_MIN_BACKOFF_MS);
         continue;
       }
@@ -1250,6 +1289,13 @@ const startPersistentPrintSessionWorker = () => {
           heartbeatTimer = null;
         }
         if (activeSocket === ws) activeSocket = null;
+        updatePersistentSessionStatus({
+          connected: false,
+          sessionId: null,
+          registrationId: null,
+          selectedPrinterId: selection.selectedPrinterId,
+          lastDisconnectedAt: new Date().toISOString(),
+        });
       };
 
       await new Promise<void>((resolve) => {
@@ -1264,17 +1310,20 @@ const startPersistentPrintSessionWorker = () => {
             type: "hello",
             selectedPrinterId: selection.selectedPrinterId,
             selectedPrinterName: selection.selectedPrinterName,
-            printerHealth: {
-              deviceName: os.hostname(),
-              agentVersion: AGENT_VERSION,
-              buildVersion: AGENT_BUILD_VERSION,
-              protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-              selectedPrinterId: selection.selectedPrinterId,
-              selectedPrinterName: selection.selectedPrinterName,
-              printers: selection.inventory.printers.length,
+              printerHealth: {
+                deviceName: os.hostname(),
+                agentVersion: AGENT_VERSION,
+                buildVersion: AGENT_BUILD_VERSION,
+                protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+                transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+                capabilities: LOCAL_AGENT_CAPABILITIES,
+                selectedPrinterId: selection.selectedPrinterId,
+                selectedPrinterName: selection.selectedPrinterName,
+                printers: selection.inventory.printers.length,
             },
           }).then((hello) => ws.send(JSON.stringify(hello))).catch((error) => {
             console.error("persistent printer session hello failed", { error: error?.message || error });
+            updatePersistentSessionStatus({ lastError: error?.message || "Persistent session hello failed." });
             ws.close();
           });
         });
@@ -1305,15 +1354,37 @@ const startPersistentPrintSessionWorker = () => {
                   type: "heartbeat",
                   printerHealth: {
                     deviceName: os.hostname(),
+                    agentVersion: AGENT_VERSION,
+                    buildVersion: AGENT_BUILD_VERSION,
+                    protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
+                    transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
+                    capabilities: LOCAL_AGENT_CAPABILITIES,
                     selectedPrinterId: selection.selectedPrinterId,
                     selectedPrinterName: selection.selectedPrinterName,
                   },
-                }).catch(() => undefined);
+                })
+                  .then(() => updatePersistentSessionStatus({ lastHeartbeatAt: new Date().toISOString(), lastError: null }))
+                  .catch((error: any) => updatePersistentSessionStatus({ lastError: error?.message || "Persistent session heartbeat failed." }));
               }, PRINT_AGENT_SESSION_HEARTBEAT_MS);
+              updatePersistentSessionStatus({
+                connected: true,
+                sessionId: session.sessionId,
+                registrationId: session.registrationId,
+                selectedPrinterId: selection.selectedPrinterId,
+                lastConnectedAt: new Date().toISOString(),
+                lastHeartbeatAt: new Date().toISOString(),
+                lastError: null,
+              });
               console.info("persistent printer session connected", {
                 sessionId: session.sessionId,
                 registrationId: session.registrationId,
                 selectedPrinterId: selection.selectedPrinterId,
+              });
+              return;
+            }
+            if (payload?.type === "error") {
+              updatePersistentSessionStatus({
+                lastError: String(payload.error || payload.errorCode || "Persistent session error").slice(0, 500),
               });
               return;
             }
@@ -1350,6 +1421,7 @@ const startPersistentPrintSessionWorker = () => {
         ws.on("close", finish);
         ws.on("error", (error: any) => {
           console.error("persistent printer session socket error", { error: (error as any)?.message || error });
+          updatePersistentSessionStatus({ lastError: (error as any)?.message || "Persistent session socket error." });
           finish();
         });
       });
@@ -1378,108 +1450,8 @@ const startPersistentPrintSessionWorker = () => {
 
 export const startDirectPrintWorker = () => {
   if (activeDirectPrintWorkerStop) return activeDirectPrintWorkerStop;
-  if (PRINT_AGENT_SESSION_MODE !== "rest" && PRINT_AGENT_SESSION_MODE !== "polling") {
-    return startPersistentPrintSessionWorker();
+  if (PRINT_AGENT_SESSION_MODE === "rest" || PRINT_AGENT_SESSION_MODE === "polling") {
+    console.warn("PRINT_AGENT_SESSION_MODE legacy value ignored; persistent WebSocket session is required.");
   }
-
-  let stopped = false;
-  let connectivityFailureCount = 0;
-  let noWorkCount = 0;
-  let lastNoWorkLogAt = 0;
-  let sleepWake: (() => void) | null = null;
-
-  const sleep = (ms: number) =>
-    new Promise<void>((resolve) => {
-      let wake = () => undefined;
-      const timer = setTimeout(() => {
-        if (sleepWake === wake) sleepWake = null;
-        resolve();
-      }, ms);
-      wake = () => {
-        clearTimeout(timer);
-        if (sleepWake === wake) sleepWake = null;
-        resolve();
-      };
-      sleepWake = wake;
-    });
-
-  activeDirectPrintWorkerWake = () => {
-    sleepWake?.();
-  };
-
-  const loop = async () => {
-    while (!stopped) {
-      const activeWakeClaim = consumeActiveWakeClaim();
-      const timing: TimingContext = {
-        startedAt: Date.now(),
-        claimCount: 0,
-        source: activeWakeClaim ? "local_wake" : "poll",
-      };
-      try {
-        if (await resolveBackendUrl()) {
-          const result = await runOnce(timing);
-          connectivityFailureCount = 0;
-          noWorkCount = result.noWork ? noWorkCount + 1 : 0;
-          const retryAfterMs =
-            result.noWork && hasActiveWakeBudget()
-              ? resolveActiveWakeRetryAfterMs(activeWakeAttempt)
-              : result.noWork
-                ? resolveNoWorkRetryAfterMs(result.retryAfterMs, noWorkCount)
-                : clampRetryAfterMs(result.retryAfterMs);
-          if (result.noWork && Date.now() - lastNoWorkLogAt > 60_000) {
-            lastNoWorkLogAt = Date.now();
-            console.debug("local direct-print claim idle", { retryAfterMs, noWorkCount });
-          }
-          await sleep(retryAfterMs);
-          continue;
-        }
-      } catch (error) {
-        const cloudConnectivityIssue = isCloudConnectivityError(error);
-        connectivityFailureCount = cloudConnectivityIssue ? connectivityFailureCount + 1 : 0;
-        const retryAfterMs = cloudConnectivityIssue
-          ? resolveConnectivityRetryAfterMs(connectivityFailureCount)
-          : clampRetryAfterMs((error as any)?.retryAfterMs);
-        if (isBackendRateLimitError(error)) {
-          activeWakeUntil = 0;
-          activeWakeRemainingClaims = 0;
-          console.warn("print.connector.rate_limited", {
-            source: timing.source,
-            elapsedMs: Date.now() - timing.startedAt,
-            claimCount: timing.claimCount,
-            retryAfterMs,
-            requestId: (error as any)?.requestId || null,
-            backoffDecision: "active_wake_stopped_server_retry_respected",
-          });
-        }
-        console.error("local direct-print worker cycle failed:", {
-          error: (error as any)?.message || error,
-          errorCode: (error as any)?.errorCode || null,
-          cloudConnectivityIssue,
-          retryAfterMs,
-        });
-        if ((error as any)?.serverTime || (error as any)?.timestampSkewSeconds != null) {
-          console.error("local direct-print backend time check failed", {
-            errorCode: (error as any)?.errorCode || null,
-            localTime: new Date().toISOString(),
-            serverTime: (error as any)?.serverTime || null,
-            timestampSkewSeconds: (error as any)?.timestampSkewSeconds ?? null,
-            retryAfterMs,
-          });
-        }
-        await sleep(retryAfterMs);
-        continue;
-      }
-      await sleep(DIRECT_PRINT_POLL_MS);
-    }
-  };
-
-  void loop();
-
-  activeDirectPrintWorkerStop = () => {
-    stopped = true;
-    sleepWake?.();
-    activeDirectPrintWorkerWake = null;
-    activeDirectPrintWorkerStop = null;
-  };
-  return activeDirectPrintWorkerStop;
+  return startPersistentPrintSessionWorker();
 };

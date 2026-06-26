@@ -21,7 +21,8 @@ const logLocalAgentTrust = (event: string, payload: Record<string, unknown>) => 
 export const verifyLocalAgentRequest = async (
   parsed: LocalAgentRequestPayload,
   action: "claim" | "ack" | "confirm" | "fail",
-  identifiers?: { printJobId?: string | null; printItemId?: string | null }
+  identifiers?: { printJobId?: string | null; printItemId?: string | null },
+  options: { skipReadiness?: boolean } = {}
 ) => {
   if (!isPrinterAgentIssuedAtFresh(parsed.issuedAt)) {
     const timestampSkewSeconds = getPrinterAgentIssuedAtSkewSeconds(parsed.issuedAt);
@@ -103,6 +104,21 @@ export const verifyLocalAgentRequest = async (
       rejectReason: "bad_signature",
     });
     throw Object.assign(new Error("Printer agent signature verification failed."), { statusCode: 401 });
+  }
+
+  if (options.skipReadiness) {
+    logLocalAgentTrust("request_signature_verified", {
+      action,
+      registrationFound: true,
+      registrationId: registration.id,
+      agentIdHash: sha256Short(parsed.agentId),
+      deviceFingerprintHash: sha256Short(parsed.deviceFingerprint),
+      publicKeyFingerprint: sha256Short(registration.publicKeyPem),
+      selectedPrinterHash: sha256Short(parsed.printerId),
+      claimSignatureVerified: true,
+      readinessSkipped: true,
+    });
+    return registration;
   }
 
   const printerStatus = await getPrinterConnectionStatusForRegistration(registration.id);

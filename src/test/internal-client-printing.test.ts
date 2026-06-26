@@ -4,6 +4,12 @@ import { createPrintingApi } from "@/lib/api/internal-client-printing";
 import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
 import type { ApiClientCore, ApiResponse } from "@/lib/api/internal-client-core";
 
+const subscribeManagedEventSourceMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/api/managed-event-source", () => ({
+  subscribeManagedEventSource: subscribeManagedEventSourceMock,
+}));
+
 type RequestPayload = {
   connected?: boolean;
   eligibleForPrinting?: boolean;
@@ -250,5 +256,24 @@ describe("printing api request control", () => {
     expect(rateLimited.data?.refreshPaused).toBe(true);
     expect(rateLimited.data?.notice).toBe("Printer status refresh is temporarily paused. Last trusted status is retained.");
     expect(paused.data?.refreshPaused).toBe(true);
+  });
+
+  it("subscribes to print job streams with the backend realtime SSE event name", () => {
+    subscribeManagedEventSourceMock.mockReturnValue(() => undefined);
+    const request = vi.fn(async () => ({ success: true, data: {} }));
+    const api = createPrintingApi(createCore(request));
+    const onMessage = vi.fn();
+
+    api.streamPrintJobStatus("job-1", onMessage);
+
+    expect(subscribeManagedEventSourceMock).toHaveBeenCalledWith(
+      "manufacturer-print-job:job-1:events",
+      "/api/manufacturer/print-jobs/job-1/events",
+      expect.any(Function),
+      expect.objectContaining({
+        eventName: "realtime",
+        pauseWhenHidden: false,
+      })
+    );
   });
 });

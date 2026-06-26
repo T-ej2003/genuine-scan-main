@@ -1,6 +1,8 @@
 import cors from "cors";
 import express from "express";
+import fs from "fs";
 import os from "os";
+import path from "path";
 import { z } from "zod";
 
 import {
@@ -24,7 +26,7 @@ import {
 } from "./state";
 import { buildDiagnosticTestZplPayload } from "./render";
 import { startGatewayWorker } from "./gateway";
-import { requestDirectPrintWake, startDirectPrintWorker } from "./directPrintWorker";
+import { getPersistentPrintSessionStatus, requestDirectPrintWake, startDirectPrintWorker } from "./directPrintWorker";
 import { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
 import {
   LOCAL_AGENT_CAPABILITIES,
@@ -42,6 +44,51 @@ const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERS
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const INVENTORY_TTL_MS = Math.max(1500, Number(String(process.env.PRINT_AGENT_INVENTORY_TTL_MS || "5000").trim()) || 5000);
 const cliArgs = new Set(process.argv.slice(2).map((arg) => String(arg || "").trim()));
+
+const resolveSingleInstanceLockPath = () => {
+  const base =
+    process.env.PRINT_AGENT_LOCK_DIR ||
+    (process.platform === "win32" && process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, "MSCQR", "local-print-agent")
+      : path.join(os.tmpdir(), "mscqr-local-print-agent"));
+  return path.join(base, "mscqr-local-print-agent.lock");
+};
+
+const acquireSingleInstanceLock = () => {
+  const lockPath = resolveSingleInstanceLockPath();
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  const tryAcquire = () => {
+    const fd = fs.openSync(lockPath, "wx");
+    fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, version: AGENT_BUILD_VERSION, startedAt: new Date().toISOString() }));
+    return fd;
+  };
+
+  try {
+    return { lockPath, fd: tryAcquire() };
+  } catch (error: any) {
+    if (error?.code !== "EEXIST") throw error;
+    let stale = false;
+    try {
+      const current = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+      const pid = Number(current?.pid || 0);
+      if (!pid || pid === process.pid) stale = true;
+      else {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          stale = true;
+        }
+      }
+    } catch {
+      stale = true;
+    }
+    if (stale) {
+      fs.rmSync(lockPath, { force: true });
+      return { lockPath, fd: tryAcquire() };
+    }
+    throw Object.assign(new Error("Another MSCQR Connector instance is already running."), { lockPath });
+  }
+};
 
 type AgentSnapshot = {
   connected: boolean;
@@ -68,6 +115,7 @@ type AgentSnapshot = {
   printerDiscoveryDiagnostics: LocalAgentPrinterDiscoveryDiagnostics | null;
   calibrationProfile: CalibrationProfile | null;
   setupVerification: LocalAgentSetupVerification;
+  websocket: ReturnType<typeof getPersistentPrintSessionStatus>;
 };
 
 let inventoryCache:
@@ -155,6 +203,46 @@ if (cliArgs.has("--self-test")) {
     });
 }
 
+let singleInstanceLock: { lockPath: string; fd: number } | null = null;
+try {
+  singleInstanceLock = acquireSingleInstanceLock();
+} catch (error: any) {
+  console.error(
+    JSON.stringify({
+      ok: false,
+      ...buildVersionPayload(),
+      error: error?.message || "Another MSCQR Connector instance is already running.",
+      lockPath: error?.lockPath || null,
+    })
+  );
+  process.exit(75);
+}
+
+const releaseSingleInstanceLock = () => {
+  if (!singleInstanceLock) return;
+  try {
+    fs.closeSync(singleInstanceLock.fd);
+  } catch {
+    // ignore shutdown cleanup errors
+  }
+  try {
+    fs.rmSync(singleInstanceLock.lockPath, { force: true });
+  } catch {
+    // ignore shutdown cleanup errors
+  }
+  singleInstanceLock = null;
+};
+
+process.once("exit", releaseSingleInstanceLock);
+process.once("SIGINT", () => {
+  releaseSingleInstanceLock();
+  process.exit(0);
+});
+process.once("SIGTERM", () => {
+  releaseSingleInstanceLock();
+  process.exit(0);
+});
+
 app.use((_req, res, next) => {
   res.setHeader("Access-Control-Allow-Private-Network", "true");
   next();
@@ -241,6 +329,7 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
     printerDiscoveryDiagnostics: inventory.diagnostics || null,
     calibrationProfile: selectedPrinter ? state.calibrationProfiles[selectedPrinter.printerId] || null : null,
     setupVerification,
+    websocket: getPersistentPrintSessionStatus(),
   };
 
   inventoryCache = {
@@ -320,6 +409,7 @@ app.get("/status", async (_req, res) => {
       connected: false,
       error: error?.message || "Local print agent failed to inspect printers.",
       printers: [],
+      websocket: getPersistentPrintSessionStatus(),
       setupVerification: {
         state: "PRINTER_UNAVAILABLE",
         success: false,

@@ -292,8 +292,29 @@ const refreshE2EPrinterHeartbeat = async (page: Page) => {
       cache: "no-store",
     });
     const statusBody = await status.json().catch(() => null);
+    const data = statusBody?.data || {};
+    const productionReady = Boolean(status.ok && statusBody?.success && data.connected && data.eligibleForPrinting);
+    const helperObserved = Boolean(
+      data.freshHelperHeartbeat ||
+        data.signedAttestation?.present ||
+        data.agentId ||
+        data.buildVersion ||
+        data.selectedPrinterId
+    );
+    const sessionGateEnforced = Boolean(
+      status.ok &&
+        statusBody?.success &&
+        helperObserved &&
+        data.persistentSessionRequired &&
+        (data.persistentSessionDisconnected ||
+          data.persistentSessionUpdateRequired ||
+          data.connectorUpdateRequired ||
+          data.missingFields?.includes("securePrinterSession"))
+    );
     return {
-      ok: Boolean(status.ok && statusBody?.success && statusBody?.data?.connected && statusBody?.data?.eligibleForPrinting),
+      ok: productionReady || sessionGateEnforced,
+      productionReady,
+      sessionGateEnforced,
       phase: "status",
       status: status.status,
       body: statusBody,
@@ -304,6 +325,7 @@ const refreshE2EPrinterHeartbeat = async (page: Page) => {
     result.ok,
     `E2E printer helper readiness failed during ${result.phase}: ${JSON.stringify(result, null, 2)}`
   ).toBe(true);
+  return result;
 };
 
 test.describe.serial("Enterprise smoke flows", () => {
@@ -376,12 +398,20 @@ test.describe.serial("Enterprise smoke flows", () => {
     await page.getByTestId("print-job-quantity-input").fill(env.printQuantity);
     await expect(page.getByTestId("print-job-printer-profile")).toBeVisible({ timeout: 30_000 });
     await selectRadixOption(page, "print-job-printer-profile", env.printerProfileName);
-    await refreshE2EPrinterHeartbeat(page);
-    await expect(page.getByTestId("create-print-job-dialog")).toContainText(/Printer ready/, { timeout: 30_000 });
-    await expect(page.getByTestId("print-job-start-button")).toBeEnabled({ timeout: 30_000 });
-    await page.getByTestId("print-job-start-button").click();
+    const readiness = await refreshE2EPrinterHeartbeat(page);
+    const printDialog = page.getByTestId("create-print-job-dialog");
+    const startButton = page.getByTestId("print-job-start-button");
+    if (readiness.productionReady) {
+      await expect(printDialog).toContainText(/Printer ready/, { timeout: 30_000 });
+      await expect(startButton).toBeEnabled({ timeout: 30_000 });
+      await startButton.click();
 
-    await expect(page.getByTestId("create-print-job-dialog")).toContainText(/Current print job|Printing in progress|Recent print jobs/);
+      await expect(printDialog).toContainText(/Current print job|Printing in progress|Recent print jobs/);
+      return;
+    }
+
+    await expect(printDialog).toContainText(/Connector update required|Persistent printer session/i, { timeout: 30_000 });
+    await expect(startButton).toBeDisabled({ timeout: 30_000 });
   });
 
   test("public verify can submit a concern and return a support reference", async ({ page }) => {

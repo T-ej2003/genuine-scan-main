@@ -194,13 +194,14 @@ const { getPrinterConnectionStatusForUser, upsertPrinterConnectionHeartbeat } = 
     rotatedPublicKeyPem.trim(),
     "heartbeat should promote the rotated local-agent key after a valid signed attestation"
   );
-  assert.strictEqual(result.status.trusted, true, "rotated local-agent key should restore a trusted connection");
-  assert.strictEqual(result.status.connectionClass, "TRUSTED", "restored heartbeat should exit compatibility mode");
+  assert.strictEqual(result.status.trusted, false, "rotated local-agent key should still require a persistent session before production trust");
+  assert.strictEqual(result.status.connectionClass, "BLOCKED", "heartbeat-only rotation should not become print eligible");
+  assert.strictEqual(result.status.persistentSessionDisconnected, true, "rotated heartbeat should wait for persistent session");
   assert.strictEqual(result.status.compatibilityMode, false, "trusted key rotation should not remain in compatibility mode");
   assert.strictEqual(
     result.status.mtlsFingerprint,
     null,
-    "connector 2026.6.16 signed attestation launch mode should not require browser-supplied mTLS"
+    "connector signed attestation launch mode should not require browser-supplied mTLS"
   );
 
   console.log("printer heartbeat key rotation tests passed");

@@ -308,7 +308,13 @@ export const printJobCreateFailureMessage = (response: {
     return "Send and confirm a live printer setup test label before starting production printing.";
   }
   if (errorCode === "missing_printer_session") {
-    return "Refresh the printer connection, then start the print run again.";
+    return "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.25 or newer, then retry.";
+  }
+  if (errorCode === "connector_update_required" || errorCode === "persistent_session_connector_update_required") {
+    return "Connector update required. Install the latest MSCQR printer connector, then refresh printer status.";
+  }
+  if (errorCode === "printer_session_required" || errorCode === "printer_session_disconnected") {
+    return "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.25 or newer, then retry.";
   }
   if (errorCode === "printer_mapping_missing") {
     return "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup.";
@@ -524,17 +530,15 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
           livePrinterStatus.error ||
           (detectedPrinters.length > 0 ? "Printer connection requires attention" : "Printer unavailable"),
       });
+      const updateRequired =
+        Boolean((effectiveLiveStatus as any).persistentSessionUpdateRequired || (effectiveLiveStatus as any).connectorUpdateRequired) ||
+        String(livePrinterStatus.code || livePrinterStatus.errorCode || "").toLowerCase() === "connector_update_required";
       toast({
-        title: "Printer unavailable",
-        description: sanitizePrinterUiError(
-          livePrinterStatus.error,
-          "Make sure the printer helper is running or choose a ready printer on this computer before starting a print run."
-        ),
+        title: updateRequired ? "Connector update required" : "Printer session disconnected",
+        description: updateRequired
+          ? "Connector update required. Install the latest MSCQR printer connector, then refresh printer status."
+          : "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.25 or newer, then retry.",
         variant: "destructive",
-      });
-      void autoReportPrinterFailure({
-        context: "create_print_job_printer_gate",
-        reason: String(livePrinterStatus.error || "Printer not eligible for printing"),
       });
       return;
     }
@@ -656,11 +660,22 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     });
     setPrintProgressPhase("Print needs attention");
     setPrintProgressError(safeError);
-    const reportSent = await autoReportPrinterFailure({
-      context: "create_print_job",
-      reason: responseMessage || "Print job setup failed",
-      diagnostics: { batchId: printBatch.id, quantity, printJobRequestId: response.requestId || null },
-    });
+    const autoReportEligible = ![
+      "connector_update_required",
+      "persistent_session_connector_update_required",
+      "printer_session_required",
+      "printer_session_disconnected",
+      "missing_printer_session",
+      "printer_not_verified",
+      "printer_test_label_required",
+    ].includes(raw);
+    const reportSent = autoReportEligible
+      ? await autoReportPrinterFailure({
+          context: "create_print_job",
+          reason: responseMessage || "Print job setup failed",
+          diagnostics: { batchId: printBatch.id, quantity, printJobRequestId: response.requestId || null },
+        })
+      : true;
     if (!reportSent && response.requestId) {
       toast({
         title: "Could not send diagnostics automatically",
@@ -726,33 +741,14 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       tokenCount: typeof data.tokenCount === "number" ? data.tokenCount : null,
       durationMs: createCompletedAt - createStartedAt,
     });
-    setPrintProgressPhase("Connector wake sent");
-    setPrintProgressNotice?.("Asking the connector on this computer to claim the queued labels.");
-    const wakeStartedAt = Date.now();
-    const wakeResponse = await apiClient.wakeLocalPrintAgent("user_print_job_created");
-    logPrintTiming("print.connector.wake.sent", {
-      printJobId: createdJobId,
-      success: Boolean(wakeResponse.success),
-      durationMs: Date.now() - wakeStartedAt,
-      status: wakeResponse.status || null,
-    });
+    setPrintProgressPhase("Persistent printer session active");
+    setPrintProgressNotice?.("The connector receives labels over its signed persistent session.");
     toast({
       title: "Print run started",
-      description: `MSCQR queued approved labels for ${selectedPrinterProfile.name}. The printer helper will pick them up and print them securely.`,
+      description: `MSCQR queued approved labels for ${selectedPrinterProfile.name}. The connector will stream backend-confirmed progress.`,
     });
-    setPrintProgressPhase(
-      wakeResponse.success
-        ? "Waiting for connector to claim job"
-        : data.pipelineState === "QUEUED"
-          ? "Waiting for printer helper"
-          : "Print run active on this computer"
-    );
-
-    setPrintProgressNotice?.(
-      wakeResponse.success
-        ? "Connector wake sent. Waiting for backend-confirmed printer progress."
-        : "Connector wake failed. Safe fallback polling remains active."
-    );
+    setPrintProgressPhase("Waiting for connector progress");
+    setPrintProgressNotice?.("Waiting for backend-confirmed printer progress.");
   }
 };
 

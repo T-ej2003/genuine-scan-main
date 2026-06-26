@@ -34,6 +34,15 @@ const updateSnapshot = (jobId: string, patch: Partial<PrintJobSnapshot>) => {
   emit(jobId);
 };
 
+const extractPrintJobView = (payload: any) => {
+  if (!payload) return null;
+  if (payload.envelope === "MSCQR_SSE_V1") {
+    const eventPayload = payload.payload || {};
+    return eventPayload.view || eventPayload.job || eventPayload.data || null;
+  }
+  return payload.view || payload.job || payload.data || null;
+};
+
 const subscribeJob = (jobId: string) => {
   const existing = subscriptions.get(jobId);
   if (existing) {
@@ -55,7 +64,8 @@ const subscribeJob = (jobId: string) => {
   const stopStream = (apiClient as any).streamPrintJobStatus(
     jobId,
     (payload: any) => {
-      const job = payload?.view || payload?.job || payload?.data || null;
+      const job = extractPrintJobView(payload);
+      if (!job) return;
       updateSnapshot(jobId, {
         job,
         connected: true,

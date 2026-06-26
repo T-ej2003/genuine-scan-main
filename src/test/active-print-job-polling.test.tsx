@@ -175,7 +175,19 @@ describe("active print job polling", () => {
     expect(getPrintJobRealtimeDebugState().subscriptions).toEqual([{ jobId: "job-live", refs: 2 }]);
 
     await act(async () => {
-      realtimeMessage?.({ view: { ...baseJob, status: "PARTIALLY_COMPLETED", session: { ...baseJob.session, remainingToPrint: 6 } } });
+      realtimeMessage?.({
+        envelope: "MSCQR_SSE_V1",
+        channel: "printJob",
+        type: "snapshot",
+        payload: {
+          printJobId: "job-live",
+          view: {
+            ...baseJob,
+            status: "PARTIALLY_COMPLETED",
+            session: { ...baseJob.session, remainingToPrint: 6 },
+          },
+        },
+      });
     });
     expect(getActivePrintSessionSnapshot()).toMatchObject({ active: false, terminal: true });
 

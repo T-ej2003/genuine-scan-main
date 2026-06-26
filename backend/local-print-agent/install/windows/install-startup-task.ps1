@@ -18,11 +18,25 @@ $DialogTitle = "MSCQR Connector Setup"
 $SetupLog = Join-Path $LogDir "setup.log"
 $CanonicalAgentExe = Join-Path $BinDir "mscqr-local-print-agent.exe"
 $LegacyTaskNames = @($TaskName, "MSCQR Connector", "MSCQR Print Agent", "MSCQR Local Connector") | Select-Object -Unique
+$LegacyServiceNames = @("MSCQRLocalPrintAgent", "MSCQR Connector", "MSCQR Print Agent", "GenuineScan Connector", "Genuine Scan Connector") | Select-Object -Unique
+$LegacyRunValueNames = @("MSCQR Connector", "MSCQR Local Print Agent", "MSCQR Print Agent", "GenuineScan Connector", "Genuine Scan Connector") | Select-Object -Unique
+$ProcessStopped = $false
+$OldStartupEntriesRemoved = 0
+$PreviousVersion = $null
 $LegacyInstallRoots = @(
   $AgentHome,
   (Join-Path $env:LOCALAPPDATA "MSCQR Connector"),
   (Join-Path $env:LOCALAPPDATA "MSCQR\connector"),
-  (Join-Path $env:APPDATA "MSCQR\local-print-agent")
+  (Join-Path $env:APPDATA "MSCQR\local-print-agent"),
+  (Join-Path $env:APPDATA "MSCQR"),
+  (Join-Path $env:LOCALAPPDATA "Programs\MSCQR Connector"),
+  (Join-Path $env:LOCALAPPDATA "GenuineScan"),
+  (Join-Path $env:LOCALAPPDATA "Genuine Scan"),
+  (Join-Path $env:APPDATA "GenuineScan"),
+  (Join-Path $env:APPDATA "Genuine Scan"),
+  (Join-Path $env:PROGRAMDATA "MSCQR"),
+  (Join-Path $env:PROGRAMDATA "GenuineScan"),
+  (Join-Path $env:PROGRAMDATA "Genuine Scan")
 ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique
 
 $PackagedInstall = $false
@@ -90,10 +104,41 @@ function Write-InstallResult {
     printerId = $PrinterId
     printerSetupUrl = $PrinterSetupUrl
     logPath = $LogPath
+    installedVersion = $ResolvedVersion
+    previousVersion = $PreviousVersion
+    processStopped = $ProcessStopped
+    oldStartupEntriesRemoved = $OldStartupEntriesRemoved
+    finalProcessStarted = ($Outcome -in @("success", "partial"))
+    localhostStatusOk = ($Outcome -in @("success", "partial"))
+    websocketCapability = $true
     writtenAt = (Get-Date).ToString("o")
   }
 
   ($payload | ConvertTo-Json -Depth 4) | Set-Content -Path $InstallResultPath -Encoding ASCII
+}
+
+function Read-PreviousVersion {
+  $candidates = @(
+    (Join-Path $BinDir "mscqr-local-print-agent.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\MSCQR Connector\bin\mscqr-local-print-agent.exe"),
+    (Join-Path $env:LOCALAPPDATA "MSCQR Connector\bin\mscqr-local-print-agent.exe")
+  ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique
+
+  foreach ($candidate in $candidates) {
+    if (-not (Test-Path $candidate)) {
+      continue
+    }
+    try {
+      $output = & $candidate --version 2>$null
+      $version = [string]$output
+      if (-not [string]::IsNullOrWhiteSpace($version)) {
+        return $version.Trim()
+      }
+    } catch {
+    }
+  }
+
+  return $null
 }
 
 function Get-PrinterSetupUrl {
@@ -233,6 +278,16 @@ function Wait-ForVerifiedStatus {
         continue
       }
 
+      if ($null -eq $statusPayload.capabilities -or $statusPayload.capabilities.supportsPersistentPrintSession -ne $true) {
+        Write-UpgradeLog "Status endpoint has not advertised persistent WebSocket capability yet."
+        continue
+      }
+
+      if ($null -eq $statusPayload.websocket -or $statusPayload.websocket.supported -ne $true) {
+        Write-UpgradeLog "Status endpoint has not reported WebSocket runtime support yet."
+        continue
+      }
+
       $setupVerification = Get-SetupVerification -StatusPayload $statusPayload
       if ($null -eq $setupVerification -or [string]::IsNullOrWhiteSpace([string]$setupVerification.state)) {
         continue
@@ -270,6 +325,7 @@ if exist "%ENV_FILE%" (
 if "%PRINT_AGENT_HOST%"=="" set PRINT_AGENT_HOST=127.0.0.1
 if "%PRINT_AGENT_PORT%"=="" set PRINT_AGENT_PORT=17866
 if "%PRINT_AGENT_VERSION%"=="" set PRINT_AGENT_VERSION=$AgentVersion
+if "%PRINT_AGENT_SESSION_MODE%"=="" set PRINT_AGENT_SESSION_MODE=websocket
 cd /d "$WorkingDirectory"
 $ExecutableCommand >> "$LogDir\agent.log" 2>&1
 "@
@@ -350,8 +406,60 @@ function Cleanup-LegacyTask {
     try {
       Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction Stop
       Write-UpgradeLog "Removed legacy scheduled-task startup entry: $legacyTaskName"
+      $script:OldStartupEntriesRemoved += 1
     } catch {
       throw "Existing scheduled task '$legacyTaskName' could not be removed. Run the installer as Administrator so the old connector startup path can be replaced."
+    }
+  }
+}
+
+function Cleanup-LegacyServices {
+  foreach ($serviceName in $LegacyServiceNames) {
+    $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if (-not $existingService) {
+      $existingService = Get-Service -DisplayName $serviceName -ErrorAction SilentlyContinue
+    }
+    if (-not $existingService) {
+      continue
+    }
+
+    Write-UpgradeLog "Found legacy connector service: $($existingService.Name)"
+    try {
+      Stop-Service -Name $existingService.Name -Force -ErrorAction SilentlyContinue
+    } catch {
+    }
+
+    $deleteResult = & sc.exe delete $existingService.Name 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      throw "Existing connector service '$($existingService.Name)' could not be removed. Run the installer as Administrator. $deleteResult"
+    }
+    $script:OldStartupEntriesRemoved += 1
+    Write-UpgradeLog "Removed legacy connector service: $($existingService.Name)"
+  }
+}
+
+function Remove-LegacyRunRegistryEntries {
+  $runKeys = @(
+    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
+    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
+    "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"
+  )
+  foreach ($runKey in $runKeys) {
+    if (-not (Test-Path $runKey)) {
+      continue
+    }
+    foreach ($valueName in $LegacyRunValueNames) {
+      $property = Get-ItemProperty -Path $runKey -Name $valueName -ErrorAction SilentlyContinue
+      if ($null -eq $property) {
+        continue
+      }
+      try {
+        Remove-ItemProperty -Path $runKey -Name $valueName -Force -ErrorAction Stop
+        $script:OldStartupEntriesRemoved += 1
+        Write-UpgradeLog "Removed legacy Run registry entry: $runKey\$valueName"
+      } catch {
+        throw "Could not remove legacy Run registry entry '$runKey\$valueName'. $($_.Exception.Message)"
+      }
     }
   }
 }
@@ -384,6 +492,7 @@ function Stop-RunningAgent {
     Write-UpgradeLog "Stopping old connector process: pid=$($process.ProcessId) path=$($process.ExecutablePath)"
     try {
       Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+      $script:ProcessStopped = $true
     } catch {
       throw "Could not stop old MSCQR connector process pid=$($process.ProcessId). $($_.Exception.Message)"
     }
@@ -406,11 +515,15 @@ function Remove-LegacyStartupEntries {
   $startupEntries += Get-ChildItem -Path $StartupDir -Filter "MSCQR*.vbs" -ErrorAction SilentlyContinue
   $startupEntries += Get-ChildItem -Path $StartupDir -Filter "MSCQR*.lnk" -ErrorAction SilentlyContinue
   $startupEntries += Get-ChildItem -Path $StartupDir -Filter "MSCQR*.cmd" -ErrorAction SilentlyContinue
+  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "Genuine*.vbs" -ErrorAction SilentlyContinue
+  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "Genuine*.lnk" -ErrorAction SilentlyContinue
+  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "Genuine*.cmd" -ErrorAction SilentlyContinue
 
   foreach ($entry in ($startupEntries | Sort-Object FullName -Unique)) {
     try {
       Write-UpgradeLog "Removing stale startup entry: $($entry.FullName)"
       Remove-Item -Path $entry.FullName -Force -ErrorAction Stop
+      $script:OldStartupEntriesRemoved += 1
     } catch {
       throw "Could not remove stale startup entry $($entry.FullName). $($_.Exception.Message)"
     }
@@ -429,6 +542,13 @@ function Remove-LegacyRuntimeFiles {
       if (Test-Path $oldBin) {
         Write-UpgradeLog "Removing old connector runtime files from: $oldBin"
         Remove-Item -Path $oldBin -Recurse -Force -ErrorAction Stop
+      }
+      foreach ($runtimeName in @("queue", "work", "tmp", "cache", "runtime", "active-job.json", "heartbeat-cache.json", "release-metadata.json", "mscqr-local-print-agent.lock")) {
+        $runtimePath = Join-Path $root $runtimeName
+        if (Test-Path $runtimePath) {
+          Write-UpgradeLog "Removing stale connector runtime state: $runtimePath"
+          Remove-Item -Path $runtimePath -Recurse -Force -ErrorAction Stop
+        }
       }
     } else {
       Write-UpgradeLog "Removing legacy connector install path: $root"
@@ -486,8 +606,14 @@ try {
   New-Item -ItemType Directory -Force -Path $StartupDir | Out-Null
 
   Write-UpgradeLog "Starting MSCQR Connector install/upgrade to version $ResolvedVersion."
+  $script:PreviousVersion = Read-PreviousVersion
+  if (-not [string]::IsNullOrWhiteSpace($PreviousVersion)) {
+    Write-UpgradeLog "Detected existing MSCQR Connector version $PreviousVersion."
+  }
   Stop-RunningAgent
   Cleanup-LegacyTask
+  Cleanup-LegacyServices
+  Remove-LegacyRunRegistryEntries
   Remove-LegacyStartupEntries
   Remove-LegacyRuntimeFiles
 

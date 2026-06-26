@@ -36,17 +36,21 @@ const run = () => {
   assert(!isLocalAgentProtocolCompatible(null), "Missing protocol should require connector update");
   assert(!isLocalAgentProtocolCompatible("test.v1#4"), "Stale test connector protocol should require update");
   assert(
+    !isLocalAgentPersistentSessionCapable(LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION),
+    "Old REST fallback connector must not satisfy the persistent production worker gate"
+  );
+  assert(
     isLocalAgentTransportDiagnosticsCurrent({
       protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
       buildVersion: LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION,
       transportDiagnosticsVersion: LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
       capabilities: LOCAL_AGENT_CAPABILITIES,
     }),
-    "REST fallback connector build and transport diagnostics should satisfy the production worker gate"
+    "REST fallback connector build may still satisfy legacy transport diagnostics for upgrade visibility"
   );
   assert(
-    LOCAL_AGENT_MIN_VERSION_HINT === LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION,
-    "REST fallback minimum should remain the compatibility version hint"
+    LOCAL_AGENT_MIN_VERSION_HINT === LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION,
+    "Production minimum should be the persistent WebSocket connector version"
   );
   assert(
     !isLocalAgentPersistentSessionCapable(LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION),

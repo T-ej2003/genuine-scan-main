@@ -64,7 +64,7 @@ describe("batch print operations", () => {
     } as any);
   });
 
-  it("hands local-agent jobs to the modal poller without operation-level status polling", async () => {
+  it("hands local-agent jobs to the realtime modal without waking REST claim polling", async () => {
     const setPrintJobId = setter();
     const setPrintProgressPhase = setter();
     const setPrintProgressNotice = setter();
@@ -113,19 +113,32 @@ describe("batch print operations", () => {
     });
 
     expect(setPrintJobId).toHaveBeenCalledWith("job-live");
-    expect(apiClient.wakeLocalPrintAgent).toHaveBeenCalledWith("user_print_job_created");
-    expect(setPrintProgressPhase).toHaveBeenLastCalledWith("Waiting for connector to claim job");
-    expect(setPrintProgressNotice).toHaveBeenCalledWith("Connector wake sent. Waiting for backend-confirmed printer progress.");
+    expect(apiClient.wakeLocalPrintAgent).not.toHaveBeenCalled();
+    expect(setPrintProgressPhase).toHaveBeenLastCalledWith("Waiting for connector progress");
+    expect(setPrintProgressNotice).toHaveBeenCalledWith("Waiting for backend-confirmed printer progress.");
     expect(apiClient.getPrintJobStatus).not.toHaveBeenCalled();
   });
 
-  it("keeps fallback status visible when local connector wake fails", async () => {
-    vi.mocked(apiClient.wakeLocalPrintAgent).mockResolvedValueOnce({ success: false, error: "Local print agent is unavailable" } as any);
+  it("blocks old connector versions without auto-report spam", async () => {
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValueOnce({
+      success: true,
+      data: {
+        connected: false,
+        eligibleForPrinting: false,
+        persistentSessionRequired: true,
+        persistentSessionCapable: false,
+        persistentSessionUpdateRequired: true,
+        persistentSessionMinimumBuildVersion: "2026.6.25",
+        buildVersion: "2026.6.16",
+      },
+    } as any);
     const setPrintProgressPhase = setter();
     const setPrintProgressNotice = setter();
+    const autoReportPrinterFailure = vi.fn();
+    const toast = vi.fn();
 
     await createPrintJob({
-      toast: vi.fn(),
+      toast,
       printBatch: { id: "batch-1", name: "Batch 1" } as any,
       printQuantity: "10",
       getAvailableInventory: () => 10,
@@ -148,7 +161,7 @@ describe("batch print operations", () => {
       selectedPrinterCanPrint: true,
       setPrinterStatus: setter(),
       buildCalibrationPayload: () => ({}),
-      autoReportPrinterFailure: vi.fn(),
+      autoReportPrinterFailure,
       onBatchesChanged: vi.fn(),
       loadRecentPrintJobs: vi.fn(),
       setPrintJobId: setter(),
@@ -167,7 +180,15 @@ describe("batch print operations", () => {
       setDirectRemainingToPrint: setter(),
     });
 
-    expect(setPrintProgressPhase).toHaveBeenLastCalledWith("Waiting for printer helper");
-    expect(setPrintProgressNotice).toHaveBeenCalledWith("Connector wake failed. Safe fallback polling remains active.");
+    expect(apiClient.createPrintJob).not.toHaveBeenCalled();
+    expect(apiClient.wakeLocalPrintAgent).not.toHaveBeenCalled();
+    expect(autoReportPrinterFailure).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Connector update required",
+      })
+    );
+    expect(setPrintProgressPhase).not.toHaveBeenCalledWith("Waiting for printer helper");
+    expect(setPrintProgressNotice).not.toHaveBeenCalledWith("Connector wake failed. Safe fallback polling remains active.");
   });
 });
