@@ -139,7 +139,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               className="gap-3"
               markClassName="size-11"
               iconClassName="h-7 w-7"
-              textClassName="text-lg"
+              wordmarkClassName="h-5 max-w-[7.5rem]"
               ariaLabel="MSCQR workspace overview"
               onClick={() => setSidebarOpen(false)}
             />

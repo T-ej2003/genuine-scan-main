@@ -28,7 +28,7 @@ const HOME_STRUCTURED_DATA = [
     "@type": "Organization",
     name: SITE_NAME,
     url: SITE_ORIGIN,
-    logo: `${SITE_ORIGIN}/brand/mscqr-mark-512.png`,
+    logo: `${SITE_ORIGIN}/brand/mscqr-logo-mark-512.png`,
     image: DEFAULT_OG_IMAGE,
     description: "MSCQR is a garment authentication QR platform for brands and manufacturers.",
   },

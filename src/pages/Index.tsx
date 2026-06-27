@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { PublicShell } from "@/components/public/PublicShell";
+import { MscqrLogo } from "@/components/brand/MscqrLogo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -115,7 +116,7 @@ function HeroSection() {
             Authentication service platform
           </p>
           <h1 className="max-w-4xl text-4xl font-semibold leading-[1.05] tracking-normal sm:text-6xl lg:text-7xl">
-            MSCQR
+            <MscqrLogo variant="wordmark" alt="MSCQR" className="h-[0.9em] w-auto max-w-full invert" />
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-100 sm:text-xl">
             A production authentication platform for QR-labelled products, controlled print workflows, and public

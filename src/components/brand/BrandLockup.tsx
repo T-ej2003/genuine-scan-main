@@ -1,5 +1,6 @@
 import { Link, type LinkProps } from "react-router-dom";
 
+import { MscqrLogo } from "@/components/brand/MscqrLogo";
 import { cn } from "@/lib/utils";
 
 type BrandLockupProps = {
@@ -8,6 +9,7 @@ type BrandLockupProps = {
   markClassName?: string;
   iconClassName?: string;
   textClassName?: string;
+  wordmarkClassName?: string;
   ariaLabel?: string;
   onClick?: LinkProps["onClick"];
 };
@@ -18,6 +20,7 @@ export function BrandLockup({
   markClassName,
   iconClassName,
   textClassName,
+  wordmarkClassName,
   ariaLabel = "MSCQR",
   onClick,
 }: BrandLockupProps) {
@@ -29,9 +32,13 @@ export function BrandLockup({
           markClassName,
         )}
       >
-        <img src="/brand/mscqr-mark.svg" alt="" className={cn("size-7", iconClassName)} aria-hidden="true" />
+        <MscqrLogo variant="mark" decorative className={cn("size-7", iconClassName)} />
       </span>
-      <span className={cn("min-w-0 font-semibold tracking-tight", textClassName)}>MSCQR</span>
+      <MscqrLogo
+        variant="wordmark"
+        decorative
+        className={cn("h-5 w-auto min-w-0 max-w-[7.5rem]", textClassName, wordmarkClassName)}
+      />
     </>
   );
 
@@ -43,5 +50,9 @@ export function BrandLockup({
     );
   }
 
-  return <div className={cn("flex min-w-0 items-center", className)}>{content}</div>;
+  return (
+    <div className={cn("flex min-w-0 items-center", className)} aria-label={ariaLabel} role="img">
+      {content}
+    </div>
+  );
 }

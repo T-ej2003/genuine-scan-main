@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { LockKeyhole, Menu } from "lucide-react";
 
 import { BrandLockup } from "@/components/brand/BrandLockup";
+import { MscqrLogo } from "@/components/brand/MscqrLogo";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -28,7 +29,7 @@ export function PublicHeader({ className }: PublicHeaderProps) {
           to="/"
           className="group flex min-w-0 max-w-[190px] shrink-0 items-center gap-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2"
           markClassName="size-11"
-          textClassName="truncate text-sm tracking-normal text-foreground"
+          wordmarkClassName="h-4 max-w-[5.5rem]"
           ariaLabel="MSCQR home"
         />
 
@@ -59,7 +60,9 @@ export function PublicHeader({ className }: PublicHeaderProps) {
             </SheetTrigger>
             <SheetContent side="right" className="w-[min(22rem,calc(100vw-2rem))]">
               <SheetHeader>
-                <SheetTitle>MSCQR</SheetTitle>
+                <SheetTitle>
+                  <MscqrLogo variant="wordmark" alt="MSCQR" className="h-5 w-auto" />
+                </SheetTitle>
                 <SheetDescription>Public navigation</SheetDescription>
               </SheetHeader>
               <nav className="mt-8 grid gap-2" aria-label="Mobile public MSCQR navigation">
