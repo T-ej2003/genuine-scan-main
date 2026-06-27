@@ -3,6 +3,8 @@ import net from "net";
 import os from "os";
 import { promisify } from "util";
 
+import { inferZplPrinterDpi } from "../printing/zplCompatibilityContract";
+
 const execFileAsync = promisify(execFile);
 
 export type LocalAgentPrinter = {
@@ -115,6 +117,8 @@ type ParsedLpoptions = {
 type ParsedWindowsPrinter = {
   name: string;
   driverName: string | null;
+  dpi: number | null;
+  languages: string[];
   portName: string | null;
   portHost: string | null;
   portNumber: number | null;
@@ -152,7 +156,7 @@ const WINDOWS_PORT_PROBE_TIMEOUT_MS = Math.max(
 );
 const JOB_POLL_MS = Math.max(500, Number(process.env.PRINT_AGENT_JOB_POLL_MS || 1200) || 1200);
 const JOB_WAIT_TIMEOUT_MS = Math.max(5_000, Number(process.env.PRINT_AGENT_JOB_WAIT_TIMEOUT_MS || 60_000) || 60_000);
-const LABEL_PRINTER_TERMS = ["zdesigner", "zebra", "zt410", "zt411", "zpl"];
+const LABEL_PRINTER_TERMS = ["zdesigner", "zebra", "zt410", "zt411", "zpl", "zpl-ii", "zpl ii", "zsim"];
 const VIRTUAL_PRINTER_TERMS = [
   "fax",
   "microsoft print to pdf",
@@ -509,6 +513,8 @@ const parseWindowsPrinterRows = (
     printers.push({
       name,
       driverName: toCleanString((row as any).DriverName || (row as any).driverName) || null,
+      dpi: inferWindowsDpi(toCleanString((row as any).DriverName || (row as any).driverName) || null, name),
+      languages: inferWindowsLanguages(toCleanString((row as any).DriverName || (row as any).driverName) || null, name),
       portName,
       portHost: toCleanString(port?.PrinterHostAddress || port?.printerHostAddress || port?.HostAddress, 180) || null,
       portNumber: Number.isFinite(Number(port?.PortNumber || port?.portNumber)) ? Number(port?.PortNumber || port?.portNumber) : null,
@@ -714,7 +720,7 @@ const isWindowsNetworkPortReachable = (host: string, port: number) =>
 const inferWindowsLanguages = (driverName: string | null, printerName: string) => {
   const combined = `${driverName || ""} ${printerName}`.toUpperCase();
   const languages: string[] = [];
-  if (combined.includes("ZPL")) languages.push("ZPL");
+  if (combined.includes("ZPL") || combined.includes("ZPL-II") || combined.includes("ZPL II") || combined.includes("ZSIM")) languages.push("ZPL");
   if (combined.includes("TSPL")) languages.push("TSPL");
   if (combined.includes("SBPL") || combined.includes("SATO")) languages.push("SBPL");
   if (combined.includes("EPL")) languages.push("EPL");
@@ -722,6 +728,8 @@ const inferWindowsLanguages = (driverName: string | null, printerName: string) =
   if (combined.includes("ESC/POS") || combined.includes("ESC_POS") || combined.includes("RECEIPT")) languages.push("ESC_POS");
   return uniqueStrings(languages, 8);
 };
+
+const inferWindowsDpi = (driverName: string | null, printerName: string) => inferZplPrinterDpi(driverName, printerName);
 
 export const buildCapabilitySummary = (
   printers: LocalAgentPrinter[],
@@ -976,9 +984,9 @@ export const listWindowsLocalPrinters = async (
           online,
           isDefault: row.isDefault,
           protocols: inferWindowsProtocols(row.portName),
-          languages: inferWindowsLanguages(row.driverName, row.name),
+          languages: row.languages,
           mediaSizes: [],
-          dpi: null,
+          dpi: row.dpi,
           deviceUri: null,
           portName: row.portName,
           windowsPortName: row.portName,

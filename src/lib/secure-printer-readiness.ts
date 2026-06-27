@@ -80,7 +80,7 @@ export const buildSecurePrintReadiness = (status?: PrinterStatusLike | null): Se
   }
 
   if (status?.persistentSessionUpdateRequired) {
-    const minimum = String(status.persistentSessionMinimumBuildVersion || "2026.6.25").trim();
+    const minimum = String(status.persistentSessionMinimumBuildVersion || "2026.6.26").trim();
     const detected = String(status.buildVersion || status.agentVersion || "unknown").trim();
     return {
       ready: false,
@@ -102,7 +102,7 @@ export const buildSecurePrintReadiness = (status?: PrinterStatusLike | null): Se
         badgeLabel: "Blocked",
         tone: "danger",
         summary: "Persistent session is not connected.",
-        detail: "Helper installed and printer detected are not enough for production printing. Keep MSCQR Connector 2026.6.25 running until Cloud trust and the persistent session are connected.",
+        detail: "Helper installed and printer detected are not enough for production printing. Keep MSCQR Connector 2026.6.26 running until Cloud trust and the persistent session are connected.",
         recoveryAction: "refresh_printer_helper",
         canRetry: true,
       };
@@ -116,7 +116,7 @@ export const buildSecurePrintReadiness = (status?: PrinterStatusLike | null): Se
       summary: "Printer verification expired. Refresh printer helper before printing.",
       detail: sanitizePrinterUiError(
         status?.trustReason || status?.error,
-        "Ensure MSCQR Connector 2026.6.25 is running, refresh printer helper status, and restart the connector if this does not recover."
+        "Ensure MSCQR Connector 2026.6.26 is running, refresh printer helper status, and restart the connector if this does not recover."
       ),
       recoveryAction: "refresh_printer_helper",
       canRetry: true,

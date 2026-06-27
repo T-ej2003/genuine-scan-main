@@ -205,7 +205,7 @@ describe("PrinterSetupPage", () => {
         remoteStatus: {
           connected: true,
           eligibleForPrinting: true,
-          agentVersion: "2026.6.25",
+          agentVersion: "2026.6.26",
         },
       },
       refetch: vi.fn().mockResolvedValue(undefined),
@@ -214,7 +214,7 @@ describe("PrinterSetupPage", () => {
       success: true,
       data: {
         outcome: "queued",
-        message: "Live setup test label queued. Keep MSCQR Connector 2026.6.25 running until it prints and confirms.",
+        message: "Live setup test label queued. Keep MSCQR Connector 2026.6.26 running until it prints and confirms.",
       },
     } as any);
 

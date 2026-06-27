@@ -2,7 +2,7 @@
 
 ## Production Evidence
 
-- Windows connector `2026.6.25` is locally healthy, has backend configuration, has a selected Zebra printer, and advertises `supportsPersistentPrintSession=true`.
+- Windows connector `2026.6.26` is locally healthy, has backend configuration, has a selected Zebra printer, and advertises `supportsPersistentPrintSession=true`.
 - The connector reports `websocket.connected=false` with `Persistent session upgrade rejected on /api/printer-agent/session with HTTP 403.`
 - Manual WebSocket probes from macOS and Windows to `https://www.mscqr.com/api/printer-agent/session` return `101 Switching Protocols`.
 - Manual probes to the direct ALB also return `101 Switching Protocols`.

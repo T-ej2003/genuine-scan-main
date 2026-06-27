@@ -35,8 +35,8 @@ const productionReadyPrinterStatus = {
   printerId: "usb-zebra",
   selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
   printerName: "ZDesigner ZT410-300dpi ZPL",
-  agentVersion: "2026.6.25",
-  buildVersion: "2026.6.25",
+  agentVersion: "2026.6.26",
+  buildVersion: "2026.6.26",
   persistentSessionRequired: true,
   persistentSessionCapable: true,
   persistentSessionUpdateRequired: false,
@@ -58,8 +58,8 @@ describe("batch print operations", () => {
         selectedPrinterId: "usb-zebra",
         printerId: "usb-zebra",
         selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
-        agentVersion: "2026.6.25",
-        buildVersion: "2026.6.25",
+        agentVersion: "2026.6.26",
+        buildVersion: "2026.6.26",
         capabilities: { supportsPersistentPrintSession: true },
         websocket: {
           mode: "websocket",
@@ -149,6 +149,60 @@ describe("batch print operations", () => {
     expect(apiClient.getPrintJobStatus).not.toHaveBeenCalled();
   });
 
+  it("marks unsafe payload creation failures as failed before print", async () => {
+    vi.mocked(apiClient.createPrintJob).mockResolvedValueOnce({
+      success: false,
+      errorCode: "print_payload_invalid",
+      message: "Generated ZPL looks unsafe for this Zebra profile.",
+      error: "unsafe_zpl_payload",
+    } as any);
+    const setPrintProgressPhase = setter();
+    const setPrintProgressError = setter();
+
+    await createPrintJob({
+      toast: vi.fn(),
+      printBatch: { id: "batch-1", name: "Batch 1" } as any,
+      printQuantity: "10",
+      getAvailableInventory: () => 10,
+      selectedPrinterProfile: {
+        id: "printer-profile-1",
+        name: "ZDesigner ZT410-300dpi ZPL",
+        connectionType: "LOCAL_AGENT",
+        nativePrinterId: "usb-zebra",
+        isActive: true,
+      } as any,
+      selectedPrinterId: "usb-zebra",
+      detectedPrinters: [{ printerId: "usb-zebra", printerName: "ZDesigner ZT410-300dpi ZPL", online: true }] as any,
+      printerStatus: productionReadyPrinterStatus as any,
+      activeLocalPrinterId: "usb-zebra",
+      selectedPrinterCanPrint: true,
+      setPrinterStatus: setter(),
+      buildCalibrationPayload: () => ({}),
+      autoReportPrinterFailure: vi.fn().mockResolvedValue(true),
+      onBatchesChanged: vi.fn(),
+      loadRecentPrintJobs: vi.fn(),
+      setPrintJobId: setter(),
+      printJobId: "",
+      directRemainingToPrint: null,
+      setPrintProgressOpen: setter(),
+      setPrintProgressPhase,
+      setPrintProgressTotal: setter(),
+      setPrintProgressPrinted: setter(),
+      setPrintProgressRemaining: setter(),
+      setPrintProgressCurrentCode: setter(),
+      setPrintProgressError,
+      setPrintProgressNotice: setter(),
+      setPrintProgressPrinterName: setter(),
+      setPrintProgressDispatchMode: setter(),
+      setDirectRemainingToPrint: setter(),
+    });
+
+    expect(setPrintProgressPhase).toHaveBeenLastCalledWith("Failed before print");
+    expect(setPrintProgressError).toHaveBeenCalledWith(
+      "The print payload was blocked before reaching the printer. No labels were printed. Use diagnostic test label or contact admin."
+    );
+  });
+
   it("does not hand off or wake REST polling when the persistent session is disconnected", async () => {
     const disconnectedStatus = {
       ...productionReadyPrinterStatus,
@@ -230,7 +284,7 @@ describe("batch print operations", () => {
         persistentSessionRequired: true,
         persistentSessionCapable: false,
         persistentSessionUpdateRequired: true,
-        persistentSessionMinimumBuildVersion: "2026.6.25",
+        persistentSessionMinimumBuildVersion: "2026.6.26",
         buildVersion: "2026.6.16",
       },
     } as any);

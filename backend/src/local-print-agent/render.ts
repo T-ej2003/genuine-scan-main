@@ -12,6 +12,7 @@ import {
   renderQrLabelImageBuffer,
 } from "../printing/pdfLabel";
 import { assertZplPayloadSafeForQrLabel, buildKnownGoodDiagnosticZplPayload } from "../printing/printPayloadSafety";
+import { classifyIndustrialZplPrinterProfile } from "../printing/zplCompatibilityContract";
 
 const execFileAsync = promisify(execFile);
 
@@ -34,6 +35,12 @@ type PrintResult = {
   printPath: string;
   labelLanguage: string;
   bytesWritten?: number | null;
+};
+
+type ZplPrinterValidationContext = {
+  printerName?: string | null;
+  printerLanguages?: string[];
+  printerDpi?: number | null;
 };
 
 const TMP_DIR = path.join(os.tmpdir(), "mscqr-local-print-agent");
@@ -66,12 +73,31 @@ export const isRawWindowsZplPayload = (request: PrintRequest) => {
   return Boolean(content && (language === "ZPL" || language === "ZSIM" || payloadType === "ZPL") && content.startsWith("^XA"));
 };
 
-export const validateZplPayloadForRawPrint = (payloadContent: string) => {
+export const validateZplPayloadForRawPrint = (payloadContent: string, context: ZplPrinterValidationContext = {}) => {
   const trimmed = String(payloadContent || "").trim();
+  const profile = classifyIndustrialZplPrinterProfile({
+    printerName: context.printerName || null,
+    languages: context.printerLanguages || ["ZPL"],
+    dpi: context.printerDpi ?? null,
+  });
+  if (!profile.compatible) {
+    throw Object.assign(
+      new Error(
+        profile.reason === "unsupported_printer_dpi"
+          ? "This label template is certified for 300dpi. Select a 300dpi ZPL-compatible printer."
+          : "This printer is not confirmed as ZPL-compatible. Select a 300dpi ZPL-compatible industrial label printer or update the connector profile."
+      ),
+      {
+        errorCode: profile.reason === "unsupported_printer_dpi" ? "unsupported_printer_dpi" : "unsupported_printer_language",
+        zplValidationErrors: [profile.reason || "unsupported_printer_profile"],
+        printerProfile: profile,
+      }
+    );
+  }
   try {
     assertZplPayloadSafeForQrLabel(trimmed);
   } catch (error: any) {
-    throw Object.assign(new Error("Generated ZPL looks unsafe for this Zebra profile. Use diagnostic test label or adjust label template."), {
+    throw Object.assign(new Error("Generated ZPL looks unsafe for this 300dpi ZPL profile. Use diagnostic test label or adjust label template."), {
       errorCode: "invalid_zpl_print_payload",
       zplValidationErrors: error?.zplSafetyIssues || [],
       payloadDiagnostics: error?.payloadDiagnostics || null,
@@ -145,10 +171,17 @@ const tryRawLabelLanguage = async (params: {
 
 const printRawWithWindowsSpooler = async (params: {
   printerId: string;
+  printerName?: string | null;
+  printerLanguages?: string[];
+  printerDpi?: number | null;
   copies: number;
   payloadContent: string;
 }) => {
-  const payloadContent = validateZplPayloadForRawPrint(params.payloadContent);
+  const payloadContent = validateZplPayloadForRawPrint(params.payloadContent, {
+    printerName: params.printerName || params.printerId,
+    printerLanguages: params.printerLanguages || [],
+    printerDpi: params.printerDpi ?? null,
+  });
   const payloadBytes = Buffer.from(payloadContent, "utf8");
   const zplPath = await writeFileEnsured(`raw-zpl-${Date.now()}-${sha256Hex(payloadContent).slice(0, 8)}.zpl`, payloadBytes);
   const scriptPath = await writeFileEnsured(
@@ -364,6 +397,7 @@ export const printLabel = async (params: {
   request: PrintRequest;
   calibrationProfile?: CalibrationProfile | null;
   printerLanguages?: string[];
+  printerDpi?: number | null;
 }): Promise<PrintResult> => {
   const payloadHash = String(params.request.payloadHash || "").trim();
   const payloadContent = String(params.request.payloadContent || "");
@@ -384,6 +418,13 @@ export const printLabel = async (params: {
     languages.includes(requestedLanguage);
 
   if (rawEligible) {
+    if (requestedLanguage === "ZPL" || requestedLanguage === "ZSIM") {
+      validateZplPayloadForRawPrint(payloadContent, {
+        printerName: params.printerName || params.printerId,
+        printerLanguages: languages,
+        printerDpi: params.printerDpi ?? null,
+      });
+    }
     const jobRef = await tryRawLabelLanguage({
       printerId: params.printerId,
       copies: Math.max(1, Number(params.request.copies || 1) || 1),
@@ -402,6 +443,9 @@ export const printLabel = async (params: {
     if (isRawWindowsZplPayload(params.request)) {
       const result = await printRawWithWindowsSpooler({
         printerId: params.printerId,
+        printerName: params.printerName,
+        printerLanguages: languages,
+        printerDpi: params.printerDpi ?? null,
         copies: Math.max(1, Number(params.request.copies || 1) || 1),
         payloadContent,
       });

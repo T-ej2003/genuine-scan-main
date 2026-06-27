@@ -760,6 +760,7 @@ const runLocalDiagnosticTestJob = async (payload: any, printerId: string) => {
       printerId,
       printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
       printerLanguages: ["ZPL"],
+      printerDpi: Number(payload.printer?.dpi || 0) || null,
       calibrationProfile: null,
       request: {
         code: String(payload.code || "MSCQR-TEST").trim(),
@@ -838,6 +839,7 @@ const runPersistentDiagnosticTestJob = async (
       printerId: selectedPrinterId,
       printerName: String(payload.printer?.name || payload.selectedPrinterName || selectedPrinterId).trim(),
       printerLanguages: ["ZPL"],
+      printerDpi: Number(payload.printer?.dpi || 0) || null,
       calibrationProfile: null,
       request: {
         code: String(payload.code || "MSCQR-TEST").trim(),
@@ -948,6 +950,7 @@ const runPersistentPrintChunk = async (
         printerId: selectedPrinterId,
         printerName,
         printerLanguages: Array.isArray(printer.languages) ? printer.languages : [],
+        printerDpi: Number(printer.dpi || 0) || null,
         calibrationProfile,
         request: {
           code,
@@ -1161,6 +1164,7 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
       printerId,
       printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
       printerLanguages: Array.isArray(payload.printer?.languages) ? payload.printer.languages : [],
+      printerDpi: Number(payload.printer?.dpi || 0) || null,
       calibrationProfile,
       request: {
         code: validated.code,

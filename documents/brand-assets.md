@@ -32,4 +32,19 @@ Zebra ZPL cannot print raw SVG directly. The same generator converts `public/bra
 
 - `backend/src/printing/generated/brandWordmarkZpl.ts`
 
-Production ZPL labels embed that bounded graphic with `^GFA` for the visual wordmark, while keeping QR sizing, quiet zone, scan URL, and serial text under the existing print payload safety checks.
+Production 300dpi ZPL labels embed the official wordmark as a bounded one-bit `^GFA` graphic. This is required because industrial ZPL printers cannot reproduce the stylised MSCQR wordmark with plain `^FDMSCQR^FS` text unless a custom font or graphic is installed on each printer.
+
+The generated graphic is allowed only through the shared 300dpi ZPL compatibility contract in:
+
+- `backend/src/printing/zplCompatibilityContract.ts`
+
+Current contract:
+
+- Profile: `zpl_300dpi_generic`
+- Label: `40x50mm`, `300dpi`, `472x591` dots
+- Official graphic: `mscqr_official_wordmark_v1`
+- Graphic data hash: `d5707dfffaa6c4a614db9ecdbba27505134d36bf904f664d5b2d85656994f854`
+- Normalized graphic hash: `a7926928e5e8d2cce6767620ebe7ec4c89c7a3e8c29bf519bbaf6122e979cf6a`
+- Connector requirement: MSCQR Connector `2026.6.26` or newer
+
+Backend and connector safety both reject arbitrary, repeated, oversized, mutated, or out-of-bounds `^GF/^GFA` payloads. Printers must be confirmed as 300dpi ZPL/ZPL-II compatible; non-ZPL queues and unsupported DPI profiles are rejected before print.

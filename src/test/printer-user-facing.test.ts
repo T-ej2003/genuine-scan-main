@@ -27,7 +27,15 @@ describe("printer user-facing helpers", () => {
     ).toBe("Sent to printer, but local queue confirmation is unavailable. Check the printed label, then manually confirm or retry.");
 
     expect(sanitizePrinterUiError("Generated ZPL looks unsafe for this Zebra profile.")).toBe(
-      "Payload rejected before print: generated Zebra ZPL looks unsafe for this profile."
+      "The print payload was blocked before reaching the printer. No labels were printed. Use diagnostic test label or contact admin."
+    );
+
+    expect(sanitizePrinterUiError("unsupported_printer_language: printer is not confirmed as ZPL-compatible")).toBe(
+      "This printer is not confirmed as ZPL-compatible. Select a 300dpi ZPL-compatible industrial label printer or update the connector profile."
+    );
+
+    expect(sanitizePrinterUiError("unsupported_printer_dpi: label template is certified for 300dpi")).toBe(
+      "This label template is certified for 300dpi. Select a 300dpi ZPL-compatible printer."
     );
   });
 
@@ -41,7 +49,7 @@ describe("printer user-facing helpers", () => {
 
   it("maps structured print-job creation errors to specific user guidance", () => {
     expect(printJobCreateFailureMessage({ errorCode: "missing_printer_session" })).toBe(
-      "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.25 or newer, then retry."
+      "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.26 or newer, then retry."
     );
     expect(printJobCreateFailureMessage({ errorCode: "printer_not_verified" })).toBe(
       "Finish printer verification or choose a verified printer before starting this print run."

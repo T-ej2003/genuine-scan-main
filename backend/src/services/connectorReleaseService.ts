@@ -208,7 +208,7 @@ const toPublicRelease = (release: ConnectorRelease, baseUrl?: string | null, opt
     productionSignedAvailable: signedWindowsAvailable,
     productionSignedMessage: signedWindowsAvailable
       ? null
-      : "Signed Windows connector is pending release. Contact MSCQR support or run the Windows Connector Signed Release workflow.",
+      : "Signed Windows connector is pending release. Use MSCQR support or the Windows Connector Signed Release workflow.",
     internalArtifactsAvailable: Boolean(release.platforms.windowsUnsignedTest),
     platforms: {
       macos: release.platforms.macos ? toPublicPlatform(release.version, "macos", release.platforms.macos, baseUrl) : null,

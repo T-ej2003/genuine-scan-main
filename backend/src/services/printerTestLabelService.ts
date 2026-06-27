@@ -453,7 +453,7 @@ const enqueuePersistentLocalAgentPrinterTestJob = async (params: {
   await writeLocalAgentTestJobMetadata(params.printer, job);
   return {
     outcome: "queued",
-    message: "Live setup test label queued. Keep MSCQR Connector 2026.6.25 running until it prints and confirms.",
+    message: "Live setup test label queued. Keep MSCQR Connector 2026.6.26 running until it prints and confirms.",
     confirmationMode: "LOCAL_QUEUE",
     connectionType: PrinterConnectionType.LOCAL_AGENT,
     deliveryMode: PrinterDeliveryMode.DIRECT,

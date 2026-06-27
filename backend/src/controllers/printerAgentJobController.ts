@@ -283,6 +283,10 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
           name: job.printer.name,
           nativePrinterId: job.printer.nativePrinterId,
           selectedPrinterId,
+          dpi:
+            Number((job.printer.capabilitySummary as Record<string, unknown> | null)?.dpi || 0) ||
+            Number((job.printer.calibrationProfile as Record<string, unknown> | null)?.dpi || 0) ||
+            null,
           languages:
             Array.isArray((job.printer.capabilitySummary as Record<string, unknown> | null)?.languages)
               ? (((job.printer.capabilitySummary as Record<string, unknown>).languages as unknown[]) || []).map((value) =>
