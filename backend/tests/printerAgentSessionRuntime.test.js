@@ -111,7 +111,7 @@ const { openTrustedPrinterAgentSession, sessionClientMessageSchema } = require("
 
 const signedHello = (overrides = {}) => {
   const issuedAt = new Date().toISOString();
-  const connectorVersion = overrides.connectorVersion || "2026.6.25";
+  const connectorVersion = overrides.connectorVersion || "2026.6.26";
   const selectedPrinterId = overrides.selectedPrinterId || printer.nativePrinterId;
   const payload = buildPrinterAgentSessionPayload({
     messageType: "hello",
@@ -146,7 +146,7 @@ const signedHello = (overrides = {}) => {
 (async () => {
 	  const first = await openTrustedPrinterAgentSession(signedHello());
 	  assert.equal(first.registrationId, registration.id, "valid signed hello should open a trusted session");
-	  assert.equal(first.connectorVersion, "2026.6.25", "trusted session should retain connector version");
+	  assert.equal(first.connectorVersion, "2026.6.26", "trusted session should retain connector version");
 	  assert.equal(first.publicKeyFingerprint.length, 64, "trusted session should bind the enrolled public-key fingerprint");
 
   const second = await openTrustedPrinterAgentSession(signedHello({ connectorVersion: "2026.6.26" }));
@@ -204,7 +204,7 @@ const signedHello = (overrides = {}) => {
       agentId: registration.agentId,
       deviceFingerprint: registration.deviceFingerprint,
       selectedPrinterId: printer.nativePrinterId,
-      connectorVersion: "2026.6.25",
+      connectorVersion: "2026.6.26",
     }).success,
     false,
     "post-hello frames must not include hello-only connector identity fields"

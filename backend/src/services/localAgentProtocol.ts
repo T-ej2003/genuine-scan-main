@@ -35,6 +35,7 @@ export const LOCAL_AGENT_CAPABILITIES = {
   supportsTransportDiagnostics: true,
   supportsTestLabel: true,
   supportsPersistentPrintSession: true,
+  supportsOfficialMscqrZplWordmark: true,
 } as const;
 
 export const REQUIRED_LOCAL_AGENT_CAPABILITY_FLAGS = Object.keys(LOCAL_AGENT_CAPABILITIES) as Array<

@@ -31,6 +31,12 @@ export const sanitizePrinterActionError = (
   if (hasAny(value, ["heartbeat", "trust", "attestation", "signature", "fingerprint", "certificate", "mtls"])) {
     return "The secure printer connection is not ready yet. Refresh and try again in a moment.";
   }
+  if (hasAny(value, ["unsupported_printer_language", "not confirmed as zpl-compatible"])) {
+    return "This printer is not confirmed as ZPL-compatible. Select a 300dpi ZPL-compatible industrial label printer or update the connector profile.";
+  }
+  if (hasAny(value, ["unsupported_printer_dpi", "certified for 300dpi"])) {
+    return "This label template is certified for 300dpi. Select a 300dpi ZPL-compatible printer.";
+  }
   if (hasAny(value, ["gateway", "private-lan"]) && hasAny(value, ["offline", "credentials", "missing"])) {
     return "The site print connector needs attention before this printer can be used.";
   }
@@ -47,7 +53,7 @@ export const sanitizePrinterActionError = (
     return "Sent to printer, but local queue confirmation is unavailable. Check the printed label, then manually confirm or retry.";
   }
   if (hasAny(value, ["generated zpl looks unsafe", "unsafe_zpl_payload", "black box", "black-block", "raster graphics not allowed"])) {
-    return "Payload rejected before print: generated Zebra ZPL looks unsafe for this profile.";
+    return "The print payload was blocked before reaching the printer. No labels were printed. Use diagnostic test label or contact admin.";
   }
   if (hasAny(value, ["operator confirmation", "manual confirmation", "awaiting/manual confirmation"])) {
     return "Sent to printer, awaiting manual operator confirmation.";

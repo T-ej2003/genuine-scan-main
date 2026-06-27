@@ -15,7 +15,7 @@ A second hardening issue existed in connector URL handling: saved backend URLs e
 - Revoked and untrusted registrations remain rejected.
 - Ed25519 signature verification remains required.
 - mTLS remains optional unless `PRINT_AGENT_REQUIRE_MTLS=true`.
-- Production printing still requires persistent WebSocket session mode and connector build `2026.6.25` or newer.
+- Production printing still requires persistent WebSocket session mode and connector build `2026.6.26` or newer.
 - Browser/frontend code still cannot mark jobs printed.
 - Print completion still depends on backend/connector physical confirmation paths.
 - Logs use hashes or short identifiers only; raw keys, signatures, tokens, cookies, CSRF values, payloads, and signed URLs are not logged.

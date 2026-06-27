@@ -258,9 +258,9 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
           code === "CONNECTOR_UPDATE_REQUIRED"
             ? "Update MSCQR Connector to use persistent print session mode."
             : code === "PRINTER_SESSION_DISCONNECTED"
-              ? "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.25 or newer, then retry."
+              ? "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.26 or newer, then retry."
           : code === "PRINTER_SESSION_REQUIRED"
-            ? "Persistent printer session is required for production printing. Start MSCQR Connector 2026.6.25 or newer, then retry."
+            ? "Persistent printer session is required for production printing. Start MSCQR Connector 2026.6.26 or newer, then retry."
           : code === "missing_printer_session"
             ? "Refresh the printer connection, then start the print run again."
             : "Finish printer verification or choose a verified printer before starting this print run.",

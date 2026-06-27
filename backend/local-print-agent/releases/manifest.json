@@ -1,8 +1,8 @@
 {
   "productName": "MSCQR Connector",
-  "latestVersion": "2026.6.25",
+  "latestVersion": "2026.6.26",
   "requiredProtocolVersion": "local-agent-direct-v2",
-  "minimumBuildVersion": "2026.6.25",
+  "minimumBuildVersion": "2026.6.26",
   "transportDiagnosticsVersion": "transport-diagnostics-v1",
   "capabilities": {
     "supportsPrinterQueueSnapshot": true,
@@ -14,12 +14,91 @@
     "supportsSpoolJobStatus": true,
     "supportsTransportDiagnostics": true,
     "supportsTestLabel": true,
-    "supportsPersistentPrintSession": true
+    "supportsPersistentPrintSession": true,
+    "supportsOfficialMscqrZplWordmark": true
   },
   "supportPath": "/help/manufacturer",
   "helpPath": "/connector-download",
   "setupGuidePath": "/help/manufacturer",
   "releases": [
+    {
+      "version": "2026.6.26",
+      "publishedAt": "2026-06-27T19:00:54.574Z",
+      "requiredProtocolVersion": "local-agent-direct-v2",
+      "minimumBuildVersion": "2026.6.26",
+      "transportDiagnosticsVersion": "transport-diagnostics-v1",
+      "capabilities": {
+        "supportsPrinterQueueSnapshot": true,
+        "supportsWindowsTcpPortInspection": true,
+        "supportsRawTcpConnectTest": true,
+        "supportsRawTcpZplSend": true,
+        "supportsUsbRawSpooler": true,
+        "supportsSpoolJobCancel": true,
+        "supportsSpoolJobStatus": true,
+        "supportsTransportDiagnostics": true,
+        "supportsTestLabel": true,
+        "supportsPersistentPrintSession": true,
+        "supportsOfficialMscqrZplWordmark": true
+      },
+      "summary": "Connector release required for official MSCQR wordmark ZPL labels with bounded shared safety validation.",
+      "notes": [
+        "Use the signed Windows connector on the Windows PC that is connected to the printer once it is published.",
+        "Use the unsigned Windows test package only for internal validation on the Windows PC that is connected to the printer.",
+        "Windows installation now verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed.",
+        "Accepts only the generated official MSCQR wordmark ^GFA graphic and continues to reject arbitrary raster graphics.",
+        "Windows Smart App Control can block the unsigned Windows test package until a signed Windows installer is published."
+      ],
+      "platforms": {
+        "windowsUnsignedTest": {
+          "label": "Windows test package",
+          "installerKind": "zip",
+          "artifactType": "windows-unsigned-test-zip",
+          "trustLevel": "internal-test",
+          "signatureStatus": "unsigned",
+          "internalOnly": true,
+          "smartAppControlSafe": false,
+          "publisherName": null,
+          "signedAt": null,
+          "windowsTrustMode": "unsigned-test",
+          "filename": "MSCQR-Connector-Windows-2026.6.26.zip",
+          "relativePath": "2026.6.26/windows/MSCQR-Connector-Windows-2026.6.26.zip",
+          "contentType": "application/zip",
+          "architecture": "x64",
+          "bytes": 39640501,
+          "sha256": "e992166292432bbd1cf15b0f961df0e2f3d976ea83afdf4b28ce67b1c38b0a35",
+          "protocolVersion": "local-agent-direct-v2",
+          "buildVersion": "2026.6.26",
+          "transportDiagnosticsVersion": "transport-diagnostics-v1",
+          "capabilities": {
+            "supportsPrinterQueueSnapshot": true,
+            "supportsWindowsTcpPortInspection": true,
+            "supportsRawTcpConnectTest": true,
+            "supportsRawTcpZplSend": true,
+            "supportsUsbRawSpooler": true,
+            "supportsSpoolJobCancel": true,
+            "supportsSpoolJobStatus": true,
+            "supportsTransportDiagnostics": true,
+            "supportsTestLabel": true,
+            "supportsPersistentPrintSession": true,
+            "supportsOfficialMscqrZplWordmark": true
+          },
+          "notes": [
+            "Extract this Windows test package on the Windows computer that will print.",
+            "Run Install Connector.cmd once to install, auto-start, and locally verify the connector.",
+            "Windows Smart App Control can block this unsigned setup package until a signed Windows installer is published."
+          ],
+          "releaseNotesIncluded": true,
+          "legalDocumentsIncluded": [
+            "legal/TERMS_AND_CONDITIONS.txt",
+            "legal/PRIVACY_POLICY.txt",
+            "legal/EULA.txt",
+            "legal/SECURITY_NOTICE.txt",
+            "legal/INSTALLATION_GUIDE.txt",
+            "legal/THIRD_PARTY_NOTICES.txt"
+          ]
+        }
+      }
+    },
     {
       "version": "2026.6.25",
       "publishedAt": "2026-06-26T15:24:29.284Z",

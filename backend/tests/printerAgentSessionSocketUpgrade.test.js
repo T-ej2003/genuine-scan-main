@@ -43,7 +43,7 @@ const openWebSocket = (url) =>
   new Promise((resolve, reject) => {
     const ws = new WebSocket(url, {
       headers: {
-        "user-agent": "mscqr-test-connector/2026.6.25",
+        "user-agent": "mscqr-test-connector/2026.6.26",
         "x-forwarded-for": "203.0.113.44",
       },
     });

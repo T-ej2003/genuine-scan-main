@@ -1,5 +1,5 @@
 import React from "react";
-import { CircleCheckBig, Loader2, Printer } from "lucide-react";
+import { AlertTriangle, CircleCheckBig, Loader2, Printer } from "lucide-react";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
@@ -35,6 +35,13 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
   const safeRemaining = Math.max(0, Number(props.remaining || Math.max(0, safeTotal - safePrinted)));
   const progressValue = safeTotal > 0 ? Math.max(0, Math.min(100, Math.round((safePrinted / safeTotal) * 100))) : 0;
   const normalizedPhase = String(props.phase || "").trim().toLowerCase();
+  const normalizedError = String(props.error || "").trim().toLowerCase();
+  const failedBeforePrint =
+    Boolean(props.error) &&
+    (normalizedPhase.includes("failed before print") ||
+      normalizedError.includes("blocked before reaching the printer") ||
+      normalizedError.includes("payload rejected before print") ||
+      normalizedError.includes("generated zebra zpl looks unsafe"));
   const isCompleted = !props.error && ["completed", "print job completed", "print run completed", "print session completed"].includes(normalizedPhase);
   const activeJob = props.activeJob || null;
   const activeSessionStatus = String(activeJob?.session?.status || "").toUpperCase();
@@ -70,14 +77,18 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
   const controlsBusy = Boolean(
     activeJob && (props.printControlBusyJobId === activeJob.id || props.printControlSubmitting || props.refreshBusy)
   );
-  const dialogTitle = props.error
+  const dialogTitle = failedBeforePrint
+    ? "Print did not start"
+    : props.error
     ? "Print needs attention"
     : stoppedOrPartial
       ? "Print run stopped"
       : isCompleted
         ? "Print completed"
         : "Printing in progress";
-  const dialogDescription = props.error
+  const dialogDescription = failedBeforePrint
+    ? "The secure payload was rejected before any physical label reached the printer queue."
+    : props.error
     ? "Review the failure details before retrying or closing this session."
     : stoppedOrPartial
       ? "The confirmed labels remain printed. Unprinted labels require controlled recovery."
@@ -97,18 +108,18 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="rounded-md border p-3">
+          <div className="min-h-[92px] rounded-md border p-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary">{props.modeLabel || "Auto path"}</Badge>
               <Badge variant="outline">{props.printerName || "Default printer"}</Badge>
-              <Badge variant={props.error ? "destructive" : "default"}>{props.phase}</Badge>
+              <Badge variant={props.error ? "destructive" : "default"}>{failedBeforePrint ? "Failed before print" : props.phase}</Badge>
             </div>
             {props.currentCode ? <div className="mt-2 text-xs text-muted-foreground">Processing the next approved label.</div> : null}
             {props.error ? <div className="mt-2 text-xs text-destructive">{props.error}</div> : null}
             {!props.error && props.notice ? <div className="mt-2 text-xs text-amber-700">{props.notice}</div> : null}
           </div>
 
-          <div className="space-y-2">
+          <div className="min-h-[62px] space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span>{safePrinted.toLocaleString()} printed</span>
               <span>{safeRemaining.toLocaleString()} remaining</span>
@@ -119,7 +130,14 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
             </div>
           </div>
 
-          {isCompleted ? (
+          {failedBeforePrint ? (
+            <div className="flex items-start gap-2 text-xs text-destructive">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <div>
+                Print did not start. {safeRemaining.toLocaleString()} label{safeRemaining === 1 ? "" : "s"} remain recoverable after the payload fix.
+              </div>
+            </div>
+          ) : isCompleted ? (
             <div className="flex items-center gap-2 text-xs text-emerald-700">
               <CircleCheckBig className="h-3.5 w-3.5" />
               Print run completed.
@@ -136,7 +154,16 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
             </div>
           )}
 
-          {showControls && activeJob ? (
+          {failedBeforePrint ? (
+            <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
+              <Button type="button" variant="outline" size="sm" asChild>
+                <a href="/printer-setup">Open printer setup</a>
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={props.onRefresh} disabled={props.refreshBusy || props.refreshDisabled}>
+                {props.refreshBusy ? "Refreshing..." : "Refresh connector"}
+              </Button>
+            </div>
+          ) : showControls && activeJob ? (
             <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
               <Button
                 type="button"

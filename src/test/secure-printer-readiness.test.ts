@@ -14,7 +14,7 @@ describe("secure printer readiness", () => {
       buildVersion: "2026.6.16",
       persistentSessionRequired: true,
       persistentSessionCapable: false,
-      persistentSessionMinimumBuildVersion: "2026.6.25",
+      persistentSessionMinimumBuildVersion: "2026.6.26",
       persistentSessionUpdateRequired: true,
     });
 
@@ -22,7 +22,7 @@ describe("secure printer readiness", () => {
     expect(readiness.reasonCode).toBe("CONNECTOR_UPDATE_REQUIRED");
     expect(readiness.summary).toBe("MSCQR Connector update required.");
     expect(readiness.detail).toContain("Update MSCQR Connector to use persistent print session mode.");
-    expect(readiness.detail).toContain("Required 2026.6.25");
+    expect(readiness.detail).toContain("Required 2026.6.26");
     expect(readiness.detail).toContain("detected 2026.6.16");
     expect(readiness.detail).not.toContain("Refresh printer helper before starting this print run");
   });
@@ -35,7 +35,7 @@ describe("secure printer readiness", () => {
       stale: false,
       compatibilityMode: false,
       connectionClass: "BLOCKED",
-      buildVersion: "2026.6.25",
+      buildVersion: "2026.6.26",
       persistentSessionRequired: true,
       persistentSessionCapable: true,
       persistentSessionDisconnected: true,

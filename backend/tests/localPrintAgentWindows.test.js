@@ -11,6 +11,11 @@ const {
   isRawWindowsZplPayload,
   validateZplPayloadForRawPrint,
 } = require("../dist/local-print-agent/render");
+const {
+  ZPL_300DPI_COMPATIBILITY_CONTRACT,
+  buildOfficialMscqrWordmarkGfaCommand,
+  classifyIndustrialZplPrinterProfile,
+} = require("../dist/printing/zplCompatibilityContract");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -54,6 +59,9 @@ const run = async () => {
   assert(printers[0].name === "Zebra ZD421", "Expected printer name");
   assert(printers[0].online === true, "Online Windows printer should be marked online");
   assert(printers[0].isDefault === true, "Default Windows printer should be preserved");
+  assert(printers[0].dpi === 203, "Windows ZPL driver names should expose detected 203dpi profiles");
+  assert(printers[1].dpi === 300, "Windows ZPL driver names should expose detected 300dpi profiles");
+  assert(printers[0].languages.includes("ZPL"), "Windows ZPL driver names should expose the ZPL language");
   assert(printers[1].online === false, "Windows queue errors should be marked offline");
   assert(printers[1].portHost === "10.45.144.9", "TCP/IP port host should be preserved");
   assert(printers[1].portNumber === 9100, "TCP/IP port number should be preserved");
@@ -346,16 +354,93 @@ const run = async () => {
     "Missing or opaque spooler refs should not be converted into physical printer failures"
   );
 
-  const validZpl = `^XA\n^PW590\n^LL590\n^LH0,0\n^CI28\n^FO24,24^BQN,2,7^FDLA,https://mscqr.example.test/scan/${"a".repeat(100)}^FS\n^XZ`;
+  const validZpl = [
+    "^XA",
+    `^PW${ZPL_300DPI_COMPATIBILITY_CONTRACT.labelWidthDots}`,
+    `^LL${ZPL_300DPI_COMPATIBILITY_CONTRACT.labelHeightDots}`,
+    "^LH0,0",
+    "^CI28",
+    `^FO102,16${buildOfficialMscqrWordmarkGfaCommand()}^FS`,
+    "^FO90,150^BQN,2,5^FDLA,https://mscqr.example.test/scan/c_connector_contract^FS",
+    "^XZ",
+  ].join("\n");
+  const mutateOfficialGraphicCommand = () => {
+    const command = buildOfficialMscqrWordmarkGfaCommand();
+    const prefix = command.slice(0, command.lastIndexOf(",") + 1);
+    const data = command.slice(prefix.length);
+    const finalNibble = data.slice(-1);
+    return `${prefix}${data.slice(0, -1)}${finalNibble === "0" ? "1" : "0"}`;
+  };
   assert(
     isRawWindowsZplPayload({ payloadType: "ZPL", labelLanguage: "ZPL", payloadContent: validZpl }),
     "Windows ZPL payloads should be routed to the RAW spooler path"
   );
-  assert(validateZplPayloadForRawPrint(validZpl) === validZpl, "Valid ZPL should pass raw-print validation");
   assert(
-    Buffer.byteLength(validateZplPayloadForRawPrint(validZpl), "utf8") === Buffer.byteLength(validZpl, "utf8"),
+    validateZplPayloadForRawPrint(validZpl, {
+      printerName: "Honeywell 300dpi ZPL",
+      printerLanguages: ["ZPL"],
+      printerDpi: 300,
+    }) === validZpl,
+    "Valid official-wordmark ZPL should pass raw-print validation for generic 300dpi ZPL printers"
+  );
+  assert(
+    Buffer.byteLength(validateZplPayloadForRawPrint(validZpl, { printerName: "TSC 300dpi ZPL", printerLanguages: ["ZPL"], printerDpi: 300 }), "utf8") === Buffer.byteLength(validZpl, "utf8"),
     "Raw ZPL bytesWritten should be based on actual payload bytes, not payload hash length"
   );
+  for (const printerName of [
+    "ZDesigner ZT410-300dpi ZPL",
+    "ZDesigner ZT411-300dpi ZPL",
+    "Honeywell 300dpi ZPL",
+    "TSC 300dpi ZPL",
+    "Printronix 300dpi ZPL",
+  ]) {
+    const profile = classifyIndustrialZplPrinterProfile({ printerName, printerLanguages: ["ZPL"], printerDpi: 300 });
+    assert(profile.compatible && profile.profileId, `${printerName} should be accepted by the generic 300dpi ZPL contract`);
+    assert(
+      validateZplPayloadForRawPrint(validZpl, { printerName, printerLanguages: ["ZPL"], printerDpi: 300 }) === validZpl,
+      `${printerName} should pass connector payload validation without Zebra-only assumptions`
+    );
+  }
+  let genericTextOnlyRejected = false;
+  try {
+    validateZplPayloadForRawPrint(validZpl, {
+      printerName: "Generic / Text Only",
+      printerLanguages: [],
+      printerDpi: 300,
+    });
+  } catch (error) {
+    genericTextOnlyRejected = true;
+    assert(error.errorCode === "unsupported_printer_language", "Generic / Text Only must fail before RAW ZPL dispatch");
+  }
+  assert(genericTextOnlyRejected, "Generic / Text Only should be rejected for production ZPL labels");
+  let unsupportedDpiRejected = false;
+  try {
+    validateZplPayloadForRawPrint(validZpl, {
+      printerName: "ZDesigner ZT410-203dpi ZPL",
+      printerLanguages: ["ZPL"],
+      printerDpi: 203,
+    });
+  } catch (error) {
+    unsupportedDpiRejected = true;
+    assert(error.errorCode === "unsupported_printer_dpi", "203dpi ZPL must fail until scaling is certified");
+  }
+  assert(unsupportedDpiRejected, "Unsupported DPI should be rejected before RAW ZPL dispatch");
+  let mutatedOfficialRejected = false;
+  try {
+    validateZplPayloadForRawPrint(validZpl.replace(buildOfficialMscqrWordmarkGfaCommand(), mutateOfficialGraphicCommand()), {
+      printerName: "ZDesigner ZT410-300dpi ZPL",
+      printerLanguages: ["ZPL"],
+      printerDpi: 300,
+    });
+  } catch (error) {
+    mutatedOfficialRejected = true;
+    assert(error.errorCode === "invalid_zpl_print_payload", "Mutated official graphics should fail connector safety validation");
+    assert(
+      error.zplValidationErrors.includes("zpl_official_wordmark_hash_mismatch"),
+      "Mutated official graphics should report a hash mismatch"
+    );
+  }
+  assert(mutatedOfficialRejected, "Mutated official wordmark graphic must not reach the RAW spooler");
   let shortZplRejected = false;
   try {
     validateZplPayloadForRawPrint("^XA\n^FO0,0^BQN,2,7^FDLA,x^FS\n^XZ");

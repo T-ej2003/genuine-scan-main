@@ -431,10 +431,17 @@ export function BatchPrintJobDialog({
     Boolean(activePrintJob?.awaitingConfirmation) ||
     /waiting for printer confirmation/i.test(String(printProgressPhase || "")) ||
     Number(activePrintJob?.session?.awaitingConfirmationCount || 0) > 0;
+  const activeFailedBeforePrint =
+    activePrintJob?.status === "FAILED" &&
+    /blocked before reaching the printer|payload rejected before print|generated zebra zpl looks unsafe|unsafe_zpl_payload/i.test(
+      `${activePrintJob.failureReason || ""} ${activePrintJob.session?.failedReason || ""} ${printProgressPhase || ""}`
+    );
+  const activeFailed = activePrintJob?.status === "FAILED" || activeSessionStatus === "FAILED";
   const showActivePrintControls = Boolean(
     activePrintJob &&
       !activeStoppedOrPartial &&
       !activeCompleted &&
+      !activeFailed &&
       (activePrintJob.status === "SENT" ||
         activePrintJob.status === "PAUSED" ||
         activePrintJob.status === "PENDING" ||
@@ -773,7 +780,17 @@ export function BatchPrintJobDialog({
               <div className="space-y-2 rounded-md border p-3 text-sm">
                 <div className="text-xs text-muted-foreground">Current print run</div>
                 <div className="font-medium">
-                  {activeStoppedOrPartial ? "Print run stopped" : activeCompleted ? "Print run completed" : "Printing in progress"}
+                  {activeFailedBeforePrint
+                    ? "Print did not start"
+                    : activeFailed
+                      ? "Print run failed"
+                      : activeStoppedOrPartial
+                        ? "Print run stopped"
+                        : activeCompleted
+                          ? "Print run completed"
+                          : activeWaitingForConfirmation
+                            ? "Printed confirmation pending"
+                            : "Preparing secure payload"}
                 </div>
                 <div className="text-xs text-muted-foreground">
                   Using {printProgressPrinterName || selectedPrinterProfile?.name || "—"} ·{" "}
@@ -794,9 +811,13 @@ export function BatchPrintJobDialog({
                     ? "Confirmed labels stay printed. Unprinted labels remain recoverable through the controlled recovery flow."
                     : activeCompleted
                     ? "MSCQR received backend confirmation for this print run."
+                    : activeFailedBeforePrint
+                      ? "The print payload was blocked before reaching the printer. No labels were printed; remaining labels are recoverable after the payload fix."
+                      : activeFailed
+                        ? "This print run failed before all labels were confirmed. Review recovery guidance before retrying."
                     : activeWaitingForConfirmation
                       ? "MSCQR is waiting for printer confirmation before marking the remaining labels printed."
-                      : "MSCQR waits for final printer confirmation before marking these labels printed."}
+                      : "MSCQR is preparing the secure print payload and waiting for connector acceptance."}
                 </div>
                 {showActivePrintControls && activePrintJob ? (
                   <div className="mt-3 flex flex-wrap justify-end gap-2">

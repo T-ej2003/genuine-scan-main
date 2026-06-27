@@ -7,4 +7,5 @@
 ## Internal Engineering Notes
 
 - [Zebra RAW ZPL QR Sizing and Windows Connector Release - Internal Engineering Note](internal/zebra-raw-zpl-qr-sizing-and-connector-release-2026-05-23.md)
+- [Official MSCQR ZPL Wordmark Safety Contract - 2026-06-27](internal/zpl-official-wordmark-safety-contract-2026-06-27.md)
 - [Admin MFA Standards Adapter Runbook](security/ADMIN_MFA_STANDARDS_ADAPTER_RUNBOOK.md)

@@ -12,6 +12,7 @@ import {
 } from "../printing/printPayloadSafety";
 import { resolvePrinterLanguageRenderer } from "../printing/renderers";
 import { getZebraQrConfig, resolveConfiguredZebraDpi, resolveConfiguredZebraQrTargetMm } from "../printing/zebraQrSizing";
+import { buildOfficialMscqrWordmarkGfaCommand } from "../printing/zplCompatibilityContract";
 import { generateHumanLabelSerial, type LabelSerialContext } from "./labelSerialService";
 import { buildVerifyUrl } from "./qrService";
 import { hashToken, signQrPayload } from "./qrTokenService";
@@ -146,16 +147,12 @@ const escapeCpclText = (value: string) =>
 
 const buildZplWordmarkGraphicCommand = (layout: ResolvedLayout) => {
   const left = Math.max(0, Math.round((layout.widthDots - MSCQR_WORDMARK_ZPL_GRAPHIC.widthDots) / 2));
-  return [
-    `^FO${left},16`,
-    `^GFA,${MSCQR_WORDMARK_ZPL_GRAPHIC.totalBytes},${MSCQR_WORDMARK_ZPL_GRAPHIC.totalBytes},${MSCQR_WORDMARK_ZPL_GRAPHIC.bytesPerRow},${MSCQR_WORDMARK_ZPL_GRAPHIC.data}`,
-    "^FS",
-  ].join("");
+  return [`^FO${left},16`, buildOfficialMscqrWordmarkGfaCommand(), "^FS"].join("");
 };
 
 const getResolvedLayout = (printer: PrinterPayloadProfile): ResolvedLayout => {
   const calibration = printer.calibrationProfile || {};
-  const labelWidthMm = Math.max(25, calibrationValue(calibration, "labelWidthMm", 50));
+  const labelWidthMm = Math.max(25, calibrationValue(calibration, "labelWidthMm", 40));
   const labelHeightMm = Math.max(20, calibrationValue(calibration, "labelHeightMm", 50));
   const offsetXmm = calibrationValue(calibration, "offsetXmm", 0);
   const offsetYmm = calibrationValue(calibration, "offsetYmm", 0);
@@ -229,6 +226,8 @@ const buildZplPayload = (params: {
   const reprintLabel = escapeZplText(params.reprintLabel || "").slice(0, 48);
   const safeScanUrl = escapeZplText(params.scanUrl);
   const footerTop = Math.max(layout.heightDots - 88, qrTop + qrSizeDots + 22);
+  const separatorWidth = Math.max(280, Math.round(layout.widthDots * 0.76));
+  const separatorLeft = Math.max(0, Math.round((layout.widthDots - separatorWidth) / 2));
   return [
     "^XA",
     `^PW${layout.widthDots}`,
@@ -236,12 +235,12 @@ const buildZplPayload = (params: {
     "^LH0,0",
     "^CI28",
     buildZplWordmarkGraphicCommand(layout),
-    "^FO0,82^FB600,1,0,C,0^A0N,22,22^FDAUTHENTICITY CHECK^FS",
-    "^FO72,112^GB456,2,2,B,0^FS",
-    reprintLabel ? `^FO0,100^FB600,1,0,C,0^A0N,18,18^FD${reprintLabel}^FS` : "",
+    `^FO0,82^FB${layout.widthDots},1,0,C,0^A0N,22,22^FDAUTHENTICITY CHECK^FS`,
+    `^FO${separatorLeft},112^GB${separatorWidth},2,2,B,0^FS`,
+    reprintLabel ? `^FO0,100^FB${layout.widthDots},1,0,C,0^A0N,18,18^FD${reprintLabel}^FS` : "",
     `^FO${qrLeft},${qrTop}^BQN,2,${qrConfig.magnification}^FDLA,${safeScanUrl}^FS`,
-    `^FO0,${footerTop}^FB600,1,0,C,0^A0N,20,20^FDscan.mscqr.com^FS`,
-    `^FO0,${footerTop + 28}^FB600,1,0,C,0^A0N,18,18^FDSerial: ${humanSerial}^FS`,
+    `^FO0,${footerTop}^FB${layout.widthDots},1,0,C,0^A0N,20,20^FDscan.mscqr.com^FS`,
+    `^FO0,${footerTop + 28}^FB${layout.widthDots},1,0,C,0^A0N,18,18^FDSerial: ${humanSerial}^FS`,
     "^XZ",
   ].filter(Boolean).join("\n");
 };

@@ -714,6 +714,42 @@ describe("dialog recovery states", () => {
     expect(screen.getByRole("button", { name: "Refresh status" })).toBeInTheDocument();
   });
 
+  it("shows payload rejection as a failed-before-print state with recoverable labels", () => {
+    render(
+      <PrintProgressDialog
+        open
+        phase="Failed before print"
+        total={10}
+        printed={0}
+        remaining={10}
+        printerName="ZDesigner ZT410-300dpi ZPL"
+        modeLabel="Printer on this computer"
+        error="The print payload was blocked before reaching the printer. No labels were printed. Use diagnostic test label or contact admin."
+        activeJob={{
+          id: "job-rejected",
+          status: "FAILED",
+          pipelineState: "NEEDS_OPERATOR_ACTION",
+          printMode: "LOCAL_AGENT",
+          quantity: 10,
+          itemCount: 10,
+          failureReason: "Generated ZPL looks unsafe for this Zebra profile.",
+          createdAt: new Date().toISOString(),
+          printer: { name: "ZDesigner ZT410-300dpi ZPL" },
+          session: { status: "FAILED", totalItems: 10, confirmedItems: 0, remainingToPrint: 10 },
+        } as any}
+      />,
+    );
+
+    expect(screen.getByText("Print did not start")).toBeInTheDocument();
+    expect(screen.getByText("Failed before print")).toBeInTheDocument();
+    expect(screen.getByText("0 printed")).toBeInTheDocument();
+    expect(screen.getByText("10 remaining")).toBeInTheDocument();
+    expect(screen.getByText(/10 labels remain recoverable after the payload fix/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop print run" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open printer setup" })).toHaveAttribute("href", "/printer-setup");
+    expect(screen.getByRole("button", { name: "Refresh connector" })).toBeInTheDocument();
+  });
+
   it("shows stopped partially completed progress as recoverable without live controls", () => {
     render(
       <PrintProgressDialog

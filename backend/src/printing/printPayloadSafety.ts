@@ -1,4 +1,11 @@
 import { getZebraQrConfig, resolveConfiguredZebraDpi, resolveConfiguredZebraQrTargetMm } from "./zebraQrSizing";
+import {
+  OFFICIAL_MSCQR_WORDMARK_ZPL_GRAPHIC_CONTRACT,
+  ZPL_300DPI_COMPATIBILITY_CONTRACT,
+  buildOfficialMscqrWordmarkGfaCommand,
+  buildOfficialMscqrWordmarkGraphicHashInput,
+  sha256Hex,
+} from "./zplCompatibilityContract";
 
 export type PrintPayloadDiagnostics = {
   payloadType: string | null;
@@ -18,10 +25,6 @@ export type PrintPayloadDiagnostics = {
   qrPayloadLength: number | null;
   unresolvedPlaceholderPresent: boolean;
 };
-
-const MAX_APPROVED_GRAPHIC_FIELD_COUNT = 1;
-const MAX_APPROVED_GRAPHIC_BYTES = 8192;
-const MAX_APPROVED_GRAPHIC_AREA_DOTS = 48000;
 
 const BINARY_PAYLOAD_HEADERS = [
   { label: "pdf", bytes: Buffer.from("%PDF", "ascii") },
@@ -52,33 +55,106 @@ const zplDimension = (payloadContent: string, command: "PW" | "LL") => {
 
 const countMatches = (payloadContent: string, pattern: RegExp) => Array.from(payloadContent.matchAll(pattern)).length;
 
+const overlaps = (
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number }
+) =>
+  left.x < right.x + right.width &&
+  left.x + left.width > right.x &&
+  left.y < right.y + right.height &&
+  left.y + left.height > right.y;
+
+const parseOfficialGraphicFields = (payloadContent: string) =>
+  Array.from(
+    payloadContent.matchAll(/\^FO\s*(\d+)\s*,\s*(\d+)[^^~]*\^GFA,(\d+),(\d+),(\d+),([\s\S]*?)\^FS/gi)
+  ).map((match) => {
+    const data = String(match[6] || "").replace(/[\s,]+/g, "").toUpperCase();
+    const totalBytes = zplNumber(match[3]) || 0;
+    const graphicBytes = zplNumber(match[4]) || 0;
+    const bytesPerRow = zplNumber(match[5]) || 0;
+    const heightDots = bytesPerRow > 0 ? Math.ceil(graphicBytes / bytesPerRow) : 0;
+    const widthDots =
+      bytesPerRow === OFFICIAL_MSCQR_WORDMARK_ZPL_GRAPHIC_CONTRACT.bytesPerRow
+        ? OFFICIAL_MSCQR_WORDMARK_ZPL_GRAPHIC_CONTRACT.widthDots
+        : bytesPerRow * 8;
+    return {
+      x: zplNumber(match[1]) || 0,
+      y: zplNumber(match[2]) || 0,
+      totalBytes,
+      graphicBytes,
+      bytesPerRow,
+      widthDots,
+      heightDots,
+      data,
+      normalizedGraphicSha256: sha256Hex(
+        buildOfficialMscqrWordmarkGraphicHashInput({
+          widthDots,
+          heightDots,
+          bytesPerRow,
+          totalBytes,
+          data,
+        })
+      ),
+      dataSha256: sha256Hex(data),
+    };
+  });
+
+const parseQrField = (payloadContent: string) => {
+  const match = payloadContent.match(/\^FO\s*(\d+)\s*,\s*(\d+)[^^~]*\^BQN,2,(\d+)\^FDLA,([\s\S]*?)\^FS/i);
+  if (!match) return null;
+  const magnification = zplNumber(match[3]) || 0;
+  const payload = String(match[4] || "");
+  const qrConfig = getZebraQrConfig({
+    targetMm: resolveConfiguredZebraQrTargetMm(),
+    dpi: ZPL_300DPI_COMPATIBILITY_CONTRACT.requiredDpi,
+    payload,
+  });
+  const moduleCount = qrConfig.moduleCount;
+  const sizeDots = moduleCount * magnification;
+  return {
+    x: zplNumber(match[1]) || 0,
+    y: zplNumber(match[2]) || 0,
+    width: sizeDots,
+    height: sizeDots,
+    quietZoneDots: magnification * 4,
+  };
+};
+
 const getRasterGraphicSafetyIssues = (payloadContent: string) => {
-  const graphics = Array.from(payloadContent.matchAll(/\^GFA,(\d+),(\d+),(\d+),([A-F0-9,\s]+?)\^FS/gi));
-  if (graphics.length === 0) return [];
+  const graphicCommandCount = countMatches(payloadContent, /\^GF/gi);
+  if (graphicCommandCount === 0) return ["zpl_official_wordmark_missing"];
 
+  const graphics = parseOfficialGraphicFields(payloadContent);
   const issues: string[] = [];
-  if (graphics.length > MAX_APPROVED_GRAPHIC_FIELD_COUNT) issues.push("zpl_too_many_raster_graphics");
+  if (graphicCommandCount > ZPL_300DPI_COMPATIBILITY_CONTRACT.maxGraphicFields) issues.push("zpl_too_many_raster_graphics");
+  if (graphics.length !== graphicCommandCount || graphics.length !== 1) issues.push("zpl_raster_graphic_invalid");
 
-  for (const graphic of graphics) {
-    const totalBytes = zplNumber(graphic[1]);
-    const graphicBytes = zplNumber(graphic[2]);
-    const bytesPerRow = zplNumber(graphic[3]);
-    if (!totalBytes || !graphicBytes || !bytesPerRow) {
-      issues.push("zpl_raster_graphic_invalid");
-      continue;
+  const graphic = graphics[0];
+  if (graphic) {
+    const contract = OFFICIAL_MSCQR_WORDMARK_ZPL_GRAPHIC_CONTRACT;
+    if (
+      graphic.totalBytes !== contract.totalBytes ||
+      graphic.graphicBytes !== contract.totalBytes ||
+      graphic.bytesPerRow !== contract.bytesPerRow ||
+      graphic.widthDots !== contract.widthDots ||
+      graphic.heightDots !== contract.heightDots
+    ) {
+      issues.push("zpl_official_wordmark_dimensions_mismatch");
     }
-    const heightDots = Math.ceil(graphicBytes / bytesPerRow);
-    const widthDots = bytesPerRow * 8;
-    if (totalBytes > MAX_APPROVED_GRAPHIC_BYTES || graphicBytes > MAX_APPROVED_GRAPHIC_BYTES) {
+    if (graphic.totalBytes > contract.maxBytes || graphic.graphicBytes > contract.maxBytes) {
       issues.push("zpl_raster_graphic_too_large");
     }
-    if (widthDots * heightDots > MAX_APPROVED_GRAPHIC_AREA_DOTS) {
-      issues.push("zpl_raster_graphic_area_too_large");
+    if (
+      graphic.normalizedGraphicSha256 !== contract.normalizedGraphicSha256 ||
+      graphic.dataSha256 !== contract.dataSha256
+    ) {
+      issues.push("zpl_official_wordmark_hash_mismatch");
+    }
+    const box = ZPL_300DPI_COMPATIBILITY_CONTRACT.allowedBrandBox;
+    if (graphic.x < box.xMin || graphic.y < box.yMin || graphic.x > box.xMax || graphic.y > box.yMax) {
+      issues.push("zpl_official_wordmark_out_of_bounds");
     }
   }
-
-  const unmatchedGraphicCount = countMatches(payloadContent, /\^GF/gi) - graphics.length;
-  if (unmatchedGraphicCount > 0) issues.push("zpl_raster_graphic_invalid");
 
   return Array.from(new Set(issues));
 };
@@ -154,7 +230,32 @@ export const getZplPayloadSafetyIssues = (params: {
   if (params.requireQr !== false && !diagnostics.containsQrCommand) issues.push("missing_zpl_qr_command");
   if (params.requireQr !== false && !/\^FDLA,[\s\S]+?\^FS/i.test(trimmed)) issues.push("missing_zpl_qr_payload");
   if (diagnostics.payloadByteLength < 120) issues.push("zpl_payload_too_short");
+  if (diagnostics.payloadByteLength > ZPL_300DPI_COMPATIBILITY_CONTRACT.maxPayloadBytes) issues.push("zpl_payload_too_large");
+  const printWidth = zplDimension(payloadContent, "PW");
+  const labelLength = zplDimension(payloadContent, "LL");
+  if (printWidth !== ZPL_300DPI_COMPATIBILITY_CONTRACT.labelWidthDots) issues.push("zpl_unsupported_label_width");
+  if (labelLength !== ZPL_300DPI_COMPATIBILITY_CONTRACT.labelHeightDots) issues.push("zpl_unsupported_label_height");
   issues.push(...getRasterGraphicSafetyIssues(payloadContent));
+  const graphic = parseOfficialGraphicFields(payloadContent)[0];
+  const qrField = parseQrField(payloadContent);
+  if (params.requireQr !== false && qrField) {
+    const qrContract = ZPL_300DPI_COMPATIBILITY_CONTRACT.qrBox;
+    if (
+      qrField.x < qrContract.xMin ||
+      qrField.y < qrContract.yMin ||
+      qrField.x + qrField.width > qrContract.xMax ||
+      qrField.y + qrField.height > qrContract.yMax ||
+      qrField.x - qrField.quietZoneDots < 0 ||
+      qrField.y - qrField.quietZoneDots < 0 ||
+      qrField.x + qrField.width + qrField.quietZoneDots > ZPL_300DPI_COMPATIBILITY_CONTRACT.labelWidthDots ||
+      qrField.y + qrField.height + qrField.quietZoneDots > ZPL_300DPI_COMPATIBILITY_CONTRACT.labelHeightDots
+    ) {
+      issues.push("zpl_qr_quiet_zone_violation");
+    }
+    if (graphic && overlaps(qrField, { x: graphic.x, y: graphic.y, width: graphic.widthDots, height: graphic.heightDots })) {
+      issues.push("zpl_brand_qr_overlap");
+    }
+  }
   if (diagnostics.hasFullLabelBlackBoxRisk) issues.push("zpl_full_label_black_box_risk");
   if (hasBinaryPayloadHeader(payloadContent)) issues.push("binary_payload_header_detected");
 
@@ -165,7 +266,7 @@ export const assertZplPayloadSafeForQrLabel = (payloadContent: string) => {
   const { issues, diagnostics } = getZplPayloadSafetyIssues({ payloadContent, requireQr: true });
   if (issues.length > 0) {
     throw Object.assign(
-      new Error("Generated ZPL looks unsafe for this Zebra profile. Use diagnostic test label or adjust label template."),
+      new Error("Generated ZPL looks unsafe for this 300dpi ZPL profile. Use diagnostic test label or adjust label template."),
       {
         errorCode: "unsafe_zpl_payload",
         zplSafetyIssues: issues,
@@ -184,10 +285,13 @@ export const buildKnownGoodDiagnosticZplPayload = (params: { targetMm?: number |
     dpi: params.dpi ?? resolveConfiguredZebraDpi(),
     payload: KNOWN_GOOD_DIAGNOSTIC_QR_PAYLOAD,
   });
-  const labelWidthDots = Math.max(590, qrConfig.estimatedSizeDots + 96);
-  const labelHeightDots = Math.max(390, qrConfig.estimatedSizeDots + 176);
-  const qrLeft = 36;
-  const qrTop = 132;
+  const labelWidthDots = ZPL_300DPI_COMPATIBILITY_CONTRACT.labelWidthDots;
+  const labelHeightDots = ZPL_300DPI_COMPATIBILITY_CONTRACT.labelHeightDots;
+  const qrLeft = Math.max(12, Math.round((labelWidthDots - qrConfig.estimatedSizeDots) / 2));
+  const qrTop = 148;
+  const wordmarkLeft = Math.max(0, Math.round((labelWidthDots - OFFICIAL_MSCQR_WORDMARK_ZPL_GRAPHIC_CONTRACT.widthDots) / 2));
+  const separatorWidth = Math.round(labelWidthDots * 0.76);
+  const separatorLeft = Math.round((labelWidthDots - separatorWidth) / 2);
   return [
     "^XA",
     `^PW${labelWidthDots}`,
@@ -195,8 +299,9 @@ export const buildKnownGoodDiagnosticZplPayload = (params: { targetMm?: number |
     "^LH0,0",
     "^CI28",
     `^FO16,16^GB${labelWidthDots - 32},${labelHeightDots - 32},2,B,0^FS`,
-    "^FO36,36^A0N,34,34^FDMSCQR TEST^FS",
-    "^FO36,92^A0N,22,22^FDDiagnostic Zebra RAW ZPL^FS",
+    `^FO${wordmarkLeft},24${buildOfficialMscqrWordmarkGfaCommand()}^FS`,
+    `^FO0,92^FB${labelWidthDots},1,0,C,0^A0N,22,22^FDDiagnostic 300dpi ZPL^FS`,
+    `^FO${separatorLeft},122^GB${separatorWidth},2,2,B,0^FS`,
     `^FO${qrLeft},${qrTop}^BQN,2,${qrConfig.magnification}^FDLA,${KNOWN_GOOD_DIAGNOSTIC_QR_PAYLOAD}^FS`,
     "^XZ",
   ].join("\n");

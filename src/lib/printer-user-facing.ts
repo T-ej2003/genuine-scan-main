@@ -52,7 +52,13 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
     return "Connector update required. Install the latest MSCQR printer connector, then refresh printer status.";
   }
   if (hasAny(value, ["printer_session_required", "printer_session_disconnected", "persistent printer session"])) {
-    return "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.25 or newer, then retry.";
+    return "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.26 or newer, then retry.";
+  }
+  if (hasAny(value, ["unsupported_printer_language", "not confirmed as zpl-compatible"])) {
+    return "This printer is not confirmed as ZPL-compatible. Select a 300dpi ZPL-compatible industrial label printer or update the connector profile.";
+  }
+  if (hasAny(value, ["unsupported_printer_dpi", "certified for 300dpi"])) {
+    return "This label template is certified for 300dpi. Select a 300dpi ZPL-compatible printer.";
   }
   if (hasAny(value, ["mtls client certificate fingerprint header missing", "compatibility mode active"])) {
     return "Printer verification expired. Refresh printer helper before printing.";
@@ -79,7 +85,7 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
     return "Sent to printer, but local queue confirmation is unavailable. Check the printed label, then manually confirm or retry.";
   }
   if (hasAny(value, ["generated zpl looks unsafe", "unsafe_zpl_payload", "black box", "black-block", "raster graphics not allowed"])) {
-    return "Payload rejected before print: generated Zebra ZPL looks unsafe for this profile.";
+    return "The print payload was blocked before reaching the printer. No labels were printed. Use diagnostic test label or contact admin.";
   }
   if (hasAny(value, ["operator confirmation", "manual confirmation", "awaiting/manual confirmation"])) {
     return "Sent to printer, awaiting manual operator confirmation.";

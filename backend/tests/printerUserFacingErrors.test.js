@@ -37,6 +37,18 @@ const run = () => {
     "Windows queue confirmation failures should not be reported as setup incompatibility"
   );
 
+  assert(
+    sanitizePrinterActionError("unsupported_printer_language: printer is not confirmed as ZPL-compatible") ===
+      "This printer is not confirmed as ZPL-compatible. Select a 300dpi ZPL-compatible industrial label printer or update the connector profile.",
+    "Unsupported printer language should return actionable ZPL guidance"
+  );
+
+  assert(
+    sanitizePrinterActionError("unsupported_printer_dpi: label template is certified for 300dpi") ===
+      "This label template is certified for 300dpi. Select a 300dpi ZPL-compatible printer.",
+    "Unsupported DPI should return actionable 300dpi guidance"
+  );
+
   const missingFields = describeMissingPrinterReadinessFields({
     connected: false,
     eligibleForPrinting: false,

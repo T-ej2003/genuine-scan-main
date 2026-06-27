@@ -14,6 +14,14 @@ const {
 const { getZebraQrConfig } = require("../dist/printing/zebraQrSizing");
 const { hashToken, signQrPayload } = require("../dist/services/qrTokenService");
 const { generateHumanLabelSerial } = require("../dist/services/labelSerialService");
+const { MSCQR_WORDMARK_ZPL_GRAPHIC } = require("../dist/printing/generated/brandWordmarkZpl");
+const {
+  OFFICIAL_MSCQR_WORDMARK_ZPL_GRAPHIC_CONTRACT,
+  ZPL_300DPI_COMPATIBILITY_CONTRACT,
+  assertOfficialMscqrWordmarkContractCurrent,
+  buildOfficialMscqrWordmarkGfaCommand,
+  classifyIndustrialZplPrinterProfile,
+} = require("../dist/printing/zplCompatibilityContract");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -207,8 +215,12 @@ const run = () => {
   assert(governedPayload.payloadContent.trim().endsWith("^XZ"), "ZPL payload should end with ^XZ");
   assert(governedPayload.payloadContent.includes("^BQN"), "ZPL payload should use Zebra QR command");
   assert(governedPayload.payloadContent.includes("^FDLA,"), "ZPL QR command should include data prefix");
-  assert(governedPayload.payloadContent.includes("^GFA,"), "ZPL payload should embed the official MSCQR wordmark graphic");
-  assert(!governedPayload.payloadContent.includes("^FDMSCQR^FS"), "ZPL payload must not print the MSCQR wordmark as system-font text");
+  assert(governedPayload.payloadContent.includes("^GFA,"), "Production ZPL must include the official MSCQR wordmark graphic");
+  assert(
+    governedPayload.payloadContent.includes(buildOfficialMscqrWordmarkGfaCommand()),
+    "Production ZPL must use the exact allowlisted official wordmark graphic"
+  );
+  assert(!governedPayload.payloadContent.includes("^FDMSCQR^FS"), "Production ZPL must not use system-font MSCQR as the visual logo");
   const governedBqnMatch = governedPayload.payloadContent.match(/\^BQN,2,(\d+)/);
   assert(governedBqnMatch, "ZPL payload should include computed Zebra QR magnification");
   const governedMagnification = Number(governedBqnMatch[1]);
@@ -236,7 +248,7 @@ const run = () => {
   assert(diagnostics.endsWithZplEnd === true, "ZPL diagnostics should report ^XZ end");
   assert(diagnostics.qrCommandCount === 1, "Production ZPL should contain exactly one QR command");
   assert(diagnostics.graphicBoxCommandCount <= 1, "Production ZPL should only include a minimal separator line");
-  assert(diagnostics.graphicFieldCommandCount === 1, "Production ZPL should include exactly one bounded wordmark raster graphic");
+  assert(diagnostics.graphicFieldCommandCount === 1, "Production ZPL should include exactly one allowlisted official wordmark graphic");
   assert(diagnostics.hasFullLabelBlackBoxRisk === false, "Production ZPL should not look like a full black block");
   assert(diagnostics.printWidthCommandPresent === true, "Production ZPL should include print width");
   assert(diagnostics.labelLengthCommandPresent === true, "Production ZPL should include label length");
@@ -251,7 +263,7 @@ const run = () => {
       name: "Zebra printer",
       connectionType: "LOCAL_AGENT",
       commandLanguage: "ZPL",
-      calibrationProfile: { qrTargetMm: 28, dpi: 300, labelWidthMm: 50, labelHeightMm: 50 },
+      calibrationProfile: { qrTargetMm: 28, dpi: 300, labelWidthMm: 40, labelHeightMm: 50 },
       capabilitySummary: null,
       metadata: { lineCode: "L01" },
     },
@@ -354,9 +366,63 @@ const run = () => {
   const risky = getZplPayloadSafetyIssues({ payloadContent: riskyBlackBlock, requireQr: true });
   assert(risky.issues.includes("missing_zpl_qr_command"), "QR labels without ^BQN should be rejected");
   assert(risky.issues.includes("zpl_full_label_black_box_risk"), "Full-label black box risk should be rejected");
-  const riskyRaster = `^XA\n^PW600\n^LL600\n^GFA,90000,90000,300,${"FF".repeat(90000)}^FS\n^FO10,10^BQN,2,4^FDLA,https://www.mscqr.com/verify/c_test^FS\n^XZ`;
+  assertOfficialMscqrWordmarkContractCurrent();
+  assert(
+    OFFICIAL_MSCQR_WORDMARK_ZPL_GRAPHIC_CONTRACT.normalizedGraphicSha256 ===
+      "a7926928e5e8d2cce6767620ebe7ec4c89c7a3e8c29bf519bbaf6122e979cf6a",
+    "Official wordmark normalized ZPL graphic hash must stay deterministic"
+  );
+  assert(
+    OFFICIAL_MSCQR_WORDMARK_ZPL_GRAPHIC_CONTRACT.dataSha256 ===
+      "d5707dfffaa6c4a614db9ecdbba27505134d36bf904f664d5b2d85656994f854",
+    "Official wordmark graphic data hash must stay deterministic"
+  );
+  const genericProfile = classifyIndustrialZplPrinterProfile({
+    printerName: "Honeywell 300dpi ZPL",
+    printerLanguages: ["ZPL"],
+    printerDpi: 300,
+  });
+  assert(genericProfile.profileId === "zpl_300dpi_generic" && genericProfile.compatible, "Generic 300dpi ZPL-compatible printers should use the production profile");
+  assert(
+    classifyIndustrialZplPrinterProfile({ printerName: "Generic / Text Only", printerLanguages: [], printerDpi: 300 }).reason ===
+      "unsupported_printer_language",
+    "Generic text-only Windows queues must not be treated as ZPL-compatible"
+  );
+  assert(
+    classifyIndustrialZplPrinterProfile({ printerName: "ZDesigner ZT410-203dpi ZPL", printerLanguages: ["ZPL"], printerDpi: 203 }).reason ===
+      "unsupported_printer_dpi",
+    "Unsupported DPI profiles must be rejected until scaling is certified"
+  );
+  assert(
+    governedPayload.payloadContent.includes(`^PW${ZPL_300DPI_COMPATIBILITY_CONTRACT.labelWidthDots}`) &&
+      governedPayload.payloadContent.includes(`^LL${ZPL_300DPI_COMPATIBILITY_CONTRACT.labelHeightDots}`),
+    "Production ZPL must use the generic 40x50mm 300dpi label dimensions"
+  );
+  const officialWordmarkRaster = [
+    "^XA",
+    `^PW${ZPL_300DPI_COMPATIBILITY_CONTRACT.labelWidthDots}`,
+    `^LL${ZPL_300DPI_COMPATIBILITY_CONTRACT.labelHeightDots}`,
+    `^FO102,16${buildOfficialMscqrWordmarkGfaCommand()}^FS`,
+    "^FO90,150^BQN,2,5^FDLA,https://www.mscqr.com/verify/c_test^FS",
+    "^XZ",
+  ].join("\n");
+  const officialRasterIssues = getZplPayloadSafetyIssues({ payloadContent: officialWordmarkRaster, requireQr: true });
+  assert(
+    officialRasterIssues.issues.length === 0,
+    `Official ZPL wordmark raster should pass the shared safety contract: ${officialRasterIssues.issues.join(",")}`
+  );
+  const repeatedOfficialRaster = `${officialWordmarkRaster.replace("^XZ", `^FO102,24${buildOfficialMscqrWordmarkGfaCommand()}^FS\n^XZ`)}`;
+  const repeatedOfficialIssues = getZplPayloadSafetyIssues({ payloadContent: repeatedOfficialRaster, requireQr: true });
+  assert(repeatedOfficialIssues.issues.includes("zpl_too_many_raster_graphics"), "Repeated official wordmark graphics should be rejected");
+  const mutatedOfficialRaster = officialWordmarkRaster.replace(MSCQR_WORDMARK_ZPL_GRAPHIC.data.slice(-10), "FFFFFFFFFF");
+  const mutatedOfficialIssues = getZplPayloadSafetyIssues({ payloadContent: mutatedOfficialRaster, requireQr: true });
+  assert(mutatedOfficialIssues.issues.includes("zpl_official_wordmark_hash_mismatch"), "Mutated official wordmark graphics should be rejected");
+  const outOfBoundsOfficialRaster = officialWordmarkRaster.replace("^FO102,16", "^FO220,16");
+  const outOfBoundsOfficialIssues = getZplPayloadSafetyIssues({ payloadContent: outOfBoundsOfficialRaster, requireQr: true });
+  assert(outOfBoundsOfficialIssues.issues.includes("zpl_official_wordmark_out_of_bounds"), "Official wordmark graphics outside the approved region should be rejected");
+  const riskyRaster = `^XA\n^PW472\n^LL591\n^FO0,0^GFA,90000,90000,300,${"FF".repeat(90000)}^FS\n^FO90,150^BQN,2,5^FDLA,https://www.mscqr.com/verify/c_test^FS\n^XZ`;
   const riskyRasterIssues = getZplPayloadSafetyIssues({ payloadContent: riskyRaster, requireQr: true });
-  assert(riskyRasterIssues.issues.includes("zpl_raster_graphic_too_large"), "Oversized ZPL raster graphics should be rejected");
+  assert(riskyRasterIssues.issues.includes("zpl_raster_graphic_too_large"), "Oversized arbitrary ZPL raster graphics should be rejected");
 
   const diagnosticZpl = buildKnownGoodDiagnosticZplPayload();
   const diagnosticBqnMatch = diagnosticZpl.match(/\^BQN,2,(\d+)/);
@@ -364,6 +430,7 @@ const run = () => {
   const diagnostic = buildPrintPayloadDiagnostics({ payloadType: "ZPL", labelLanguage: "ZPL", payloadContent: diagnosticZpl });
   assert(diagnostic.startsWithZplStart && diagnostic.endsWithZplEnd, "Diagnostic ZPL should be a complete ZPL label");
   assert(diagnostic.containsQrCommand, "Diagnostic ZPL should contain a harmless QR");
+  assert(diagnostic.graphicFieldCommandCount === 1, "Diagnostic ZPL should exercise the same official wordmark safety path");
   assert(!diagnostic.hasFullLabelBlackBoxRisk, "Diagnostic ZPL border must not look like a filled black block");
 
   console.log("print payload service tests passed");
