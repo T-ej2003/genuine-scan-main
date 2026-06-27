@@ -147,12 +147,12 @@ export function PageShell({ title, intro, children, actions }: PageShellProps) {
               {actions ? <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">{actions}</div> : null}
             </div>
             <div className="rounded-3xl border border-moonlight-300 bg-moonlight-100 p-6">
-              <BrandLockup
-                className="gap-3"
-                markClassName="size-10 rounded-none border-0 bg-transparent"
-                iconClassName="size-10"
-                textClassName="text-sm text-moonlight-900"
-              />
+	              <BrandLockup
+	                className="gap-3"
+	                markClassName="size-10 rounded-none border-0 bg-transparent"
+	                iconClassName="size-10"
+	                wordmarkClassName="h-4 max-w-[6.5rem]"
+	              />
               <div className="mt-6 rounded-2xl bg-white p-5">
                 <p className="text-sm font-semibold text-foreground">Made for clothing QR labels</p>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">

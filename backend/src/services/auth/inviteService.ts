@@ -6,7 +6,7 @@ import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../ut
 import { sendAuthEmail } from "./authEmailService";
 import { createAuditLog } from "../auditService";
 import { maskEmailForLog } from "../mailTransportService";
-import { renderActionEmail } from "../emailTemplateService";
+import { mscqrBrandHeaderHtml, renderActionEmail } from "../emailTemplateService";
 import { normalizeEmailAddress } from "../../utils/email";
 import { isManufacturerRole, listManufacturerLicenseeLinks, upsertManufacturerLicenseeLink } from "../manufacturerScopeService";
 import { buildConnectorDownloadUrls } from "../connectorReleaseService";
@@ -136,7 +136,7 @@ const inviteHtmlTemplate = (params: {
     <div style="background:#eef2f7;padding:24px 0;font-family:Inter,Segoe UI,Arial,sans-serif;color:#10253f;">
       <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #d8e2ef;border-radius:24px;overflow:hidden;box-shadow:0 24px 60px rgba(15,23,42,0.08);">
         <div style="padding:28px 32px;background:linear-gradient(135deg,#10253f 0%,#17385b 100%);color:#ffffff;">
-          <div style="font-size:12px;letter-spacing:0.22em;text-transform:uppercase;opacity:0.78;">MSCQR onboarding</div>
+	          ${mscqrBrandHeaderHtml("onboarding", { inverse: true })}
           <h1 style="margin:12px 0 8px;font-size:30px;line-height:1.15;">Activate your MSCQR account</h1>
           <p style="margin:0;color:rgba(255,255,255,0.82);line-height:1.6;">Set your password, then follow the guided printing setup for your workstation if you are printing from the factory floor.</p>
         </div>

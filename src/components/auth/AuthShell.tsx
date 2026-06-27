@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { BadgeCheck, Fingerprint, ShieldCheck, Sparkles } from "lucide-react";
 
 import { BrandLockup } from "@/components/brand/BrandLockup";
+import { MscqrLogo } from "@/components/brand/MscqrLogo";
 import { MotionPanel } from "@/components/mscqr/motion";
 import { StatusBadge } from "@/components/mscqr/status";
 import { cn } from "@/lib/utils";
@@ -55,11 +56,11 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
           <MotionPanel className={cn("hidden lg:flex flex-col justify-between rounded-3xl border p-8 backdrop-blur-xl", light ? "border-slate-200 bg-white shadow-xl" : "border-white/10 bg-mscqr-surface/78 shadow-[0_30px_90px_rgba(0,0,0,0.32)]")}>
             <div className="space-y-8">
                 <BrandLockup
-                  className="gap-3"
-                  markClassName={cn("h-12 w-12", light ? "border-slate-200 bg-slate-50" : "border-cyan-200/20 bg-cyan-200/10")}
-                  iconClassName="h-7 w-7"
-                  textClassName={cn("text-xl", light ? "text-slate-950" : "text-white")}
-                />
+	                  className="gap-3"
+	                  markClassName={cn("h-12 w-12", light ? "border-slate-200 bg-slate-50" : "border-cyan-200/20 bg-cyan-200/10")}
+	                  iconClassName="h-7 w-7"
+	                  wordmarkClassName={cn("h-6 max-w-[8.5rem]", light ? "" : "invert")}
+	                />
 
               <div className="space-y-3">
                 <div className={cn("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs", light ? "border-sky-200 bg-sky-50 text-sky-700" : "border-amber-200/20 bg-amber-200/10 text-amber-100")}>
@@ -91,7 +92,7 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
             </div>
 
             <div className={cn("mt-6 flex items-center justify-between rounded-2xl border px-4 py-3 text-xs", light ? "border-slate-200 bg-slate-50 text-slate-600" : "border-white/10 bg-white/5 text-slate-300")}>
-              <span className={cn("font-semibold", light ? "text-slate-950" : "text-white")}>MSCQR</span>
+	              <MscqrLogo variant="wordmark" decorative className={cn("h-4 w-auto", light ? "" : "invert")} />
               <StatusBadge tone="verified">Safeguards active</StatusBadge>
             </div>
           </MotionPanel>
@@ -101,11 +102,11 @@ export function AuthShell({ title, description, sideTitle, sideDescription, chil
               <div className={cn("rounded-[1.25rem] border text-mscqr-primary", light ? "border-slate-200 bg-white shadow-xl" : "border-white/10 bg-mscqr-surface/92 shadow-[0_24px_80px_rgba(5,15,30,0.35)]")}>
                 <div className={cn("border-b px-6 py-6 sm:px-8", light ? "border-slate-200" : "border-white/10")}>
                   <BrandLockup
-                    className="gap-3 lg:hidden"
-                    markClassName="h-8 w-8 rounded-none border-0 bg-transparent"
-                    iconClassName="h-8 w-8"
-                    textClassName={cn("text-base", light ? "text-slate-950" : "text-white")}
-                  />
+	                    className="gap-3 lg:hidden"
+	                    markClassName="h-8 w-8 rounded-none border-0 bg-transparent"
+	                    iconClassName="h-8 w-8"
+	                    wordmarkClassName={cn("h-4 max-w-[6.5rem]", light ? "" : "invert")}
+	                  />
                   <div className="mt-4 flex flex-col gap-4 lg:mt-0 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <h2 className={cn("text-2xl font-semibold tracking-tight", light ? "text-slate-950" : "text-white")}>{title}</h2>

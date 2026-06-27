@@ -1,5 +1,6 @@
 import {
   appendMscqrIdentityToText,
+  mscqrBrandHeaderHtml,
   mscqrFooterHtml,
 } from "./emailTemplateService";
 import {
@@ -62,7 +63,7 @@ const simpleHtml = (title: string, lines: string[]) => `
   <div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
     <div style="max-width:640px;margin:0 auto;padding:28px 18px;">
       <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:28px;">
-        <p style="margin:0 0 12px;color:#0f766e;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;font-size:12px;">MSCQR</p>
+        ${mscqrBrandHeaderHtml()}
         <h1 style="margin:0 0 16px;font-size:22px;line-height:1.25;color:#0f172a;">${escapeHtml(title)}</h1>
         ${lines.map((line) => `<p style="margin:0 0 12px;line-height:1.65;color:#334155;white-space:pre-wrap;">${escapeHtml(line)}</p>`).join("")}
         ${mscqrFooterHtml()}

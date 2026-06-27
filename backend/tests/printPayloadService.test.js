@@ -207,6 +207,8 @@ const run = () => {
   assert(governedPayload.payloadContent.trim().endsWith("^XZ"), "ZPL payload should end with ^XZ");
   assert(governedPayload.payloadContent.includes("^BQN"), "ZPL payload should use Zebra QR command");
   assert(governedPayload.payloadContent.includes("^FDLA,"), "ZPL QR command should include data prefix");
+  assert(governedPayload.payloadContent.includes("^GFA,"), "ZPL payload should embed the official MSCQR wordmark graphic");
+  assert(!governedPayload.payloadContent.includes("^FDMSCQR^FS"), "ZPL payload must not print the MSCQR wordmark as system-font text");
   const governedBqnMatch = governedPayload.payloadContent.match(/\^BQN,2,(\d+)/);
   assert(governedBqnMatch, "ZPL payload should include computed Zebra QR magnification");
   const governedMagnification = Number(governedBqnMatch[1]);
@@ -234,7 +236,7 @@ const run = () => {
   assert(diagnostics.endsWithZplEnd === true, "ZPL diagnostics should report ^XZ end");
   assert(diagnostics.qrCommandCount === 1, "Production ZPL should contain exactly one QR command");
   assert(diagnostics.graphicBoxCommandCount <= 1, "Production ZPL should only include a minimal separator line");
-  assert(diagnostics.graphicFieldCommandCount === 0, "Production ZPL should not include raster graphics");
+  assert(diagnostics.graphicFieldCommandCount === 1, "Production ZPL should include exactly one bounded wordmark raster graphic");
   assert(diagnostics.hasFullLabelBlackBoxRisk === false, "Production ZPL should not look like a full black block");
   assert(diagnostics.printWidthCommandPresent === true, "Production ZPL should include print width");
   assert(diagnostics.labelLengthCommandPresent === true, "Production ZPL should include label length");
@@ -352,6 +354,9 @@ const run = () => {
   const risky = getZplPayloadSafetyIssues({ payloadContent: riskyBlackBlock, requireQr: true });
   assert(risky.issues.includes("missing_zpl_qr_command"), "QR labels without ^BQN should be rejected");
   assert(risky.issues.includes("zpl_full_label_black_box_risk"), "Full-label black box risk should be rejected");
+  const riskyRaster = `^XA\n^PW600\n^LL600\n^GFA,90000,90000,300,${"FF".repeat(90000)}^FS\n^FO10,10^BQN,2,4^FDLA,https://www.mscqr.com/verify/c_test^FS\n^XZ`;
+  const riskyRasterIssues = getZplPayloadSafetyIssues({ payloadContent: riskyRaster, requireQr: true });
+  assert(riskyRasterIssues.issues.includes("zpl_raster_graphic_too_large"), "Oversized ZPL raster graphics should be rejected");
 
   const diagnosticZpl = buildKnownGoodDiagnosticZplPayload();
   const diagnosticBqnMatch = diagnosticZpl.match(/\^BQN,2,(\d+)/);

@@ -421,12 +421,12 @@ export default function ConnectorDownload() {
         <div className="overflow-hidden rounded-[34px] border border-white/70 bg-white/70 shadow-[0_40px_120px_-70px_rgba(15,23,42,0.4)] backdrop-blur-xl">
           <div className="border-b border-slate-200/80 px-5 py-5 sm:px-8 sm:py-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <BrandLockup
-                className="gap-4"
-                markClassName="h-14 w-14 rounded-[20px] border-0 bg-slate-950 shadow-[0_20px_35px_-25px_rgba(15,23,42,0.8)]"
-                iconClassName="h-8 w-8"
-                textClassName="text-2xl text-slate-950"
-              />
+	              <BrandLockup
+	                className="gap-4"
+	                markClassName="h-14 w-14 rounded-[20px] border-0 bg-slate-950 shadow-[0_20px_35px_-25px_rgba(15,23,42,0.8)]"
+	                iconClassName="h-8 w-8"
+	                wordmarkClassName="h-7 max-w-[9.5rem]"
+	              />
               <div className="flex flex-wrap gap-3">
                 <Button asChild size="sm" variant="outline">
                   <Link to={release?.setupGuidePath || "/help/manufacturer"} data-testid="open-printer-helper-guide">

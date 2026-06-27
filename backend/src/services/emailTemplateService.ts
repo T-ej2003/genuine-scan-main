@@ -1,6 +1,7 @@
 const MSCQR_NAME = "MSCQR";
 const MSCQR_URL = "https://www.mscqr.com";
 const MSCQR_CONTACT = "administration@mscqr.com";
+const MSCQR_WORDMARK_URL = `${MSCQR_URL}/brand/mscqr-wordmark.svg`;
 
 const escapeHtml = (value: unknown) =>
   String(value ?? "")
@@ -22,6 +23,13 @@ export const appendMscqrIdentityToText = (body: string) => {
 
 export const mscqrFooterHtml = () =>
   `<p style="margin:24px 0 0;color:#64748b;font-size:13px;line-height:1.6;">${MSCQR_NAME}<br><a href="${MSCQR_URL}" style="color:#0f766e;">${MSCQR_URL}</a><br>${MSCQR_CONTACT}</p>`;
+
+export const mscqrBrandHeaderHtml = (suffix?: string | null, options: { inverse?: boolean } = {}) => {
+  const suffixText = String(suffix || "").trim();
+  const imageFilter = options.inverse ? "filter:invert(1);" : "";
+  const suffixColor = options.inverse ? "rgba(255,255,255,0.78)" : "#0f766e";
+  return `<div style="margin:0 0 14px;"><img src="${MSCQR_WORDMARK_URL}" width="112" height="25" alt="${MSCQR_NAME}" style="display:inline-block;vertical-align:middle;width:112px;height:auto;border:0;${imageFilter}" />${suffixText ? `<span style="display:inline-block;margin-left:8px;vertical-align:middle;color:${suffixColor};font-weight:700;letter-spacing:0.08em;text-transform:uppercase;font-size:12px;">${escapeHtml(suffixText)}</span>` : ""}</div>`;
+};
 
 export const renderActionEmail = (params: {
   heading: string;
@@ -58,7 +66,7 @@ export const renderActionEmail = (params: {
     <div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
       <div style="max-width:640px;margin:0 auto;padding:28px 18px;">
         <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:28px;">
-          <p style="margin:0 0 12px;color:#0f766e;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;font-size:12px;">MSCQR</p>
+          ${mscqrBrandHeaderHtml()}
           <h1 style="margin:0 0 16px;font-size:24px;line-height:1.25;color:#0f172a;">${escapeHtml(params.heading)}</h1>
           <p style="margin:0 0 16px;line-height:1.65;color:#334155;">${escapeHtml(params.intro)}</p>
           ${params.workspaceName ? `<p style="margin:0 0 16px;line-height:1.65;color:#334155;"><strong>Workspace:</strong> ${escapeHtml(params.workspaceName)}</p>` : ""}
@@ -87,7 +95,7 @@ export const renderOtpEmail = (params: { code: string; expiresMinutes: number })
     <div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
       <div style="max-width:560px;margin:0 auto;padding:28px 18px;">
         <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:28px;">
-          <p style="margin:0 0 12px;color:#0f766e;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;font-size:12px;">MSCQR verification</p>
+          ${mscqrBrandHeaderHtml("verification")}
           <h1 style="margin:0 0 16px;font-size:22px;line-height:1.25;">Your sign-in code</h1>
           <p style="font-size:28px;letter-spacing:0.16em;font-weight:700;margin:0 0 18px;color:#0f172a;">${escapeHtml(params.code)}</p>
           <p style="margin:0 0 16px;line-height:1.65;color:#334155;">This one-time code expires in ${params.expiresMinutes} minutes. Use it only on <a href="${MSCQR_URL}" style="color:#0f766e;">${MSCQR_URL}</a>.</p>

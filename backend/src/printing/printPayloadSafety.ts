@@ -19,6 +19,10 @@ export type PrintPayloadDiagnostics = {
   unresolvedPlaceholderPresent: boolean;
 };
 
+const MAX_APPROVED_GRAPHIC_FIELD_COUNT = 1;
+const MAX_APPROVED_GRAPHIC_BYTES = 8192;
+const MAX_APPROVED_GRAPHIC_AREA_DOTS = 48000;
+
 const BINARY_PAYLOAD_HEADERS = [
   { label: "pdf", bytes: Buffer.from("%PDF", "ascii") },
   { label: "png", bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
@@ -31,6 +35,7 @@ const commandSequenceForDiagnostics = (payloadContent: string) =>
     .map((match) => {
       const command = `${match[0][0]}${String(match[1] || "").toUpperCase()}`;
       if (command.startsWith("^FD")) return "^FD<redacted>";
+      if (command.startsWith("^GF")) return "^GF<graphic>";
       return command;
     })
     .slice(0, 80);
@@ -46,6 +51,37 @@ const zplDimension = (payloadContent: string, command: "PW" | "LL") => {
 };
 
 const countMatches = (payloadContent: string, pattern: RegExp) => Array.from(payloadContent.matchAll(pattern)).length;
+
+const getRasterGraphicSafetyIssues = (payloadContent: string) => {
+  const graphics = Array.from(payloadContent.matchAll(/\^GFA,(\d+),(\d+),(\d+),([A-F0-9,\s]+?)\^FS/gi));
+  if (graphics.length === 0) return [];
+
+  const issues: string[] = [];
+  if (graphics.length > MAX_APPROVED_GRAPHIC_FIELD_COUNT) issues.push("zpl_too_many_raster_graphics");
+
+  for (const graphic of graphics) {
+    const totalBytes = zplNumber(graphic[1]);
+    const graphicBytes = zplNumber(graphic[2]);
+    const bytesPerRow = zplNumber(graphic[3]);
+    if (!totalBytes || !graphicBytes || !bytesPerRow) {
+      issues.push("zpl_raster_graphic_invalid");
+      continue;
+    }
+    const heightDots = Math.ceil(graphicBytes / bytesPerRow);
+    const widthDots = bytesPerRow * 8;
+    if (totalBytes > MAX_APPROVED_GRAPHIC_BYTES || graphicBytes > MAX_APPROVED_GRAPHIC_BYTES) {
+      issues.push("zpl_raster_graphic_too_large");
+    }
+    if (widthDots * heightDots > MAX_APPROVED_GRAPHIC_AREA_DOTS) {
+      issues.push("zpl_raster_graphic_area_too_large");
+    }
+  }
+
+  const unmatchedGraphicCount = countMatches(payloadContent, /\^GF/gi) - graphics.length;
+  if (unmatchedGraphicCount > 0) issues.push("zpl_raster_graphic_invalid");
+
+  return Array.from(new Set(issues));
+};
 
 const hasFullLabelBlackBoxRisk = (payloadContent: string) => {
   const printWidth = zplDimension(payloadContent, "PW");
@@ -118,7 +154,7 @@ export const getZplPayloadSafetyIssues = (params: {
   if (params.requireQr !== false && !diagnostics.containsQrCommand) issues.push("missing_zpl_qr_command");
   if (params.requireQr !== false && !/\^FDLA,[\s\S]+?\^FS/i.test(trimmed)) issues.push("missing_zpl_qr_payload");
   if (diagnostics.payloadByteLength < 120) issues.push("zpl_payload_too_short");
-  if (diagnostics.graphicFieldCommandCount > 0) issues.push("zpl_raster_graphics_not_allowed");
+  issues.push(...getRasterGraphicSafetyIssues(payloadContent));
   if (diagnostics.hasFullLabelBlackBoxRisk) issues.push("zpl_full_label_black_box_risk");
   if (hasBinaryPayloadHeader(payloadContent)) issues.push("binary_payload_header_detected");
 
