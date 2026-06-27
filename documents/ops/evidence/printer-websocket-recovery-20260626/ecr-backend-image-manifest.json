@@ -1,0 +1,15 @@
+{
+    "images": [
+        {
+            "registryId": "368992683803",
+            "repositoryName": "mscqr-backend",
+            "imageId": {
+                "imageDigest": "sha256:4314fa7c7209ce041073946b20c4f6d87646337ae8846571f46486393f9b673a",
+                "imageTag": "a5b1036fd41764572f95866bdc32f96ca4feb7ef"
+            },
+            "imageManifest": "{\n  \"schemaVersion\": 2,\n  \"mediaType\": \"application/vnd.oci.image.index.v1+json\",\n  \"manifests\": [\n    {\n      \"mediaType\": \"application/vnd.oci.image.manifest.v1+json\",\n      \"digest\": \"sha256:9eeb4a8cdec1ef0466b779ba28458e8e3a0ebaa427b2b518fe247d73895fb99a\",\n      \"size\": 3337,\n      \"platform\": {\n        \"architecture\": \"amd64\",\n        \"os\": \"linux\"\n      }\n    },\n    {\n      \"mediaType\": \"application/vnd.oci.image.manifest.v1+json\",\n      \"digest\": \"sha256:24107e6dcb68ab5f327b4492c146e364cff7e19373f8a517d4436ac4a1553977\",\n      \"size\": 564,\n      \"annotations\": {\n        \"vnd.docker.reference.digest\": \"sha256:9eeb4a8cdec1ef0466b779ba28458e8e3a0ebaa427b2b518fe247d73895fb99a\",\n        \"vnd.docker.reference.type\": \"attestation-manifest\"\n      },\n      \"platform\": {\n        \"architecture\": \"unknown\",\n        \"os\": \"unknown\"\n      }\n    }\n  ]\n}",
+            "imageManifestMediaType": "application/vnd.oci.image.index.v1+json"
+        }
+    ],
+    "failures": []
+}

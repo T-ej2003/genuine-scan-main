@@ -24,6 +24,27 @@ type RequestOptions = RequestInit & {
   suppressMutationEvent?: boolean;
 };
 
+const SESSION_EXPIRED_MESSAGE = "Your session has expired. Please sign in again.";
+
+const friendlyUnauthenticatedMessage = (message?: string | null) => {
+  const normalized = String(message || "").trim();
+  if (!normalized) return SESSION_EXPIRED_MESSAGE;
+  if (/no token provided|no refresh token|not authenticated|unauthorized/i.test(normalized)) {
+    return SESSION_EXPIRED_MESSAGE;
+  }
+  return normalized;
+};
+
+const extractAccessToken = (payload: unknown) => {
+  if (!payload || typeof payload !== "object") return "";
+  const value =
+    (payload as { accessToken?: unknown }).accessToken ??
+    (payload as { token?: unknown }).token ??
+    ((payload as { auth?: { accessToken?: unknown; token?: unknown } }).auth?.accessToken ||
+      (payload as { auth?: { token?: unknown } }).auth?.token);
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+};
+
 const stripHtmlError = (value: string) =>
   normalizeWhitespace(
     extractPlainTextFromHtml(value) ||
@@ -251,7 +272,7 @@ export function createApiClientCore(): ApiClientCore {
   let token: string | null = null;
   const getCache = new Map<string, unknown>();
   const endpointCooldowns = new Map<string, { until: number; hits: number }>();
-  let refreshInFlight: Promise<ApiResponse<{ user: any }>> | null = null;
+  let refreshInFlight: Promise<ApiResponse<{ user: any; auth?: any; accessToken?: string }>> | null = null;
 
   const normalizeCooldownEndpoint = (endpoint: string) => {
     const [path, rawQuery = ""] = String(endpoint || "").split("?");
@@ -335,8 +356,6 @@ export function createApiClientCore(): ApiClientCore {
     return "";
   };
 
-  const hasCookieBackedSession = () => Boolean(readCookie("aq_access") || readCookie("aq_refresh") || readCookie("mscqr_verify_session"));
-
   const isAuthRefreshEndpoint = (endpoint: string) =>
     endpoint === "/auth/login" ||
     endpoint === "/auth/refresh" ||
@@ -413,7 +432,7 @@ export function createApiClientCore(): ApiClientCore {
 
     const refreshOnce = async () => {
       if (refreshInFlight) return refreshInFlight;
-      refreshInFlight = request<{ user: any }>("/auth/refresh", {
+      refreshInFlight = request<{ user: any; auth?: any; accessToken?: string }>("/auth/refresh", {
         method: "POST",
         skipAuthRefresh: true,
       }).finally(() => {
@@ -447,18 +466,17 @@ export function createApiClientCore(): ApiClientCore {
         : await response.text().catch((): string => "");
 
       if (response.status === 401 && !options.skipAuthRefresh && !isAuthRefreshEndpoint(endpoint)) {
-        const message =
+        const rawMessage =
           (payload && typeof payload === "object" && (payload.error || payload.message)) ||
           (typeof payload === "string" && payload) ||
           "Not authenticated";
+        const message = friendlyUnauthenticatedMessage(rawMessage);
 
-        if (!getToken() && !hasCookieBackedSession()) {
-          pushNetworkLog({ status: response.status, ok: false, error: message });
-          return { success: false, error: message, status: response.status, code: "UNAUTHENTICATED", requestId };
-        }
-
+        setToken(null);
         const refreshed = await refreshOnce();
         if (refreshed.success) {
+          const nextToken = extractAccessToken(refreshed.data);
+          if (nextToken) setToken(nextToken);
           return request<T>(endpoint, { ...options, skipAuthRefresh: true });
         }
 

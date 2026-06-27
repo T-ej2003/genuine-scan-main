@@ -33,6 +33,15 @@ const userFor = (role: Role) => ({
   },
 });
 
+const authSessionFor = (role: Role) => {
+  const user = userFor(role);
+  return {
+    user,
+    auth: user.auth,
+    accessToken: `client-visual-${role.toLowerCase()}-access-token`,
+  };
+};
+
 const batchRows = [
   {
     id: "batch-source-1",
@@ -83,6 +92,7 @@ async function mockClientApis(page: Page, role: Role = "LICENSEE_ADMIN") {
     window.localStorage.setItem("manufacturer-printer-onboarding:v1:manufacturer-visual-user:client-visual-device", "dismissed");
   }, consentState);
 
+  await page.route("**/api/auth/refresh", (route) => route.fulfill({ json: { success: true, data: authSessionFor(role) } }));
   await page.route("**/api/auth/me", (route) => route.fulfill({ json: { success: true, data: userFor(role) } }));
   await page.route("**/api/notifications**", (route) => route.fulfill({ json: { success: true, data: { items: [], unreadCount: 0 } } }));
   await page.route("**/api/dashboard/attention-queue", (route) => route.fulfill({ json: { success: true, data: [] } }));
@@ -168,6 +178,9 @@ async function mockClientApis(page: Page, role: Role = "LICENSEE_ADMIN") {
         data: [{ id: "manufacturer-1", name: "Acme Factory 1", email: "factory1@acme.com", isActive: true, location: "Cape Town" }],
       },
     }),
+  );
+  await page.route("**/api/manufacturer/print-reissue-requests**", (route) =>
+    route.fulfill({ json: { success: true, data: { items: [], total: 0, limit: 25, offset: 0 } } }),
   );
   await page.route("**/api/users**", (route) =>
     route.fulfill({
