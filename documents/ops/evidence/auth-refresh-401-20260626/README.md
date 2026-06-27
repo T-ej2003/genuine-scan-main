@@ -83,6 +83,25 @@ Focused validation:
 
 - `npm run test:e2e -- e2e/p0-access-control.spec.ts`
 
+## CI Follow-up: Auth-Public Pages and Visual Smoke
+
+The next frontend quality run exposed two additional stale assumptions:
+
+- `/login`, `/accept-invite`, `/forgot-password`, and `/reset-password` are public auth workflow pages, but the bootstrap policy did not list them as auth-optional. They could enter protected-session bootstrap before the form was usable.
+- `e2e/client-pages.visual.spec.ts` mocked `/api/auth/me`, but not `/api/auth/refresh`, and did not mock `/api/manufacturer/print-reissue-requests`. The unmocked reissue request proxied to a missing backend and opened the support diagnostics dialog over the batch workspace modal screenshot.
+
+Fix:
+
+- `src/contexts/auth-bootstrap.ts` now treats the auth workflow pages as auth-optional.
+- `src/test/auth-bootstrap-paths.test.ts` guards public auth pages and protected app pages.
+- P1 and visual Playwright mocks now model `/auth/refresh` with a valid restored-session test payload.
+- The visual batch modal test now mocks the print reissue queue instead of depending on a live backend proxy.
+
+Focused validation:
+
+- `npm run test -- src/test/auth-bootstrap-paths.test.ts`
+- `npm run test:e2e -- e2e/p0-access-control.spec.ts e2e/p1-auth-flows.spec.ts e2e/client-pages.visual.spec.ts`
+
 ## Manual Validation Steps
 
 1. Sign in with MFA and open a protected page such as `/batches`.

@@ -34,6 +34,12 @@ const pendingMfaUser = {
 const json = (route: Route, body: unknown, status = 200) =>
   route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
+const activeSessionPayload = () => ({
+  user: activeUser,
+  auth: activeUser.auth,
+  accessToken: "p1-auth-flow-access-token",
+});
+
 async function installP1AuthMocks(page: Page) {
   let authenticated = false;
   await page.route("**/api/**", async (route) => {
@@ -45,6 +51,11 @@ async function installP1AuthMocks(page: Page) {
     if (path === "/auth/me") {
       return authenticated
         ? json(route, { success: true, data: activeUser })
+        : json(route, { success: false, error: "Invalid or expired token" }, 401);
+    }
+    if (path === "/auth/refresh") {
+      return authenticated
+        ? json(route, { success: true, data: activeSessionPayload() })
         : json(route, { success: false, error: "Invalid or expired token" }, 401);
     }
     if (path === "/auth/login") {
@@ -59,7 +70,7 @@ async function installP1AuthMocks(page: Page) {
       }
       if (body.email === "p1-admin@mscqr.example" && body.password === "CorrectHorseBattery1!") {
         authenticated = true;
-        return json(route, { success: true, data: { user: activeUser, auth: activeUser.auth } });
+        return json(route, { success: true, data: activeSessionPayload() });
       }
       return json(route, { success: false, error: "Invalid email or password" }, 401);
     }
@@ -69,7 +80,7 @@ async function installP1AuthMocks(page: Page) {
     if (path === "/auth/mfa/challenge/complete") {
       if (body.code === "123456") {
         authenticated = true;
-        return json(route, { success: true, data: { user: activeUser, auth: activeUser.auth } });
+        return json(route, { success: true, data: activeSessionPayload() });
       }
       return json(route, { success: false, error: "Invalid authentication code." }, 400);
     }
@@ -87,7 +98,7 @@ async function installP1AuthMocks(page: Page) {
     }
     if (path === "/auth/accept-invite") {
       authenticated = true;
-      return json(route, { success: true, data: { user: activeUser, auth: activeUser.auth } });
+      return json(route, { success: true, data: activeSessionPayload() });
     }
     if (path === "/auth/forgot-password") return json(route, { success: true, data: { queued: true } });
     if (path === "/auth/reset-password") return json(route, { success: false, error: "Reset token is invalid or expired" }, 400);
