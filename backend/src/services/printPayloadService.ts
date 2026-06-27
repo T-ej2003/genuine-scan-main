@@ -2,7 +2,6 @@ import { createHash } from "crypto";
 import { PrintPayloadType, PrinterCommandLanguage, PrinterConnectionType, PrinterLanguageKind } from "@prisma/client";
 
 import { buildCanonicalQrLabel } from "../printing/canonicalLabel";
-import { MSCQR_WORDMARK_ZPL_GRAPHIC } from "../printing/generated/brandWordmarkZpl";
 import {
   assertZplPayloadSafeForQrLabel,
   buildKnownGoodDiagnosticZplPayload,
@@ -144,15 +143,6 @@ const escapeCpclText = (value: string) =>
     .replace(/"/g, "'")
     .trim();
 
-const buildZplWordmarkGraphicCommand = (layout: ResolvedLayout) => {
-  const left = Math.max(0, Math.round((layout.widthDots - MSCQR_WORDMARK_ZPL_GRAPHIC.widthDots) / 2));
-  return [
-    `^FO${left},16`,
-    `^GFA,${MSCQR_WORDMARK_ZPL_GRAPHIC.totalBytes},${MSCQR_WORDMARK_ZPL_GRAPHIC.totalBytes},${MSCQR_WORDMARK_ZPL_GRAPHIC.bytesPerRow},${MSCQR_WORDMARK_ZPL_GRAPHIC.data}`,
-    "^FS",
-  ].join("");
-};
-
 const getResolvedLayout = (printer: PrinterPayloadProfile): ResolvedLayout => {
   const calibration = printer.calibrationProfile || {};
   const labelWidthMm = Math.max(25, calibrationValue(calibration, "labelWidthMm", 50));
@@ -235,9 +225,9 @@ const buildZplPayload = (params: {
     `^LL${layout.heightDots}`,
     "^LH0,0",
     "^CI28",
-    buildZplWordmarkGraphicCommand(layout),
-    "^FO0,82^FB600,1,0,C,0^A0N,22,22^FDAUTHENTICITY CHECK^FS",
-    "^FO72,112^GB456,2,2,B,0^FS",
+    "^FO0,18^FB600,1,0,C,0^A0N,34,34^FDMSCQR^FS",
+    "^FO0,58^FB600,1,0,C,0^A0N,22,22^FDAUTHENTICITY CHECK^FS",
+    "^FO72,88^GB456,2,2,B,0^FS",
     reprintLabel ? `^FO0,100^FB600,1,0,C,0^A0N,18,18^FD${reprintLabel}^FS` : "",
     `^FO${qrLeft},${qrTop}^BQN,2,${qrConfig.magnification}^FDLA,${safeScanUrl}^FS`,
     `^FO0,${footerTop}^FB600,1,0,C,0^A0N,20,20^FDscan.mscqr.com^FS`,

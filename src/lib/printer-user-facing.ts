@@ -79,7 +79,7 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
     return "Sent to printer, but local queue confirmation is unavailable. Check the printed label, then manually confirm or retry.";
   }
   if (hasAny(value, ["generated zpl looks unsafe", "unsafe_zpl_payload", "black box", "black-block", "raster graphics not allowed"])) {
-    return "Payload rejected before print: generated Zebra ZPL looks unsafe for this profile.";
+    return "The print payload was blocked before reaching the printer. No labels were printed. Use diagnostic test label or contact admin.";
   }
   if (hasAny(value, ["operator confirmation", "manual confirmation", "awaiting/manual confirmation"])) {
     return "Sent to printer, awaiting manual operator confirmation.";

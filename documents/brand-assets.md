@@ -32,4 +32,6 @@ Zebra ZPL cannot print raw SVG directly. The same generator converts `public/bra
 
 - `backend/src/printing/generated/brandWordmarkZpl.ts`
 
-Production ZPL labels embed that bounded graphic with `^GFA` for the visual wordmark, while keeping QR sizing, quiet zone, scan URL, and serial text under the existing print payload safety checks.
+Production Zebra ZPL labels currently do not embed the `^GFA` wordmark graphic. The hardware connector safety profile rejects raster graphics before spooler dispatch in the active ZDesigner ZT410-300dpi ZPL launch profile, so production ZPL temporarily uses the safety-approved semantic `MSCQR` text header. This keeps QR sizing, quiet zone, scan URL, serial text, and connector trust unchanged while preventing false "started printing" states.
+
+The generated wordmark module remains in source control for future hardware validation. Re-enable it only after the backend safety profile, packaged connector safety profile, diagnostic label path, and physical Zebra validation all accept the same bounded official graphic while continuing to reject arbitrary or oversized `^GF/^GFA` payloads.

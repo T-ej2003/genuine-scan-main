@@ -19,10 +19,6 @@ export type PrintPayloadDiagnostics = {
   unresolvedPlaceholderPresent: boolean;
 };
 
-const MAX_APPROVED_GRAPHIC_FIELD_COUNT = 1;
-const MAX_APPROVED_GRAPHIC_BYTES = 8192;
-const MAX_APPROVED_GRAPHIC_AREA_DOTS = 48000;
-
 const BINARY_PAYLOAD_HEADERS = [
   { label: "pdf", bytes: Buffer.from("%PDF", "ascii") },
   { label: "png", bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
@@ -53,34 +49,7 @@ const zplDimension = (payloadContent: string, command: "PW" | "LL") => {
 const countMatches = (payloadContent: string, pattern: RegExp) => Array.from(payloadContent.matchAll(pattern)).length;
 
 const getRasterGraphicSafetyIssues = (payloadContent: string) => {
-  const graphics = Array.from(payloadContent.matchAll(/\^GFA,(\d+),(\d+),(\d+),([A-F0-9,\s]+?)\^FS/gi));
-  if (graphics.length === 0) return [];
-
-  const issues: string[] = [];
-  if (graphics.length > MAX_APPROVED_GRAPHIC_FIELD_COUNT) issues.push("zpl_too_many_raster_graphics");
-
-  for (const graphic of graphics) {
-    const totalBytes = zplNumber(graphic[1]);
-    const graphicBytes = zplNumber(graphic[2]);
-    const bytesPerRow = zplNumber(graphic[3]);
-    if (!totalBytes || !graphicBytes || !bytesPerRow) {
-      issues.push("zpl_raster_graphic_invalid");
-      continue;
-    }
-    const heightDots = Math.ceil(graphicBytes / bytesPerRow);
-    const widthDots = bytesPerRow * 8;
-    if (totalBytes > MAX_APPROVED_GRAPHIC_BYTES || graphicBytes > MAX_APPROVED_GRAPHIC_BYTES) {
-      issues.push("zpl_raster_graphic_too_large");
-    }
-    if (widthDots * heightDots > MAX_APPROVED_GRAPHIC_AREA_DOTS) {
-      issues.push("zpl_raster_graphic_area_too_large");
-    }
-  }
-
-  const unmatchedGraphicCount = countMatches(payloadContent, /\^GF/gi) - graphics.length;
-  if (unmatchedGraphicCount > 0) issues.push("zpl_raster_graphic_invalid");
-
-  return Array.from(new Set(issues));
+  return /\^GF/gi.test(payloadContent) ? ["zpl_raster_graphics_not_allowed"] : [];
 };
 
 const hasFullLabelBlackBoxRisk = (payloadContent: string) => {

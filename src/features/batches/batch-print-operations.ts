@@ -166,12 +166,19 @@ export const syncProgressFromPrintJob = (
     return;
   }
   if (job.status === "FAILED") {
-    setPrintProgressPhase("Print job failed");
-    setPrintProgressError(
-      sanitizePrinterUiError(
-        job.failureReason || job.session?.failedReason,
-        "This print job needs attention before it can continue."
-      )
+    const safeError = sanitizePrinterUiError(
+      job.failureReason || job.session?.failedReason,
+      "This print job needs attention before it can continue."
+    );
+    const failedBeforePrint = /blocked before reaching the printer|payload rejected before print|generated zebra zpl looks unsafe|unsafe_zpl_payload/i.test(
+      `${safeError} ${job.failureReason || ""} ${job.session?.failedReason || ""}`
+    );
+    setPrintProgressPhase(failedBeforePrint ? "Failed before print" : "Print job failed");
+    setPrintProgressError(safeError);
+    setPrintProgressNotice?.(
+      failedBeforePrint
+        ? "No labels were printed. Remaining labels are recoverable after the payload fix."
+        : "Review printer setup and recovery guidance before retrying."
     );
     return;
   }
@@ -652,12 +659,15 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       !raw.includes("invalid_state_transition");
     const responseMessage = String(response.message || response.error || "").trim();
     const safeError = printJobCreateFailureMessage(response);
+    const failedBeforePrint = /blocked before reaching the printer|payload rejected before print|generated zebra zpl looks unsafe|unsafe_zpl_payload/i.test(
+      `${safeError} ${responseMessage} ${raw}`
+    );
     toast({
       title: isBusy ? "Batch busy" : "Print needs attention",
       description: isBusy ? "These codes were just allocated by another job. Please retry." : safeError,
       variant: "destructive",
     });
-    setPrintProgressPhase("Print needs attention");
+    setPrintProgressPhase(failedBeforePrint ? "Failed before print" : "Print needs attention");
     setPrintProgressError(safeError);
     const autoReportEligible = ![
       "connector_update_required",

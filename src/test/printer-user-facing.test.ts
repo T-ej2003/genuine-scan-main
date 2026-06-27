@@ -27,7 +27,7 @@ describe("printer user-facing helpers", () => {
     ).toBe("Sent to printer, but local queue confirmation is unavailable. Check the printed label, then manually confirm or retry.");
 
     expect(sanitizePrinterUiError("Generated ZPL looks unsafe for this Zebra profile.")).toBe(
-      "Payload rejected before print: generated Zebra ZPL looks unsafe for this profile."
+      "The print payload was blocked before reaching the printer. No labels were printed. Use diagnostic test label or contact admin."
     );
   });
 

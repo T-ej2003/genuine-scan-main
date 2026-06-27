@@ -406,7 +406,9 @@ test.describe.serial("Enterprise smoke flows", () => {
       await expect(startButton).toBeEnabled({ timeout: 30_000 });
       await startButton.click();
 
-      await expect(printDialog).toContainText(/Current print job|Printing in progress|Recent print jobs/);
+      await expect(printDialog).toContainText(
+        /Current print job|Preparing secure payload|Printed confirmation pending|Print did not start|Recent print jobs/
+      );
       return;
     }
 
