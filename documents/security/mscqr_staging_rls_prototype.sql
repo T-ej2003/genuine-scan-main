@@ -151,32 +151,48 @@ RETURNS TABLE (
   latest_risk_band text,
   latest_replacement_status text
 )
-LANGUAGE sql
-STABLE
+LANGUAGE plpgsql
+VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-  SELECT
-    q."code",
-    q."status"::text,
-    q."customerVerifiableAt",
-    q."scanCount",
-    vd."outcome"::text AS latest_outcome,
-    vd."riskBand"::text AS latest_risk_band,
-    vd."replacementStatus"::text AS latest_replacement_status
-  FROM "QRCode" q
-  LEFT JOIN LATERAL (
-    SELECT d."outcome", d."riskBand", d."replacementStatus"
-    FROM "VerificationDecision" d
-    WHERE d."qrCodeId" = q."id"
-       OR d."code" = q."code"
-    ORDER BY d."createdAt" DESC
-    LIMIT 1
-  ) vd ON true
-  WHERE app_rls.is_public_verification()
-    AND q."code" = public_code
-    AND q."customerVerifiableAt" IS NOT NULL
-  LIMIT 1
+DECLARE
+  prior_platform_admin text;
+BEGIN
+  IF lower(COALESCE(current_setting('app.role', true), '')) <> 'public_verification' THEN
+    RETURN;
+  END IF;
+
+  prior_platform_admin := current_setting('app.is_platform_admin', true);
+  PERFORM set_config('app.is_platform_admin', 'true', true);
+
+  RETURN QUERY
+    SELECT
+      q."code",
+      q."status"::text,
+      q."customerVerifiableAt",
+      q."scanCount",
+      vd."outcome"::text AS latest_outcome,
+      vd."riskBand"::text AS latest_risk_band,
+      vd."replacementStatus"::text AS latest_replacement_status
+    FROM "QRCode" q
+    LEFT JOIN LATERAL (
+      SELECT d."outcome", d."riskBand", d."replacementStatus"
+      FROM "VerificationDecision" d
+      WHERE d."qrCodeId" = q."id"
+         OR d."code" = q."code"
+      ORDER BY d."createdAt" DESC
+      LIMIT 1
+    ) vd ON true
+    WHERE q."code" = public_code
+      AND q."customerVerifiableAt" IS NOT NULL
+    LIMIT 1;
+
+  PERFORM set_config('app.is_platform_admin', COALESCE(prior_platform_admin, ''), true);
+EXCEPTION WHEN OTHERS THEN
+  PERFORM set_config('app.is_platform_admin', COALESCE(prior_platform_admin, ''), true);
+  RAISE;
+END;
 $$;
 
 -- Remove prior prototype policies before recreating them. This keeps manual

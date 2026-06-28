@@ -132,6 +132,14 @@ This keeps public and worker access visible in test setup instead of accidentall
 
 Run this only against a disposable staging database restored from sanitized data or seeded fixtures.
 
+Local P2 behavioral command:
+
+```sh
+MSCQR_RLS_PROTOTYPE_TEST=true npm --prefix backend run test:rls:prototype
+```
+
+The command starts the local P2 Postgres service, creates a disposable database, applies current Prisma migrations, applies the non-production prototype SQL, verifies the RLS behaviors, applies rollback SQL, confirms RLS/FORCE are disabled, and drops the temporary database.
+
 1. Prepare
    - Apply `documents/security/mscqr_staging_rls_prototype.sql` manually with a DBA-owned session.
    - Confirm no production database URL is present.
