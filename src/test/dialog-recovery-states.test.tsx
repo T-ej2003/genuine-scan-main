@@ -490,8 +490,15 @@ describe("dialog recovery states", () => {
 
     expect(screen.getAllByText(/remaining labels/i).length).toBeGreaterThan(0);
     expect(screen.getByText((_, element) => element?.textContent === "925 remaining labels")).toBeInTheDocument();
-    expect(screen.getByText(/Requested range:/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Confirmed prints/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Stopped prints/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Replacement labels/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Pending re-issue requests/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Confirmed prints/i }));
     expect(screen.getByText("QR-000065 to QR-000074")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Back to operations/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Replacement labels/i }));
     expect(screen.queryByText(/source batch/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Sample scan proof/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Printer verification expired\. Refresh printer helper before printing\./)).toBeInTheDocument();

@@ -267,13 +267,45 @@ export const reissueRequestSchema = z
     originalPrintJobId: z.string(),
     replacementPrintJobId: z.string().nullable().optional(),
     status: reissueRequestStatusSchema,
+    approvalState: z.string().nullable().optional(),
     reason: z.string(),
+    decisionNote: z.string().nullable().optional(),
     rejectionReason: z.string().nullable().optional(),
-    createdAt: z.string(),
+    requestedByRole: z.string().nullable().optional(),
+    targetApproverRole: z.string().nullable().optional(),
+    quantity: z.number().nullable().optional(),
+    requestedCount: z.number().nullable().optional(),
+    affectedRangeStart: z.string().nullable().optional(),
+    affectedRangeEnd: z.string().nullable().optional(),
+    requestedRangeStart: z.string().nullable().optional(),
+    requestedRangeEnd: z.string().nullable().optional(),
+    createdAt: z.union([z.string(), z.date()]).nullable().optional(),
+    requestedAt: z.union([z.string(), z.date()]).nullable().optional(),
+    updatedAt: z.union([z.string(), z.date()]).nullable().optional(),
     approvedAt: z.string().nullable().optional(),
+    rejectedAt: z.string().nullable().optional(),
     executedAt: z.string().nullable().optional(),
+    originalPrintJobNumber: z.string().nullable().optional(),
+    originalRequestedRange: z
+      .object({
+        startCode: z.string().nullable().optional(),
+        endCode: z.string().nullable().optional(),
+        count: z.number().nullable().optional(),
+      })
+      .nullable()
+      .optional(),
+    originalConfirmedCount: z.number().nullable().optional(),
+    originalPendingCount: z.number().nullable().optional(),
+    originalFailedCount: z.number().nullable().optional(),
+    recoveryStartLabel: z.string().nullable().optional(),
+    recoveryEndLabel: z.string().nullable().optional(),
+    nextAction: z.string().nullable().optional(),
+    batch: z.record(z.string(), z.unknown()).nullable().optional(),
+    printer: z.record(z.string(), z.unknown()).nullable().optional(),
+    requestedBy: z.record(z.string(), z.unknown()).nullable().optional(),
+    decidedBy: z.record(z.string(), z.unknown()).nullable().optional(),
   })
-  .strict();
+  .passthrough();
 
 export type PrinterProfileDTO = z.infer<typeof printerProfileSchema>;
 export type PrinterProfileSnapshotDTO = z.infer<typeof printerProfileSnapshotSchema>;

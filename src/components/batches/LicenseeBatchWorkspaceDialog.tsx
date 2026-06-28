@@ -1,6 +1,6 @@
 import React from "react";
 import { format } from "date-fns";
-import { Activity, Download, PencilLine, Trash2, UserCog, Boxes, Factory, Printer, ShieldCheck } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Download, PackageCheck, PencilLine, RefreshCcw, Trash2, UserCog, Boxes, Factory, Printer, ShieldCheck } from "lucide-react";
 
 import type { BatchWorkspaceAllocation, StableBatchOverviewRow } from "@/lib/batch-workspace";
 import { Badge } from "@/components/ui/badge";
@@ -229,6 +229,58 @@ const printJobRange = (job: PrintJobRow) => {
   return "Range not recorded";
 };
 
+const formatDateTime = (value?: string | Date | null) => {
+  if (!value) return "Time not recorded";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Time not recorded";
+  return format(date, "PPp");
+};
+
+const reissueRange = (request: any) =>
+  formatCodeRange({
+    startCode: request.requestedRangeStart || request.affectedRangeStart || request.recoveryStartLabel,
+    endCode: request.requestedRangeEnd || request.affectedRangeEnd || request.recoveryEndLabel,
+  }) || "Range not recorded";
+
+const reissueRequestedCount = (request: any) =>
+  Number(request.requestedCount || request.quantity || request.originalPendingCount || 0);
+
+const reissueRequester = (request: any) =>
+  request.requestedBy?.name || request.requestedBy?.email || request.requestedByName || "Requester not recorded";
+
+const reissueStatusLabel = (request: any) => {
+  if (request.status === "APPROVED") return "Approved and ready to print";
+  if (request.status === "EXECUTED") return "Replacement print job created";
+  if (request.status === "REJECTED") return "Rejected";
+  if (request.targetApproverRole === "SUPER_ADMIN") return "Super admin review";
+  return "Brand admin review";
+};
+
+const reissueSafeEvidenceLabel = (request: any) => {
+  const pending = Number(request.originalPendingCount || 0);
+  const failed = Number(request.originalFailedCount || 0);
+  if (pending > 0 || failed > 0) return "Recovery evidence found";
+  if (request.status === "APPROVED" || request.status === "EXECUTED") return "Approved exception";
+  return "Review print evidence";
+};
+
+const isConfirmedPrintRun = (job: PrintJobRow) =>
+  job.pipelineState === "LOCKED" ||
+  job.pipelineState === "PRINT_CONFIRMED" ||
+  job.status === "CONFIRMED" ||
+  Boolean(job.confirmedAt);
+
+const isStoppedPrintRun = (job: PrintJobRow) =>
+  needsRecovery(job) ||
+  job.status === "STOPPED" ||
+  job.status === "PARTIALLY_COMPLETED" ||
+  job.status === "FAILED" ||
+  job.pipelineState === "STOPPED" ||
+  job.pipelineState === "FAILED" ||
+  job.pipelineState === "NEEDS_OPERATOR_ACTION";
+
+const canRequestReissueForJob = (job: PrintJobRow) => isEligibleForReissue(job) || isStoppedPrintRun(job);
+
 const workspacePrimaryRange = (workspace: StableBatchOverviewRow) => {
   const allocation = workspace.allocations[0] || null;
   return {
@@ -319,7 +371,6 @@ export function LicenseeBatchWorkspaceDialog({
   onRefreshReissueRequests = () => undefined,
   onDecideReissueRequest = () => undefined,
   onPrintApprovedReissueRequest = () => undefined,
-  onContinuePrintRecovery = () => undefined,
   onRefreshPrinterStatus = () => undefined,
   securePrinterReady = false,
   initialTab = "overview",
@@ -333,8 +384,27 @@ export function LicenseeBatchWorkspaceDialog({
   const isManufacturerMode = role === "manufacturer";
   const isSuperAdminMode = role === "super_admin" || role === "platform_super_admin";
   const [selectedPrintJobDetail, setSelectedPrintJobDetail] = React.useState<PrintJobRow | null>(null);
+  const [manufacturerOperationSection, setManufacturerOperationSection] = React.useState<
+    "menu" | "confirmed" | "stopped" | "replacement" | "pending"
+  >("menu");
   const manufacturerOps = workspace?.manufacturerOperational || null;
   const blockingRecoveryJob = recentPrintJobs.find(needsRecovery) || null;
+  const confirmedPrintJobs = React.useMemo(
+    () => recentPrintJobs.filter((job) => isConfirmedPrintRun(job) && !isStoppedPrintRun(job)),
+    [recentPrintJobs]
+  );
+  const stoppedPrintJobs = React.useMemo(
+    () => recentPrintJobs.filter(isStoppedPrintRun),
+    [recentPrintJobs]
+  );
+  const replacementRequests = React.useMemo(
+    () => reissueRequests.filter((request) => request.status === "APPROVED" || request.status === "EXECUTED"),
+    [reissueRequests]
+  );
+  const pendingReissueRequests = React.useMemo(
+    () => reissueRequests.filter((request) => request.status !== "APPROVED" && request.status !== "EXECUTED"),
+    [reissueRequests]
+  );
   const existingReissueJobIds = React.useMemo(
     () =>
       new Set(
@@ -345,7 +415,6 @@ export function LicenseeBatchWorkspaceDialog({
     [reissueRequests]
   );
   const hasExistingReissue = (job: PrintJobRow) => existingReissueJobIds.has(job.id);
-  const printerBlockedReason = "Refresh printer helper before starting this print run.";
   const manufacturerNextLabel = blockingRecoveryJob
     ? "Recovery required before next range"
     : manufacturerOps?.nextPrintableLabelCode || null;
@@ -356,6 +425,9 @@ export function LicenseeBatchWorkspaceDialog({
           endCode: manufacturerOps.remainingPrintableRangeEnd,
         })
       : "";
+  React.useEffect(() => {
+    setManufacturerOperationSection("menu");
+  }, [workspace?.sourceBatchId, workspace?.focusBatchId]);
 
   return (
     <>
@@ -453,168 +525,249 @@ export function LicenseeBatchWorkspaceDialog({
                   </TabsContent>
 
                   <TabsContent value="operations" className="mt-0 space-y-5">
-                    <div className="rounded-lg border p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="font-semibold">Print recovery</div>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            Continue from the next printable index before starting a later range.
-                          </p>
+                    {manufacturerOperationSection === "menu" ? (
+                      <>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {[
+                            {
+                              key: "confirmed" as const,
+                              title: "Confirmed prints",
+                              count: confirmedPrintJobs.length,
+                              detail: "Print runs with backend-confirmed labels.",
+                              icon: CheckCircle2,
+                            },
+                            {
+                              key: "stopped" as const,
+                              title: "Stopped prints",
+                              count: stoppedPrintJobs.length,
+                              detail: "Runs that need recovery or replacement approval.",
+                              icon: AlertTriangle,
+                            },
+                            {
+                              key: "replacement" as const,
+                              title: "Replacement labels",
+                              count: replacementRequests.length,
+                              detail: "Approved or already-created replacement jobs.",
+                              icon: PackageCheck,
+                            },
+                            {
+                              key: "pending" as const,
+                              title: "Pending re-issue requests",
+                              count: pendingReissueRequests.length,
+                              detail: "Requests waiting for brand or super admin review.",
+                              icon: RefreshCcw,
+                            },
+                          ].map((item) => {
+                            const Icon = item.icon;
+                            return (
+                              <button
+                                key={item.key}
+                                type="button"
+                                onClick={() => setManufacturerOperationSection(item.key)}
+                                className="rounded-lg border bg-background p-4 text-left transition hover:border-primary/40 hover:bg-muted/20"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex items-center gap-3">
+                                    <span className="flex h-9 w-9 items-center justify-center rounded-md border bg-muted/30">
+                                      <Icon className="h-4 w-4" />
+                                    </span>
+                                    <div>
+                                      <div className="font-semibold">{item.title}</div>
+                                      <div className="mt-1 text-sm text-muted-foreground">{item.detail}</div>
+                                    </div>
+                                  </div>
+                                  <Badge variant={item.count > 0 ? "default" : "secondary"}>{item.count}</Badge>
+                                </div>
+                              </button>
+                            );
+                          })}
                         </div>
-                        <Badge variant={manufacturerRemainingLabels(workspace) > 0 ? "default" : "secondary"}>
-                          Next printable {manufacturerNextLabel || "none"}
-                        </Badge>
-                      </div>
-                      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                        {blockingRecoveryJob
-                          ? `${getRecoveryInstruction(blockingRecoveryJob).firstLine} ${getRecoveryInstruction(blockingRecoveryJob).secondLine}`
-                          : manufacturerOps?.nextPrintableLabelCode
-                            ? `Continue from label ${manufacturerOps.nextPrintableLabelCode}. Remaining printable range ${manufacturerRemainingRange}.`
-                            : "No recovery range is currently reported for this batch."}
-                      </div>
-                    </div>
 
-                    <div className="rounded-lg border p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="font-semibold">Recent print runs</div>
-                          <p className="mt-1 text-sm text-muted-foreground">Requested label ranges, confirmation counts, printer, operator, and recovery state.</p>
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                          {blockingRecoveryJob
+                            ? `${getRecoveryInstruction(blockingRecoveryJob).firstLine} ${getRecoveryInstruction(blockingRecoveryJob).secondLine}`
+                            : manufacturerOps?.nextPrintableLabelCode
+                              ? `Next printable label is ${manufacturerOps.nextPrintableLabelCode}.`
+                              : "No recovery task is currently open for this batch."}
                         </div>
-                        <Badge variant="secondary">{recentPrintJobs.length} run{recentPrintJobs.length === 1 ? "" : "s"}</Badge>
-                      </div>
-                      {printJobsLoading ? (
-                        <div className="mt-3 rounded-lg border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">Loading recent print runs...</div>
-                      ) : recentPrintJobs.length === 0 ? (
-                        <div className="mt-3 rounded-lg border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">No recent print runs were found for this batch.</div>
-                      ) : (
-                        <div className="mt-3 space-y-3">
-                          {recentPrintJobs.map((job) => (
-                            <div key={job.id} className="rounded-lg border bg-muted/10 p-4">
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                  <div className="font-medium">{job.jobNumber || "Print run"}</div>
-                                  <div className="mt-1 text-xs text-muted-foreground">
-                                    Requested range: <span className="font-mono">{printJobRange(job)}</span>
-                                  </div>
-                                  <div className="mt-1 text-xs text-muted-foreground">
-                                    {job.printer?.name || "Saved printer"} · Operator: {printJobOperator(job)}
-                                  </div>
-                                </div>
-                                <Badge variant={getPrintJobStatusBadgeVariant(job)}>{getPrintJobStageLabel(job)}</Badge>
-                              </div>
-                              <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
-                                <div>Requested {getPrintRunCounts(job).requested.toLocaleString()}</div>
-                                <div>Confirmed {getPrintRunCounts(job).confirmed.toLocaleString()}</div>
-                                <div>Pending {getPrintRunCounts(job).pending.toLocaleString()}</div>
-                                <div>Failed {getPrintRunCounts(job).failed.toLocaleString()}</div>
-                              </div>
-                              {needsRecovery(job) ? (
-                                <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-                                  <div>{getRecoveryInstruction(job).firstLine}</div>
-                                  <div>{getRecoveryInstruction(job).secondLine}</div>
-                                </div>
-                              ) : null}
-                              <div className="mt-3 flex flex-wrap justify-end gap-2">
-                                <Button size="sm" variant="outline" onClick={() => setSelectedPrintJobDetail(job)}>View details</Button>
-                                {needsRecovery(job) ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={!securePrinterReady}
-                                    title={!securePrinterReady ? printerBlockedReason : undefined}
-                                    onClick={() => onContinuePrintRecovery(job)}
-                                  >
-                                    Continue/recover remaining labels
-                                  </Button>
-                                ) : null}
-                                {canRequestReissue && isEligibleForReissue(job) ? (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={!reissueReason.trim() || reissuingJobId === job.id || hasExistingReissue(job)}
-                                    title={hasExistingReissue(job) ? "A replacement request already exists for this print run." : undefined}
-                                    onClick={() => onRequestReissue(job.id)}
-                                  >
-                                    {hasExistingReissue(job) ? "Reissue requested" : reissuingJobId === job.id ? "Submitting..." : "Request reissue"}
-                                  </Button>
-                                ) : null}
-                              </div>
+                      </>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 px-4 py-3">
+                          <div>
+                            <div className="font-semibold">
+                              {manufacturerOperationSection === "confirmed"
+                                ? "Confirmed prints"
+                                : manufacturerOperationSection === "stopped"
+                                  ? "Stopped prints"
+                                  : manufacturerOperationSection === "replacement"
+                                    ? "Replacement labels"
+                                    : "Pending re-issue requests"}
                             </div>
-                          ))}
+                            <div className="text-xs text-muted-foreground">
+                              {manufacturerOperationSection === "stopped"
+                                ? "Resolve the earliest unconfirmed range before starting a later range."
+                                : "Select a card to review the print job or request details."}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {manufacturerOperationSection === "replacement" || manufacturerOperationSection === "pending" ? (
+                              <Button variant="outline" size="sm" onClick={onRefreshReissueRequests} disabled={reissueRequestsLoading}>
+                                {reissueRequestsLoading ? "Refreshing..." : "Refresh"}
+                              </Button>
+                            ) : null}
+                            <Button variant="outline" size="sm" onClick={() => setManufacturerOperationSection("menu")}>
+                              Back to operations
+                            </Button>
+                          </div>
                         </div>
-                      )}
-                    </div>
 
-                    <div className="rounded-lg border p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="font-semibold">Replacement labels</div>
-                          <p className="mt-1 text-sm text-muted-foreground">Approved replacements are printed only after printer helper verification is fresh.</p>
-                        </div>
-                        <Button variant="outline" size="sm" onClick={onRefreshReissueRequests} disabled={reissueRequestsLoading}>
-                          {reissueRequestsLoading ? "Refreshing..." : "Refresh"}
-                        </Button>
-                      </div>
-                      <div className="mt-3 space-y-2">
-                        <Label htmlFor="manufacturer-reissue-reason">Reissue request reason</Label>
-                        <Input
-                          id="manufacturer-reissue-reason"
-                          value={reissueReason}
-                          onChange={(event) => onReissueReasonChange(event.target.value)}
-                          placeholder="Explain why replacement labels are required"
-                        />
-                      </div>
-                      {reissueRequests.length === 0 ? (
-                        <div className="mt-3 rounded-lg border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">No replacement requests are ready for this batch.</div>
-                      ) : (
-                        <div className="mt-3 space-y-2">
-                          {reissueRequests.map((request) => (
-                            <div
-                              key={request.id}
-                              data-testid={highlightedReissueRequestId === request.id ? "highlighted-reissue-request" : undefined}
-                              className={`rounded-lg border bg-background p-3 text-sm ${
-                                highlightedReissueRequestId === request.id ? "border-emerald-300 bg-emerald-50/60" : ""
-                              }`}
-                            >
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                  <div className="font-medium">{request.batch?.name || "Replacement request"}</div>
-                                  <div className="mt-1 text-xs text-muted-foreground">
-                                    {request.quantity ? `${Number(request.quantity).toLocaleString()} labels · ` : ""}
-                                    {request.status === "APPROVED" ? "Ready after printer verification" : humanStatusLabel(request.status || "requested")}
-                                  </div>
-                                  <div className="mt-2 text-xs text-muted-foreground">{request.reason}</div>
+                        {manufacturerOperationSection === "confirmed" || manufacturerOperationSection === "stopped" ? (
+                          <div className="space-y-3">
+                            {canRequestReissue ? (
+                              <div className="space-y-2 rounded-lg border bg-muted/10 p-4">
+                                <Label htmlFor="manufacturer-print-run-reissue-reason">Re-issue request reason</Label>
+                                <Input
+                                  id="manufacturer-print-run-reissue-reason"
+                                  value={reissueReason}
+                                  onChange={(event) => onReissueReasonChange(event.target.value)}
+                                  placeholder="Explain why replacement labels are required"
+                                />
+                                <div className="text-xs text-muted-foreground">
+                                  The backend decides the safe recovery range. This note is kept with the approval request.
                                 </div>
-                                <Badge variant="secondary">
-                                  {request.status === "APPROVED" ? "Replacement approved" : humanStatusLabel(request.status || "requested")}
-                                </Badge>
                               </div>
-                              {request.status === "APPROVED" ? (
-                                <div className="mt-3 space-y-2">
-                                  {reissuePrintRecoveryById[request.id] || !securePrinterReady ? (
-                                    <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-                                      {reissuePrintRecoveryById[request.id] || "Printer verification expired. Refresh printer helper before printing."}
+                            ) : null}
+                            {(manufacturerOperationSection === "confirmed" ? confirmedPrintJobs : stoppedPrintJobs).length === 0 ? (
+                              <div className="rounded-lg border border-dashed bg-muted/10 p-5 text-sm text-muted-foreground">
+                                {manufacturerOperationSection === "confirmed"
+                                  ? "No confirmed print runs found for this batch."
+                                  : "No stopped or failed print runs need recovery right now."}
+                              </div>
+                            ) : (
+                              (manufacturerOperationSection === "confirmed" ? confirmedPrintJobs : stoppedPrintJobs).map((job) => (
+                                <div key={job.id} className="rounded-lg border bg-background p-4">
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="space-y-2">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <div className="font-medium">{job.jobNumber || job.id}</div>
+                                        <Badge variant={getPrintJobStatusBadgeVariant(job)}>{getPrintJobStageLabel(job)}</Badge>
+                                        {job.reprintOfJobId ? <Badge variant="outline">Replacement</Badge> : null}
+                                      </div>
+                                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+                                        <div>Range <span className="font-mono">{printJobRange(job)}</span></div>
+                                        <div>Requested {getPrintRunCounts(job).requested.toLocaleString()}</div>
+                                        <div>Confirmed {getPrintRunCounts(job).confirmed.toLocaleString()}</div>
+                                        <div>Pending {getPrintRunCounts(job).pending.toLocaleString()}</div>
+                                        <div>Failed {getPrintRunCounts(job).failed.toLocaleString()}</div>
+                                        <div>Printer {job.printer?.name || "Not recorded"}</div>
+                                        <div>Operator {printJobOperator(job)}</div>
+                                        <div>Created {formatDateTime(job.createdAt)}</div>
+                                        <div>Updated {formatDateTime(job.updatedAt)}</div>
+                                      </div>
+                                      {needsRecovery(job) ? (
+                                        <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                                          <div>{getRecoveryInstruction(job).firstLine}</div>
+                                          <div>{getRecoveryInstruction(job).secondLine}</div>
+                                        </div>
+                                      ) : null}
+                                      {job.failureReason ? <div className="text-xs text-destructive">Failure: {job.failureReason}</div> : null}
+                                    </div>
+                                    <div className="flex flex-wrap justify-end gap-2">
+                                      <Button size="sm" variant="outline" onClick={() => setSelectedPrintJobDetail(job)}>View details</Button>
+                                      {canRequestReissue && canRequestReissueForJob(job) ? (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          disabled={!reissueReason.trim() || reissuingJobId === job.id || hasExistingReissue(job)}
+                                          title={hasExistingReissue(job) ? "A replacement request already exists for this print run." : undefined}
+                                          onClick={() => onRequestReissue(job.id)}
+                                        >
+                                          {hasExistingReissue(job) ? "Reissue requested" : reissuingJobId === job.id ? "Submitting..." : "Request re-issue"}
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        ) : null}
+
+                        {manufacturerOperationSection === "replacement" || manufacturerOperationSection === "pending" ? (
+                          <div className="space-y-4">
+                            {manufacturerOperationSection === "pending" ? (
+                              <div className="space-y-2">
+                                <Label htmlFor="manufacturer-reissue-reason">Re-issue request reason</Label>
+                                <Input
+                                  id="manufacturer-reissue-reason"
+                                  value={reissueReason}
+                                  onChange={(event) => onReissueReasonChange(event.target.value)}
+                                  placeholder="Explain why replacement labels are required"
+                                />
+                              </div>
+                            ) : null}
+                            {(manufacturerOperationSection === "replacement" ? replacementRequests : pendingReissueRequests).length === 0 ? (
+                              <div className="rounded-lg border border-dashed bg-muted/10 p-5 text-sm text-muted-foreground">
+                                {manufacturerOperationSection === "replacement"
+                                  ? "No approved replacement labels are ready for this batch."
+                                  : "No pending re-issue requests are waiting right now."}
+                              </div>
+                            ) : (
+                              (manufacturerOperationSection === "replacement" ? replacementRequests : pendingReissueRequests).map((request) => (
+                                <div
+                                  key={request.id}
+                                  data-testid={highlightedReissueRequestId === request.id ? "highlighted-reissue-request" : undefined}
+                                  className={`rounded-lg border bg-background p-4 text-sm ${
+                                    highlightedReissueRequestId === request.id ? "border-emerald-300 bg-emerald-50/60" : ""
+                                  }`}
+                                >
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="space-y-2">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <div className="font-medium">{request.batch?.name || "Replacement request"}</div>
+                                        <Badge variant="secondary">{reissueStatusLabel(request)}</Badge>
+                                      </div>
+                                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+                                        <div>Requested {reissueRequestedCount(request).toLocaleString()} labels</div>
+                                        <div>Range <span className="font-mono">{reissueRange(request)}</span></div>
+                                        <div>Requester {reissueRequester(request)}</div>
+                                        <div>Requested {formatDateTime(request.requestedAt)}</div>
+                                        <div>Related print job {request.originalPrintJobNumber || request.originalPrintJobId || "Not recorded"}</div>
+                                        <div>{reissueSafeEvidenceLabel(request)}</div>
+                                      </div>
+                                      <div className="text-xs text-muted-foreground">Reason: {request.reason || "No reason recorded"}</div>
+                                      {request.nextAction ? <div className="text-xs text-muted-foreground">Next action: {request.nextAction}</div> : null}
+                                    </div>
+                                  </div>
+                                  {request.status === "APPROVED" ? (
+                                    <div className="mt-3 space-y-2">
+                                      {reissuePrintRecoveryById[request.id] || !securePrinterReady ? (
+                                        <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                                          {reissuePrintRecoveryById[request.id] || "Printer verification expired. Refresh printer helper before printing."}
+                                        </div>
+                                      ) : null}
+                                      <div className="flex flex-wrap justify-end gap-2">
+                                        <Button size="sm" variant="outline" onClick={onRefreshPrinterStatus}>
+                                          Refresh printer helper
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          disabled={!securePrinterReady || printingReissueRequestId === request.id}
+                                          onClick={() => onPrintApprovedReissueRequest(request.id)}
+                                        >
+                                          {printingReissueRequestId === request.id ? "Checking printer..." : "Print replacement labels"}
+                                        </Button>
+                                      </div>
                                     </div>
                                   ) : null}
-                                  <div className="flex flex-wrap justify-end gap-2">
-                                    <Button size="sm" variant="outline" onClick={onRefreshPrinterStatus}>
-                                      Refresh printer helper
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      disabled={!securePrinterReady || printingReissueRequestId === request.id}
-                                      onClick={() => onPrintApprovedReissueRequest(request.id)}
-                                    >
-                                      {printingReissueRequestId === request.id ? "Checking printer..." : "Print replacement labels"}
-                                    </Button>
-                                  </div>
                                 </div>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                              ))
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </TabsContent>
 
                   <TabsContent value="audit" className="mt-0 space-y-4">
@@ -1140,11 +1293,19 @@ export function LicenseeBatchWorkspaceDialog({
                                     <div className="flex flex-wrap items-start justify-between gap-3">
                                       <div>
                                         <div className="font-medium">{request.batch?.name || "Batch reissue request"}</div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                          Requested by {request.requestedBy?.name || "User"} · {request.quantity ? `${Number(request.quantity).toLocaleString()} labels · ` : ""}
-                                          {request.requestedAt ? format(new Date(request.requestedAt), "PPp") : "Pending"}
+                                        <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+                                          <div>Requested {reissueRequestedCount(request).toLocaleString()} labels</div>
+                                          <div>Range <span className="font-mono">{reissueRange(request)}</span></div>
+                                          <div>Requester {reissueRequester(request)}</div>
+                                          <div>Requested {formatDateTime(request.requestedAt)}</div>
+                                          <div>Related print job {request.originalPrintJobNumber || request.originalPrintJobId || "Not recorded"}</div>
+                                          <div>{reissueSafeEvidenceLabel(request)}</div>
                                         </div>
-                                        <div className="mt-2 text-xs text-muted-foreground">{request.reason}</div>
+                                        <div className="mt-2 text-xs text-muted-foreground">Reason: {request.reason || "No reason recorded"}</div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                          Status: {reissueStatusLabel(request)}
+                                          {request.nextAction ? ` · Next action: ${request.nextAction}` : ""}
+                                        </div>
                                       </div>
                                       <Badge variant="secondary">
                                         {request.status === "APPROVED"
@@ -1369,12 +1530,24 @@ export function LicenseeBatchWorkspaceDialog({
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
+                <div className="text-xs font-medium text-muted-foreground">Print job ID</div>
+                <div className="font-mono text-xs break-all">{selectedPrintJobDetail.id}</div>
+              </div>
+              <div>
                 <div className="text-xs font-medium text-muted-foreground">Operator</div>
                 <div>{printJobOperator(selectedPrintJobDetail)}</div>
               </div>
               <div>
                 <div className="text-xs font-medium text-muted-foreground">Printer</div>
                 <div>{selectedPrintJobDetail.printer?.name || "Saved printer"}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">Created</div>
+                <div>{formatDateTime(selectedPrintJobDetail.createdAt)}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">Updated</div>
+                <div>{formatDateTime(selectedPrintJobDetail.updatedAt)}</div>
               </div>
             </div>
             <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
@@ -1387,6 +1560,7 @@ export function LicenseeBatchWorkspaceDialog({
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                 <div>{getRecoveryInstruction(selectedPrintJobDetail).firstLine}</div>
                 <div>{getRecoveryInstruction(selectedPrintJobDetail).secondLine}</div>
+                <div className="mt-1 font-medium">Next action: request re-issue, then print approved replacement labels.</div>
               </div>
             ) : null}
           </div>

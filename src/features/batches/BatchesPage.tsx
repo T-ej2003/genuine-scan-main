@@ -97,11 +97,15 @@ export default function BatchesPage() {
     workspace.workspaceOpen && canRequestReissue
   );
 
-  const fetchReissueRequests = async () => {
+  const fetchReissueRequests = async (options?: { force?: boolean }) => {
     if (!canRequestReissue) return;
     setReissueRequestsLoading(true);
     try {
-      const response = await apiClient.listPrintReissueRequests({ status: isManufacturer ? undefined : "PENDING", limit: 25 });
+      const response = await apiClient.listPrintReissueRequests({
+        status: isManufacturer ? undefined : "PENDING",
+        limit: 25,
+        force: Boolean(options?.force),
+      });
       setReissueRequests(response.success && Array.isArray(response.data) ? response.data : []);
     } finally {
       setReissueRequestsLoading(false);
@@ -110,7 +114,7 @@ export default function BatchesPage() {
 
   useEffect(() => {
     if (!workspace.workspaceOpen || !canRequestReissue) return;
-    void fetchReissueRequests();
+    void fetchReissueRequests({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.workspaceOpen, canRequestReissue, role]);
 
@@ -150,7 +154,7 @@ export default function BatchesPage() {
       });
 
       await Promise.allSettled([
-        fetchReissueRequests(),
+        fetchReissueRequests({ force: true }),
         workspacePrintJobsQuery.refetch(),
         operations.fetchBatches(),
         workspace.workspaceBatch ? workspace.fetchWorkspaceHistory(workspace.workspaceBatch) : Promise.resolve(),
@@ -192,7 +196,7 @@ export default function BatchesPage() {
               : "Replacement labels are approved and ready for the manufacturer to print."
             : "MSCQR recorded the rejection and notified the requester.",
       });
-      await Promise.allSettled([fetchReissueRequests(), workspacePrintJobsQuery.refetch(), operations.fetchBatches()]);
+      await Promise.allSettled([fetchReissueRequests({ force: true }), workspacePrintJobsQuery.refetch(), operations.fetchBatches()]);
     } finally {
       setDecidingReissueRequestId(null);
     }
@@ -225,7 +229,7 @@ export default function BatchesPage() {
     }
 
     void workspace.openWorkspace(matchedWorkspace);
-    if (targetReissueRequestId) void fetchReissueRequests();
+    if (targetReissueRequestId) void fetchReissueRequests({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [operations.loading, operations.stableRows, searchParams]);
 
@@ -266,7 +270,7 @@ export default function BatchesPage() {
         title: "Replacement print started",
         description: "MSCQR created the replacement print job. Physical confirmation still comes from the connector.",
       });
-      await Promise.allSettled([fetchReissueRequests(), workspacePrintJobsQuery.refetch(), operations.fetchBatches()]);
+      await Promise.allSettled([fetchReissueRequests({ force: true }), workspacePrintJobsQuery.refetch(), operations.fetchBatches()]);
     } finally {
       setPrintingReissueRequestId(null);
     }
@@ -411,7 +415,7 @@ export default function BatchesPage() {
         securePrinterReady={securePrinterReady}
         onReissueDecisionNoteChange={setReissueDecisionNote}
         onRefreshReissueRequests={() => {
-          void fetchReissueRequests();
+          void fetchReissueRequests({ force: true });
         }}
         onDecideReissueRequest={(requestId, decision) => {
           void decideReissueRequest(requestId, decision);

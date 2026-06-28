@@ -7,7 +7,12 @@ import {
 
 import prisma from "../config/database";
 import { createAuditLog } from "./auditService";
-import { createAuthorizedPrintReissue } from "./printReissueService";
+import {
+  createAuthorizedPrintReissue,
+  describeOriginalPrintJobForReissue,
+  projectPrintJobReissueSummaries,
+  type PrintJobReissueProjection,
+} from "./printReissueService";
 import { buildScopedPrintJobWhere, type PrintJobScope } from "./printJobScopeService";
 import { createRoleNotifications, createUserNotification } from "./notificationService";
 
@@ -37,59 +42,98 @@ const targetApproverRoleFor = (role: UserRole) => {
   throw Object.assign(new Error("Access denied"), { statusCode: 403 });
 };
 
-const serializeRequest = (row: any) => ({
-  id: row.id,
-  originalPrintJobId: row.originalPrintJobId,
-  replacementPrintJobId: row.replacementPrintJobId,
-  status: row.status,
-  reason: row.reason,
-  decisionNote: row.decisionNote || row.rejectionReason || null,
-  requestedByRole: row.requestedByRole,
-  targetApproverRole: row.targetApproverRole,
-  quantity: row.quantity,
-  affectedRangeStart: row.affectedRangeStart,
-  affectedRangeEnd: row.affectedRangeEnd,
-  requestedAt: row.createdAt,
-  updatedAt: row.updatedAt,
-  approvedAt: row.approvedAt,
-  rejectedAt: row.rejectedAt,
-  executedAt: row.executedAt,
-  batch: row.originalPrintJob?.batch
-    ? {
-        id: row.originalPrintJob.batch.id,
-        name: row.originalPrintJob.batch.name,
-        licenseeId: row.originalPrintJob.batch.licenseeId,
-      }
-    : null,
-  printer: row.originalPrintJob?.printer
-    ? {
-        id: row.originalPrintJob.printer.id,
-        displayName: row.originalPrintJob.printer.name || "Printer",
-      }
-    : null,
-  requestedBy: row.requestedByUser
-    ? {
-        id: row.requestedByUser.id,
-        name: row.requestedByUser.name || row.requestedByUser.email || "User",
-        email: row.requestedByUser.email || null,
-        role: row.requestedByUser.role,
-      }
-    : null,
-  decidedBy: row.approvedByUser
-    ? {
-        id: row.approvedByUser.id,
-        name: row.approvedByUser.name || row.approvedByUser.email || "User",
-        email: row.approvedByUser.email || null,
-        role: row.approvedByUser.role,
-      }
-    : null,
-});
+const approvalStateFor = (row: any) => {
+  if (row.status === ReissueRequestStatus.APPROVED) return "APPROVED_READY_TO_PRINT";
+  if (row.status === ReissueRequestStatus.EXECUTED) return "PRINT_JOB_CREATED";
+  if (row.status === ReissueRequestStatus.REJECTED) return "REJECTED";
+  if (row.targetApproverRole === "SUPER_ADMIN") return "SUPER_ADMIN_REVIEW";
+  return "BRAND_ADMIN_REVIEW";
+};
+
+const nextActionFor = (row: any) => {
+  if (row.status === ReissueRequestStatus.APPROVED) return "Print replacement labels";
+  if (row.status === ReissueRequestStatus.EXECUTED) return "Watch replacement print job";
+  if (row.status === ReissueRequestStatus.REJECTED) return "No action";
+  if (row.targetApproverRole === "SUPER_ADMIN") return "Waiting for super admin review";
+  return "Waiting for brand admin review";
+};
+
+const serializeRequest = (row: any, projection?: PrintJobReissueProjection | null) => {
+  const original = row.originalPrintJob ? describeOriginalPrintJobForReissue(row.originalPrintJob, projection) : null;
+  const requestedCount = Number(row.quantity || original?.requestedCount || 0);
+  const requestedRangeStart = row.affectedRangeStart || original?.requestedRangeStart || null;
+  const requestedRangeEnd = row.affectedRangeEnd || original?.requestedRangeEnd || null;
+
+  return {
+    id: row.id,
+    originalPrintJobId: row.originalPrintJobId,
+    replacementPrintJobId: row.replacementPrintJobId,
+    status: row.status,
+    approvalState: approvalStateFor(row),
+    reason: row.reason,
+    decisionNote: row.decisionNote || row.rejectionReason || null,
+    requestedByRole: row.requestedByRole,
+    targetApproverRole: row.targetApproverRole,
+    quantity: row.quantity,
+    requestedCount,
+    affectedRangeStart: row.affectedRangeStart,
+    affectedRangeEnd: row.affectedRangeEnd,
+    requestedRangeStart,
+    requestedRangeEnd,
+    requestedAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    approvedAt: row.approvedAt,
+    rejectedAt: row.rejectedAt,
+    executedAt: row.executedAt,
+    originalPrintJobNumber: original?.originalPrintJobNumber || null,
+    originalRequestedRange: original?.originalRequestedRange || null,
+    originalConfirmedCount: original?.originalConfirmedCount || 0,
+    originalPendingCount: original?.originalPendingCount || 0,
+    originalFailedCount: original?.originalFailedCount || 0,
+    recoveryStartLabel: original?.recoveryStartLabel || requestedRangeStart,
+    recoveryEndLabel: original?.recoveryEndLabel || requestedRangeEnd,
+    nextAction: nextActionFor(row),
+    batch: row.originalPrintJob?.batch
+      ? {
+          id: row.originalPrintJob.batch.id,
+          name: row.originalPrintJob.batch.name,
+          licenseeId: row.originalPrintJob.batch.licenseeId,
+        }
+      : null,
+    printer: row.originalPrintJob?.printer
+      ? {
+          id: row.originalPrintJob.printer.id,
+          displayName: row.originalPrintJob.printer.name || "Printer",
+        }
+      : null,
+    requestedBy: row.requestedByUser
+      ? {
+          id: row.requestedByUser.id,
+          name: row.requestedByUser.name || row.requestedByUser.email || "User",
+          email: row.requestedByUser.email || null,
+          role: row.requestedByUser.role,
+        }
+      : null,
+    decidedBy: row.approvedByUser
+      ? {
+          id: row.approvedByUser.id,
+          name: row.approvedByUser.name || row.approvedByUser.email || "User",
+          email: row.approvedByUser.email || null,
+          role: row.approvedByUser.role,
+        }
+      : null,
+  };
+};
 
 const serializeReplacementPrintStart = (row: any, idempotent = false) => ({
   reissueRequestId: row.id,
   replacementPrintJobId: row.replacementPrintJobId,
   printSessionId: row.replacementPrintJob?.printSession?.id || null,
   quantity: Number(row.replacementPrintJob?.itemCount || row.replacementPrintJob?.quantity || row.quantity || 0),
+  requestedRangeStart: row.replacementPrintJob?.rangeStart || row.affectedRangeStart || null,
+  requestedRangeEnd: row.replacementPrintJob?.rangeEnd || row.affectedRangeEnd || null,
+  recoveryStartLabel: row.affectedRangeStart || null,
+  recoveryEndLabel: row.affectedRangeEnd || null,
   mode: row.replacementPrintJob?.printMode || null,
   pipelineState: row.replacementPrintJob?.pipelineState || null,
   idempotent,
@@ -100,6 +144,12 @@ const requestInclude = {
     include: {
       batch: { select: { id: true, name: true, licenseeId: true } },
       printer: { select: { id: true, name: true } },
+      printSession: {
+        select: {
+          id: true,
+          status: true,
+        },
+      },
     },
   },
   replacementPrintJob: {
@@ -107,6 +157,8 @@ const requestInclude = {
       id: true,
       quantity: true,
       itemCount: true,
+      rangeStart: true,
+      rangeEnd: true,
       printMode: true,
       pipelineState: true,
       printSession: { select: { id: true } },
@@ -115,6 +167,11 @@ const requestInclude = {
   requestedByUser: { select: { id: true, name: true, email: true, role: true } },
   approvedByUser: { select: { id: true, name: true, email: true, role: true } },
 };
+
+const loadProjectionForRequest = async (request: { originalPrintJobId?: string | null }) =>
+  (await projectPrintJobReissueSummaries(prisma, [String(request.originalPrintJobId || "").trim()])).get(
+    String(request.originalPrintJobId || "").trim()
+  ) || null;
 
 export const createScopedPrintReissueRequest = async (params: {
   scope: PrintJobScope;
@@ -130,10 +187,22 @@ export const createScopedPrintReissueRequest = async (params: {
     include: {
       batch: { select: { id: true, name: true, licenseeId: true } },
       printer: { select: { id: true, name: true } },
+      printSession: {
+        select: {
+          id: true,
+          status: true,
+        },
+      },
     },
   });
   if (!originalJob) throw Object.assign(new Error("Print job not found"), { statusCode: 404 });
   const original = originalJob as any;
+  const originalProjection =
+    (await projectPrintJobReissueSummaries(prisma, [originalJob.id])).get(originalJob.id) || null;
+  const originalReissue = describeOriginalPrintJobForReissue(originalJob, originalProjection);
+  const requestedCount = params.quantity || originalReissue.requestedCount || null;
+  const requestedRangeStart = params.affectedRangeStart || originalReissue.requestedRangeStart || null;
+  const requestedRangeEnd = params.affectedRangeEnd || originalReissue.requestedRangeEnd || null;
 
   const targetApproverRole = targetApproverRoleFor(params.scope.role);
   const existing = await prisma.printReissueRequest.findFirst({
@@ -146,7 +215,7 @@ export const createScopedPrintReissueRequest = async (params: {
     include: requestInclude,
     orderBy: { createdAt: "desc" },
   });
-  if (existing) return { request: serializeRequest(existing), idempotent: true };
+  if (existing) return { request: serializeRequest(existing, originalProjection), idempotent: true };
 
   const created = await prisma.printReissueRequest.create({
     data: {
@@ -159,9 +228,9 @@ export const createScopedPrintReissueRequest = async (params: {
       batchId: original.batch.id,
       requestedByRole: params.scope.role,
       targetApproverRole,
-      quantity: params.quantity || null,
-      affectedRangeStart: params.affectedRangeStart || null,
-      affectedRangeEnd: params.affectedRangeEnd || null,
+      quantity: requestedCount,
+      affectedRangeStart: requestedRangeStart,
+      affectedRangeEnd: requestedRangeEnd,
     },
     include: requestInclude,
   });
@@ -177,7 +246,9 @@ export const createScopedPrintReissueRequest = async (params: {
       batchId: original.batch.id,
       manufacturerId: original.manufacturerId,
       targetApproverRole,
-      quantity: params.quantity || null,
+      quantity: requestedCount,
+      affectedRangeStart: requestedRangeStart,
+      affectedRangeEnd: requestedRangeEnd,
     },
   });
 
@@ -205,7 +276,7 @@ export const createScopedPrintReissueRequest = async (params: {
     channels: [NotificationChannel.WEB],
   });
 
-  return { request: serializeRequest(created), idempotent: false };
+  return { request: serializeRequest(created, originalProjection), idempotent: false };
 };
 
 export const listScopedPrintReissueRequests = async (params: {
@@ -230,7 +301,11 @@ export const listScopedPrintReissueRequests = async (params: {
     take: Math.min(Math.max(Number(params.limit || 25), 1), 100),
   });
 
-  return rows.map(serializeRequest);
+  const summaries = await projectPrintJobReissueSummaries(
+    prisma,
+    rows.map((row) => row.originalPrintJobId)
+  );
+  return rows.map((row) => serializeRequest(row, summaries.get(row.originalPrintJobId) || null));
 };
 
 const assertCanDecide = (scope: PrintJobScope, request: any) => {
@@ -313,7 +388,7 @@ export const decideScopedPrintReissueRequest = async (params: {
         targetRoute: `/batches?batchId=${encodeURIComponent(String(request.batchId || ""))}&tab=reissue&reissueRequestId=${encodeURIComponent(request.id)}`,
       },
     });
-    return { request: serializeRequest(rejected), result: null };
+    return { request: serializeRequest(rejected, await loadProjectionForRequest(rejected)), result: null };
   }
 
   if (request.targetApproverRole === "LICENSEE_ADMIN") {
@@ -384,7 +459,7 @@ export const decideScopedPrintReissueRequest = async (params: {
       },
     });
 
-    return { request: serializeRequest(forwarded), result: null };
+    return { request: serializeRequest(forwarded, await loadProjectionForRequest(forwarded)), result: null };
   }
 
   const approved = await prisma.printReissueRequest.update({
@@ -435,7 +510,7 @@ export const decideScopedPrintReissueRequest = async (params: {
     },
   });
 
-  return { request: serializeRequest(approved), result: null };
+  return { request: serializeRequest(approved, await loadProjectionForRequest(approved)), result: null };
 };
 
 export const startApprovedPrintReissueRequest = async (params: {
@@ -455,7 +530,11 @@ export const startApprovedPrintReissueRequest = async (params: {
   }
 
   if (request.status === ReissueRequestStatus.EXECUTED && request.replacementPrintJobId) {
-    return { request: serializeRequest(request), result: serializeReplacementPrintStart(request, true), idempotent: true };
+    return {
+      request: serializeRequest(request, await loadProjectionForRequest(request)),
+      result: serializeReplacementPrintStart(request, true),
+      idempotent: true,
+    };
   }
 
   if (request.status !== ReissueRequestStatus.APPROVED) {
@@ -530,5 +609,5 @@ export const startApprovedPrintReissueRequest = async (params: {
     userAgent: params.userAgent || undefined,
   });
 
-  return { request: serializeRequest(executed), result, idempotent: false };
+  return { request: serializeRequest(executed, await loadProjectionForRequest(executed)), result, idempotent: false };
 };
