@@ -106,6 +106,15 @@ Related join/link table used by policies:
 
 The prototype SQL creates helper functions under `app_rls` and table policies for the requested tables only.
 
+Every protected table is configured with both `ENABLE ROW LEVEL SECURITY` and
+`FORCE ROW LEVEL SECURITY`. PostgreSQL table owners bypass row-level security
+unless `FORCE` is set. This matters for staging/P2 validation because Prisma
+migrations and disposable test databases can leave the Prisma connection role as
+the owner of migrated tables. Without `FORCE`, tests executed through that role
+could pass while bypassing the prototype policies, creating false confidence.
+The rollback SQL therefore clears `FORCE` with `NO FORCE ROW LEVEL SECURITY`
+before disabling RLS.
+
 The policies intentionally do not grant generic public access to raw tenant tables. Public verification is represented as an explicit service context:
 
 - `app.role = 'public_verification'`
@@ -126,7 +135,7 @@ Run this only against a disposable staging database restored from sanitized data
 1. Prepare
    - Apply `documents/security/mscqr_staging_rls_prototype.sql` manually with a DBA-owned session.
    - Confirm no production database URL is present.
-   - Confirm `SELECT relname, relrowsecurity FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relrowsecurity;` returns only the prototype target tables.
+   - Confirm `SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relrowsecurity;` returns only the prototype target tables and shows both `relrowsecurity = true` and `relforcerowsecurity = true`.
 
 2. Licensee isolation
    - Seed licensee A and licensee B, each with a batch.
@@ -161,7 +170,7 @@ Run this only against a disposable staging database restored from sanitized data
 
 7. Rollback
    - Apply `documents/security/mscqr_staging_rls_rollback.sql`.
-   - Assert `relrowsecurity` and policies are removed for the target tables.
+   - Assert `relrowsecurity = false`, `relforcerowsecurity = false`, and policies are removed for the target tables.
    - Re-run application-layer authorization tests to confirm current app auth remains the controlling mechanism.
 
 ## Production Rollout Risks And Blockers
