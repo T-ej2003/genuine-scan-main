@@ -103,5 +103,7 @@ assert(!workflowSource.includes("items:"), "Reissue request list/review queries 
 assert(serviceSource.includes("PRINT_REISSUE_ORIGINAL_NOT_RECOVERABLE"), "Invalid original lifecycle must be a typed business conflict");
 assert(serviceSource.includes("NOT_ENOUGH_RECOVERABLE_LABELS"), "Invalid recovery range must return a typed 422-style conflict");
 assert(controllerSource.includes("error.statusCode") && controllerSource.includes("error?.details"), "Reissue print endpoint must return structured safe business errors");
+assert(!/displayCode\s*\|\|\s*[^,\n]*code/i.test(serviceSource), "Print reissue service must not fall back from displayCode to public QR identity");
+assert(serviceSource.includes("REPLACEMENT_QR_PUBLIC_CODE_MISSING"), "Replacement printing must fail closed when QRCode.code is missing");
 
 console.log("print reissue recovery range tests passed");

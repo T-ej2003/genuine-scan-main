@@ -88,7 +88,8 @@ const hasNonEmptyJsonEvidence = (value: unknown) => {
 
 const displayLabelCode = (row: PrintItemRangeRow) => {
   const displayCode = String(row.qrCode?.displayCode || "").trim();
-  return displayCode || String(row.code || "").trim();
+  if (displayCode) return displayCode;
+  return String(row.code || "").trim();
 };
 
 const buildRangeSummary = (codes: Array<string | null | undefined>): ReissueRangeSummary => {
@@ -234,7 +235,7 @@ export const projectPrintJobReissueSummaries = async (
       AND pi."confirmationEvidence"::text NOT IN ('null', '{}')
     )
   )`;
-  const labelSql = Prisma.sql`COALESCE(q."displayCode", pi."code")`;
+  const labelSql = Prisma.sql`q."displayCode"`;
 
   const rows = await client.$queryRaw<
     Array<{
@@ -413,7 +414,24 @@ export const createAuthorizedPrintReissue = async (params: {
         );
       }
 
-      const prepared = reservedRows.map((qr: ReservableQrCodeRow) => {
+      const normalizedReservedRows = reservedRows.map((qr) => ({
+        ...qr,
+        code: String(qr.code || "").trim(),
+      }));
+      const missingPublicCode = normalizedReservedRows.find((qr) => !qr.code);
+      if (missingPublicCode) {
+        throw Object.assign(new Error("Internal print reissue invariant failed: replacement QRCode.code is missing."), {
+          code: "REPLACEMENT_QR_PUBLIC_CODE_MISSING",
+          statusCode: 500,
+          details: {
+            qrCodeId: missingPublicCode.id,
+            batchId: originalJob.batch.id,
+            replacementPrintJobId: null,
+          },
+        });
+      }
+
+      const prepared = normalizedReservedRows.map((qr: ReservableQrCodeRow) => {
         const nonce = randomNonce();
         const payload = {
           qr_id: qr.id,
