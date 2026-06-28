@@ -58,7 +58,7 @@ export const createPrintingOperationsApi = (core: ApiClientCore) => ({
     );
   },
 
-  listPrintReissueRequests(options?: { status?: string; limit?: number }) {
+  listPrintReissueRequests(options?: { status?: string; limit?: number; force?: boolean }) {
     const params = new URLSearchParams();
     if (options?.status) params.append("status", options.status);
     if (options?.limit) params.append("limit", String(options.limit));
@@ -66,7 +66,8 @@ export const createPrintingOperationsApi = (core: ApiClientCore) => ({
     return controlledPrinterGet<any[]>(
       `print-reissue-requests:${query || "all"}`,
       PRINTER_STATUS_MIN_REFRESH_MS,
-      () => core.request<any[]>(`/manufacturer/print-reissue-requests${query}`)
+      () => core.request<any[]>(`/manufacturer/print-reissue-requests${query}`),
+      { force: Boolean(options?.force) }
     );
   },
 

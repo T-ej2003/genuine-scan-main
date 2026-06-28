@@ -388,6 +388,16 @@ export const printApprovedManufacturerPrintReissueRequest = async (req: AuthRequ
         error: "This source batch is busy. Refresh the workspace and try the reissue again.",
       });
     }
+    if (typeof error?.statusCode === "number") {
+      const safeMessage = message || "Replacement labels could not be printed.";
+      return res.status(error.statusCode).json({
+        success: false,
+        error: safeMessage,
+        message: safeMessage,
+        ...(typeof error?.code === "string" ? { code: error.code, errorCode: error.code } : {}),
+        ...(error?.details ? { details: error.details } : {}),
+      });
+    }
     return handleUserSafeError(res, error, "Replacement labels could not be printed.");
   }
 };
