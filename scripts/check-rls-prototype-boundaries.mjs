@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { execFileSync } from "node:child_process";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 
@@ -20,6 +21,25 @@ const walk = (dir, out = []) => {
 
 const toRel = (file) => path.relative(repoRoot, file).replace(/\\/g, "/");
 const failures = [];
+const listGitFiles = (...args) =>
+  execFileSync("git", ["ls-files", ...args], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  })
+    .split("\n")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+const trackedFiles = Array.from(new Set([...listGitFiles(), ...listGitFiles("--others", "--exclude-standard")]));
+const automationFileExactPaths = new Set(["package.json", "backend/package.json"]);
+const automationDirectoryPrefixes = [
+  ".github/workflows/",
+  "deploy/",
+  "ops/deploy/",
+  "backend/prisma/migrations/",
+];
+const requiredAutomationCoverage = ["ops/deploy/deploy.yml", "ops/deploy/deploy-standby.yml"];
+const isAutomationFile = (file) =>
+  automationFileExactPaths.has(file) || automationDirectoryPrefixes.some((prefix) => file.startsWith(prefix));
 
 const migrationFiles = walk(path.join(repoRoot, "backend/prisma/migrations")).filter((file) =>
   /\.(sql|ts|js|mjs|cjs)$/.test(file)
@@ -42,6 +62,31 @@ for (const file of srcFiles) {
   if (!/rlsTransactionContextPrototype|withRlsPrototypeTransaction|setRlsPrototypeContext/.test(source)) continue;
   if (!/rls-prototype-approved-import/.test(source)) {
     failures.push(`${rel}: production runtime must not import RLS prototype helper without rls-prototype-approved-import marker.`);
+  }
+}
+
+const rlsIndexArtifacts = trackedFiles.filter((file) => /^mscqr_rls_index.*non_applied\.sql$/i.test(path.basename(file)));
+for (const file of rlsIndexArtifacts) {
+  if (!file.startsWith("documents/security/")) {
+    failures.push(`${file}: non-applied RLS index SQL artifacts must stay under documents/security.`);
+  }
+}
+
+const automationFiles = trackedFiles.filter(
+  (file) => isAutomationFile(file)
+);
+for (const file of requiredAutomationCoverage) {
+  if (trackedFiles.includes(file) && !automationFiles.includes(file)) {
+    failures.push(`${file}: required deploy automation path is not covered by the non-applied RLS index artifact scan.`);
+  }
+}
+for (const file of automationFiles) {
+  const source = fs.readFileSync(path.join(repoRoot, file), "utf8");
+  for (const artifact of rlsIndexArtifacts) {
+    const artifactName = path.basename(artifact);
+    if (source.includes(artifactName) || source.includes(artifact)) {
+      failures.push(`${file}: automatic migration/deploy automation must not reference non-applied RLS index artifact ${artifact}.`);
+    }
   }
 }
 
