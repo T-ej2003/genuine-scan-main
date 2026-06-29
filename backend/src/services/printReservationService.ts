@@ -64,6 +64,8 @@ export type UnresolvedRecoveryRange = {
   printJobId: string | null;
 };
 
+export type ReservableQrCodeSummaryReadClient = Pick<Prisma.TransactionClient, "$queryRaw">;
+
 const hasNonEmptyJsonEvidence = (value: unknown) => {
   if (value === null || value === undefined) return false;
   if (typeof value === "object" && !Array.isArray(value)) return Object.keys(value as Record<string, unknown>).length > 0;
@@ -293,7 +295,7 @@ export const findUnresolvedRecoveryRangeForBatch = async (
 };
 
 export const listReservableQrCodeSummaries = async (
-  client: Prisma.TransactionClient,
+  client: ReservableQrCodeSummaryReadClient,
   batchIds: string[]
 ): Promise<Map<string, ReservableQrCodeSummary>> => {
   if (batchIds.length === 0) return new Map();

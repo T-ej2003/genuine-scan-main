@@ -10,6 +10,7 @@ import {
 
 const LINEAGE_BACKFILL_COOLDOWN_MS = 5 * 60_000;
 const lineageBackfillState = new Map<string, number>();
+type DbClient = typeof prisma | Prisma.TransactionClient;
 
 const UNASSIGNED_STATUSES = [QRStatus.DORMANT, QRStatus.ACTIVE] as const;
 const PRINTABLE_STATUSES = [QRStatus.ALLOCATED, QRStatus.DORMANT, QRStatus.ACTIVE] as const;
@@ -152,7 +153,7 @@ export const backfillBatchLineageFromAuditLogs = async (opts?: {
   }
 };
 
-const buildCountMaps = async (batchIds: string[]) => {
+const buildCountMaps = async (batchIds: string[], db: DbClient = prisma, sequentialReads = false) => {
   if (batchIds.length === 0) {
     return {
       countsMap: new Map<string, BatchInventoryCounts>(),
@@ -162,8 +163,8 @@ const buildCountMaps = async (batchIds: string[]) => {
     };
   }
 
-  const [rollups, unassignedRanges, reservableSummaries] = await Promise.all([
-    prisma.inventoryStatusRollup.findMany({
+  const readRollups = () =>
+    db.inventoryStatusRollup.findMany({
       where: { batchId: { in: batchIds } },
       select: {
         batchId: true,
@@ -176,8 +177,9 @@ const buildCountMaps = async (batchIds: string[]) => {
         blocked: true,
         scanned: true,
       },
-    }),
-    prisma.qRCode.groupBy({
+    });
+  const readUnassignedRanges = () =>
+    db.qRCode.groupBy({
       by: ["batchId"],
       where: {
         batchId: { in: batchIds },
@@ -186,9 +188,12 @@ const buildCountMaps = async (batchIds: string[]) => {
       _count: { _all: true },
       _min: { code: true, displayCode: true },
       _max: { code: true, displayCode: true },
-    }),
-    listReservableQrCodeSummaries(prisma, batchIds),
-  ]);
+    });
+  const readReservableSummaries = () => listReservableQrCodeSummaries(db, batchIds);
+
+  const [rollups, unassignedRanges, reservableSummaries] = sequentialReads
+    ? [await readRollups(), await readUnassignedRanges(), await readReservableSummaries()]
+    : await Promise.all([readRollups(), readUnassignedRanges(), readReservableSummaries()]);
 
   const countsMap = new Map<string, BatchInventoryCounts>();
   for (const rollup of rollups) {
@@ -206,7 +211,7 @@ const buildCountMaps = async (batchIds: string[]) => {
 
   const missingBatchIds = batchIds.filter((batchId) => !countsMap.has(batchId));
   if (missingBatchIds.length > 0) {
-    const countGroups = await prisma.qRCode.groupBy({
+    const countGroups = await db.qRCode.groupBy({
       by: ["batchId", "status"],
       where: { batchId: { in: missingBatchIds } },
       _count: { _all: true },
@@ -242,11 +247,19 @@ const buildCountMaps = async (batchIds: string[]) => {
   };
 };
 
-export const enrichBatchSummaries = async (batches: BatchWithScope[]): Promise<BatchOperationalSummary[]> => {
+export const enrichBatchSummaries = async (
+  batches: BatchWithScope[],
+  db: DbClient = prisma,
+  sequentialReads = false
+): Promise<BatchOperationalSummary[]> => {
   if (!batches.length) return [];
 
   const batchIds = batches.map((batch) => batch.id);
-  const { countsMap, unassignedRangeMap, printableRangeMap, reservableCountMap } = await buildCountMaps(batchIds);
+  const { countsMap, unassignedRangeMap, printableRangeMap, reservableCountMap } = await buildCountMaps(
+    batchIds,
+    db,
+    sequentialReads
+  );
 
   return batches.map((batch) => {
     const counts = countsMap.get(batch.id) || emptyCounts();
@@ -293,24 +306,40 @@ export const listCachedBatchOperationalSummaries = async (params: {
   offset: number;
 }) =>
   getOrComputeVersionedCache("qr-batches", params.scopeKey, 20, async () => {
-    const [batches, total] = await Promise.all([
-      prisma.batch.findMany({
-        where: params.where,
-        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-        include: {
-          licensee: { select: { id: true, name: true, prefix: true } },
-          manufacturer: { select: { id: true, name: true, email: true } },
-          parentBatch: { select: { id: true, name: true } },
-          rootBatch: { select: { id: true, name: true } },
-          _count: { select: { qrCodes: true } },
-        },
-        take: params.limit,
-        skip: params.offset,
-      }),
-      prisma.batch.count({ where: params.where }),
-    ]);
-    return { rows: batches.length ? await enrichBatchSummaries(batches as BatchWithScope[]) : batches, total };
+    return listBatchOperationalSummaries(params);
   });
+
+export const listBatchOperationalSummaries = async (params: {
+  where: Prisma.BatchWhereInput;
+  limit: number;
+  offset: number;
+  db?: DbClient;
+}) => {
+  const db = params.db || prisma;
+  const useSequentialReads = Boolean(params.db);
+  const readBatches = () =>
+    db.batch.findMany({
+      where: params.where,
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      include: {
+        licensee: { select: { id: true, name: true, prefix: true } },
+        manufacturer: { select: { id: true, name: true, email: true } },
+        parentBatch: { select: { id: true, name: true } },
+        rootBatch: { select: { id: true, name: true } },
+        _count: { select: { qrCodes: true } },
+      },
+      take: params.limit,
+      skip: params.offset,
+    });
+  const readTotal = () => db.batch.count({ where: params.where });
+  const [batches, total] = useSequentialReads
+    ? [await readBatches(), await readTotal()]
+    : await Promise.all([readBatches(), readTotal()]);
+  return {
+    rows: batches.length ? await enrichBatchSummaries(batches as BatchWithScope[], db, useSequentialReads) : batches,
+    total,
+  };
+};
 
 export const getBatchAllocationMap = async (batchId: string, opts?: { licenseeId?: string }) => {
   const focusBatch = await prisma.batch.findFirst({
