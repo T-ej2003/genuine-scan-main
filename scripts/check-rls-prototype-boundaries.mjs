@@ -30,6 +30,16 @@ const listGitFiles = (...args) =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 const trackedFiles = Array.from(new Set([...listGitFiles(), ...listGitFiles("--others", "--exclude-standard")]));
+const automationFileExactPaths = new Set(["package.json", "backend/package.json"]);
+const automationDirectoryPrefixes = [
+  ".github/workflows/",
+  "deploy/",
+  "ops/deploy/",
+  "backend/prisma/migrations/",
+];
+const requiredAutomationCoverage = ["ops/deploy/deploy.yml", "ops/deploy/deploy-standby.yml"];
+const isAutomationFile = (file) =>
+  automationFileExactPaths.has(file) || automationDirectoryPrefixes.some((prefix) => file.startsWith(prefix));
 
 const migrationFiles = walk(path.join(repoRoot, "backend/prisma/migrations")).filter((file) =>
   /\.(sql|ts|js|mjs|cjs)$/.test(file)
@@ -63,13 +73,13 @@ for (const file of rlsIndexArtifacts) {
 }
 
 const automationFiles = trackedFiles.filter(
-  (file) =>
-    file === "package.json" ||
-    file === "backend/package.json" ||
-    file.startsWith(".github/workflows/") ||
-    file.startsWith("deploy/") ||
-    file.startsWith("backend/prisma/migrations/")
+  (file) => isAutomationFile(file)
 );
+for (const file of requiredAutomationCoverage) {
+  if (trackedFiles.includes(file) && !automationFiles.includes(file)) {
+    failures.push(`${file}: required deploy automation path is not covered by the non-applied RLS index artifact scan.`);
+  }
+}
 for (const file of automationFiles) {
   const source = fs.readFileSync(path.join(repoRoot, file), "utf8");
   for (const artifact of rlsIndexArtifacts) {

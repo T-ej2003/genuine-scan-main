@@ -96,7 +96,7 @@ Before any production index build:
 
 ## Guardrails
 
-`scripts/check-rls-prototype-boundaries.mjs` now checks that `mscqr_rls_index*_non_applied.sql` files stay under `documents/security/` and are not referenced by package scripts, GitHub workflow automation, deploy files, or Prisma migrations. This keeps reviewed SQL as a human-approved artifact rather than an automatic database change.
+`scripts/check-rls-prototype-boundaries.mjs` now checks that `mscqr_rls_index*_non_applied.sql` files stay under `documents/security/` and are not referenced by package scripts, GitHub workflow automation, deploy automation, or Prisma migrations. The deploy automation scan includes `deploy/` and the Ansible playbooks under `ops/deploy/`, including `ops/deploy/deploy.yml` and `ops/deploy/deploy-standby.yml`. This keeps reviewed SQL as a human-approved artifact rather than an automatic database change.
 
 ## CTO Recommendations
 
