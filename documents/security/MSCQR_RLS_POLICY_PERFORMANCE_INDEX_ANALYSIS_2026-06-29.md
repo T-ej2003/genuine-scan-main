@@ -121,7 +121,7 @@ The printer list candidate filters local-agent rows by `assignedUserId` or print
 
 ## Risky Missing or Weak Index Shapes
 
-These are recommendations only and are captured in `documents/security/mscqr_rls_index_recommendations_non_applied.sql`.
+These are recommendations only and are captured in `documents/security/mscqr_rls_index_recommendations_non_applied.sql`. The reviewed rollout decision and table-by-table classifications live in `documents/security/MSCQR_RLS_INDEX_ROLLOUT_PLAN_2026-06-29.md`; use that plan before selecting any production or staging index work.
 
 - `Batch(licenseeId, updatedAt DESC, createdAt DESC, id)`
 - `Batch(manufacturerId, updatedAt DESC, createdAt DESC, id)` with `manufacturerId IS NOT NULL`
