@@ -9,6 +9,11 @@ import {
   isStagingRlsBatchesReadEnabled,
   withStagingRlsBatchReadTransaction,
 } from "../lib/stagingRlsBatchReadContext";
+import {
+  categorizeStagingRlsBatchReadFailure,
+  classifyStagingRlsBatchReadContext,
+  recordStagingRlsBatchReadProof,
+} from "../observability/stagingRlsBatchReadProof";
 import { AuthenticatedSessionClaims } from "../types";
 
 type LoadBatchListPayloadParams = {
@@ -45,8 +50,33 @@ const loadBatchListPayload = async (
 };
 
 export const listScopedBatchReadPayload = async (params: LoadBatchListPayloadParams) => {
-  if (isStagingRlsBatchesReadEnabled()) {
-    return withStagingRlsBatchReadTransaction(prisma, params.user, (tx) => loadBatchListPayload(params, tx));
+  const flagEnabled = isStagingRlsBatchesReadEnabled();
+  if (flagEnabled) {
+    const startedAt = process.hrtime.bigint();
+    const contextClass = classifyStagingRlsBatchReadContext(params.user);
+    try {
+      const payload = await withStagingRlsBatchReadTransaction(prisma, params.user, (tx) =>
+        loadBatchListPayload(params, tx)
+      );
+      recordStagingRlsBatchReadProof({
+        flagEnabled,
+        contextClass,
+        durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
+        rowCount: Array.isArray(payload.rows) ? payload.rows.length : 0,
+        success: true,
+      });
+      return payload;
+    } catch (error) {
+      recordStagingRlsBatchReadProof({
+        flagEnabled,
+        contextClass,
+        durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
+        rowCount: 0,
+        success: false,
+        failureCategory: categorizeStagingRlsBatchReadFailure(error),
+      });
+      throw error;
+    }
   }
 
   return loadBatchListPayload(params);

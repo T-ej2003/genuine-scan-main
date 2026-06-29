@@ -26,6 +26,16 @@ const backendRoot = path.resolve(__dirname, "..");
 const distRoot = path.join(backendRoot, "dist");
 const repoRoot = path.resolve(__dirname, "../..");
 
+const mockModule = (relativePath, exportsValue) => {
+  const resolved = require.resolve(path.join(distRoot, relativePath));
+  require.cache[resolved] = {
+    id: resolved,
+    filename: resolved,
+    loaded: true,
+    exports: exportsValue,
+  };
+};
+
 const quoteIdent = (value) => {
   assert.match(value, /^[a-z0-9_]+$/i, "Unsafe PostgreSQL identifier");
   return `"${value.replace(/"/g, '""')}"`;
@@ -176,18 +186,80 @@ const assertBatchMarkers = (response, expectedMarker, forbiddenMarker, label) =>
   assert.doesNotMatch(response.text, new RegExp(forbiddenMarker, "i"), `${label}: leaked ${forbiddenMarker}`);
 };
 
+const withConsoleCapture = async (callback) => {
+  const logs = [];
+  const originalInfo = console.info;
+  const originalWarn = console.warn;
+  console.info = (...args) => logs.push({ level: "info", args });
+  console.warn = (...args) => logs.push({ level: "warn", args });
+  try {
+    await callback(logs);
+  } finally {
+    console.info = originalInfo;
+    console.warn = originalWarn;
+  }
+  return logs;
+};
+
+const getProofLogs = (logs) =>
+  logs
+    .filter((entry) => entry.args[0] === "staging_rls_batches_read_proof")
+    .map((entry) => ({ level: entry.level, event: entry.args[1] }));
+
+const assertSafeProofEvent = (event) => {
+  assert.strictEqual(event.metric, "staging_rls_batches_read");
+  assert.strictEqual(event.route, "GET /api/qr/batches");
+  assert.strictEqual(event.flagEnabled, true);
+  assert(["platform_admin", "manufacturer", "tenant_user"].includes(event.contextClass), "safe context class expected");
+  assert.strictEqual(typeof event.durationMs, "number");
+  assert(event.durationMs >= 0, "duration must be non-negative");
+  assert.strictEqual(typeof event.rowCount, "number");
+  assert(event.rowCount >= 0, "row count must be non-negative");
+
+  const serialized = JSON.stringify(event);
+  for (const forbidden of [
+    ids.licenseeAdminA,
+    ids.manufacturerA,
+    ids.superAdmin,
+    ids.licenseeA,
+    ids.orgA,
+    "licensee-admin-a@mscqr.test",
+    "manufacturer-a@mscqr.test",
+  ]) {
+    assert(!serialized.includes(forbidden), `proof event leaked raw identifier: ${forbidden}`);
+  }
+
+  for (const forbiddenKey of [
+    "userId",
+    "actorUserId",
+    "licenseeId",
+    "manufacturerId",
+    "organizationId",
+    "orgId",
+    "qrCode",
+    "token",
+    "secret",
+    "email",
+  ]) {
+    assert(!Object.prototype.hasOwnProperty.call(event, forbiddenKey), `proof event includes ${forbiddenKey}`);
+  }
+};
+
 const runFlagOffRouteAssertions = async () => {
   process.env[flagName] = "false";
-  await withP2TestApp(async ({ request, prisma }) => {
-    await seedP2Fixtures(prisma);
-    const tokens = await issueBearerTokens();
+  const logs = await withConsoleCapture(async () => {
+    await withP2TestApp(async ({ request, prisma }) => {
+      await seedP2Fixtures(prisma);
+      const tokens = await issueBearerTokens();
 
-    const licensee = await request("GET", "/api/qr/batches", null, { headers: authHeader(tokens.licenseeAdminA) });
-    assertBatchMarkers(licensee, "P2 Batch A", "P2 Batch B", "flag off licensee batch list");
+      const licensee = await request("GET", "/api/qr/batches", null, { headers: authHeader(tokens.licenseeAdminA) });
+      assertBatchMarkers(licensee, "P2 Batch A", "P2 Batch B", "flag off licensee batch list");
 
-    const manufacturer = await request("GET", "/api/qr/batches", null, { headers: authHeader(tokens.manufacturerA) });
-    assertBatchMarkers(manufacturer, "P2 Batch A", "P2 Batch B", "flag off manufacturer batch list");
+      const manufacturer = await request("GET", "/api/qr/batches", null, { headers: authHeader(tokens.manufacturerA) });
+      assertBatchMarkers(manufacturer, "P2 Batch A", "P2 Batch B", "flag off manufacturer batch list");
+    });
   });
+  assert.deepEqual(getProofLogs(logs), [], "flag-off cached path must not emit RLS proof events");
 };
 
 const runFlagOnRouteAssertions = async () => {
@@ -212,6 +284,23 @@ const runFlagOnRouteAssertions = async () => {
     process.env.DATABASE_URL = buildRoleUrl(databaseInfo.databaseUrl, appRoleName);
     clearDistRequireCache();
 
+    const proofLogs = [];
+    const batchRequestLogs = [];
+    const captureLogger = (level, message, meta) => {
+      if (message === "staging_rls_batches_read_proof") proofLogs.push({ level, event: meta });
+      if (message === "HTTP request completed" && meta?.path === "/api/qr/batches") {
+        batchRequestLogs.push({ level, event: meta });
+      }
+    };
+    mockModule("utils/logger.js", {
+      logger: {
+        info: (message, meta) => captureLogger("info", message, meta),
+        warn: (message, meta) => captureLogger("warn", message, meta),
+        error: (message, meta) => captureLogger("error", message, meta),
+        debug: (message, meta) => captureLogger("debug", message, meta),
+      },
+    });
+
     appPrisma = require("../dist/config/database").default;
     const { createBackendApp } = require("../dist/app");
     const app = createBackendApp();
@@ -234,6 +323,36 @@ const runFlagOnRouteAssertions = async () => {
       assert.equal(platform.status, 200, platform.text);
       assert.match(platform.text, /P2 Batch A/i, "platform admin should see tenant A batch");
       assert.match(platform.text, /P2 Batch B/i, "platform admin should see tenant B batch through explicit platform context");
+
+      const successProofs = proofLogs.filter((entry) => entry.event.success);
+      assert.equal(successProofs.length, 3, "flag-on route requests must emit success proof events");
+      assert.deepEqual(
+        successProofs.map((entry) => entry.event.contextClass).sort(),
+        ["manufacturer", "platform_admin", "tenant_user"],
+        "proof events must expose context class only"
+      );
+      for (const entry of successProofs) {
+        assert.strictEqual(entry.level, "info");
+        assertSafeProofEvent(entry.event);
+        assert.strictEqual(entry.event.failureCategory, null);
+      }
+      assert.equal(batchRequestLogs.length, 3, "flag-on batch request telemetry should be emitted for each route call");
+      assert.deepEqual(
+        batchRequestLogs.map((entry) => entry.event.actorContextClass).sort(),
+        ["manufacturer", "platform_admin", "tenant_user"],
+        "request telemetry must expose context class only under the staging RLS flag"
+      );
+      for (const entry of batchRequestLogs) {
+        assert.strictEqual(entry.event.actorUserId, null, "flag-on request telemetry must redact actor user id");
+        assert.strictEqual(entry.event.actorRole, null, "flag-on request telemetry must redact actor role");
+        assert.strictEqual(entry.event.actorLicenseeId, null, "flag-on request telemetry must redact licensee id");
+        assert.strictEqual(entry.event.actorOrgId, null, "flag-on request telemetry must redact organization id");
+        const serialized = JSON.stringify(entry.event);
+        assert(!serialized.includes(ids.licenseeAdminA), "request telemetry leaked licensee admin id");
+        assert(!serialized.includes(ids.manufacturerA), "request telemetry leaked manufacturer id");
+        assert(!serialized.includes(ids.licenseeA), "request telemetry leaked licensee id");
+        assert(!serialized.includes(ids.orgA), "request telemetry leaked organization id");
+      }
 
       const context = await readContext(appPrisma);
       assert.notEqual(context.user_id, ids.licenseeAdminA, "app.user_id leaked after route transaction");
@@ -258,6 +377,35 @@ const runFlagOnRouteAssertions = async () => {
         /requires app\.licensee_id/,
         "tenant user missing licensee context must fail closed"
       );
+
+      const { listScopedBatchReadPayload } = require("../dist/services/stagingRlsBatchReadService");
+      await assert.rejects(
+        () =>
+          listScopedBatchReadPayload({
+            user: {
+              userId: ids.licenseeAdminA,
+              email: "missing-tenant@mscqr.test",
+              role: UserRole.LICENSEE_ADMIN,
+              licenseeId: null,
+              orgId: ids.orgA,
+              sessionStage: "ACTIVE",
+              authAssurance: "ADMIN_MFA",
+            },
+            requestedLicenseeId: null,
+            scopeKey: "rls-proof-failure-test",
+            limit: 1,
+            offset: 0,
+          }),
+        /requires app\.licensee_id/,
+        "staging RLS service must fail closed when tenant context is missing"
+      );
+
+      const failureProof = proofLogs.find((entry) => !entry.event.success);
+      assert(failureProof, "flag-on failures must emit a categorized proof event");
+      assert.strictEqual(failureProof.level, "warn");
+      assertSafeProofEvent(failureProof.event);
+      assert.strictEqual(failureProof.event.failureCategory, "rls_context_missing");
+      assert(!JSON.stringify(failureProof.event).includes("requires app.licensee_id"), "failure proof must not log error text");
     } finally {
       rollbackBatchRouteRls(databaseInfo.databaseUrl);
     }

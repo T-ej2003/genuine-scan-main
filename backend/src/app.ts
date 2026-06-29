@@ -6,6 +6,8 @@ import routes from "./routes";
 import { releaseMetadata } from "./observability/release";
 import { captureBackendException } from "./observability/sentry";
 import { getLatencySummary, recordRequestMetric } from "./observability/requestMetrics";
+import { classifyStagingRlsBatchReadContext } from "./observability/stagingRlsBatchReadProof";
+import { isStagingRlsBatchesReadEnabled } from "./lib/stagingRlsBatchReadContext";
 import { sanitizeRequestInput } from "./middleware/requestSanitizer";
 import {
   createPublicActorRateLimiter,
@@ -121,6 +123,12 @@ export const createBackendApp = () => {
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
       const pathName = req.originalUrl.split("?")[0] || req.path || "/";
       const claims = (req as express.Request & { user?: RequestClaimsSnapshot }).user || null;
+      const redactStagingRlsBatchActor =
+        req.method === "GET" && pathName === "/api/qr/batches" && isStagingRlsBatchesReadEnabled();
+      const actorContextClass =
+        redactStagingRlsBatchActor && claims?.role
+          ? classifyStagingRlsBatchReadContext({ role: claims.role })
+          : null;
 
       recordRequestMetric({
         at: Date.now(),
@@ -137,10 +145,11 @@ export const createBackendApp = () => {
         status: res.statusCode,
         durationMs: Math.round(durationMs * 10) / 10,
         release: releaseMetadata.release,
-        actorUserId: claims?.userId || null,
-        actorRole: claims?.role || null,
-        actorLicenseeId: claims?.licenseeId || null,
-        actorOrgId: claims?.orgId || null,
+        actorContextClass,
+        actorUserId: redactStagingRlsBatchActor ? null : claims?.userId || null,
+        actorRole: redactStagingRlsBatchActor ? null : claims?.role || null,
+        actorLicenseeId: redactStagingRlsBatchActor ? null : claims?.licenseeId || null,
+        actorOrgId: redactStagingRlsBatchActor ? null : claims?.orgId || null,
         sessionStage: claims?.sessionStage || null,
         authAssurance: claims?.authAssurance || null,
       };
