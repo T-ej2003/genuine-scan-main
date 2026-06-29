@@ -123,13 +123,25 @@
     "id": "tenant-incident-read",
     "routes": ["/incidents", "/incidents/:id"],
     "files": ["backend/src/controllers/incidentController.ts", "backend/src/services/incidentService.ts"],
-    "models": ["Incident", "QRCode", "QrScanLog", "SupportTicket", "AuditLog"],
+    "models": ["Incident", "QRCode", "QrScanLog", "Batch", "User", "IncidentHandoff", "SupportTicket", "SupportTicketMessage", "IncidentEvent", "IncidentCommunication", "IncidentEvidence"],
     "currentGuard": ["authenticate", "requireAnyAdmin", "enforceTenantIsolation"],
     "futureContext": ["tenant_user", "manufacturer_user", "platform_admin"],
-    "oneTransactionFit": "yes",
+    "oneTransactionFit": "medium",
     "externalSideEffects": [],
-    "risk": "low",
-    "notes": "Safe candidate for read-only metadata list/detail, excluding evidence and export paths."
+    "risk": "medium",
+    "notes": "Current list/detail handlers are not evidence-free metadata reads: listIncidentsScoped includes IncidentEvidence and SupportTicket, while getIncidentByIdScoped includes IncidentHandoff, SupportTicketMessage, IncidentEvent, IncidentCommunication, and IncidentEvidence. Do not treat these routes as first-wave simple metadata candidates until relation loading is split."
+  },
+  {
+    "id": "future-tenant-incident-metadata-read",
+    "routes": ["future /incidents metadata-only", "future /incidents/:id metadata-only"],
+    "files": ["backend/src/controllers/incidentController.ts", "backend/src/services/incidentService.ts"],
+    "models": ["Incident", "QRCode", "QrScanLog", "Batch", "User"],
+    "currentGuard": ["not implemented", "would require authenticate", "would require requireAnyAdmin", "would require enforceTenantIsolation"],
+    "futureContext": ["tenant_user", "manufacturer_user", "platform_admin"],
+    "oneTransactionFit": "yes_after_handler_split",
+    "externalSideEffects": [],
+    "risk": "medium",
+    "notes": "Future candidate only. Requires a true metadata-only service path that does not eager-load evidence, support messages, incident events, or communications before staging RLS runtime wrapping."
   },
   {
     "id": "incident-mutation-evidence-export",
