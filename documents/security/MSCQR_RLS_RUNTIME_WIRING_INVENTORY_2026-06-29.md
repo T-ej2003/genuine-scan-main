@@ -120,6 +120,8 @@ Added `scripts/check-rls-prototype-boundaries.mjs` as a narrow prototype boundar
 - Production runtime under `backend/src/**` must not import the prototype transaction helper unless an explicit `rls-prototype-approved-import` marker is present.
 - RLS prototype backend tests must stay gated behind `MSCQR_RLS_*PROTOTYPE_TEST`.
 
+The guard is enforced through `npm run verify:guardrails`, which is also part of `npm run verify:ci:security` in `.github/workflows/quality-gate.yml`. This keeps prototype RLS boundary regressions from passing the security gate as a manually-run-only check.
+
 ## CTO Recommendations
 
 - Treat the first staging experiment as a read-only route pilot. Do not start with public verification, print dispatch, or worker paths.
