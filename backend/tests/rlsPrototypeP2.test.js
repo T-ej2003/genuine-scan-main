@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
 const path = require("node:path");
 const { PrismaClient } = require("@prisma/client");
+const { withRlsPrototypeTransaction } = require("../dist/lib/rlsTransactionContextPrototype");
 
 const {
   P2TestDbSkip,
@@ -126,21 +127,71 @@ const assertRlsFlags = async (client, expectedEnabled, expectedForced) => {
   }
 };
 
-const withRlsContext = (client, context, callback) =>
-  client.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.user_id', ${context.userId || ""}, true)`;
-    await tx.$executeRaw`SELECT set_config('app.role', ${context.role || ""}, true)`;
-    await tx.$executeRaw`SELECT set_config('app.licensee_id', ${context.licenseeId || ""}, true)`;
-    await tx.$executeRaw`SELECT set_config('app.manufacturer_id', ${context.manufacturerId || ""}, true)`;
-    await tx.$executeRaw`SELECT set_config('app.organization_id', ${context.organizationId || ""}, true)`;
-    await tx.$executeRaw`SELECT set_config('app.is_platform_admin', ${context.isPlatformAdmin ? "true" : "false"}, true)`;
-    return callback(tx);
-  });
+const createPrototypeCleanupState = () => ({
+  prototypeApplied: false,
+  rollbackApplied: false,
+});
+
+const applyPrototypeSql = async (databaseUrl, adminPrisma, cleanupState) => {
+  applySqlFile(databaseUrl, prototypeSqlPath);
+  cleanupState.prototypeApplied = true;
+  cleanupState.rollbackApplied = false;
+  await assertRlsFlags(adminPrisma, true, true);
+};
+
+const rollbackPrototypeIfApplied = async ({ databaseUrl, adminPrisma, cleanupState, reason }) => {
+  if (!databaseUrl || !cleanupState.prototypeApplied || cleanupState.rollbackApplied) return null;
+  try {
+    console.log(`RLS prototype cleanup: applying rollback SQL after ${reason}`);
+    applySqlFile(databaseUrl, rollbackSqlPath);
+    if (adminPrisma) await assertRlsFlags(adminPrisma, false, false);
+    cleanupState.prototypeApplied = false;
+    cleanupState.rollbackApplied = true;
+    return null;
+  } catch (error) {
+    return error;
+  }
+};
+
+const throwWithRollbackContext = (primaryError, rollbackError) => {
+  if (primaryError && rollbackError) {
+    console.error("RLS prototype cleanup rollback failed after the original test failure:");
+    console.error(rollbackError);
+    primaryError.rollbackError = rollbackError;
+    throw primaryError;
+  }
+  if (primaryError) throw primaryError;
+  if (rollbackError) throw rollbackError;
+};
 
 const idsFromRows = (rows) => rows.map((row) => row.id).sort();
 
+const runRollbackCleanupRegression = async (databaseUrl, adminPrisma) => {
+  const cleanupState = createPrototypeCleanupState();
+  let primaryError = null;
+  let rollbackError = null;
+
+  try {
+    await applyPrototypeSql(databaseUrl, adminPrisma, cleanupState);
+    throw new Error("forced RLS prototype cleanup regression failure");
+  } catch (error) {
+    primaryError = error;
+  } finally {
+    rollbackError = await rollbackPrototypeIfApplied({
+      databaseUrl,
+      adminPrisma,
+      cleanupState,
+      reason: "forced cleanup regression failure",
+    });
+  }
+
+  assert.match(primaryError?.message || "", /forced RLS prototype cleanup regression failure/);
+  assert.equal(rollbackError, null, "forced-failure cleanup rollback should succeed");
+  await assertRlsFlags(adminPrisma, false, false);
+};
+
 const runBehaviorAssertions = async (appPrisma) => {
-  await withRlsContext(
+  await withRlsPrototypeTransaction(
     appPrisma,
     {
       userId: ids.licenseeAdminA,
@@ -158,7 +209,7 @@ const runBehaviorAssertions = async (appPrisma) => {
     }
   );
 
-  await withRlsContext(
+  await withRlsPrototypeTransaction(
     appPrisma,
     {
       userId: ids.manufacturerA,
@@ -174,7 +225,7 @@ const runBehaviorAssertions = async (appPrisma) => {
     }
   );
 
-  await withRlsContext(
+  await withRlsPrototypeTransaction(
     appPrisma,
     {
       userId: ids.superAdmin,
@@ -191,7 +242,7 @@ const runBehaviorAssertions = async (appPrisma) => {
     }
   );
 
-  await withRlsContext(
+  await withRlsPrototypeTransaction(
     appPrisma,
     {
       role: "public_verification",
@@ -222,6 +273,9 @@ const main = async () => {
   let adminPrisma = null;
   let appPrisma = null;
   let appRole = null;
+  let primaryError = null;
+  let rollbackError = null;
+  const cleanupState = createPrototypeCleanupState();
 
   process.env.NODE_ENV = "test";
 
@@ -231,28 +285,29 @@ const main = async () => {
     runPrismaSchemaSetup(databaseInfo.databaseUrl);
 
     adminPrisma = new PrismaClient({ datasources: { db: { url: databaseInfo.databaseUrl } } });
+    await runRollbackCleanupRegression(databaseInfo.databaseUrl, adminPrisma);
     await seedP2Fixtures(adminPrisma);
 
-    applySqlFile(databaseInfo.databaseUrl, prototypeSqlPath);
-    await assertRlsFlags(adminPrisma, true, true);
+    await applyPrototypeSql(databaseInfo.databaseUrl, adminPrisma, cleanupState);
 
     appRole = createAppRole(databaseInfo.databaseUrl);
     appPrisma = new PrismaClient({ datasources: { db: { url: buildRoleUrl(databaseInfo.databaseUrl, appRole) } } });
     await runBehaviorAssertions(appPrisma);
     await appPrisma.$disconnect();
     appPrisma = null;
-
-    applySqlFile(databaseInfo.databaseUrl, rollbackSqlPath);
-    await assertRlsFlags(adminPrisma, false, false);
-
-    console.log("RLS prototype P2 behavioral tests passed");
   } catch (error) {
     if (error instanceof P2TestDbSkip && !isTruthy(process.env.P2_TEST_DATABASE_REQUIRED)) {
       console.log(`RLS prototype P2 test skipped: ${error.message}`);
       return;
     }
-    throw error;
+    primaryError = error;
   } finally {
+    rollbackError = await rollbackPrototypeIfApplied({
+      databaseUrl: databaseInfo?.databaseUrl,
+      adminPrisma,
+      cleanupState,
+      reason: primaryError ? "test failure" : "successful test completion",
+    });
     if (appPrisma?.$disconnect) await appPrisma.$disconnect().catch(() => {});
     if (adminPrisma?.$disconnect) await adminPrisma.$disconnect().catch(() => {});
     if (databaseInfo?.databaseUrl && appRole) {
@@ -264,6 +319,9 @@ const main = async () => {
     }
     if (databaseInfo?.createdDatabaseName) dropP2TestDatabase(databaseInfo);
   }
+
+  throwWithRollbackContext(primaryError, rollbackError);
+  console.log("RLS prototype P2 behavioral tests passed");
 };
 
 main().catch((error) => {

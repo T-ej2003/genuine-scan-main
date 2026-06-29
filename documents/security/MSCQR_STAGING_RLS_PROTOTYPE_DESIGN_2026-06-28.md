@@ -37,7 +37,11 @@ Important: session context must never be set with session-level `SET` on pooled 
 
 ## Safe Prisma Transaction Helper Design
 
-Do not wire this into production as part of the prototype. This is the intended shape for staging tests:
+Implemented prototype helper: `backend/src/lib/rlsTransactionContextPrototype.ts`.
+
+Do not wire this into production as part of the prototype. The helper exists so staging/P2 tests can validate transaction-local `app.*` session context before any future runtime rollout. Current production tenant authorization remains the application-layer controller/service checks.
+
+Intended shape for staging tests:
 
 ```ts
 type RlsContext = {
@@ -73,6 +77,15 @@ Rules for this helper:
 - It must not issue protected queries before the `set_config(..., true)` calls.
 - It must not use session-level `SET`.
 - It must preserve current app-layer authorization checks.
+- It must reject `public_verification` when `app.is_platform_admin` is requested, so public verification cannot accidentally receive platform-admin policy context.
+
+Local P2 transaction-context command:
+
+```sh
+MSCQR_RLS_CONTEXT_PROTOTYPE_TEST=true npm --prefix backend run test:rls:context-prototype
+```
+
+The context test creates a disposable local P2 database and proves context exists inside the transaction, disappears after commit, does not leak across transactions, requires explicit platform-admin context, and keeps public verification non-admin.
 
 ## Model Ownership Map
 
@@ -138,7 +151,7 @@ Local P2 behavioral command:
 MSCQR_RLS_PROTOTYPE_TEST=true npm --prefix backend run test:rls:prototype
 ```
 
-The command starts the local P2 Postgres service, creates a disposable database, applies current Prisma migrations, applies the non-production prototype SQL, verifies the RLS behaviors, applies rollback SQL, confirms RLS/FORCE are disabled, and drops the temporary database.
+The command starts the local P2 Postgres service, creates a disposable database, applies current Prisma migrations, applies the non-production prototype SQL, verifies the RLS behaviors, applies rollback SQL from fail-safe cleanup, confirms RLS/FORCE are disabled, and drops the temporary database. It also includes a forced-failure cleanup regression so persistent P2 databases are not left with prototype RLS enabled after post-apply assertion failures.
 
 1. Prepare
    - Apply `documents/security/mscqr_staging_rls_prototype.sql` manually with a DBA-owned session.
