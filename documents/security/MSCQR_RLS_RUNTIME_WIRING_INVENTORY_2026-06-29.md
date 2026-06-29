@@ -1,0 +1,130 @@
+# MSCQR Staging-Only RLS Runtime Wiring Inventory - 2026-06-29
+
+## Scope And Constraints
+
+This is an inventory for a future staging-only runtime RLS experiment. It does not enable RLS, does not change any database, does not create Prisma migrations, and does not wire production request paths into RLS.
+
+Current production tenant isolation remains the existing application-layer authorization in route middleware, controllers, and services. The prototype helper in `backend/src/lib/rlsTransactionContextPrototype.ts` must stay unused by production runtime paths until an explicit staging rollout PR wraps specific paths.
+
+Companion machine-readable inventory: `documents/security/mscqr_rls_runtime_wiring_inventory.json`.
+
+Inspected surfaces:
+
+- `backend/src/routes/**`
+- `backend/src/controllers/**`
+- `backend/src/services/**`
+- `backend/src/middleware/**`
+- `backend/src/config/database.ts`
+- `backend/src/worker.ts`
+- `backend/src/local-print-agent/**`
+- Relevant backend authorization tests including `backend/tests/p2DbAuthorization.test.js`, `backend/tests/accessControlIsolation.test.js`, `backend/tests/tenantIsolationExtended.test.js`, `backend/tests/publicVerificationApiContract.test.js`, `backend/tests/localAgentPrintFlow.test.js`, and printer trust tests.
+
+Focused protected models:
+
+`Organization`, `Licensee`, `User`, `Batch`, `QRCode`, `PrintJob`, `PrintItem`, `QrScanLog`, `Incident`, `AuditLog`, `Printer`, `TenantFeatureFlag`, `VerificationDecision`, `PrintReissueRequest`, `BatchPrintPackToken`, `CustomerVerificationSession`, `SupportTicket`, `ManufacturerLicenseeLink`, `PrintSession`, `AuditLogOutbox`, `SecurityEventOutbox`.
+
+## Context Types
+
+| Context type | Intended `app.*` shape |
+|---|---|
+| `tenant_user` | Authenticated licensee/org user. Set `app.user_id`, `app.role`, `app.licensee_id`, and `app.organization_id`; platform admin false. |
+| `manufacturer_user` | Authenticated manufacturer/ops user. Set `app.user_id`, `app.role`, `app.manufacturer_id`, optional selected `app.licensee_id`, and `app.organization_id`; platform admin false. |
+| `platform_admin` | Explicit global route. Set `app.user_id`, `app.role`, and `app.is_platform_admin=true`; tenant IDs only if intentionally scoped. |
+| `public_verification` | Public QR verification service path. Set `app.role=public_verification`; never platform admin. |
+| `printer_agent` | Trusted printer/gateway/local-agent flow. Needs explicit printer or worker context design before runtime wiring. |
+| `background_worker` | Outbox, scheduler, rollup, reconciliation, and network print resume jobs. Set explicit worker role after service-level policy design. |
+| `unauthenticated_public_minimized` | Public intake/track/health paths. Must not raw-read tenant tables unless exposed through a minimized function/service DTO. |
+| `system_bootstrap` | Startup/bootstrap/auth repair paths. Needs explicit table-owner/admin behavior; generally deferred. |
+
+## Inventory
+
+| Route or path group | Files inspected | Protected models touched | Current app-layer guard | Future RLS context | One transaction fit | External side effects | Risk | Notes |
+|---|---|---|---|---|---|---|---|---|
+| Auth hydration and self session reads: `/auth/me`, `/auth/sessions`, MFA status | `backend/src/middleware/auth.ts`, `backend/src/routes/modules/authRoutes.ts`, `backend/src/controllers/authController.ts`, `backend/src/controllers/authSessionController.ts`, auth services | `User` plus auth/MFA tables outside this focused list | `authenticate` / `authenticateAnySession`; disabled-user checks in hydration | `tenant_user`, `manufacturer_user`, `platform_admin`, `system_bootstrap` for bootstrap-like auth flows | Medium. Hydration is middleware outside route transaction today. | Cookie/token issuance and revocation. | High | RLS runtime wiring cannot simply wrap controllers; auth middleware reads `User` before controller execution. Needs request-scoped transaction strategy or an auth-specific non-RLS bootstrap decision. |
+| Licensee admin directory: `/licensees*` | `backend/src/routes/index.ts`, `backend/src/controllers/licenseeController.ts`, `backend/src/controllers/licenseeInviteController.ts`, invite/user services | `Licensee`, `Organization`, `User`, `AuditLog` | `authenticate`, `requirePlatformAdmin`, recent MFA for mutations | `platform_admin` | Medium for reads, lower for simple CRUD mutations after audit side effects are separated. | Invite/email/audit side effects. | Medium | Platform-global behavior must use explicit `app.is_platform_admin=true`; avoid implicit table-owner behavior. |
+| User and manufacturer directory: `/users*`, `/manufacturers*` | `backend/src/routes/index.ts`, `backend/src/controllers/userController.ts`, `backend/src/services/userService.ts`, `backend/src/services/manufacturerScopeService.ts` | `User`, `Licensee`, `ManufacturerLicenseeLink`, `Organization`, `AuditLog` | `authenticate`, `requireAnyAdmin`, `enforceTenantIsolation`, recent MFA for mutations | `tenant_user`, `manufacturer_user`, `platform_admin` | Medium. Some paths are simple list/read; mutations include audit and invite-style work. | Audit logging, possible email/invite effects. | Medium | Manufacturer link hydration is used by auth and tenant middleware; do not wire until middleware context design is solved. |
+| Tenant batch list/read: `GET /qr/batches`, `GET /qr/batches/:id/allocation-map` | `backend/src/routes/index.ts`, `backend/src/controllers/qrController.ts` | `Batch`, `QRCode`, `User`, `ManufacturerLicenseeLink` | `authenticate`, rate limits, `enforceTenantIsolation`; controller scopes by effective licensee/manufacturer/platform role | `tenant_user`, `manufacturer_user`, `platform_admin` | Yes for read path. | None on list/read. | Low | Best first staging candidate. Wrap only read-only list/detail query block; preserve controller scoping. |
+| Batch mutation and allocation: `POST /qr/batches`, assign, rename, release, delete, bulk-delete, admin allocate | `backend/src/controllers/qrController.ts`, `backend/src/services/batchReleaseService.ts`, `backend/src/services/batchStateMachineService.ts` | `Batch`, `QRCode`, `PrintJob`, `PrintItem`, `AuditLog`, `ManufacturerLicenseeLink` | `authenticate`, role-specific middleware, `enforceTenantIsolation`, recent MFA/sensitive auth, CSRF | `tenant_user`, `manufacturer_user`, `platform_admin` | Mixed. Some already use `$transaction`; others perform prechecks before transaction. | Audit logs, state-machine side effects, possible print lifecycle coupling. | High | Defer until read candidates prove the helper pattern. Mutations need precheck queries moved into the same RLS transaction or explicitly justified. |
+| Platform QR code raw list/export/report/rotation: `/qr/codes*`, legacy report, signed links | `backend/src/controllers/qrController.ts`, `backend/src/services/legacyQrRotationService.ts`, `backend/src/services/qrZipStreamService.ts` | `QRCode`, `Batch`, `AuditLog` | `authenticate`, `requirePlatformAdmin`; recent MFA for mutations | `platform_admin` | Reads maybe; export/stream no. Rotation already uses transaction internally but has broad global behavior. | CSV/ZIP streaming, signed link generation, audit. | High | Keep platform-admin-only. Exports and streaming must stay deferred; do not wrap long streams in DB transactions. |
+| QR stats/dashboard/attention queue: `/qr/stats`, `/dashboard/stats`, `/dashboard/attention-queue` | `backend/src/controllers/qrController.ts`, `backend/src/controllers/dashboardController.ts`, `backend/src/services/dashboardSnapshotService.ts`, `backend/src/services/attentionQueueService.ts` | `QRCode`, `Batch`, `Incident`, `PrintJob`, `SupportTicket`, `AuditLog` | `authenticate`, `enforceTenantIsolation`, dashboard rate limits | `tenant_user`, `manufacturer_user`, `platform_admin` | Medium. Stats use multiple counts/groupBy calls. | None direct. | Medium | Candidate only after single-model reads. RLS can add planner overhead to aggregate/count/groupBy paths. |
+| Public QR verification and scan: `/verify/:code`, `/scan`, customer verification session routes | `backend/src/routes/index.ts`, `backend/src/controllers/verify/**`, `backend/src/controllers/scanController.ts`, `backend/src/services/qrService.ts`, `backend/src/services/customerVerificationSessionService.ts`, `backend/src/services/verificationDecisionService.ts` | `QRCode`, `QrScanLog`, `VerificationDecision`, `CustomerVerificationSession`, `Incident`, `SupportTicket` | Public rate limits, optional customer auth, DTO minimization, signed token policy, CSRF for cookie mutations | `public_verification`, `unauthenticated_public_minimized` | Blocker today. Reads and writes are mixed with risk evaluation and post-scan mutation. | Scan log writes, verification decisions, customer auth cookies, incident/support handoff. | Blocker | Must remain deferred. Public anonymous access plus tenant-owned tables needs dedicated DB function/view/service-role design; do not grant raw table visibility. |
+| Public support/access/intake/tracking: `/public/request-access`, `/public/support`, `/support/tickets/track/:reference`, `/incidents/report`, `/verify/report-fraud` | `backend/src/controllers/publicIntakeController.ts`, `backend/src/controllers/supportIssueController.ts`, `backend/src/controllers/supportController.ts`, `backend/src/controllers/incidents/publicIncidentResponse.ts`, `backend/src/services/incidentService.ts`, `backend/src/services/supportWorkflowService.ts` | `SupportTicket`, `Incident`, `QRCode`, `CustomerVerificationSession` | Public rate limits, upload signature validation, sanitizers; platform/ops for protected follow-up routes | `unauthenticated_public_minimized`, `public_verification`, later `platform_admin` for ops views | No for public mutation paths. | File uploads, email, customer communications. | Blocker | Defer public tracking/intake. These paths intentionally create or reveal minimized public state and should not inherit tenant-user RLS context. |
+| Admin QR logs, scan reporting, analytics: `/admin/qr/scan-logs`, `/admin/qr/batch-summary`, `/admin/qr/analytics`, trace/risk analytics | `backend/src/controllers/qrLogController.ts`, `backend/src/services/scanLogReportingService.ts`, `backend/src/services/scanInsightService.ts`, `backend/src/services/analyticsService.ts`, `backend/src/controllers/tracePolicyController.ts` | `QrScanLog`, `QRCode`, `Batch`, `AuditLog`, `Incident`, `VerificationDecision` | `authenticate`, `requireOpsUser`, `enforceTenantIsolation` | `tenant_user`, `manufacturer_user`, `platform_admin` | Medium. Reporting uses raw SQL/fallback relation checks and multi-query reporting. | None direct, but reporting can be expensive. | High | Defer until RLS policy performance is measured with realistic row counts. Raw SQL needs explicit context wrapper and test coverage. |
+| Tenant incident read: `GET /incidents`, `GET /incidents/:id` | `backend/src/controllers/incidentController.ts`, `backend/src/services/incidentService.ts` | `Incident`, `QRCode`, `QrScanLog`, `SupportTicket`, `AuditLog` | `authenticate`, `requireAnyAdmin`, `enforceTenantIsolation` | `tenant_user`, `manufacturer_user`, `platform_admin` | Yes for basic list/read; evidence/detail joins need care. | None for basic list/read. | Low | Safe first candidate for read-only list/detail without evidence download. Keep evidence/download/export deferred. |
+| Incident mutation/evidence/email/export: incident patch/events/evidence/email/PDF/bundles | `backend/src/controllers/incidentController.ts`, `backend/src/services/incidentService.ts`, `backend/src/services/incidentPdfService.ts`, `backend/src/services/governanceService.ts` | `Incident`, `AuditLog`, `SupportTicket`, `QRCode` | `authenticate`, `requireAnyAdmin`, `enforceTenantIsolation`, recent MFA, upload validation | `tenant_user`, `manufacturer_user`, `platform_admin` | Mixed. Some creates use transactions, but files/email/export should not be wrapped. | File upload/download, email, PDF/archive generation. | High | Defer except simple metadata reads. File and email side effects must happen outside DB transactions with explicit post-commit behavior. |
+| Tenant printer list/read: `/manufacturer/printers`, printer status reads | `backend/src/controllers/printerController.ts`, `backend/src/services/printerRegistryService.ts`, `backend/src/controllers/printerAgentController.ts` | `Printer`, `User`, `ManufacturerLicenseeLink` | `authenticate`, `requireOpsUser`/`requireManufacturer`, `enforceTenantIsolation` | `manufacturer_user`, `tenant_user`, `platform_admin` | Yes for list/read. | None for list/read. | Low | Safe first candidate for staging if limited to list/read/status snapshots. |
+| Printer configuration/test/discovery/relink | `backend/src/controllers/printerController.ts`, `backend/src/controllers/printerRelinkController.ts`, `backend/src/services/printerRegistryService.ts`, `backend/src/services/printerTestLabelService.ts`, `backend/src/services/localAgentPrinterRelinkService.ts` | `Printer`, `PrintJob`, `PrintItem`, `PrintSession`, `QRCode`, `AuditLog` | `authenticate`, `requireOpsUser`, `requireRecentSensitiveAuth`, `enforceTenantIsolation`, CSRF | `manufacturer_user`, `printer_agent`, `platform_admin` | Mixed. DB writes combine with network printer calls/test-label dispatch. | Network printer I/O, local agent dispatch, test labels. | Blocker | Defer. These paths need post-commit dispatch boundaries and explicit printer-agent policy context. |
+| Manufacturer print job read/status/reissue list: `/manufacturer/print-jobs`, `/:id`, `/events`, `/print-reissue-requests` | `backend/src/controllers/print-job/queryHandlers.ts`, `backend/src/controllers/printJobEventsController.ts`, `backend/src/services/printReissueRequestWorkflowService.ts`, `backend/src/services/printValidationEvidenceService.ts` | `PrintJob`, `PrintItem`, `PrintSession`, `QRCode`, `Printer`, `PrintReissueRequest`, `Batch` | `authenticate`/`authenticateSSE`, `requireOpsUser`, `enforceTenantIsolation` | `manufacturer_user`, `tenant_user`, `platform_admin` | Medium. List/status yes; SSE and projected summaries need care. | SSE stream for events. | Medium | Read-only status/list can follow batch/printer candidates later. Event stream should remain deferred. |
+| Print job create/operation/reissue/confirm/sample scan/direct print token | `backend/src/controllers/print-job/**`, `backend/src/services/printJobCreationTransactionService.ts`, `backend/src/services/printOperationControlService.ts`, `backend/src/services/printReissueService.ts`, `backend/src/services/printConfirmationService.ts`, `backend/src/services/printSampleScanService.ts` | `PrintJob`, `PrintItem`, `PrintSession`, `QRCode`, `Printer`, `Batch`, `AuditLog`, `PrintReissueRequest` | `authenticate`, `requireManufacturer`/`requireOpsUser`, `requireRecentSensitiveAuth`, `enforceTenantIsolation`, CSRF, printer trust checks | `manufacturer_user`, `printer_agent`, `platform_admin` | Mixed. Several transactional cores exist, but prechecks and printer dispatch surround them. | Printer/network dispatch, signed print payloads, audit, events. | Blocker | Defer. This is high-value and high-risk; preserve backend-authoritative print lifecycle and printer trust gates. |
+| Printer gateway/local-agent claim/ack/confirm/fail and session socket | `backend/src/controllers/printerGatewayController.ts`, `backend/src/controllers/printerAgentJobController.ts`, `backend/src/controllers/printerAgentTestJobController.ts`, `backend/src/services/localAgentClaimService.ts`, `backend/src/services/printerAgentSessionService.ts`, `backend/src/services/printerAgentSessionSocket.ts`, network print services | `Printer`, `PrintJob`, `PrintItem`, `PrintSession`, `QRCode`, `Incident` | Signed gateway/local-agent trust, rate limits, printer heartbeat/session checks; not normal user auth | `printer_agent`, `background_worker` | No as a route wrapper. Internal chunks have transactions but protocol spans many calls. | WebSocket/session streaming, printer protocol I/O, chunk dispatch. | Blocker | Defer. Needs explicit printer-agent DB role design and session lifecycle tests before RLS runtime wiring. |
+| Audit logs/read/export/stream and fraud reports | `backend/src/routes/auditRoutes.ts`, `backend/src/controllers/auditController.ts`, `backend/src/services/auditService.ts`, `backend/src/services/immutableAuditExportService.ts` | `AuditLog`, `User`, `Batch`, `QRCode`, `Incident` | `authenticate`/`authenticateSSE`, `requireAuditViewer`, `enforceTenantIsolation`; platform admin for fraud reports | `tenant_user`, `platform_admin` | Reads maybe; export/stream no. | CSV export, SSE, immutable package generation. | High | Defer streams/exports. Basic audit list might be a later candidate after tenant read-only routes and pagination are proven. |
+| Governance/compliance/approvals/feature flags | `backend/src/routes/modules/governanceRoutes.ts`, `backend/src/controllers/governanceController.ts`, `backend/src/services/governanceService.ts`, `backend/src/services/sensitiveActionApprovalService.ts`, `backend/src/services/compliancePackService.ts` | `TenantFeatureFlag`, `Incident`, `AuditLog`, `Batch`, `QRCode`, `PrintJob`, `Printer`, `ManufacturerLicenseeLink` | Mostly `requirePlatformAdmin`; approvals allow `requireOpsUser`; MFA/sensitive auth for mutations | `platform_admin`, `manufacturer_user`, `tenant_user` for approval subsets | Mixed. Many jobs/exports are not one transaction. | Compliance ZIPs, evidence deletion, printer mutation, approval side effects. | High | Defer except maybe feature flag platform-admin read in a later global-context test. |
+| Support tickets protected/public reports | `backend/src/controllers/supportController.ts`, `backend/src/controllers/supportIssueController.ts`, `backend/src/services/supportWorkflowService.ts` | `SupportTicket`, `Incident`, `User` | Platform admin for tickets; ops user plus tenant isolation for support reports; public tracking is rate-limited only | `platform_admin`, `tenant_user`, `unauthenticated_public_minimized` | Protected list/read yes for platform admin; public tracking no. | Messages, email/workflow, screenshot file serving. | Medium/Blocker | Protected platform-admin ticket list is simple but global. Public tracking and screenshots remain deferred. |
+| Notifications and realtime dashboard events | `backend/src/routes/modules/realtimeRoutes.ts`, `backend/src/controllers/notificationController.ts`, `backend/src/services/notificationService.ts`, `backend/src/services/printJobRealtimeService.ts` | `User`, `Incident`, `PrintJob`, `SupportTicket` | `authenticate`/`authenticateSSE`; some routes use `enforceTenantIsolation` | `tenant_user`, `manufacturer_user`, `platform_admin` | Reads yes; SSE streams no. | SSE streams/realtime fanout. | Medium | Normal notification list/read can be later candidate; event streams need request lifecycle design. |
+| Background workers and schedulers | `backend/src/worker.ts`, `backend/src/services/siemOutboxService.ts`, `backend/src/services/auditLogOutboxService.ts`, `backend/src/services/analyticsRollupService.ts`, `backend/src/services/compliancePackService.ts`, `backend/src/services/legacyQrRiskReportJobService.ts`, `backend/src/services/printConfirmationReconciler.ts`, `backend/src/services/networkDirectPrintService.ts`, `backend/src/services/networkIppPrintService.ts`, `backend/src/services/hotEventPartitionService.ts` | `SecurityEventOutbox`, `AuditLogOutbox`, `Batch`, `QRCode`, `QrScanLog`, `PrintJob`, `PrintItem`, `PrintSession`, `Incident`, `AuditLog` | Process-level worker startup; no request auth | `background_worker` | Internal jobs vary; many span multiple iterations. | Webhooks, object storage, network printing, scheduled maintenance. | Blocker | Must remain deferred until there is explicit worker context, policy coverage, and per-job transaction boundaries. |
+| Local print-agent package under `backend/src/local-print-agent/**` | `backend/src/local-print-agent/**` | No server Prisma calls found in this package | Local connector process, not backend request authorization | Not applicable | Not applicable | Printer/client I/O. | Low for backend RLS | No Prisma usage found here; server-side printer agent routes live in controllers/services listed above. |
+| Database singleton | `backend/src/config/database.ts` | All models via shared `PrismaClient` | None; central client only | All future contexts depend on wrapping callers, not this file | No | None | Blocker for broad rollout | Current shared client has no request-scoped context. Runtime wiring must avoid session-level `SET` and use interactive transactions around selected paths only. |
+
+## First Safe Staging Candidates
+
+1. `GET /qr/batches` tenant/manufacturer batch list.
+   - Files: `backend/src/routes/index.ts`, `backend/src/controllers/qrController.ts`.
+   - Context: `tenant_user` or `manufacturer_user`.
+   - Why first: read-only, already guarded by `authenticate` and `enforceTenantIsolation`, and has no external side effects.
+
+2. `GET /qr/batches/:id/allocation-map` for scoped tenant/manufacturer batch detail.
+   - Files: `backend/src/controllers/qrController.ts`.
+   - Context: `tenant_user` or `manufacturer_user`.
+   - Why: constrained read surface over `Batch` and `QRCode`; good follow-up after batch list.
+
+3. `GET /incidents` basic tenant incident list.
+   - Files: `backend/src/routes/index.ts`, `backend/src/controllers/incidentController.ts`, `backend/src/services/incidentService.ts`.
+   - Context: `tenant_user` or `manufacturer_user`.
+   - Why: read-only list, existing tenant guard, no file/email/export side effects if kept to metadata list.
+
+4. `GET /incidents/:id` basic incident detail without evidence file reads.
+   - Files: `backend/src/controllers/incidentController.ts`, `backend/src/services/incidentService.ts`.
+   - Context: `tenant_user` or `manufacturer_user`.
+   - Why: direct tenant object read; defer evidence and export attachments.
+
+5. `GET /manufacturer/printers` / manufacturer printer status read.
+   - Files: `backend/src/controllers/printerController.ts`, `backend/src/services/printerRegistryService.ts`, `backend/src/controllers/printerAgentController.ts`.
+   - Context: `manufacturer_user`.
+   - Why: read-only printer inventory/status is narrower than print dispatch and avoids network printer mutations.
+
+## Must Remain Deferred
+
+- Public verification and scan mutation.
+- Public fraud/incident/support intake and public support tracking.
+- Printer gateway, local-agent, persistent printer-agent session, and print dispatch flows.
+- Compliance pack download/export and audit export/streaming.
+- Background rollups, outbox workers, print confirmation reconciler, legacy risk reports, and network print resume jobs.
+- Auth middleware hydration and bootstrap flows.
+- Raw SQL/reporting paths such as scan-log reporting and analytics until every raw query is wrapped and performance-tested.
+- Platform-global/table-owner behavior unless `app.is_platform_admin=true` is explicit and test-covered.
+
+## Runtime Wiring Blockers
+
+- The shared `PrismaClient` in `backend/src/config/database.ts` has no request-scoped transaction context; selected routes need explicit interactive transaction wrappers before RLS is active.
+- Auth middleware reads `User` before controllers run. A route-only wrapper would be too late for authenticated requests.
+- Several protected workflows mix DB reads/writes with email, file upload/download, object storage, SSE, WebSocket, or printer/network side effects. These cannot be wrapped wholesale in one database transaction.
+- Public flows intentionally read tenant-owned QR/verification data through minimized DTOs. They need a dedicated public DB contract, not raw table visibility.
+- Worker/service-account behavior needs an explicit `background_worker` policy and tests before enforcement.
+- Relation-heavy policies on print and verification tables require policy performance and index analysis before any staging runtime experiment.
+
+## Guardrail Recommendation
+
+Added `scripts/check-rls-prototype-boundaries.mjs` as a narrow prototype boundary check. It is intentionally limited to three risks:
+
+- Prototype RLS SQL must not appear under `backend/prisma/migrations`.
+- Production runtime under `backend/src/**` must not import the prototype transaction helper unless an explicit `rls-prototype-approved-import` marker is present.
+- RLS prototype backend tests must stay gated behind `MSCQR_RLS_*PROTOTYPE_TEST`.
+
+The guard is enforced through `npm run verify:guardrails`, which is also part of `npm run verify:ci:security` in `.github/workflows/quality-gate.yml`. This keeps prototype RLS boundary regressions from passing the security gate as a manually-run-only check.
+
+## CTO Recommendations
+
+- Treat the first staging experiment as a read-only route pilot. Do not start with public verification, print dispatch, or worker paths.
+- Add policy performance/index review before wrapping any high-volume tables (`QRCode`, `QrScanLog`, `VerificationDecision`, `PrintItem`).
+- Require a post-transaction side-effect pattern before mutations are wrapped. Email, file, object storage, printer dispatch, and realtime fanout must happen after DB commit or through an outbox.
+- Keep existing app-layer authorization permanently; RLS should be defense-in-depth, not a replacement authorization system.
