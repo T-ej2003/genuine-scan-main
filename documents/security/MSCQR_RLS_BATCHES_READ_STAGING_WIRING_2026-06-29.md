@@ -16,6 +16,7 @@ existing cached batch-list read path.
 - HTTP route: `GET /api/qr/batches`
 - Express route registration: `protectedReadRouter.get("/qr/batches", qrReadPreAuthRouteLimiter, authenticate, qrReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation, getBatches)`
 - Controller: `backend/src/controllers/qrController.ts#getBatches`
+- Route read helper: `backend/src/services/stagingRlsBatchReadService.ts#listScopedBatchReadPayload`
 - Runtime helper: `backend/src/lib/stagingRlsBatchReadContext.ts`
 - Read service path under the flag: `backend/src/services/batchAllocationService.ts#listBatchOperationalSummaries`
 

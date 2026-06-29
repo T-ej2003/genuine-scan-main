@@ -11,11 +11,10 @@ import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../
 import { createUserNotification } from "../services/notificationService";
 import {
   buildLineageSuccessMessage,
-  listBatchOperationalSummaries,
-  listCachedBatchOperationalSummaries,
   getBatchAllocationMap as loadBatchAllocationMap,
 } from "../services/batchAllocationService";
 import { buildScopedWhere, findScopedBatch } from "../services/accessControlService";
+import { listScopedBatchReadPayload } from "../services/stagingRlsBatchReadService";
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
 import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
@@ -28,10 +27,6 @@ import {
   formatPrintValidationEvidenceMarkdown,
   generatePrintValidationEvidenceReport,
 } from "../services/printValidationEvidenceService";
-import {
-  isStagingRlsBatchesReadEnabled,
-  withStagingRlsBatchReadTransaction,
-} from "../lib/stagingRlsBatchReadContext";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -1274,20 +1269,13 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
       limit,
       offset,
     ].join(":");
-    const loadPayload = async (db?: Prisma.TransactionClient) => {
-      const where = (await buildScopedWhere(req.user!, {
-        requestedLicenseeId,
-        manufacturerField: "manufacturerId",
-        db,
-      })) as Prisma.BatchWhereInput;
-      return db
-        ? listBatchOperationalSummaries({ where, limit, offset, db })
-        : listCachedBatchOperationalSummaries({ where, scopeKey, limit, offset });
-    };
-
-    const payload = isStagingRlsBatchesReadEnabled()
-      ? await withStagingRlsBatchReadTransaction(prisma, req.user, (tx) => loadPayload(tx))
-      : await loadPayload();
+    const payload = await listScopedBatchReadPayload({
+      user: req.user,
+      requestedLicenseeId,
+      scopeKey,
+      limit,
+      offset,
+    });
 
     return res.json({ success: true, data: payload.rows, meta: { total: payload.total, limit, offset } });
   } catch (e) {
