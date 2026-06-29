@@ -148,8 +148,9 @@ export const requireLicenseeScope = (req: AuthRequest, res: Response, next: Next
 
 export const resolveRequestedLicenseeScope = async (
   user: NonNullable<AuthRequest["user"]>,
-  requestedLicenseeId?: string | null
-) => resolveScopedLicenseeAccess(user, requestedLicenseeId || null);
+  requestedLicenseeId?: string | null,
+  db?: Parameters<typeof resolveScopedLicenseeAccess>[2]
+) => resolveScopedLicenseeAccess(user, requestedLicenseeId || null, db);
 
 export const assertCanAccessResource = async (
   user: NonNullable<AuthRequest["user"]>,
@@ -194,10 +195,11 @@ export const buildScopedWhere = async (
     licenseeField?: string;
     manufacturerField?: string;
     relationManufacturerField?: string;
+    db?: Parameters<typeof resolveScopedLicenseeAccess>[2];
   } = {}
 ) => {
   const where: MutableWhere = { ...(options.base || {}) };
-  const scope = await resolveRequestedLicenseeScope(user, options.requestedLicenseeId || null);
+  const scope = await resolveRequestedLicenseeScope(user, options.requestedLicenseeId || null, options.db);
   addLicenseeScope(where, options.licenseeField || "licenseeId", scope.scopeLicenseeId, scope.accessibleLicenseeIds);
 
   if (isManufacturerRole(user.role)) {

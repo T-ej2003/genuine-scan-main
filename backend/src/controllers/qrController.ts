@@ -11,6 +11,7 @@ import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../
 import { createUserNotification } from "../services/notificationService";
 import {
   buildLineageSuccessMessage,
+  listBatchOperationalSummaries,
   listCachedBatchOperationalSummaries,
   getBatchAllocationMap as loadBatchAllocationMap,
 } from "../services/batchAllocationService";
@@ -27,6 +28,10 @@ import {
   formatPrintValidationEvidenceMarkdown,
   generatePrintValidationEvidenceReport,
 } from "../services/printValidationEvidenceService";
+import {
+  isStagingRlsBatchesReadEnabled,
+  withStagingRlsBatchReadTransaction,
+} from "../lib/stagingRlsBatchReadContext";
 
 /* ===================== SCHEMAS ===================== */
 
@@ -1255,13 +1260,10 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
-    const where = (await buildScopedWhere(req.user, {
-      requestedLicenseeId: (req.query.licenseeId as string | undefined) || null,
-      manufacturerField: "manufacturerId",
-    })) as Prisma.BatchWhereInput;
 
     const limit = Math.min(parseInt(String(req.query.limit ?? "100"), 10) || 100, 500);
     const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
+    const requestedLicenseeId = (req.query.licenseeId as string | undefined) || null;
 
     const scopeKey = [
       req.user.role,
@@ -1272,7 +1274,20 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
       limit,
       offset,
     ].join(":");
-    const payload = await listCachedBatchOperationalSummaries({ where, scopeKey, limit, offset });
+    const loadPayload = async (db?: Prisma.TransactionClient) => {
+      const where = (await buildScopedWhere(req.user!, {
+        requestedLicenseeId,
+        manufacturerField: "manufacturerId",
+        db,
+      })) as Prisma.BatchWhereInput;
+      return db
+        ? listBatchOperationalSummaries({ where, limit, offset, db })
+        : listCachedBatchOperationalSummaries({ where, scopeKey, limit, offset });
+    };
+
+    const payload = isStagingRlsBatchesReadEnabled()
+      ? await withStagingRlsBatchReadTransaction(prisma, req.user, (tx) => loadPayload(tx))
+      : await loadPayload();
 
     return res.json({ success: true, data: payload.rows, meta: { total: payload.total, limit, offset } });
   } catch (e) {
