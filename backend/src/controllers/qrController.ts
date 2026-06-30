@@ -9,12 +9,10 @@ import { getQRStats } from "../services/qrService";
 import { allocateQrRange, getNextLicenseeQrNumber, lockLicenseeAllocation } from "../services/qrAllocationService";
 import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "../services/qrTokenService";
 import { createUserNotification } from "../services/notificationService";
-import {
-  buildLineageSuccessMessage,
-  getBatchAllocationMap as loadBatchAllocationMap,
-} from "../services/batchAllocationService";
+import { buildLineageSuccessMessage } from "../services/batchAllocationService";
 import { buildScopedWhere, findScopedBatch } from "../services/accessControlService";
 import { listScopedBatchReadPayload } from "../services/stagingRlsBatchReadService";
+import { getScopedBatchAllocationMapPayload } from "../services/stagingRlsBatchAllocationMapService";
 import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeService";
 import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
@@ -1299,19 +1297,19 @@ export const getBatchAllocationMap = async (req: AuthRequest, res: Response) => 
       return res.status(400).json({ success: false, error: "Missing batch id" });
     }
 
-    const focusBatch = await findScopedBatch(req.user, batchId, {
-      select: { id: true, licenseeId: true, manufacturerId: true },
+    const allocationPayload = await getScopedBatchAllocationMapPayload({
+      user: req.user,
+      batchId,
     });
-    if (!focusBatch) {
+    if (allocationPayload.status === "batch_not_found") {
       return res.status(404).json({ success: false, error: "Batch not found" });
     }
 
-    const allocationMap = await loadBatchAllocationMap(batchId, { licenseeId: focusBatch.licenseeId });
-    if (!allocationMap) {
+    if (allocationPayload.status === "allocation_map_unavailable" || !allocationPayload.allocationMap) {
       return res.status(404).json({ success: false, error: "Allocation map unavailable" });
     }
 
-    return res.json({ success: true, data: allocationMap });
+    return res.json({ success: true, data: allocationPayload.allocationMap });
   } catch (error) {
     console.error("getBatchAllocationMap error:", error);
     return res.status(500).json({ success: false, error: "Internal server error" });

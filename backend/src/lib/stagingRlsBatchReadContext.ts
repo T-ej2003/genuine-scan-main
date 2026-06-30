@@ -4,6 +4,7 @@ import { AuthenticatedSessionClaims } from "../types";
 import { isManufacturerRole, isPlatformRole } from "../services/manufacturerScopeService";
 
 export const STAGING_RLS_BATCHES_READ_FLAG = "MSCQR_STAGING_RLS_BATCHES_READ_ENABLED";
+export const STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG = "MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED";
 
 export type StagingRlsBatchReadContext = {
   userId: string;
@@ -28,6 +29,9 @@ const parseBooleanEnv = (name: string, fallback = false) => {
 
 export const isStagingRlsBatchesReadEnabled = () =>
   parseBooleanEnv(STAGING_RLS_BATCHES_READ_FLAG, false);
+
+export const isStagingRlsBatchAllocationMapEnabled = () =>
+  parseBooleanEnv(STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG, false);
 
 export const buildStagingRlsBatchReadContext = (
   user: AuthenticatedSessionClaims
