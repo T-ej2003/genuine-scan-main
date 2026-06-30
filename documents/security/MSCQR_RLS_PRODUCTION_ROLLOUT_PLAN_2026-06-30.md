@@ -25,6 +25,8 @@ This is an operations plan for a future production MSCQR Row Level Security roll
   - `GET /api/manufacturer/printers` behind `MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED`
 - No global or table-level production RLS should be enabled without explicit rollout approval, a reviewed rollback plan, and a production database change window.
 - The staged route flags are route-specific proof gates, not permission to enable table RLS globally.
+- The current route flags are process-wide environment flags. The route helpers read `process.env`; the current runtime does not implement a tenant allowlist gate before switching to the staged RLS path.
+- Do not enable these flags on the general production backend fleet while describing the rollout as tenant-limited. Tenant-limited production canarying is not supported by the current flags alone.
 
 ## Preconditions
 
@@ -44,6 +46,9 @@ All items below must be complete before any production rollout phase that change
 - Table owner bypass and `FORCE ROW LEVEL SECURITY` behavior are accounted for.
 - The production application role `BYPASSRLS` state has been checked and recorded.
 - Any future table-RLS change has reviewed rollback SQL, lock timeouts, statement timeouts, and catalog verification queries.
+- Before any production route flag is enabled, the canary isolation mechanism is documented as one of:
+  - a dedicated backend task, service, or pool receiving only controlled canary traffic; or
+  - a separately implemented and tested tenant allowlist gate.
 
 ## Staging Validation Checklist
 
@@ -107,10 +112,16 @@ Use this checklist before promoting any route-level behavior toward production:
 - Confirm no non-target routes are affected.
 - Roll back immediately by unsetting the route flag if status codes, latency, telemetry, or route scope deviate.
 
-### Phase 4 - Limited Tenant Canary
+### Phase 4 - Traffic-Isolated Production Canary
 
 - Proceed only after Phase 3 is clean and documented.
-- Canary one route and one limited tenant population at a time.
+- The safe canary unit is not one tenant via environment flag alone. Today the route flags are process-wide, so enabling a flag on a general production backend process affects every matching route request handled by that process.
+- Use only one of these canary isolation mechanisms:
+  - a dedicated staging environment with the route flag enabled; or
+  - a dedicated production canary backend task, service, or pool with controlled traffic routing; or
+  - a separately implemented and tested tenant allowlist gate.
+- Current code does not support the tenant allowlist option. Do not claim tenant canary support until that gate is implemented, tested, and separately approved.
+- If using a dedicated production canary backend pool, route only the approved canary traffic to that pool and keep the general production backend fleet flags off.
 - Compare response counts, response shapes, status-code mix, p50 latency, p95 latency, and failure categories against baseline.
 - Keep public verification, scan mutation, printer dispatch, workers, exports, incidents, support, and admin global surfaces outside the canary.
 - Require rollback owner presence during the canary window.
@@ -344,6 +355,7 @@ Proceed only when all are true:
 - Rollback owner, rollout owner, security owner, and database owner have signed off.
 - Production DB backup/snapshot posture is confirmed before any future DB change.
 - Non-target routes show no RLS proof events and no behavior change.
+- Any production canary has an approved isolation mechanism: staging-only validation, dedicated backend pool with controlled traffic routing, or a separately implemented and tested tenant allowlist.
 
 ## No-Go Criteria
 
@@ -356,6 +368,8 @@ Stop or roll back if any are true:
 - Tenant IDs, user IDs, organization IDs, manufacturer IDs, printer IDs, QR codes, customer identifiers, device names, IP addresses, tokens, secrets, emails, or raw exception text appear in proof or generic request telemetry.
 - Query latency regresses materially from baseline.
 - Route flags affect non-target routes.
+- Route flags would be enabled on the general production backend fleet while the rollout is described as tenant-limited.
+- No canary isolation mechanism exists for the requested production flag enablement.
 - Unexpected 401, 403, 404, or 500 responses increase.
 - RLS context appears to leak outside its transaction.
 - Rollback cannot be executed immediately by the assigned rollback owner.

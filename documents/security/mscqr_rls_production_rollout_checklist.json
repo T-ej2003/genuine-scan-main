@@ -10,6 +10,15 @@
   "safeToCreatePrismaMigration": false,
   "safeToChangeProductionDb": false,
   "appLayerAuthorizationMustRemain": true,
+  "routeFlagsScope": "process_wide_environment_flags",
+  "tenantAllowlistSupportedByCurrentCode": false,
+  "canaryIsolationMechanismRequiredBeforeProductionFlagEnablement": true,
+  "allowedCanaryIsolationMechanisms": [
+    "dedicated_staging_environment",
+    "dedicated_production_backend_pool_with_controlled_traffic_routing",
+    "separately_implemented_and_tested_tenant_allowlist_gate"
+  ],
+  "generalProductionFleetTenantLimitedWarning": "Do not enable route flags on the general production backend fleet while describing the rollout as tenant-limited; current env flags affect every matching route request handled by that process.",
   "currentStagedRouteFlags": [
     {
       "flag": "MSCQR_STAGING_RLS_BATCHES_READ_ENABLED",
@@ -42,7 +51,9 @@
     "production_window_approved",
     "production_backup_snapshot_pitr_posture_confirmed",
     "production_rds_connection_and_role_ownership_behavior_understood",
-    "table_owner_and_force_rls_behavior_accounted_for"
+    "table_owner_and_force_rls_behavior_accounted_for",
+    "canary_isolation_mechanism_confirmed_before_production_flag_enablement",
+    "rollout_unit_recorded_as_staging_only_dedicated_backend_pool_or_tested_tenant_allowlist"
   ],
   "productionPhases": [
     {
@@ -73,10 +84,12 @@
     },
     {
       "phase": 4,
-      "name": "limited_tenant_canary",
+      "name": "traffic_isolated_production_canary",
       "changesProductionRls": false,
       "changesProductionDb": false,
-      "requiresCleanPriorTelemetry": true
+      "requiresCleanPriorTelemetry": true,
+      "requiresCanaryIsolationMechanism": true,
+      "tenantLimitedByEnvFlagAloneSupported": false
     },
     {
       "phase": 5,
@@ -118,7 +131,13 @@
     "unsafe_identifiers_in_telemetry",
     "query_latency_regresses_materially",
     "rls_flags_affect_non_target_routes",
+    "no_canary_isolation_mechanism_for_production_flag_enablement",
+    "route_flags_enabled_on_general_production_fleet_while_called_tenant_limited",
     "rollback_owner_unavailable"
+  ],
+  "blockers": [
+    "production_flag_enablement_on_general_fleet_without_dedicated_backend_pool_or_tested_tenant_allowlist",
+    "tenant_limited_canary_claim_based_only_on_process_wide_env_flags"
   ],
   "explicitlyOutOfScope": [
     "production_rls_enablement",

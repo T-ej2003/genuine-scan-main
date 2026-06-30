@@ -21,6 +21,9 @@ This operator checklist supports `documents/security/MSCQR_RLS_PRODUCTION_ROLLOU
 - [ ] Production RDS role ownership, `BYPASSRLS`, and `FORCE ROW LEVEL SECURITY` behavior are understood.
 - [ ] Index readiness plan is reviewed.
 - [ ] Staging `EXPLAIN` or `EXPLAIN ANALYZE` evidence exists with realistic row counts.
+- [ ] Current route flags are understood to be process-wide environment flags, not tenant-scoped controls.
+- [ ] Canary isolation mechanism is confirmed before any production route flag is enabled.
+- [ ] Rollout unit is recorded as one of: staging-only, dedicated backend pool with controlled traffic routing, or separately implemented and tested tenant allowlist.
 
 ## Staging Validation
 
@@ -43,7 +46,7 @@ This operator checklist supports `documents/security/MSCQR_RLS_PRODUCTION_ROLLOU
 - [ ] Phase 1: Index readiness reviewed; any index rollout remains separately approved.
 - [ ] Phase 2: Runtime code deployed with all route flags off.
 - [ ] Phase 3: One explicitly approved internal/admin smoke flag only, if approved.
-- [ ] Phase 4: Limited tenant canary only after clean smoke telemetry.
+- [ ] Phase 4: Traffic-isolated canary only after clean smoke telemetry; do not treat env flags alone as tenant-limited.
 - [ ] Phase 5: Route flags expanded one route at a time after clean telemetry.
 - [ ] Phase 6: Table-level production RLS enablement planned only after route-level confidence and separate approval.
 
@@ -82,6 +85,8 @@ This operator checklist supports `documents/security/MSCQR_RLS_PRODUCTION_ROLLOU
 - [ ] Unsafe identifiers appear in telemetry.
 - [ ] Query latency regresses materially.
 - [ ] RLS flags affect non-target routes.
+- [ ] No canary isolation mechanism exists for production flag enablement.
+- [ ] Route flags would be enabled on the general production backend fleet while the rollout is called tenant-limited.
 - [ ] Rollback owner cannot execute immediate rollback.
 
 ## CTO Recommendations
