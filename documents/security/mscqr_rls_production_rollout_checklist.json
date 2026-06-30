@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "service": "MSCQR",
+  "planDate": "2026-06-30",
+  "planDocument": "documents/security/MSCQR_RLS_PRODUCTION_ROLLOUT_PLAN_2026-06-30.md",
+  "operatorChecklist": "documents/ops/MSCQR_RLS_PRODUCTION_ROLLOUT_CHECKLIST_2026-06-30.md",
+  "status": "planning_only",
+  "safeToEnableProductionRls": false,
+  "safeToEnableGlobalRls": false,
+  "safeToCreatePrismaMigration": false,
+  "safeToChangeProductionDb": false,
+  "appLayerAuthorizationMustRemain": true,
+  "currentStagedRouteFlags": [
+    {
+      "flag": "MSCQR_STAGING_RLS_BATCHES_READ_ENABLED",
+      "route": "GET /api/qr/batches",
+      "proofEvent": "staging_rls_batches_read_proof",
+      "rollback": "Unset flag or set to false, restart affected backend process, verify route returns to flag-off cached read behavior."
+    },
+    {
+      "flag": "MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED",
+      "route": "GET /api/qr/batches/:id/allocation-map",
+      "proofEvent": "staging_rls_batch_allocation_map_proof",
+      "rollback": "Unset flag or set to false, restart affected backend process, verify route returns to flag-off allocation-map read behavior."
+    },
+    {
+      "flag": "MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED",
+      "route": "GET /api/manufacturer/printers",
+      "proofEvent": "staging_rls_manufacturer_printers_read_proof",
+      "rollback": "Unset flag or set to false, restart affected backend process, verify route returns to flag-off printer read behavior."
+    }
+  ],
+  "preconditions": [
+    "current_ci_checks_green",
+    "staging_flags_tested_individually",
+    "staging_flags_tested_together",
+    "staging_proof_telemetry_reviewed",
+    "no_unsafe_telemetry_identifiers",
+    "index_rollout_plan_reviewed",
+    "staging_explain_evidence_collected_with_realistic_row_counts",
+    "rollback_owner_assigned",
+    "production_window_approved",
+    "production_backup_snapshot_pitr_posture_confirmed",
+    "production_rds_connection_and_role_ownership_behavior_understood",
+    "table_owner_and_force_rls_behavior_accounted_for"
+  ],
+  "productionPhases": [
+    {
+      "phase": 0,
+      "name": "no_op_documentation_and_owner_signoff",
+      "changesProductionRls": false,
+      "changesProductionDb": false
+    },
+    {
+      "phase": 1,
+      "name": "index_readiness_optional_separate_approval",
+      "changesProductionRls": false,
+      "changesProductionDb": false,
+      "requiresSeparateApprovalForDbChange": true
+    },
+    {
+      "phase": 2,
+      "name": "deploy_runtime_code_with_all_rls_flags_off",
+      "changesProductionRls": false,
+      "changesProductionDb": false
+    },
+    {
+      "phase": 3,
+      "name": "one_explicitly_approved_internal_admin_smoke_flag",
+      "changesProductionRls": false,
+      "changesProductionDb": false,
+      "requiresExplicitApproval": true
+    },
+    {
+      "phase": 4,
+      "name": "limited_tenant_canary",
+      "changesProductionRls": false,
+      "changesProductionDb": false,
+      "requiresCleanPriorTelemetry": true
+    },
+    {
+      "phase": 5,
+      "name": "expand_route_flags_after_clean_telemetry",
+      "changesProductionRls": false,
+      "changesProductionDb": false,
+      "routeByRouteOnly": true
+    },
+    {
+      "phase": 6,
+      "name": "table_level_production_rls_enablement_plan_after_route_confidence",
+      "changesProductionRls": false,
+      "changesProductionDb": false,
+      "requiresSeparateApproval": true
+    }
+  ],
+  "rollbackOrderIfTableRlsEverEnabled": [
+    "disable_route_flags",
+    "disable_force_row_level_security_where_needed",
+    "disable_row_level_security_on_affected_tables",
+    "verify_relrowsecurity_false_and_relforcerowsecurity_false",
+    "verify_policies_removed_or_match_approved_rollback_state",
+    "rerun_application_layer_authorization_smoke_tests"
+  ],
+  "goCriteria": [
+    "staging_route_telemetry_success_rate_acceptable",
+    "latency_within_target",
+    "no_identifier_leakage",
+    "no_unexpected_401_403_404_500_increase",
+    "rollback_tested",
+    "owner_signoff_complete",
+    "non_target_routes_unaffected"
+  ],
+  "noGoCriteria": [
+    "public_verification_affected",
+    "scan_mutation_affected",
+    "print_dispatch_or_printer_agent_flows_affected",
+    "worker_failures_increase",
+    "unsafe_identifiers_in_telemetry",
+    "query_latency_regresses_materially",
+    "rls_flags_affect_non_target_routes",
+    "rollback_owner_unavailable"
+  ],
+  "explicitlyOutOfScope": [
+    "production_rls_enablement",
+    "global_production_table_rls_enablement",
+    "prisma_migrations",
+    "production_db_changes",
+    "additional_runtime_route_wiring",
+    "app_layer_authorization_removal",
+    "public_verification_rls_runtime_wiring",
+    "scan_mutation_rls_runtime_wiring",
+    "printer_heartbeat_dispatch_test_print_replacement_flows",
+    "workers_outboxes_schedulers",
+    "exports_downloads_streams",
+    "incidents_support_evidence_heavy_routes"
+  ],
+  "requiredValidationCommands": [
+    "git diff --check",
+    "npm run check:documents",
+    "npm run check:rls-prototype-boundaries",
+    "npm run check:prisma-scope-guardrails",
+    "npm run check:print-qr-identity",
+    "npm --prefix backend run build"
+  ]
+}
