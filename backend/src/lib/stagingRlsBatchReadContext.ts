@@ -5,6 +5,8 @@ import { isManufacturerRole, isPlatformRole } from "../services/manufacturerScop
 
 export const STAGING_RLS_BATCHES_READ_FLAG = "MSCQR_STAGING_RLS_BATCHES_READ_ENABLED";
 export const STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG = "MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED";
+export const STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG =
+  "MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED";
 
 export type StagingRlsBatchReadContext = {
   userId: string;
@@ -32,6 +34,9 @@ export const isStagingRlsBatchesReadEnabled = () =>
 
 export const isStagingRlsBatchAllocationMapEnabled = () =>
   parseBooleanEnv(STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG, false);
+
+export const isStagingRlsManufacturerPrintersReadEnabled = () =>
+  parseBooleanEnv(STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG, false);
 
 export const buildStagingRlsBatchReadContext = (
   user: AuthenticatedSessionClaims
