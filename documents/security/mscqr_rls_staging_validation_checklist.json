@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "service": "MSCQR",
+  "planDate": "2026-06-30",
+  "status": "staging_validation_only",
+  "evidenceDocument": "documents/qa/evidence/MSCQR_RLS_STAGING_VALIDATION_EVIDENCE_2026-06-30.md",
+  "runbookDocument": "documents/ops/MSCQR_RLS_STAGING_VALIDATION_RUNBOOK_2026-06-30.md",
+  "productionRlsEnabled": false,
+  "globalTableRlsEnabled": false,
+  "createsPrismaMigration": false,
+  "changesProductionDb": false,
+  "wiresAdditionalRoutes": false,
+  "removesAppLayerAuthorization": false,
+  "approvedRoutes": [
+    {
+      "route": "GET /api/qr/batches",
+      "flag": "MSCQR_STAGING_RLS_BATCHES_READ_ENABLED",
+      "proofEvent": "staging_rls_batches_read_proof",
+      "method": "GET",
+      "mutatesData": false
+    },
+    {
+      "route": "GET /api/qr/batches/:id/allocation-map",
+      "flag": "MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED",
+      "proofEvent": "staging_rls_batch_allocation_map_proof",
+      "method": "GET",
+      "mutatesData": false
+    },
+    {
+      "route": "GET /api/manufacturer/printers",
+      "flag": "MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED",
+      "proofEvent": "staging_rls_manufacturer_printers_read_proof",
+      "method": "GET",
+      "mutatesData": false
+    }
+  ],
+  "preflight": [
+    "confirm_environment_is_staging_only",
+    "confirm_deployed_backend_sha",
+    "confirm_route_flags_initially_false_or_off",
+    "confirm_baseline_auth_test_users_exist_without_recording_ids",
+    "confirm_safe_staging_batch_id_exists_without_recording_it",
+    "confirm_rollback_owner_available",
+    "confirm_app_layer_authorization_remains_enabled",
+    "confirm_no_global_or_table_rls_enablement"
+  ],
+  "validationSequence": [
+    "capture_flag_off_baseline_for_three_routes",
+    "enable_batch_list_flag_only_validate_and_rollback",
+    "enable_allocation_map_flag_only_validate_and_rollback",
+    "enable_manufacturer_printers_flag_only_validate_and_rollback",
+    "enable_all_three_flags_validate_compare_telemetry_and_latency",
+    "unset_all_flags_confirm_baseline_returns",
+    "record_pass_fail_evidence"
+  ],
+  "allowedProofTelemetryFields": [
+    "metric",
+    "route",
+    "flagEnabled",
+    "contextClass",
+    "durationMs",
+    "rowCount",
+    "safeCoarseResultCount",
+    "success",
+    "failureCategory"
+  ],
+  "forbiddenTelemetryValues": [
+    "user_ids",
+    "licensee_ids",
+    "manufacturer_ids",
+    "organization_ids",
+    "printer_ids",
+    "printer_names",
+    "device_names",
+    "batch_ids",
+    "qr_codes",
+    "customer_identifiers",
+    "request_tokens",
+    "secrets",
+    "email_addresses",
+    "raw_exception_text"
+  ],
+  "latencyThresholds": {
+    "warning": [
+      "p95_increase_above_baseline_more_than_25_percent",
+      "p95_increase_above_baseline_more_than_250_ms"
+    ],
+    "noGo": [
+      "p95_increase_above_baseline_more_than_50_percent",
+      "p95_increase_above_baseline_more_than_500_ms",
+      "repeated_timeout",
+      "material_status_code_regression"
+    ],
+    "requiresRealisticStagingRowCountsBeforeProductionCanary": true
+  },
+  "rollbackChecks": [
+    "unset_route_flag",
+    "restart_or_redeploy_staging_backend_if_needed",
+    "confirm_proof_events_stop",
+    "confirm_route_response_returns_to_baseline",
+    "confirm_no_table_level_staging_or_production_global_rls_was_enabled"
+  ],
+  "noGoCriteria": [
+    "non_target_route_affected",
+    "public_verification_affected",
+    "scan_mutation_affected",
+    "print_dispatch_affected",
+    "worker_errors_increase",
+    "ids_or_secrets_in_telemetry",
+    "unexpected_401_403_404_500_increase",
+    "latency_materially_regresses",
+    "flag_rollback_does_not_restore_baseline",
+    "global_or_table_rls_enabled"
+  ],
+  "optionalCollector": {
+    "script": "scripts/collect-rls-staging-validation-evidence.mjs",
+    "requiresExplicitStagingBaseUrl": true,
+    "authTokenEnv": "STAGING_AUTH_TOKEN",
+    "safeBatchIdEnv": "STAGING_BATCH_ID",
+    "doesNotEnableFlags": true,
+    "doesNotMutateData": true,
+    "approvedRoutesOnly": true,
+    "writesSafeSummaryOnly": true,
+    "refusesProductionLookingHosts": [
+      "mscqr.com",
+      "*.mscqr.com",
+      "production",
+      "prod"
+    ],
+    "explicitMscqrSubdomainAllowlistImplemented": false,
+    "hostGuardSelfCheckCommand": "node scripts/collect-rls-staging-validation-evidence.mjs --self-check-host-guard"
+  },
+  "requiredValidationCommands": [
+    "git diff --check",
+    "npm run check:documents",
+    "npm run check:rls-prototype-boundaries",
+    "npm run check:prisma-scope-guardrails",
+    "npm run check:print-qr-identity",
+    "npm --prefix backend run build",
+    "node scripts/collect-rls-staging-validation-evidence.mjs --dry-run"
+  ]
+}
