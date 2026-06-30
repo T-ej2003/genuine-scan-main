@@ -44,6 +44,8 @@ This collector:
   - accepts bearer auth through STAGING_AUTH_TOKEN only
   - never prints auth tokens
   - sends GET requests only to the three approved staged RLS routes
+  - uses manual redirect handling and never follows 3xx responses
+  - records only whether a Location header was present, not its value
   - does not enable flags and does not mutate data
   - writes safe status, shape, timing, and count summaries only
 `;
@@ -169,34 +171,75 @@ const summarizeBody = (text, contentType) => {
   return { type: "non_json", responseBytes: text.length };
 };
 
-const collectRoute = async (baseUrl, token, route) => {
+const getStatusCategory = (status) => {
+  if (status >= 200 && status <= 299) return "2xx";
+  if (status >= 300 && status <= 399) return "3xx";
+  if (status >= 400 && status <= 499) return "4xx";
+  if (status >= 500 && status <= 599) return "5xx";
+  return "other";
+};
+
+const getStatusOutcome = (status) => {
+  const category = getStatusCategory(status);
+  if (category === "2xx") return "success_2xx";
+  if (category === "3xx") return "redirect_3xx";
+  if (category === "4xx") return "client_error_4xx";
+  if (category === "5xx") return "server_error_5xx";
+  return "other_status";
+};
+
+const countBy = (items, getKey) =>
+  items.reduce((counts, item) => {
+    const key = getKey(item);
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+
+const buildRouteFetchOptions = (token) => ({
+  method: "GET",
+  redirect: "manual",
+  headers: {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+    "User-Agent": "mscqr-rls-staging-validation-evidence-collector",
+  },
+});
+
+const summarizeResponseAttempt = async (response, durationMs) => {
+  const statusCategory = getStatusCategory(response.status);
+  const isRedirect = statusCategory === "3xx";
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+  const attempt = {
+    status: response.status,
+    statusCategory,
+    statusOutcome: getStatusOutcome(response.status),
+    ok: response.ok,
+    durationMs,
+    contentType: contentType.split(";")[0],
+    shapeSummary: summarizeBody(text, contentType),
+    rawBodyStored: false,
+    authTokenPrinted: false,
+    redacted: true,
+  };
+  if (isRedirect) {
+    attempt.redirected = true;
+    attempt.redirectStatusCategory = "3xx";
+    attempt.locationPresent = response.headers.has("location");
+  }
+  return attempt;
+};
+
+const collectRoute = async (baseUrl, token, route, fetchImpl = fetch) => {
   const timings = [];
   const attempts = [];
   for (let i = 0; i < samples; i += 1) {
     const url = new URL(route.path, baseUrl);
     const started = performance.now();
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-        "User-Agent": "mscqr-rls-staging-validation-evidence-collector",
-      },
-    });
+    const response = await fetchImpl(url, buildRouteFetchOptions(token));
     const durationMs = Math.round(performance.now() - started);
     timings.push(durationMs);
-    const contentType = response.headers.get("content-type") || "";
-    const text = await response.text();
-    attempts.push({
-      status: response.status,
-      ok: response.ok,
-      durationMs,
-      contentType: contentType.split(";")[0],
-      shapeSummary: summarizeBody(text, contentType),
-      rawBodyStored: false,
-      authTokenPrinted: false,
-      redacted: true,
-    });
+    attempts.push(await summarizeResponseAttempt(response, durationMs));
   }
   return {
     key: route.key,
@@ -206,6 +249,12 @@ const collectRoute = async (baseUrl, token, route) => {
     mutatesData: false,
     samples,
     statusSet: [...new Set(attempts.map((attempt) => attempt.status))],
+    statusCategoryCounts: countBy(attempts, (attempt) => attempt.statusCategory),
+    statusOutcomeCounts: countBy(attempts, (attempt) => attempt.statusOutcome),
+    hasRedirects: attempts.some((attempt) => attempt.statusCategory === "3xx"),
+    allSamples2xx: attempts.every((attempt) => attempt.statusCategory === "2xx"),
+    redirectPolicy: "manual",
+    followsRedirects: false,
     timingMs: {
       p50: percentile(timings, 50),
       p95: percentile(timings, 95),
@@ -231,6 +280,12 @@ if (isDryRun) {
         requires: ["STAGING_BASE_URL", "STAGING_AUTH_TOKEN", "STAGING_BATCH_ID for allocation-map route"],
         refusesProductionLookingHosts: ["mscqr.com", "*.mscqr.com", "production", "prod"],
         approvedRoutes: plannedRoutes,
+        routeFetchPolicy: {
+          redirect: buildRouteFetchOptions("<redacted>").redirect,
+          followsRedirects: false,
+          rawLocationRecorded: false,
+          locationPresentRecordedFor3xx: true,
+        },
         output: "documents/qa/evidence/rls-staging-validation-safe-summary-<timestamp>.json",
         enablesFlags: false,
         mutatesData: false,
@@ -262,8 +317,26 @@ if (isHostGuardSelfCheck) {
     };
   });
   const failed = results.filter((result) => !result.passed);
-  console.log(JSON.stringify({ hostGuardSelfCheck: failed.length === 0 ? "passed" : "failed", results }, null, 2));
-  if (failed.length > 0) process.exit(1);
+  const routeFetchOptions = buildRouteFetchOptions("<redacted>");
+  const redirectPolicySelfCheck = {
+    expected: "manual",
+    actual: routeFetchOptions.redirect,
+    followsRedirects: routeFetchOptions.redirect !== "manual",
+    passed: routeFetchOptions.redirect === "manual",
+  };
+  console.log(
+    JSON.stringify(
+      {
+        hostGuardSelfCheck: failed.length === 0 ? "passed" : "failed",
+        redirectPolicySelfCheck: redirectPolicySelfCheck.passed ? "passed" : "failed",
+        results,
+        redirectPolicy: redirectPolicySelfCheck,
+      },
+      null,
+      2,
+    ),
+  );
+  if (failed.length > 0 || !redirectPolicySelfCheck.passed) process.exit(1);
   process.exit(0);
 }
 

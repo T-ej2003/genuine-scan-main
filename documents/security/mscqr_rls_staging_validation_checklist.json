@@ -42,6 +42,7 @@
     "confirm_safe_staging_batch_id_exists_without_recording_it",
     "confirm_rollback_owner_available",
     "confirm_app_layer_authorization_remains_enabled",
+    "confirm_collector_does_not_follow_redirects",
     "confirm_no_global_or_table_rls_enablement"
   ],
   "validationSequence": [
@@ -107,6 +108,7 @@
     "print_dispatch_affected",
     "worker_errors_increase",
     "ids_or_secrets_in_telemetry",
+    "approved_route_returns_3xx_redirect",
     "unexpected_401_403_404_500_increase",
     "latency_materially_regresses",
     "flag_rollback_does_not_restore_baseline",
@@ -120,6 +122,11 @@
     "doesNotEnableFlags": true,
     "doesNotMutateData": true,
     "approvedRoutesOnly": true,
+    "redirectPolicy": "manual",
+    "followsRedirects": false,
+    "records3xxAsRedirectEvidence": true,
+    "recordsRawLocationHeader": false,
+    "recordsLocationPresentOnly": true,
     "writesSafeSummaryOnly": true,
     "refusesProductionLookingHosts": [
       "mscqr.com",
@@ -128,7 +135,8 @@
       "prod"
     ],
     "explicitMscqrSubdomainAllowlistImplemented": false,
-    "hostGuardSelfCheckCommand": "node scripts/collect-rls-staging-validation-evidence.mjs --self-check-host-guard"
+    "hostGuardSelfCheckCommand": "node scripts/collect-rls-staging-validation-evidence.mjs --self-check-host-guard",
+    "redirectPolicySelfCheckCommand": "node scripts/collect-rls-staging-validation-evidence.mjs --self-check-host-guard"
   },
   "requiredValidationCommands": [
     "git diff --check",
@@ -137,6 +145,8 @@
     "npm run check:prisma-scope-guardrails",
     "npm run check:print-qr-identity",
     "npm --prefix backend run build",
-    "node scripts/collect-rls-staging-validation-evidence.mjs --dry-run"
+    "node scripts/collect-rls-staging-validation-evidence.mjs --dry-run",
+    "node scripts/collect-rls-staging-validation-evidence.mjs --help",
+    "node scripts/collect-rls-staging-validation-evidence.mjs --self-check-host-guard"
   ]
 }

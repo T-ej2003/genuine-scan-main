@@ -41,6 +41,7 @@ Current flags are process-wide environment flags. They are not tenant-scoped con
 ## Optional Safe Collector Setup
 
 The collector does not enable flags and does not mutate data. It only sends `GET` requests to the three approved route templates and writes safe summaries.
+It uses manual redirect handling. Approved-route `3xx` responses are recorded as redirect evidence and are not followed to `/login` or any other `Location`.
 
 Dry-run:
 
@@ -72,6 +73,9 @@ Rules:
 - Do not paste tokens into evidence.
 - Do not commit generated evidence containing real hostnames unless the host is safe to disclose.
 - The generated summary must not contain raw response bodies or IDs.
+- The generated summary records `success_2xx`, `redirect_3xx`, `client_error_4xx`, and `server_error_5xx` outcomes separately.
+- Redirect evidence must record only coarse redirect facts such as `redirected`, `redirectStatusCategory`, and `locationPresent`; it must not record raw `Location` values.
+- Any `3xx` from an approved route is a warning/no-go until auth, proxy, and routing behavior are fixed and fresh evidence is collected.
 
 ## Baseline Flag-Off Validation
 
@@ -81,7 +85,8 @@ With all three flags off:
 2. Call `GET /api/qr/batches/:id/allocation-map` using the safe staging batch ID.
 3. Call `GET /api/manufacturer/printers`.
 4. Record status, response shape summary, safe row/result counts, p50 latency, and p95 latency if available.
-5. Do not store tenant IDs, user IDs, printer IDs, batch IDs, QR codes, request tokens, auth cookies, or secrets.
+5. Record whether each route returned `success_2xx`, `redirect_3xx`, `client_error_4xx`, or `server_error_5xx`.
+6. Do not store tenant IDs, user IDs, printer IDs, batch IDs, QR codes, request tokens, auth cookies, redirect `Location` values, or secrets.
 
 Expected result: all three routes match current app-layer authorization behavior and no staged RLS proof events are emitted.
 
@@ -202,6 +207,7 @@ Stop validation and roll back if any condition is true:
 - Print dispatch is affected.
 - Worker errors increase.
 - IDs or secrets appear in proof telemetry or generic request telemetry.
+- Any approved route returns a `3xx` redirect during collection; fix auth/proxy/routing before accepting evidence.
 - 401, 403, 404, or 500 responses increase unexpectedly.
 - Latency materially regresses.
 - Flag rollback does not restore baseline behavior.
