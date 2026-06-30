@@ -8,10 +8,10 @@ import { discoverPrinterCapabilities } from "../printing/registry/printerProfile
 import {
   deleteNetworkDirectPrinter as deleteNetworkDirectPrinterRecord,
   getRegisteredPrinterForManufacturer,
-  listRegisteredPrintersForManufacturer,
   testRegisteredPrinterConnection,
   upsertManagedNetworkPrinter,
 } from "../services/printerRegistryService";
+import { listScopedManufacturerPrintersReadPayload } from "../services/stagingRlsManufacturerPrintersReadService";
 import { createAuditLog } from "../services/auditService";
 import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import { resolvePrinterConfirmationMode } from "../services/printConfirmationService";
@@ -125,7 +125,8 @@ export const listPrinters = async (req: AuthRequest, res: Response) => {
 
     const scope = await resolveScope(req);
     const includeInactive = String(req.query.includeInactive || "").trim().toLowerCase() === "true";
-    const rows = await listRegisteredPrintersForManufacturer({
+    const rows = await listScopedManufacturerPrintersReadPayload({
+      user: req.user,
       userId: scope.userId,
       orgId: scope.orgId,
       licenseeId: scope.licenseeId,

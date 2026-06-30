@@ -7,9 +7,11 @@ import { releaseMetadata } from "./observability/release";
 import { captureBackendException } from "./observability/sentry";
 import { getLatencySummary, recordRequestMetric } from "./observability/requestMetrics";
 import { classifyStagingRlsBatchReadContext } from "./observability/stagingRlsBatchReadProof";
+import { classifyStagingRlsManufacturerPrintersReadContext } from "./observability/stagingRlsManufacturerPrintersReadProof";
 import {
   isStagingRlsBatchAllocationMapEnabled,
   isStagingRlsBatchesReadEnabled,
+  isStagingRlsManufacturerPrintersReadEnabled,
 } from "./lib/stagingRlsBatchReadContext";
 import { sanitizeRequestInput } from "./middleware/requestSanitizer";
 import {
@@ -46,6 +48,13 @@ const STAGING_RLS_BATCH_ALLOCATION_MAP_TELEMETRY_PATH = "/api/qr/batches/:id/all
 const stagingRlsBatchAllocationMapTelemetryPattern = /^\/api\/qr\/batches\/[^/]+\/allocation-map\/?$/;
 const isStagingRlsBatchAllocationMapTelemetryRoute = (method: string, pathName: string) =>
   method === "GET" && stagingRlsBatchAllocationMapTelemetryPattern.test(pathName);
+const stagingRlsManufacturerPrintersReadTelemetryPaths = new Set([
+  "/api/manufacturer/printers",
+  "/api/manufacturer/printers/",
+]);
+const STAGING_RLS_MANUFACTURER_PRINTERS_READ_TELEMETRY_PATH = "/api/manufacturer/printers";
+const isStagingRlsManufacturerPrintersReadTelemetryRoute = (method: string, pathName: string) =>
+  method === "GET" && stagingRlsManufacturerPrintersReadTelemetryPaths.has(pathName);
 
 export const createBackendApp = () => {
   const redisRequired =
@@ -136,15 +145,23 @@ export const createBackendApp = () => {
       const isStagingRlsAllocationMapTelemetry =
         isStagingRlsBatchAllocationMapTelemetryRoute(req.method, pathName) &&
         isStagingRlsBatchAllocationMapEnabled();
+      const isStagingRlsManufacturerPrintersTelemetry =
+        isStagingRlsManufacturerPrintersReadTelemetryRoute(req.method, pathName) &&
+        isStagingRlsManufacturerPrintersReadEnabled();
       const redactStagingRlsBatchActor =
         (isStagingRlsBatchReadTelemetryRoute(req.method, pathName) && isStagingRlsBatchesReadEnabled()) ||
-        isStagingRlsAllocationMapTelemetry;
+        isStagingRlsAllocationMapTelemetry ||
+        isStagingRlsManufacturerPrintersTelemetry;
       const telemetryPath = isStagingRlsAllocationMapTelemetry
         ? STAGING_RLS_BATCH_ALLOCATION_MAP_TELEMETRY_PATH
+        : isStagingRlsManufacturerPrintersTelemetry
+          ? STAGING_RLS_MANUFACTURER_PRINTERS_READ_TELEMETRY_PATH
         : pathName;
       const actorContextClass =
         redactStagingRlsBatchActor && claims?.role
-          ? classifyStagingRlsBatchReadContext({ role: claims.role })
+          ? isStagingRlsManufacturerPrintersTelemetry
+            ? classifyStagingRlsManufacturerPrintersReadContext({ role: claims.role })
+            : classifyStagingRlsBatchReadContext({ role: claims.role })
           : null;
 
       recordRequestMetric({
