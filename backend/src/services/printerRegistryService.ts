@@ -527,8 +527,10 @@ export const listRegisteredPrintersForManufacturer = async (params: {
   licenseeId?: string | null;
   licenseeIds?: string[] | null;
   includeInactive?: boolean;
+  db?: Prisma.TransactionClient;
 }) => {
-  const printers = (await prisma.printer.findMany({
+  const db = params.db || prisma;
+  const printers = (await db.printer.findMany({
     where: printerListWhere(params),
     include: {
       printerRegistration: {
@@ -549,7 +551,7 @@ export const listRegisteredPrintersForManufacturer = async (params: {
 
   const rows = await Promise.all(
     printers.map(async (printer) => {
-      const profile = await getPrinterProfileForPrinter(printer.id);
+      const profile = await getPrinterProfileForPrinter(printer.id, db);
       const latestDiscoverySnapshot =
         profile?.snapshots.find((snapshot) => snapshot.snapshotType === "LIVE_DISCOVERY") ||
         profile?.onboardingSnapshot ||

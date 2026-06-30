@@ -370,8 +370,11 @@ export const ensurePrinterProfileForPrinter = async (
   });
 };
 
-export const getPrinterProfileForPrinter = async (printerId: string) =>
-  prisma.printerProfile.findUnique({
+export const getPrinterProfileForPrinter = async (
+  printerId: string,
+  db: Pick<typeof prisma, "printerProfile"> | Prisma.TransactionClient = prisma
+) =>
+  db.printerProfile.findUnique({
     where: { printerId },
     include: {
       onboardingSnapshot: true,
