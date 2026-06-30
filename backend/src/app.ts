@@ -7,7 +7,10 @@ import { releaseMetadata } from "./observability/release";
 import { captureBackendException } from "./observability/sentry";
 import { getLatencySummary, recordRequestMetric } from "./observability/requestMetrics";
 import { classifyStagingRlsBatchReadContext } from "./observability/stagingRlsBatchReadProof";
-import { isStagingRlsBatchesReadEnabled } from "./lib/stagingRlsBatchReadContext";
+import {
+  isStagingRlsBatchAllocationMapEnabled,
+  isStagingRlsBatchesReadEnabled,
+} from "./lib/stagingRlsBatchReadContext";
 import { sanitizeRequestInput } from "./middleware/requestSanitizer";
 import {
   createPublicActorRateLimiter,
@@ -39,6 +42,10 @@ const getErrorMessage = (error: unknown) => (error instanceof Error ? error.mess
 const stagingRlsBatchReadTelemetryPaths = new Set(["/api/qr/batches", "/api/qr/batches/"]);
 const isStagingRlsBatchReadTelemetryRoute = (method: string, pathName: string) =>
   method === "GET" && stagingRlsBatchReadTelemetryPaths.has(pathName);
+const STAGING_RLS_BATCH_ALLOCATION_MAP_TELEMETRY_PATH = "/api/qr/batches/:id/allocation-map";
+const stagingRlsBatchAllocationMapTelemetryPattern = /^\/api\/qr\/batches\/[^/]+\/allocation-map\/?$/;
+const isStagingRlsBatchAllocationMapTelemetryRoute = (method: string, pathName: string) =>
+  method === "GET" && stagingRlsBatchAllocationMapTelemetryPattern.test(pathName);
 
 export const createBackendApp = () => {
   const redisRequired =
@@ -126,8 +133,15 @@ export const createBackendApp = () => {
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
       const pathName = req.originalUrl.split("?")[0] || req.path || "/";
       const claims = (req as express.Request & { user?: RequestClaimsSnapshot }).user || null;
+      const isStagingRlsAllocationMapTelemetry =
+        isStagingRlsBatchAllocationMapTelemetryRoute(req.method, pathName) &&
+        isStagingRlsBatchAllocationMapEnabled();
       const redactStagingRlsBatchActor =
-        isStagingRlsBatchReadTelemetryRoute(req.method, pathName) && isStagingRlsBatchesReadEnabled();
+        (isStagingRlsBatchReadTelemetryRoute(req.method, pathName) && isStagingRlsBatchesReadEnabled()) ||
+        isStagingRlsAllocationMapTelemetry;
+      const telemetryPath = isStagingRlsAllocationMapTelemetry
+        ? STAGING_RLS_BATCH_ALLOCATION_MAP_TELEMETRY_PATH
+        : pathName;
       const actorContextClass =
         redactStagingRlsBatchActor && claims?.role
           ? classifyStagingRlsBatchReadContext({ role: claims.role })
@@ -136,7 +150,7 @@ export const createBackendApp = () => {
       recordRequestMetric({
         at: Date.now(),
         method: req.method,
-        route: pathName,
+        route: telemetryPath,
         status: res.statusCode,
         durationMs,
       });
@@ -144,7 +158,7 @@ export const createBackendApp = () => {
       const meta = {
         requestId,
         method: req.method,
-        path: pathName,
+        path: telemetryPath,
         status: res.statusCode,
         durationMs: Math.round(durationMs * 10) / 10,
         release: releaseMetadata.release,

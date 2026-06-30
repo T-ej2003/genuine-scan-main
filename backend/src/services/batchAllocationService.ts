@@ -341,8 +341,13 @@ export const listBatchOperationalSummaries = async (params: {
   };
 };
 
-export const getBatchAllocationMap = async (batchId: string, opts?: { licenseeId?: string }) => {
-  const focusBatch = await prisma.batch.findFirst({
+export const getBatchAllocationMap = async (
+  batchId: string,
+  opts?: { licenseeId?: string; db?: DbClient }
+) => {
+  const db = opts?.db || prisma;
+  const sequentialReads = Boolean(opts?.db);
+  const focusBatch = await db.batch.findFirst({
     where: {
       id: batchId,
       ...(opts?.licenseeId ? { licenseeId: opts.licenseeId } : {}),
@@ -357,7 +362,7 @@ export const getBatchAllocationMap = async (batchId: string, opts?: { licenseeId
   if (!focusBatch) return null;
 
   const sourceBatchId = focusBatch.rootBatchId || focusBatch.parentBatchId || focusBatch.id;
-  const relatedBatches = await prisma.batch.findMany({
+  const relatedBatches = await db.batch.findMany({
     where: {
       licenseeId: focusBatch.licenseeId,
       OR: [
@@ -374,7 +379,7 @@ export const getBatchAllocationMap = async (batchId: string, opts?: { licenseeId
     },
   });
 
-  const enriched = await enrichBatchSummaries(relatedBatches as BatchWithScope[]);
+  const enriched = await enrichBatchSummaries(relatedBatches as BatchWithScope[], db, sequentialReads);
   const sourceBatch = enriched.find((batch) => batch.id === sourceBatchId) || null;
   const selectedBatch = enriched.find((batch) => batch.id === focusBatch.id) || null;
   const allocationBatches = enriched.filter((batch) => batch.id !== sourceBatchId);

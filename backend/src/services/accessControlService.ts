@@ -318,13 +318,15 @@ export const buildIncidentScopeWhere = async (
 export const findScopedBatch = async (
   user: NonNullable<AuthRequest["user"]>,
   id: string,
-  args: Prisma.BatchFindFirstArgs = {}
+  args: Prisma.BatchFindFirstArgs = {},
+  opts?: { db?: typeof prisma | Prisma.TransactionClient }
 ) =>
-  prisma.batch.findFirst({
+  (opts?.db || prisma).batch.findFirst({
     ...args,
     where: await buildScopedWhere(user, {
       base: { id },
       manufacturerField: "manufacturerId",
+      db: opts?.db,
       ...(args.where ? { base: { ...(args.where as unknown as MutableWhere), id } } : {}),
     }),
   });
