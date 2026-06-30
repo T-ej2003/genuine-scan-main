@@ -9,6 +9,10 @@ This document records the staging-readiness proof for the already-wired runtime 
 - Controller: `backend/src/controllers/qrController.ts#getBatches`
 - Route read helper: `backend/src/services/stagingRlsBatchReadService.ts#listScopedBatchReadPayload`
 
+Request telemetry treats only `GET /api/qr/batches` and `GET /api/qr/batches/` as the batch-list proof
+route. The match is exact after query-string removal; child paths such as `/api/qr/batches/:id`,
+`/api/qr/batches/export`, or any other suffix are not classified as this proof route.
+
 No other route is wired by this proof.
 
 ## Exact Flag
@@ -33,8 +37,9 @@ When the flag is enabled, the backend emits one structured event per `GET /api/q
 
 The proof event must not include user IDs, licensee IDs, manufacturer IDs, organization IDs, QR codes, customer identifiers, request tokens, secrets, email addresses, or raw exception text.
 
-The generic `HTTP request completed` telemetry for `GET /api/qr/batches` is also redacted while the flag is enabled:
-actor user ID, role, licensee ID, and organization ID are set to `null`, and `actorContextClass` is used instead.
+The generic `HTTP request completed` telemetry for `GET /api/qr/batches` and `GET /api/qr/batches/` is
+also redacted while the flag is enabled: actor user ID, role, licensee ID, and organization ID are set to
+`null`, and `actorContextClass` is used instead.
 
 ## Manual Staging Validation Checklist
 

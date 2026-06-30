@@ -206,7 +206,19 @@ const getProofLogs = (logs) =>
     .filter((entry) => entry.args[0] === "staging_rls_batches_read_proof")
     .map((entry) => ({ level: entry.level, event: entry.args[1] }));
 
+const safeProofEventKeys = [
+  "contextClass",
+  "durationMs",
+  "failureCategory",
+  "flagEnabled",
+  "metric",
+  "route",
+  "rowCount",
+  "success",
+];
+
 const assertSafeProofEvent = (event) => {
+  assert.deepEqual(Object.keys(event).sort(), safeProofEventKeys, "proof event must contain only safe telemetry fields");
   assert.strictEqual(event.metric, "staging_rls_batches_read");
   assert.strictEqual(event.route, "GET /api/qr/batches");
   assert.strictEqual(event.flagEnabled, true);
@@ -285,11 +297,11 @@ const runFlagOnRouteAssertions = async () => {
     clearDistRequireCache();
 
     const proofLogs = [];
-    const batchRequestLogs = [];
+    const requestLogs = [];
     const captureLogger = (level, message, meta) => {
       if (message === "staging_rls_batches_read_proof") proofLogs.push({ level, event: meta });
-      if (message === "HTTP request completed" && meta?.path === "/api/qr/batches") {
-        batchRequestLogs.push({ level, event: meta });
+      if (message === "HTTP request completed") {
+        requestLogs.push({ level, event: meta });
       }
     };
     mockModule("utils/logger.js", {
@@ -316,6 +328,11 @@ const runFlagOnRouteAssertions = async () => {
       const licensee = await routeRequest("GET", "/api/qr/batches", null, { headers: authHeader(tokens.licenseeAdminA) });
       assertBatchMarkers(licensee, "P2 Batch A", "P2 Batch B", "flag on licensee batch list");
 
+      const licenseeTrailingSlash = await routeRequest("GET", "/api/qr/batches/", null, {
+        headers: authHeader(tokens.licenseeAdminA),
+      });
+      assertBatchMarkers(licenseeTrailingSlash, "P2 Batch A", "P2 Batch B", "flag on licensee trailing-slash batch list");
+
       const manufacturer = await routeRequest("GET", "/api/qr/batches", null, { headers: authHeader(tokens.manufacturerA) });
       assertBatchMarkers(manufacturer, "P2 Batch A", "P2 Batch B", "flag on manufacturer batch list");
 
@@ -324,11 +341,15 @@ const runFlagOnRouteAssertions = async () => {
       assert.match(platform.text, /P2 Batch A/i, "platform admin should see tenant A batch");
       assert.match(platform.text, /P2 Batch B/i, "platform admin should see tenant B batch through explicit platform context");
 
+      const childRoutePath = `/api/qr/batches/${ids.batchA}/validation-evidence`;
+      const childRoute = await routeRequest("GET", childRoutePath, null, { headers: authHeader(tokens.licenseeAdminA) });
+      assert.notEqual(childRoute.status, 401, `child route should pass auth before telemetry assertion: ${childRoute.text}`);
+
       const successProofs = proofLogs.filter((entry) => entry.event.success);
-      assert.equal(successProofs.length, 3, "flag-on route requests must emit success proof events");
+      assert.equal(successProofs.length, 4, "flag-on route requests must emit success proof events");
       assert.deepEqual(
         successProofs.map((entry) => entry.event.contextClass).sort(),
-        ["manufacturer", "platform_admin", "tenant_user"],
+        ["manufacturer", "platform_admin", "tenant_user", "tenant_user"],
         "proof events must expose context class only"
       );
       for (const entry of successProofs) {
@@ -336,12 +357,19 @@ const runFlagOnRouteAssertions = async () => {
         assertSafeProofEvent(entry.event);
         assert.strictEqual(entry.event.failureCategory, null);
       }
-      assert.equal(batchRequestLogs.length, 3, "flag-on batch request telemetry should be emitted for each route call");
+      const batchRequestLogs = requestLogs.filter((entry) =>
+        ["/api/qr/batches", "/api/qr/batches/"].includes(entry.event.path)
+      );
+      assert.equal(batchRequestLogs.length, 4, "flag-on batch request telemetry should be emitted for each route call");
       assert.deepEqual(
         batchRequestLogs.map((entry) => entry.event.actorContextClass).sort(),
-        ["manufacturer", "platform_admin", "tenant_user"],
+        ["manufacturer", "platform_admin", "tenant_user", "tenant_user"],
         "request telemetry must expose context class only under the staging RLS flag"
       );
+      const exactPathLog = batchRequestLogs.find((entry) => entry.event.path === "/api/qr/batches");
+      const trailingSlashLog = batchRequestLogs.find((entry) => entry.event.path === "/api/qr/batches/");
+      assert(exactPathLog, "exact batch-list path should emit request telemetry");
+      assert(trailingSlashLog, "trailing-slash batch-list path should emit request telemetry");
       for (const entry of batchRequestLogs) {
         assert.strictEqual(entry.event.actorUserId, null, "flag-on request telemetry must redact actor user id");
         assert.strictEqual(entry.event.actorRole, null, "flag-on request telemetry must redact actor role");
@@ -353,6 +381,13 @@ const runFlagOnRouteAssertions = async () => {
         assert(!serialized.includes(ids.licenseeA), "request telemetry leaked licensee id");
         assert(!serialized.includes(ids.orgA), "request telemetry leaked organization id");
       }
+      const childRouteLog = requestLogs.find((entry) => entry.event.path === childRoutePath);
+      assert(childRouteLog, "child batch route should emit request telemetry");
+      assert.strictEqual(childRouteLog.event.actorContextClass, null, "child batch route must not be classified as RLS proof telemetry");
+      assert.strictEqual(childRouteLog.event.actorUserId, ids.licenseeAdminA, "child batch route must not redact actor user id");
+      assert.strictEqual(childRouteLog.event.actorRole, UserRole.LICENSEE_ADMIN, "child batch route must not redact actor role");
+      assert.strictEqual(childRouteLog.event.actorLicenseeId, ids.licenseeA, "child batch route must not redact licensee id");
+      assert.strictEqual(childRouteLog.event.actorOrgId, ids.orgA, "child batch route must not redact organization id");
 
       const context = await readContext(appPrisma);
       assert.notEqual(context.user_id, ids.licenseeAdminA, "app.user_id leaked after route transaction");

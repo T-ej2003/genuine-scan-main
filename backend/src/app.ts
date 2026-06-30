@@ -36,6 +36,9 @@ type RequestClaimsSnapshot = {
 };
 
 const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error || "Unknown error"));
+const stagingRlsBatchReadTelemetryPaths = new Set(["/api/qr/batches", "/api/qr/batches/"]);
+const isStagingRlsBatchReadTelemetryRoute = (method: string, pathName: string) =>
+  method === "GET" && stagingRlsBatchReadTelemetryPaths.has(pathName);
 
 export const createBackendApp = () => {
   const redisRequired =
@@ -124,7 +127,7 @@ export const createBackendApp = () => {
       const pathName = req.originalUrl.split("?")[0] || req.path || "/";
       const claims = (req as express.Request & { user?: RequestClaimsSnapshot }).user || null;
       const redactStagingRlsBatchActor =
-        req.method === "GET" && pathName === "/api/qr/batches" && isStagingRlsBatchesReadEnabled();
+        isStagingRlsBatchReadTelemetryRoute(req.method, pathName) && isStagingRlsBatchesReadEnabled();
       const actorContextClass =
         redactStagingRlsBatchActor && claims?.role
           ? classifyStagingRlsBatchReadContext({ role: claims.role })

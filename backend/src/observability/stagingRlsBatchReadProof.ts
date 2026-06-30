@@ -43,7 +43,6 @@ export const categorizeStagingRlsBatchReadFailure = (error: unknown): StagingRls
 };
 
 export const buildStagingRlsBatchReadProofEvent = (input: StagingRlsBatchReadProofInput) => ({
-  schemaVersion: 1,
   metric: "staging_rls_batches_read",
   route: STAGING_RLS_BATCHES_READ_ROUTE,
   flagEnabled: input.flagEnabled,
