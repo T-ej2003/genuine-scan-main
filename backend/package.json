@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "prisma generate && tsx watch src/index.ts",
     "auth:mfa:break-glass": "tsx scripts/break-glass-mfa-reset.ts",
+    "auth:resend-setup-link": "node scripts/resend-password-setup-link.js",
     "seed:launch-smoke-users": "node scripts/seed-launch-smoke-users.js",
     "repair:admin-accounts": "node scripts/repair-admin-accounts.js",
     "check:smtp": "node scripts/check-smtp-delivery.js",
