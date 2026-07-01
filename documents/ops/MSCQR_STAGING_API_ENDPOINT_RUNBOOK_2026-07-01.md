@@ -43,13 +43,21 @@ Record names and hosts only. Do not paste secret values into docs, issues, logs,
 node scripts/check-staging-endpoint-readiness.mjs --dry-run
 ```
 
+The readiness helper redacts URL credentials in previews, including Redis, Postgres, and HTTP basic-auth userinfo. Operators must still avoid pasting real `DATABASE_URL`, `REDIS_URL`, tokens, passwords, private keys, or secret values into PRs, issues, chat, runbooks, or evidence.
+
 4. Confirm the RLS collector still refuses production domains:
 
 ```sh
 node scripts/collect-rls-staging-validation-evidence.mjs --self-check-host-guard
 ```
 
-5. Confirm the readiness checklist is reviewed:
+5. Confirm the readiness helper redaction self-check passes:
+
+```sh
+node scripts/check-staging-endpoint-readiness.mjs --self-check-redaction
+```
+
+6. Confirm the readiness checklist is reviewed:
 
 ```sh
 node scripts/check-staging-endpoint-readiness.mjs --print-checklist
