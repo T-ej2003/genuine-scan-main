@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "name": "mscqr_staging_endpoint_readiness",
+  "date": "2026-07-01",
+  "scope": "Preflight checklist for a real non-production MSCQR staging API endpoint before RLS validation.",
+  "forbiddenShortcuts": [
+    "Do not point staging at production DB or production RDS Proxy.",
+    "Do not use the production ECS service as staging.",
+    "Do not use www.mscqr.com, mscqr.com, or default *.mscqr.com as staging.",
+    "Do not relax the collector guard for *.mscqr.com without a separate reviewed explicit allowlist.",
+    "Do not enable production RLS.",
+    "Do not enable global or table-level RLS.",
+    "Do not commit real secret values."
+  ],
+  "checks": [
+    {
+      "id": "endpoint_non_production_hostname",
+      "severity": "blocker",
+      "description": "Staging endpoint is not mscqr.com, any *.mscqr.com host, or a host containing prod/production.",
+      "evidence": "Run node scripts/check-staging-endpoint-readiness.mjs --dry-run and collector host guard self-check."
+    },
+    {
+      "id": "ecs_isolation",
+      "severity": "blocker",
+      "description": "Staging uses a separate ECS service or task definition with staging-only environment values.",
+      "evidence": "Record staging cluster, service, and task definition names without secret values."
+    },
+    {
+      "id": "database_isolation",
+      "severity": "blocker",
+      "description": "Staging DATABASE_URL points to staging Postgres or sanitized snapshot restore, not production RDS or RDS Proxy.",
+      "evidence": "Record staging DB host name only."
+    },
+    {
+      "id": "redis_isolation",
+      "severity": "high",
+      "description": "Staging Redis is separate or uses a formally reviewed isolated namespace with no production key overlap.",
+      "evidence": "Record staging Redis host or namespace, not credentials."
+    },
+    {
+      "id": "object_storage_isolation",
+      "severity": "high",
+      "description": "Staging object storage uses a separate bucket or a strictly scoped staging prefix.",
+      "evidence": "Record staging bucket and prefix only."
+    },
+    {
+      "id": "secrets_isolation",
+      "severity": "blocker",
+      "description": "Staging JWT, QR signing, hash, token, and printer/session secrets are separate from production and stored only in secret stores.",
+      "evidence": "Record secret names or ARNs only, never values."
+    },
+    {
+      "id": "github_staging_vars",
+      "severity": "blocker",
+      "description": "GitHub staging vars no longer point at https://www.mscqr.com or https://www.mscqr.com/api.",
+      "evidence": "Review STAGING_SMOKE_BASE_URL, STAGING_SMOKE_API_BASE_URL, and STAGING_BASE_URL."
+    },
+    {
+      "id": "health_check",
+      "severity": "blocker",
+      "description": "Staging health endpoint returns healthy before collector baseline.",
+      "evidence": "curl -fsS against /api/health or the verified backend health route."
+    },
+    {
+      "id": "rls_flags_default_off",
+      "severity": "blocker",
+      "description": "All staged RLS route flags are false before baseline collection.",
+      "evidence": "Task definition env review and baseline collector summary."
+    },
+    {
+      "id": "collector_baseline_ready",
+      "severity": "high",
+      "description": "RLS collector dry-run and baseline with flags off complete against staging only.",
+      "evidence": "Safe collector summary without raw response bodies, IDs, tokens, cookies, or redirect locations."
+    }
+  ],
+  "recommendedOption": "API-only staging backend reachable by a non-MSCQR ALB DNS name or explicitly reviewed internal hostname."
+}
