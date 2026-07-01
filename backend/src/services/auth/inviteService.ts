@@ -211,6 +211,7 @@ export const createInvite = async (input: {
   licenseeId?: string | null;
   manufacturerId?: string | null;
   allowExistingInvitedUser?: boolean;
+  requireExistingUser?: boolean;
   createdByUserId: string;
   ipHash: string | null;
   userAgent: string | null;
@@ -238,6 +239,7 @@ export const createInvite = async (input: {
   const now = new Date();
   const expiresAt = addHours(now, 24);
   const allowExistingInvitedUser = Boolean(input.allowExistingInvitedUser);
+  const requireExistingUser = Boolean(input.requireExistingUser);
 
   const rawToken = randomOpaqueToken(32);
   const tokenHash = hashToken(rawToken);
@@ -332,6 +334,7 @@ export const createInvite = async (input: {
         status: existing.status as UserStatus,
       };
     } else {
+      if (requireExistingUser) throw new Error("Existing user is required for invite resend");
       createdUser = await tx.user.create({
         data: {
           email,
