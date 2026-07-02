@@ -43,6 +43,16 @@ git check-ignore -v infra/terraform/staging-api/staging.auto.tfvars
 git check-ignore -v infra/terraform/staging-api/example.local.tfvars
 ```
 
+If a private tfvars file exists, it should appear only as ignored local material,
+not as an added or modified tracked file:
+
+```sh
+git status --short --ignored infra/terraform/staging-api/staging.auto.tfvars infra/terraform/staging-api/*.local.tfvars
+```
+
+Expected ignored files are shown with `!!`. Stop if any private tfvars file is
+shown as `A`, `M`, or another tracked status.
+
 Never commit:
 
 - VPC IDs.
@@ -93,7 +103,8 @@ Run from the repository root:
 ```sh
 cp infra/terraform/staging-api/terraform.tfvars.example infra/terraform/staging-api/staging.auto.tfvars
 # Edit infra/terraform/staging-api/staging.auto.tfvars locally with private values.
-git status --short --untracked-files=all
+git check-ignore -v infra/terraform/staging-api/staging.auto.tfvars
+git status --short --ignored infra/terraform/staging-api/staging.auto.tfvars infra/terraform/staging-api/*.local.tfvars
 npm run check:branch-secret-diff
 npm run check:staging-private-inputs
 npm run check:staging-aws-identity

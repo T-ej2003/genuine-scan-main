@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import test from "node:test";
 import path from "node:path";
 
@@ -82,4 +83,34 @@ test("safe JSON output does not include raw private-looking values", () => {
   assert.equal(result.stdout.includes(privateLookingSubnet), false);
   assert.equal(result.stdout.includes("arn:aws:secretsmanager"), false);
   assert.equal(result.stdout.includes("x.x.x.x/32"), false);
+});
+
+test("force-added private tfvars are blocked even when gitignored", () => {
+  const tempRoot = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "mscqr-private-inputs-git-"));
+  try {
+    const tfRoot = path.join(tempRoot, "infra/terraform/staging-api");
+    fs.mkdirSync(tfRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, ".gitignore"),
+      [
+        "infra/terraform/staging-api/staging.auto.tfvars",
+        "infra/terraform/staging-api/terraform.tfvars",
+        "infra/terraform/staging-api/*.local.tfvars",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    fs.writeFileSync(path.join(tfRoot, "staging.auto.tfvars"), safeTemplate, "utf8");
+    assert.equal(spawnSync("git", ["init"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", ".gitignore"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", "-f", "infra/terraform/staging-api/staging.auto.tfvars"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+
+    const result = evaluatePrivateInputs({ root: tempRoot });
+
+    assert.equal(result.status, "blocked_private_tfvars_invalid");
+    assert.equal(result.trackedPrivateTfvarsCount, 1);
+    assert(result.blockerCodes.includes("private_tfvars_tracked_or_staged"));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

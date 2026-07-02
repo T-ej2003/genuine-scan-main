@@ -132,30 +132,49 @@ function checkGitIgnored(root = repoRoot) {
   }));
 }
 
+function trackedPrivateTfvars(root = repoRoot) {
+  const result = spawnSync("git", [
+    "ls-files",
+    "--",
+    "infra/terraform/staging-api/staging.auto.tfvars",
+    "infra/terraform/staging-api/terraform.tfvars",
+    "infra/terraform/staging-api/*.local.tfvars",
+  ], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0) return [];
+  return result.stdout.split("\n").map((entry) => entry.trim()).filter(Boolean);
+}
+
 export function evaluatePrivateInputs({ root = repoRoot } = {}) {
   const tfvarsFiles = listPrivateTfvars(root);
   const gitIgnored = checkGitIgnored(root);
   const gitignoreBlockers = Object.entries(gitIgnored)
     .filter(([, ignored]) => !ignored)
     .map(([relPath]) => `gitignore_missing:${relPath}`);
+  const trackedTfvars = trackedPrivateTfvars(root);
+  const trackedBlockers = trackedTfvars.length > 0 ? ["private_tfvars_tracked_or_staged"] : [];
 
   if (tfvarsFiles.length === 0) {
     return {
       status: "blocked_missing_private_tfvars",
       foundTfvarsFile: false,
       requiredKeysPresent: Object.fromEntries(requiredKeys.map((key) => [key, false])),
-      blockersCount: gitignoreBlockers.length,
+      blockersCount: gitignoreBlockers.length + trackedBlockers.length,
       warningsCount: 0,
-      blockerCodes: gitignoreBlockers,
+      blockerCodes: [...gitignoreBlockers, ...trackedBlockers].sort(),
       warningCodes: [],
       gitIgnored,
+      trackedPrivateTfvarsCount: trackedTfvars.length,
       rawValuesPrinted: false,
     };
   }
 
   const combined = tfvarsFiles.map((relPath) => fs.readFileSync(path.join(root, relPath), "utf8")).join("\n");
   const evaluated = evaluatePrivateInputSource(combined);
-  const blockerCodes = [...evaluated.blockers, ...gitignoreBlockers].sort();
+  const blockerCodes = [...evaluated.blockers, ...gitignoreBlockers, ...trackedBlockers].sort();
   const warningCodes = evaluated.warnings.sort();
 
   return {
@@ -167,6 +186,7 @@ export function evaluatePrivateInputs({ root = repoRoot } = {}) {
     blockerCodes,
     warningCodes,
     gitIgnored,
+    trackedPrivateTfvarsCount: trackedTfvars.length,
     rawValuesPrinted: false,
   };
 }
