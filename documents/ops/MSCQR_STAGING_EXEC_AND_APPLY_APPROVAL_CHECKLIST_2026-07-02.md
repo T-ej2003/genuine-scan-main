@@ -16,6 +16,9 @@ This checklist is preparation-only. It does not authorize production changes, da
 ## Before Terraform Apply
 
 - [ ] PR is approved and all required checks are green.
+- [ ] Branch protection or a repository ruleset is enabled and verified for `main` before any staging Terraform plan/apply review continues. See `documents/ops/MSCQR_GITHUB_BRANCH_PROTECTION_REQUIRED_CHECKS_2026-07-02.md`.
+- [ ] Required status check is enabled and verified: `Staging Infra Validation/Terraform staging validate`.
+- [ ] Required status check is enabled and verified: `Staging Infra Validation/Staging IAM policy lint`.
 - [ ] `npm run check:staging-terraform` passed locally or in CI.
 - [ ] `npm run check:staging-iam-policies` passed locally or in CI.
 - [ ] CI result is understood as syntax/safety validation only; it does not prove AWS deployability.

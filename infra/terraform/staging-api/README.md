@@ -43,6 +43,18 @@ npm run check:staging-iam-policies
 
 These CI checks prove syntax and repository safety constraints only. They do not prove AWS deployability, do not replace a real `terraform plan`, and do not authorize `terraform apply`.
 
+## Required GitHub Checks
+
+Before any staging Terraform plan/apply review continues, GitHub required checks
+from PR #95 must be enabled on `main` either globally or through a path-scoped
+ruleset. Required checks:
+
+- `Staging Infra Validation/Terraform staging validate`
+- `Staging Infra Validation/Staging IAM policy lint`
+
+Configuration and verification steps are documented in
+`documents/ops/MSCQR_GITHUB_BRANCH_PROTECTION_REQUIRED_CHECKS_2026-07-02.md`.
+
 Use `terraform.tfvars.example` as a placeholder template only. A real uncommitted `terraform.tfvars` must use staging-only subnet IDs, reviewed operator CIDRs, an immutable staging backend image URI, and Secrets Manager ARNs under `mscqr/staging/*`.
 
 The module models:
