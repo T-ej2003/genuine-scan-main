@@ -156,6 +156,16 @@ const getResourceIssue = (key, raw) => {
   return null;
 };
 
+const getAlternativeResourceIssue = (key, raw) => {
+  if (key === "STAGING_REDIS_URL" && !raw && read("STAGING_REDIS_HOST")) {
+    return { severity: "pass", message: "STAGING_REDIS_HOST is set; STAGING_REDIS_URL is optional for readiness metadata." };
+  }
+  if (key === "STAGING_REDIS_HOST" && !raw && read("STAGING_REDIS_URL")) {
+    return { severity: "pass", message: "STAGING_REDIS_URL is set; STAGING_REDIS_HOST is optional for readiness metadata." };
+  }
+  return null;
+};
+
 const evaluate = () => {
   const checks = [];
 
@@ -191,7 +201,7 @@ const evaluate = () => {
 
   for (const key of resourceKeys) {
     const value = read(key);
-    const issue = getResourceIssue(key, value);
+    const issue = getAlternativeResourceIssue(key, value) || getResourceIssue(key, value);
     checks.push({
       key,
       configured: Boolean(value),
@@ -281,7 +291,25 @@ const runRedactionSelfCheck = () => {
     },
   ];
 
-  const allResults = [...redactionResults, ...productionBlockResults];
+  const originalRedisHost = process.env.STAGING_REDIS_HOST;
+  delete process.env.STAGING_REDIS_HOST;
+  const missingRedisUrlIssue = getResourceIssue("STAGING_REDIS_URL", "");
+  process.env.STAGING_REDIS_HOST = "staging-redis.internal";
+  const alternateRedisIssue = getAlternativeResourceIssue("STAGING_REDIS_URL", "");
+  if (originalRedisHost === undefined) {
+    delete process.env.STAGING_REDIS_HOST;
+  } else {
+    process.env.STAGING_REDIS_HOST = originalRedisHost;
+  }
+
+  const alternativeResourceResults = [
+    {
+      name: "redis host satisfies redis readiness metadata",
+      passed: missingRedisUrlIssue?.severity === "missing" && alternateRedisIssue?.severity === "pass",
+    },
+  ];
+
+  const allResults = [...redactionResults, ...productionBlockResults, ...alternativeResourceResults];
   const failed = allResults.filter((result) => !result.passed);
 
   console.log(
@@ -291,6 +319,7 @@ const runRedactionSelfCheck = () => {
         rawSecretValuesPrinted: false,
         redactionResults,
         productionBlockResults,
+        alternativeResourceResults,
       },
       null,
       2,
