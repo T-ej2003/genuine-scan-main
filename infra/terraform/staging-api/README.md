@@ -20,6 +20,7 @@ Review commands:
 ```sh
 npm run check:staging-terraform
 npm run check:staging-iam-policies
+npm run check:staging-private-inputs
 npm run check:staging-aws-identity
 MSCQR_STAGING_TERRAFORM_PLAN_ENABLED=true MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM=MSCQR_GENERATE_STAGING_PLAN_ONLY npm run plan:staging-terraform
 ```
@@ -49,11 +50,12 @@ wrapper:
 MSCQR_STAGING_TERRAFORM_PLAN_ENABLED=true MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM=MSCQR_GENERATE_STAGING_PLAN_ONLY npm run plan:staging-terraform
 ```
 
-The wrapper calls the AWS identity guard, refuses unsafe identities and
-arguments, writes local private evidence under `.terraform-plans/staging/`, and
-prints only add/change/destroy counts plus safe metadata. Plan evidence is
-private and must not be committed. `terraform apply` remains forbidden until a
-separate apply approval PR/checklist exists.
+The wrapper calls the private input checker and AWS identity guard, refuses
+unsafe identities and arguments, writes local private evidence under
+`.terraform-plans/staging/`, and prints only add/change/destroy counts plus safe
+metadata. Plan evidence is private and must not be committed. Cost evidence must
+be created after the first real plan and before any apply approval. `terraform
+apply` remains forbidden until a separate apply approval PR/checklist exists.
 
 ## Required GitHub Checks
 
@@ -67,7 +69,7 @@ ruleset. Required checks:
 Configuration and verification steps are documented in
 `documents/ops/MSCQR_GITHUB_BRANCH_PROTECTION_REQUIRED_CHECKS_2026-07-02.md`.
 
-Use `terraform.tfvars.example` as a placeholder template only. Real private inputs must use only ignored local files (`staging.auto.tfvars` or `*.local.tfvars`) or `TF_VAR_*` environment variables, and must contain staging-only subnet IDs, reviewed operator CIDRs, an immutable staging backend image URI, and Secrets Manager ARNs under `mscqr/staging/*`.
+Use `terraform.tfvars.example` as a placeholder template only. Real private inputs must use only ignored local files (`staging.auto.tfvars` or `*.local.tfvars`) or `TF_VAR_*` environment variables, and must contain staging-only subnet IDs, reviewed operator CIDRs, an immutable staging backend image URI, and Secrets Manager ARNs under `mscqr/staging/*`. Preparation guidance is in `documents/ops/MSCQR_STAGING_PRIVATE_TFVARS_PREPARATION_2026-07-02.md`; cost evidence guidance is in `documents/ops/MSCQR_STAGING_COST_ESTIMATION_EVIDENCE_2026-07-02.md`.
 
 The module models:
 

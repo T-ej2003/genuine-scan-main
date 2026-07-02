@@ -36,6 +36,7 @@ under `.terraform-plans/staging/` and prints only a safe summary.
 - Private inputs include staging-only VPC/subnet IDs, narrow operator CIDRs,
   an immutable staging backend image URI, and staging Secrets Manager ARNs under
   `mscqr/staging/*`.
+- Private inputs pass `npm run check:staging-private-inputs`.
 
 ## Commands
 
@@ -44,6 +45,7 @@ Run from the repository root:
 ```sh
 npm run check:staging-terraform
 npm run check:staging-iam-policies
+npm run check:staging-private-inputs
 npm run check:staging-aws-identity
 MSCQR_STAGING_TERRAFORM_PLAN_ENABLED=true MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM=MSCQR_GENERATE_STAGING_PLAN_ONLY npm run plan:staging-terraform
 ```
@@ -61,6 +63,10 @@ Do not run raw `terraform plan` for the first staging plan. Use the wrapper so
 confirmation gates, identity checks, private input checks, ignored evidence
 paths, and safe summary output stay consistent.
 
+The plan cannot proceed until private inputs pass
+`npm run check:staging-private-inputs`. Prepare those inputs using
+`documents/ops/MSCQR_STAGING_PRIVATE_TFVARS_PREPARATION_2026-07-02.md`.
+
 ## Private Evidence To Save
 
 Save these privately outside the repository or in the ignored
@@ -71,6 +77,7 @@ Save these privately outside the repository or in the ignored
   evidence store.
 - AWS caller identity safe summary.
 - Screenshot or export proving the PR #96 required status checks are enabled.
+- Private cost estimate notes after the first real plan is generated.
 
 ## Evidence Not To Commit
 
@@ -89,6 +96,10 @@ Do not commit:
 This runbook stops at plan generation. `terraform apply` is forbidden here even
 if the plan is clean. Apply approval requires a future apply-specific approval
 record, checklist, evidence review, and explicit human approval.
+
+Cost evidence must be created after the first real plan and before any future
+apply approval. Use
+`documents/ops/MSCQR_STAGING_COST_ESTIMATION_EVIDENCE_2026-07-02.md`.
 
 ## Human Review Before Any Future Apply
 
