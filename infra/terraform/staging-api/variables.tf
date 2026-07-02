@@ -137,6 +137,17 @@ variable "log_retention_days" {
   default     = 14
 }
 
+variable "exec_log_retention_days" {
+  type        = number
+  description = "CloudWatch log retention for staging ECS Exec session logs."
+  default     = 30
+
+  validation {
+    condition     = var.exec_log_retention_days >= 30 && var.exec_log_retention_days <= 365
+    error_message = "exec_log_retention_days must be between 30 and 365 days."
+  }
+}
+
 variable "db_allocated_storage_gb" {
   type        = number
   description = "Initial staging RDS storage in GiB."

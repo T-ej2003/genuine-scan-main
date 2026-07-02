@@ -3,15 +3,16 @@ locals {
   name_prefix       = "mscqr-staging"
   short_name_prefix = "mscqr-stg"
 
-  cluster_name      = "mscqr-staging-euw2-main"
-  service_name      = "mscqr-staging-backend-service-euw2"
-  task_family       = "mscqr-staging-backend"
-  alb_name          = "mscqr-stg-alb-euw2"
-  target_group_name = "mscqr-stg-backend-tg-euw2"
-  log_group_name    = "/ecs/mscqr-staging-backend"
-  db_identifier     = "mscqr-staging-db"
-  redis_group_id    = "mscqr-staging-redis-euw2"
-  artifacts_bucket  = "mscqr-staging-euw2-artifacts-${var.account_id}"
+  cluster_name        = "mscqr-staging-euw2-main"
+  service_name        = "mscqr-staging-backend-service-euw2"
+  task_family         = "mscqr-staging-backend"
+  alb_name            = "mscqr-stg-alb-euw2"
+  target_group_name   = "mscqr-stg-backend-tg-euw2"
+  log_group_name      = "/ecs/mscqr-staging-backend"
+  exec_log_group_name = "/aws/ecs/mscqr-staging/exec"
+  db_identifier       = "mscqr-staging-db"
+  redis_group_id      = "mscqr-staging-redis-euw2"
+  artifacts_bucket    = "mscqr-staging-euw2-artifacts-${var.account_id}"
 
   common_tags = merge(
     {
@@ -63,6 +64,7 @@ check "staging_name_guard" {
         local.alb_name,
         local.target_group_name,
         local.log_group_name,
+        local.exec_log_group_name,
         local.db_identifier,
         local.redis_group_id,
         local.artifacts_bucket,
@@ -72,9 +74,67 @@ check "staging_name_guard" {
   }
 }
 
+data "aws_iam_policy_document" "ecs_exec_logs_kms" {
+  statement {
+    sid    = "EnableAccountIamPermissionsForStagingKey"
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${var.account_id}:root"]
+    }
+
+    actions   = ["kms:*"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "AllowCloudWatchLogsEncryptionForStagingExecLogGroup"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["logs.${var.aws_region}.amazonaws.com"]
+    }
+
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "kms:EncryptionContext:aws:logs:arn"
+      values   = ["arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:${local.exec_log_group_name}"]
+    }
+  }
+}
+
+resource "aws_kms_key" "ecs_exec_logs" {
+  description             = "MSCQR staging ECS Exec session log encryption key"
+  deletion_window_in_days = 30
+  enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.ecs_exec_logs_kms.json
+}
+
+resource "aws_kms_alias" "ecs_exec_logs" {
+  name          = "alias/mscqr-staging-ecs-exec-logs"
+  target_key_id = aws_kms_key.ecs_exec_logs.key_id
+}
+
 resource "aws_cloudwatch_log_group" "backend" {
   name              = local.log_group_name
   retention_in_days = var.log_retention_days
+}
+
+resource "aws_cloudwatch_log_group" "ecs_exec" {
+  name              = local.exec_log_group_name
+  retention_in_days = var.exec_log_retention_days
+  kms_key_id        = aws_kms_key.ecs_exec_logs.arn
 }
 
 resource "aws_iam_role" "ecs_execution" {
@@ -178,6 +238,65 @@ resource "aws_iam_role_policy" "ecs_task_execute_command_channels" {
         # resource ARN, so IAM requires Resource="*"; scope is constrained to
         # the exact channel actions and the reviewed staging region.
         Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_task_execute_command_kms" {
+  name = "mscqr-staging-ecs-exec-kms"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "AllowTaskAgentToDecryptStagingExecSessionKey"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = aws_kms_key.ecs_exec_logs.arn
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_task_execute_command_logs" {
+  name = "mscqr-staging-ecs-exec-logs"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "AllowExecAgentToDiscoverStagingExecLogGroups"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+          }
+        }
+      },
+      {
+        Sid    = "AllowExecAgentToWriteStagingExecSessionLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:DescribeLogStreams",
+          "logs:PutLogEvents",
+        ]
+        Resource = "arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:${local.exec_log_group_name}:*"
         Condition = {
           StringEquals = {
             "aws:RequestedRegion" = var.aws_region
@@ -304,6 +423,18 @@ resource "aws_ecs_cluster" "staging" {
   setting {
     name  = "containerInsights"
     value = "enabled"
+  }
+
+  configuration {
+    execute_command_configuration {
+      kms_key_id = aws_kms_key.ecs_exec_logs.arn
+      logging    = "OVERRIDE"
+
+      log_configuration {
+        cloud_watch_encryption_enabled = true
+        cloud_watch_log_group_name     = aws_cloudwatch_log_group.ecs_exec.name
+      }
+    }
   }
 }
 

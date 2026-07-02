@@ -8,9 +8,24 @@ output "ecs_cluster_name" {
   value       = aws_ecs_cluster.staging.name
 }
 
+output "staging_cluster_name" {
+  description = "Staging ECS cluster name for approval evidence."
+  value       = aws_ecs_cluster.staging.name
+}
+
 output "ecs_service_name" {
   description = "Staging backend ECS service name."
   value       = aws_ecs_service.backend.name
+}
+
+output "staging_backend_service_name" {
+  description = "Staging backend ECS service name for approval evidence."
+  value       = aws_ecs_service.backend.name
+}
+
+output "exec_log_group_name" {
+  description = "CloudWatch log group for staging ECS Exec session logs."
+  value       = aws_cloudwatch_log_group.ecs_exec.name
 }
 
 output "task_family" {
