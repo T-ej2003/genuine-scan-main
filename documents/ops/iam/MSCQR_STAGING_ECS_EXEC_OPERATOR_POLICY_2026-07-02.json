@@ -1,0 +1,73 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowExecuteCommandOnlyOnStagingBackendTasks",
+      "Effect": "Allow",
+      "Action": "ecs:ExecuteCommand",
+      "Resource": "arn:aws:ecs:eu-west-2:<ACCOUNT_ID>:task/mscqr-staging-euw2-main/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:<ACCOUNT_ID>:cluster/mscqr-staging-euw2-main",
+          "ecs:container-name": "backend"
+        }
+      }
+    },
+    {
+      "Sid": "AllowReadOnlyStagingEcsDiscovery",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeClusters",
+        "ecs:DescribeServices",
+        "ecs:DescribeTasks",
+        "ecs:ListTasks"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "AllowReadStagingExecLogGroupMetadata",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "AllowReadStagingExecSessionLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogStreams",
+        "logs:FilterLogEvents",
+        "logs:GetLogEvents"
+      ],
+      "Resource": [
+        "arn:aws:logs:eu-west-2:<ACCOUNT_ID>:log-group:/aws/ecs/mscqr-staging/exec",
+        "arn:aws:logs:eu-west-2:<ACCOUNT_ID>:log-group:/aws/ecs/mscqr-staging/exec:*"
+      ]
+    },
+    {
+      "Sid": "AllowUseOfStagingExecKmsKeyOnly",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt",
+        "kms:DescribeKey",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "arn:aws:kms:eu-west-2:<ACCOUNT_ID>:key/<STAGING_ECS_EXEC_LOG_KEY_ID>",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    }
+  ]
+}
