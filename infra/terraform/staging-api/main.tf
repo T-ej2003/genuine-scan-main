@@ -256,13 +256,47 @@ resource "aws_iam_role_policy" "ecs_task_execute_command_kms" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "AllowTaskAgentToDecryptStagingExecSessionKey"
+        Sid      = "AllowTaskAgentToDecryptStagingExecSessionKey"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = aws_kms_key.ecs_exec_logs.arn
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_task_execute_command_logs" {
+  name = "mscqr-staging-ecs-exec-logs"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "AllowExecAgentToDiscoverStagingExecLogGroups"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+          }
+        }
+      },
+      {
+        Sid    = "AllowExecAgentToWriteStagingExecSessionLogs"
         Effect = "Allow"
         Action = [
-          "kms:Decrypt",
-          "kms:DescribeKey",
+          "logs:CreateLogStream",
+          "logs:DescribeLogStreams",
+          "logs:PutLogEvents",
         ]
-        Resource = aws_kms_key.ecs_exec_logs.arn
+        Resource = "arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:${local.exec_log_group_name}:*"
         Condition = {
           StringEquals = {
             "aws:RequestedRegion" = var.aws_region

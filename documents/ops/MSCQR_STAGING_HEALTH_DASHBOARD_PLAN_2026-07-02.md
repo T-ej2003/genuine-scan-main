@@ -115,7 +115,7 @@ This document defines the observability baseline required before staging scale t
 
 ## Implementation Sequence
 
-1. Add CloudWatch dashboard and alarms only after staging Terraform apply approval.
+1. Add CloudWatch dashboard and alarms only after staging Terraform apply approval based on an attached, human-reviewed plan.
 2. Keep dashboard resources in the staging Terraform root or a dedicated observability module with staging-only name guards.
 3. Wire CloudTrail `ecs:ExecuteCommand` events to an EventBridge rule and notification target before broadening operator access.
 4. Add CI or scheduled evidence collection for the RLS collector and seed script after the staging endpoint exists.
