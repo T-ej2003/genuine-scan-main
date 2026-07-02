@@ -1,0 +1,42 @@
+aws_region  = "eu-west-2"
+account_id  = "368992683803"
+environment = "staging"
+
+vpc_id                 = "vpc-xxxxxxxxxxxxxxxxx"
+public_subnet_ids      = ["subnet-public-a-placeholder", "subnet-public-b-placeholder"]
+app_private_subnet_ids = ["subnet-app-a-placeholder", "subnet-app-b-placeholder"]
+db_private_subnet_ids  = ["subnet-db-a-placeholder", "subnet-db-b-placeholder"]
+
+allowed_operator_cidrs = [
+  "203.0.113.10/32",
+]
+
+backend_image_uri = "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:replace-with-reviewed-staging-image-digest"
+
+desired_count     = 1
+task_cpu          = 1024
+task_memory       = 2048
+db_instance_class = "db.t4g.small"
+redis_node_type   = "cache.t4g.micro"
+
+staging_secret_arns = {
+  database_url                    = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/database-url-placeholder"
+  redis_url                       = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/redis-url-placeholder"
+  jwt_secret_current              = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/jwt-secret-current-placeholder"
+  qr_sign_private_key             = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/qr-sign-private-key-placeholder"
+  qr_sign_public_key              = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/qr-sign-public-key-placeholder"
+  ip_hash_salt_current            = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/ip-hash-salt-current-placeholder"
+  token_hash_secret_current       = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/token-hash-secret-current-placeholder"
+  scan_fingerprint_secret         = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/scan-fingerprint-secret-placeholder"
+  printer_sse_sign_secret_current = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/printer-sse-sign-secret-current-placeholder"
+  customer_verify_otp_secret      = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/customer-verify-otp-secret-placeholder"
+  customer_verify_token_secret    = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/customer-verify-token-secret-placeholder"
+  incident_hash_salt_current      = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/incident-hash-salt-current-placeholder"
+  auth_mfa_encryption_key         = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/auth-mfa-encryption-key-placeholder"
+}
+
+tags = {
+  Owner       = "platform"
+  CostCenter  = "staging-validation"
+  DataProfile = "synthetic-only"
+}

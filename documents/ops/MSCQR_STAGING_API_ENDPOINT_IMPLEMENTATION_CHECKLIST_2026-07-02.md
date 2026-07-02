@@ -11,6 +11,8 @@ This is a docs-only implementation plan for a real non-production AWS staging AP
 
 No AWS resources were created. No production resource was mutated. No deployment was run. No production database was used. No secret values are recorded here.
 
+Follow-on preparation note: `documents/ops/MSCQR_STAGING_RLS_SEED_AND_TERRAFORM_PLAN_2026-07-02.md` now captures the next implementation bridge: a guarded staging RLS validation seed and a preparation-only Terraform skeleton under `infra/terraform/staging-api/`. That follow-on work still forbids Terraform apply, AWS resource creation, production DB use, and production/global RLS enablement.
+
 ## Executive Decision
 
 Recommended staging shape: create a separate API-only ECS staging backend in `eu-west-2`, backed by separate staging Postgres, separate staging Valkey/Redis, separate staging S3, separate staging secrets, and a dedicated staging ALB with an AWS-generated `*.elb.amazonaws.com` DNS name.
@@ -309,6 +311,8 @@ This creates:
 
 Run only inside the staging backend task after the staging DB is migrated:
 
+The staging Terraform service enables ECS Exec for this controlled migration and seed path only. The backend task role has the minimum SSM Messages channel permissions required by ECS Exec; operators still need explicit `ecs:ExecuteCommand` permission in their own IAM identity. Review command activity in CloudTrail and the staging backend CloudWatch log group after each run.
+
 ```sh
 set +x
 aws ecs execute-command \
@@ -333,6 +337,8 @@ Proposed future package script:
 ```
 
 Proposed future staging command:
+
+Use the same controlled ECS Exec path for this seed command only after the staging task definition, task role, and operator IAM permissions have been reviewed.
 
 ```sh
 set +x
