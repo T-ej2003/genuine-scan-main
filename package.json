@@ -23,6 +23,8 @@
     "check:architecture-guardrails": "node scripts/check-architecture-guardrails.mjs",
     "check:staging-terraform": "node scripts/check-staging-terraform-validate.mjs",
     "check:staging-iam-policies": "node scripts/check-staging-iam-policies.mjs",
+    "check:staging-aws-identity": "node scripts/check-staging-aws-identity.mjs",
+    "plan:staging-terraform": "node scripts/plan-staging-terraform.mjs",
     "check:aws-dr-safety": "node scripts/check-aws-dr-safety.mjs",
     "check:asg-compose-interpolation": "node scripts/dr/check-asg-compose-interpolation.mjs",
     "check:asg-multi-instance-readiness": "node scripts/dr/check-asg-multi-instance-readiness.mjs",

@@ -19,8 +19,12 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Branch protection or a repository ruleset is enabled and verified for `main` before any staging Terraform plan/apply review continues. See `documents/ops/MSCQR_GITHUB_BRANCH_PROTECTION_REQUIRED_CHECKS_2026-07-02.md`.
 - [ ] Required status check is enabled and verified: `Staging Infra Validation/Terraform staging validate`.
 - [ ] Required status check is enabled and verified: `Staging Infra Validation/Staging IAM policy lint`.
+- [ ] First staging plan was generated through `npm run plan:staging-terraform`; raw first-plan commands are not accepted. See `documents/ops/MSCQR_STAGING_TERRAFORM_PLAN_RUNBOOK_2026-07-02.md`.
+- [ ] Plan evidence is stored privately under `.terraform-plans/staging/` or the approved private evidence store, not committed to git.
+- [ ] `terraform apply` remains forbidden until a separate apply approval PR/checklist is approved.
 - [ ] `npm run check:staging-terraform` passed locally or in CI.
 - [ ] `npm run check:staging-iam-policies` passed locally or in CI.
+- [ ] `npm run check:staging-aws-identity` passed with a staging Terraform provisioning role.
 - [ ] CI result is understood as syntax/safety validation only; it does not prove AWS deployability.
 - [ ] `terraform init -backend=false` completed in the same checkout before validation.
 - [ ] `terraform fmt -check` and `terraform validate` passed for `infra/terraform/staging-api`.

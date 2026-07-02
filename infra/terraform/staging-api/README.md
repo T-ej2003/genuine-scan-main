@@ -18,11 +18,10 @@ Hard rules:
 Review commands:
 
 ```sh
-cd infra/terraform/staging-api
-terraform init -backend=false
-terraform fmt -check
-terraform validate
-terraform plan -var-file=terraform.tfvars
+npm run check:staging-terraform
+npm run check:staging-iam-policies
+npm run check:staging-aws-identity
+MSCQR_STAGING_TERRAFORM_PLAN_ENABLED=true MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM=MSCQR_GENERATE_STAGING_PLAN_ONLY npm run plan:staging-terraform
 ```
 
 Do not treat `terraform validate` as meaningful unless `terraform init -backend=false` completed successfully in the same checkout. If the AWS provider plugin schema cannot be loaded, reinstall the provider cache and rerun validation before plan review; do not rely on stale local `.terraform` state.
@@ -43,6 +42,19 @@ npm run check:staging-iam-policies
 
 These CI checks prove syntax and repository safety constraints only. They do not prove AWS deployability, do not replace a real `terraform plan`, and do not authorize `terraform apply`.
 
+The first staging Terraform plan must be generated through the repository
+wrapper:
+
+```sh
+MSCQR_STAGING_TERRAFORM_PLAN_ENABLED=true MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM=MSCQR_GENERATE_STAGING_PLAN_ONLY npm run plan:staging-terraform
+```
+
+The wrapper calls the AWS identity guard, refuses unsafe identities and
+arguments, writes local private evidence under `.terraform-plans/staging/`, and
+prints only add/change/destroy counts plus safe metadata. Plan evidence is
+private and must not be committed. `terraform apply` remains forbidden until a
+separate apply approval PR/checklist exists.
+
 ## Required GitHub Checks
 
 Before any staging Terraform plan/apply review continues, GitHub required checks
@@ -55,7 +67,7 @@ ruleset. Required checks:
 Configuration and verification steps are documented in
 `documents/ops/MSCQR_GITHUB_BRANCH_PROTECTION_REQUIRED_CHECKS_2026-07-02.md`.
 
-Use `terraform.tfvars.example` as a placeholder template only. A real uncommitted `terraform.tfvars` must use staging-only subnet IDs, reviewed operator CIDRs, an immutable staging backend image URI, and Secrets Manager ARNs under `mscqr/staging/*`.
+Use `terraform.tfvars.example` as a placeholder template only. Real private inputs must use only ignored local files (`staging.auto.tfvars` or `*.local.tfvars`) or `TF_VAR_*` environment variables, and must contain staging-only subnet IDs, reviewed operator CIDRs, an immutable staging backend image URI, and Secrets Manager ARNs under `mscqr/staging/*`.
 
 The module models:
 
