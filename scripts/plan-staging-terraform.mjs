@@ -187,6 +187,32 @@ function runIdentityGuard(env) {
   return { ok: result.status === 0 && parsed.allowed === true, identityCheck: parsed };
 }
 
+function runPrivateInputsGuard(env) {
+  const result = spawnSync(process.execPath, ["scripts/check-staging-private-inputs.mjs", "--strict"], {
+    cwd: repoRoot,
+    env,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    parsed = {
+      status: "blocked_private_input_guard_invalid_output",
+      foundTfvarsFile: false,
+      requiredKeysPresent: {},
+      blockersCount: 1,
+      warningsCount: 0,
+      rawValuesPrinted: false,
+    };
+  }
+
+  return { ok: result.status === 0 && parsed.status === "ok", privateInputCheck: parsed };
+}
+
 function parsePlanCounts(planText, showJson) {
   const textMatch = planText.match(/Plan:\s+([0-9]+)\s+to add,\s+([0-9]+)\s+to change,\s+([0-9]+)\s+to destroy\./);
   if (textMatch) {
@@ -254,6 +280,14 @@ export function main(argv = process.argv.slice(2), env = process.env) {
   }
   if (inputState.missingRequiredVariables.length > 0) {
     printSafeJson(blocked("Required private Terraform inputs are missing.", { inputState }));
+    return 1;
+  }
+
+  const privateInputs = runPrivateInputsGuard(env);
+  if (!privateInputs.ok) {
+    printSafeJson(blocked("Private staging Terraform inputs did not pass preflight.", {
+      privateInputCheck: privateInputs.privateInputCheck,
+    }));
     return 1;
   }
 
