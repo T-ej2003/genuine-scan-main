@@ -38,7 +38,9 @@ Private input sources:
   TF_VAR_* environment variables
 
 Outputs are written under .terraform-plans/staging/ and must not be committed.
-This wrapper never runs terraform apply/destroy/import/state/taint/untaint.`;
+This wrapper never runs terraform apply/destroy/import/state/taint/untaint.
+TF_CLI_ARGS* environment variables are refused because Terraform would inject
+them into fixed wrapper commands.`;
 }
 
 export function findForbiddenPlanArgs(args) {
@@ -66,6 +68,12 @@ export function checkPlanEnvGates(env = process.env) {
     failures.push(`MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM must be ${requiredConfirmation}.`);
   }
   return failures;
+}
+
+export function findTerraformCliArgEnvKeys(env = process.env) {
+  return Object.keys(env)
+    .filter((key) => key === "TF_CLI_ARGS" || key.startsWith("TF_CLI_ARGS_"))
+    .sort();
 }
 
 function readTopLevelTfvarsAssignments(filePath) {
@@ -136,7 +144,7 @@ function runCommand(command, args, options = {}) {
     env: options.env || process.env,
     encoding: "utf8",
     maxBuffer: 128 * 1024 * 1024,
-    stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
   if (result.error?.code === "ENOENT") {
@@ -219,6 +227,14 @@ export function main(argv = process.argv.slice(2), env = process.env) {
   const gateFailures = checkPlanEnvGates(env);
   if (gateFailures.length > 0) {
     printSafeJson(blocked("Missing explicit staging Terraform plan confirmation.", { gateFailures }));
+    return 1;
+  }
+
+  const terraformCliArgEnvKeys = findTerraformCliArgEnvKeys(env);
+  if (terraformCliArgEnvKeys.length > 0) {
+    printSafeJson(blocked("TF_CLI_ARGS* environment variables are forbidden for this wrapper.", {
+      terraformCliArgEnvKeys,
+    }));
     return 1;
   }
 

@@ -11,6 +11,7 @@ import {
 import {
   checkPlanEnvGates,
   collectPrivateInputState,
+  findTerraformCliArgEnvKeys,
   findForbiddenPlanArgs,
 } from "../plan-staging-terraform.mjs";
 
@@ -85,6 +86,35 @@ test("plan env gate helper reports both required confirmations", () => {
     "MSCQR_STAGING_TERRAFORM_PLAN_ENABLED must be true.",
     "MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM must be MSCQR_GENERATE_STAGING_PLAN_ONLY.",
   ]);
+});
+
+test("terraform CLI argument environment variables are refused by key without values", () => {
+  assert.deepEqual(findTerraformCliArgEnvKeys({
+    TF_CLI_ARGS: "-destroy",
+    TF_CLI_ARGS_plan: "-var-file=/private/unapproved.tfvars",
+    TF_VAR_account_id: "368992683803",
+  }), ["TF_CLI_ARGS", "TF_CLI_ARGS_plan"]);
+});
+
+test("plan wrapper refuses TF_CLI_ARGS before private input or terraform", () => {
+  const result = spawnSync(process.execPath, ["scripts/plan-staging-terraform.mjs"], {
+    cwd: repoRoot,
+    env: {
+      PATH: process.env.PATH,
+      MSCQR_STAGING_TERRAFORM_PLAN_ENABLED: "true",
+      MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM: "MSCQR_GENERATE_STAGING_PLAN_ONLY",
+      TF_CLI_ARGS_plan: "-destroy -var-file=/private/unapproved.tfvars",
+    },
+    encoding: "utf8",
+  });
+
+  assert.notEqual(result.status, 0);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.status, "blocked_before_plan");
+  assert.equal(parsed.reason, "TF_CLI_ARGS* environment variables are forbidden for this wrapper.");
+  assert.deepEqual(parsed.terraformCliArgEnvKeys, ["TF_CLI_ARGS_plan"]);
+  assert(!result.stdout.includes("-destroy"));
+  assert(!result.stdout.includes("/private/unapproved.tfvars"));
 });
 
 test("forbidden terraform arguments are refused", () => {

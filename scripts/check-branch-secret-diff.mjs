@@ -35,9 +35,13 @@ const resolveBaseRef = () => {
 
 const matchesTarget = (relativePath) =>
   /^docker-compose(?:\.[^/]+)?\.ya?ml$/i.test(relativePath) ||
+  relativePath === ".gitignore" ||
+  relativePath === "package.json" ||
   relativePath === ".env.example" ||
   relativePath === path.join("backend", ".env.example") ||
   relativePath === "README.md" ||
+  (relativePath.startsWith("infra/terraform/staging-api/") && !relativePath.endsWith("terraform.tfvars.example")) ||
+  relativePath.startsWith("scripts/") ||
   relativePath.startsWith("documents/") ||
   relativePath.startsWith(".github/workflows/");
 
@@ -56,6 +60,31 @@ const rules = [
     name: "Fallback default on object storage credential env",
     regex: /\$\{OBJECT_STORAGE_(?:ACCESS_KEY|SECRET_KEY):-[^}]+\}/g,
     message: "OBJECT_STORAGE_* credentials must use required env forms, not fallback defaults.",
+  },
+  {
+    name: "AWS access key literal",
+    regex: /\bAKIA[0-9A-Z]{16}\b/g,
+    message: "AWS access key IDs must not appear in branch diffs.",
+  },
+  {
+    name: "Private key block",
+    regex: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
+    message: "Private key material must not appear in branch diffs.",
+  },
+  {
+    name: "Committed VPC ID",
+    regex: /\bvpc-[0-9a-f]{8,17}\b/gi,
+    message: "Real VPC IDs must stay in private Terraform inputs or private evidence.",
+  },
+  {
+    name: "Committed subnet ID",
+    regex: /\bsubnet-[0-9a-f]{8,17}\b/gi,
+    message: "Real subnet IDs must stay in private Terraform inputs or private evidence.",
+  },
+  {
+    name: "Committed Secrets Manager ARN",
+    regex: /\barn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:mscqr\/[^\s"'`]+/gi,
+    message: "Secrets Manager ARNs must stay in private Terraform inputs or private evidence.",
   },
 ];
 
