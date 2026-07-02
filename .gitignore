@@ -52,5 +52,9 @@ shared/contracts/runtime/*.d.ts
 shared/contracts/runtime/*.d.ts.map
 .terraform/
 **/.terraform/
+.terraform-plans/
+infra/terraform/staging-api/terraform.tfvars
+infra/terraform/staging-api/staging.auto.tfvars
+infra/terraform/staging-api/*.local.tfvars
 
 ops/deploy/inventory.ini
