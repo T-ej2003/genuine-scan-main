@@ -11,6 +11,7 @@ Hard rules:
 - The provider pins `allowed_account_ids = [var.account_id]`; wrong active AWS credentials should fail provider initialization or plan.
 - Account `368992683803` may be used for staging only through a least-privilege staging provisioning role. Root credentials must not be used for apply.
 - `allowed_operator_cidrs` must stay narrow. Broad public ingress such as `0.0.0.0/0`, `::/0`, and broad IPv4 masks are rejected by variable validation.
+- ECS Exec is enabled on the staging backend service only for controlled staging migration and seed execution. Operators still need explicit IAM permission for `ecs:ExecuteCommand`, and command activity must be reviewed through CloudTrail plus the backend CloudWatch log group.
 
 Review commands:
 
@@ -36,5 +37,7 @@ The module models:
 - Valkey/Redis group `mscqr-staging-redis-euw2`
 - S3 bucket `mscqr-staging-euw2-artifacts-<account_id>`
 - IAM roles and staging-only security groups
+
+ECS Exec task-role permissions are limited to the four SSM Messages channel actions required by ECS Exec. AWS does not support resource-level ARNs for those channel actions, so the task-role policy uses `Resource = "*"` with the action list constrained and `aws:RequestedRegion` pinned to `var.aws_region`.
 
 GitHub environment variables are intentionally documented outside this Terraform root and are not managed here.

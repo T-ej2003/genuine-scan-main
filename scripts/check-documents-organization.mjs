@@ -11,6 +11,10 @@ const allowedDocumentationPrefixes = [
   "tools/aws-webapp-cost-optimizer/",
 ];
 
+const allowedConventionalMarkdownPatterns = [
+  /^infra\/terraform\/.+\/README\.md$/,
+];
+
 const trackedDocuments = execFileSync("git", ["ls-files", "*.md", "*.docx"], {
   encoding: "utf8",
 })
@@ -21,6 +25,7 @@ const trackedDocuments = execFileSync("git", ["ls-files", "*.md", "*.docx"], {
 const misplaced = trackedDocuments.filter((filePath) => {
   if (filePath.startsWith("documents/")) return false;
   if (allowedConventionalMarkdown.has(filePath)) return false;
+  if (allowedConventionalMarkdownPatterns.some((pattern) => pattern.test(filePath))) return false;
   return !allowedDocumentationPrefixes.some((prefix) => filePath.startsWith(prefix));
 });
 

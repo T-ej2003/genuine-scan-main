@@ -311,6 +311,8 @@ This creates:
 
 Run only inside the staging backend task after the staging DB is migrated:
 
+The staging Terraform service enables ECS Exec for this controlled migration and seed path only. The backend task role has the minimum SSM Messages channel permissions required by ECS Exec; operators still need explicit `ecs:ExecuteCommand` permission in their own IAM identity. Review command activity in CloudTrail and the staging backend CloudWatch log group after each run.
+
 ```sh
 set +x
 aws ecs execute-command \
@@ -335,6 +337,8 @@ Proposed future package script:
 ```
 
 Proposed future staging command:
+
+Use the same controlled ECS Exec path for this seed command only after the staging task definition, task role, and operator IAM permissions have been reviewed.
 
 ```sh
 set +x

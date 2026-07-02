@@ -158,6 +158,36 @@ resource "aws_iam_role_policy" "ecs_task_artifacts" {
   })
 }
 
+resource "aws_iam_role_policy" "ecs_task_execute_command_channels" {
+  name = "mscqr-staging-ecs-exec-channels"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowEcsExecSsmMessagesChannelsInStagingRegion"
+        Effect = "Allow"
+        Action = [
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel",
+        ]
+        # AWS SSM Messages channel actions used by ECS Exec do not expose a
+        # resource ARN, so IAM requires Resource="*"; scope is constrained to
+        # the exact channel actions and the reviewed staging region.
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+          }
+        }
+      }
+    ]
+  })
+}
+
 resource "aws_security_group" "alb" {
   name        = "mscqr-stg-alb-sg-euw2"
   description = "Staging ALB ingress from approved operator or CI CIDRs only"
@@ -323,11 +353,12 @@ resource "aws_ecs_task_definition" "backend" {
 }
 
 resource "aws_ecs_service" "backend" {
-  name            = local.service_name
-  cluster         = aws_ecs_cluster.staging.id
-  task_definition = aws_ecs_task_definition.backend.arn
-  desired_count   = var.desired_count
-  launch_type     = "FARGATE"
+  name                   = local.service_name
+  cluster                = aws_ecs_cluster.staging.id
+  task_definition        = aws_ecs_task_definition.backend.arn
+  desired_count          = var.desired_count
+  launch_type            = "FARGATE"
+  enable_execute_command = true
 
   deployment_circuit_breaker {
     enable   = true

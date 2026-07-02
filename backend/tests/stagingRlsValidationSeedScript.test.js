@@ -136,16 +136,26 @@ const runCliTests = () => {
 };
 
 const runTerraformSafetyTextTests = () => {
+  const main = fs.readFileSync(path.join(repoRoot, "infra/terraform/staging-api/main.tf"), "utf8");
   const providers = fs.readFileSync(path.join(repoRoot, "infra/terraform/staging-api/providers.tf"), "utf8");
   const variables = fs.readFileSync(path.join(repoRoot, "infra/terraform/staging-api/variables.tf"), "utf8");
   const readme = fs.readFileSync(path.join(repoRoot, "infra/terraform/staging-api/README.md"), "utf8");
 
+  assert(main.includes("enable_execute_command = true"), "Terraform ECS service must enable ECS Exec.");
+  assert(main.includes('"ssmmessages:CreateControlChannel"'), "Terraform task role must allow ECS Exec control channels.");
+  assert(main.includes('"ssmmessages:CreateDataChannel"'), "Terraform task role must allow ECS Exec data channels.");
+  assert(main.includes('"ssmmessages:OpenControlChannel"'), "Terraform task role must open ECS Exec control channels.");
+  assert(main.includes('"ssmmessages:OpenDataChannel"'), "Terraform task role must open ECS Exec data channels.");
+  assert(main.includes('"aws:RequestedRegion" = var.aws_region'), "Terraform ECS Exec channel permissions must be region-scoped.");
   assert(providers.includes("allowed_account_ids = [var.account_id]"), "Terraform provider must pin allowed_account_ids.");
   assert(variables.includes('cidr != "0.0.0.0/0"'), "Terraform CIDR validation must reject IPv4 world-open ingress.");
   assert(variables.includes('cidr != "::/0"'), "Terraform CIDR validation must reject IPv6 world-open ingress.");
   assert(variables.includes(">= 24") && variables.includes("<= 32"), "Terraform CIDR validation must constrain IPv4 masks to /24 through /32.");
   assert(variables.includes(">= 120") && variables.includes("<= 128"), "Terraform CIDR validation must constrain IPv6 masks to /120 through /128.");
   assert(readme.includes("Root credentials must not be used for apply."), "Terraform README must document root credential prohibition.");
+  assert(readme.includes("Operators still need explicit IAM permission for `ecs:ExecuteCommand`"), "Terraform README must document operator ECS Exec authorization.");
+  assert(readme.includes("CloudTrail plus the backend CloudWatch log group"), "Terraform README must document ECS Exec audit surfaces.");
+  assert(readme.includes('Resource = "*"'), "Terraform README must document why ECS Exec channel permissions require wildcard resources.");
 };
 
 const runP2IdempotencyTest = async () => {
