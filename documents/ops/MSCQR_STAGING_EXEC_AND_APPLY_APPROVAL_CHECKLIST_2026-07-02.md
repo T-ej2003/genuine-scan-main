@@ -16,11 +16,15 @@ This checklist is preparation-only. It does not authorize production changes, da
 ## Before Terraform Apply
 
 - [ ] PR is approved and all required checks are green.
+- [ ] `npm run check:staging-terraform` passed locally or in CI.
+- [ ] `npm run check:staging-iam-policies` passed locally or in CI.
+- [ ] CI result is understood as syntax/safety validation only; it does not prove AWS deployability.
 - [ ] `terraform init -backend=false` completed in the same checkout before validation.
 - [ ] `terraform fmt -check` and `terraform validate` passed for `infra/terraform/staging-api`.
 - [ ] Validation did not depend on stale local `.terraform` state; if provider schema loading failed, the provider cache was reinstalled and validation was rerun.
 - [ ] A human-reviewed `terraform plan` exists and is attached to the approval record.
 - [ ] Apply approval is not granted until the reviewed plan artifact is attached and explicitly approved.
+- [ ] First real plan was run only with the reviewed least-privilege staging provisioning role.
 - [ ] The plan was generated with `allowed_account_ids = [var.account_id]` still present in `providers.tf`.
 - [ ] AWS caller identity was recorded and is not the account root user.
 - [ ] The caller assumed a least-privilege staging provisioning role explicitly.

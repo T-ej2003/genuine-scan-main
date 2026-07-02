@@ -21,6 +21,8 @@
     "check:dependency-audit": "node scripts/check-dependency-audit.mjs",
     "check:documents": "node scripts/check-documents-organization.mjs",
     "check:architecture-guardrails": "node scripts/check-architecture-guardrails.mjs",
+    "check:staging-terraform": "node scripts/check-staging-terraform-validate.mjs",
+    "check:staging-iam-policies": "node scripts/check-staging-iam-policies.mjs",
     "check:aws-dr-safety": "node scripts/check-aws-dr-safety.mjs",
     "check:asg-compose-interpolation": "node scripts/dr/check-asg-compose-interpolation.mjs",
     "check:asg-multi-instance-readiness": "node scripts/dr/check-asg-multi-instance-readiness.mjs",

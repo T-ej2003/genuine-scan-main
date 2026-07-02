@@ -27,6 +27,22 @@ terraform plan -var-file=terraform.tfvars
 
 Do not treat `terraform validate` as meaningful unless `terraform init -backend=false` completed successfully in the same checkout. If the AWS provider plugin schema cannot be loaded, reinstall the provider cache and rerun validation before plan review; do not rely on stale local `.terraform` state.
 
+The repository-level clean validation guard is:
+
+```sh
+npm run check:staging-terraform
+```
+
+That guard uses a temporary `TF_DATA_DIR` and temporary `TF_PLUGIN_CACHE_DIR`, runs `init -backend=false`, `fmt -check`, `validate`, and provider schema loading, and refuses plan/apply/destroy/import arguments. GitHub Actions runs this guard in `.github/workflows/staging-infra-validation.yml` without AWS credentials.
+
+Operator IAM policy templates are linted with:
+
+```sh
+npm run check:staging-iam-policies
+```
+
+These CI checks prove syntax and repository safety constraints only. They do not prove AWS deployability, do not replace a real `terraform plan`, and do not authorize `terraform apply`.
+
 Use `terraform.tfvars.example` as a placeholder template only. A real uncommitted `terraform.tfvars` must use staging-only subnet IDs, reviewed operator CIDRs, an immutable staging backend image URI, and Secrets Manager ARNs under `mscqr/staging/*`.
 
 The module models:
@@ -46,6 +62,6 @@ The module models:
 
 ECS Exec task-role permissions are limited to the four SSM Messages channel actions required by ECS Exec, decrypt access to the staging ECS Exec KMS key for the managed agent, and CloudWatch Logs write permissions to `/aws/ecs/mscqr-staging/exec`. AWS does not support resource-level ARNs for the SSM Messages channel actions or `logs:DescribeLogGroups`, so those policy statements use `Resource = "*"` with the action lists constrained and `aws:RequestedRegion` pinned to `var.aws_region`.
 
-Before any `terraform apply`, complete `documents/ops/MSCQR_STAGING_EXEC_AND_APPLY_APPROVAL_CHECKLIST_2026-07-02.md`, including reviewed plan evidence. Before any `ecs execute-command`, review the staging-only operator policy template at `documents/ops/iam/MSCQR_STAGING_ECS_EXEC_OPERATOR_POLICY_2026-07-02.json` and record the approval/evidence ID.
+Before any `terraform apply`, assume the reviewed least-privilege staging provisioning role and complete `documents/ops/MSCQR_STAGING_EXEC_AND_APPLY_APPROVAL_CHECKLIST_2026-07-02.md`, including reviewed plan evidence. Before any `ecs execute-command`, review the staging-only operator policy template at `documents/ops/iam/MSCQR_STAGING_ECS_EXEC_OPERATOR_POLICY_2026-07-02.json` and record the approval/evidence ID.
 
 GitHub environment variables are intentionally documented outside this Terraform root and are not managed here.
