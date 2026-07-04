@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/aws/apply-ecr-repository-controls.sh <backend|frontend|both>
+Usage: scripts/aws/apply-ecr-repository-controls.sh <backend|frontend|worker|both|all>
 
 Apply production ECR hardening controls for the MSCQR ECS images:
 - immutable tags
@@ -14,11 +14,12 @@ Environment:
   AWS_REGION          Required AWS region for ECR.
   BACKEND_ECR_REPO    Optional. Default: mscqr-backend
   FRONTEND_ECR_REPO   Optional. Default: mscqr-web
+  WORKER_ECR_REPO     Optional. Default: mscqr-worker
   KEEP_TAGGED_COUNT   Optional. Default: 120
   UNTAGGED_DAYS       Optional. Default: 7
 
 Examples:
-  AWS_REGION=eu-west-2 ./scripts/aws/apply-ecr-repository-controls.sh both
+  AWS_REGION=eu-west-2 ./scripts/aws/apply-ecr-repository-controls.sh all
 EOF
 }
 
@@ -34,9 +35,9 @@ if [[ -z "$SERVICE_SCOPE" ]]; then
 fi
 
 case "$SERVICE_SCOPE" in
-  backend|frontend|both) ;;
+  backend|frontend|worker|both|all) ;;
   *)
-    echo "Expected backend, frontend, or both. Got: $SERVICE_SCOPE" >&2
+    echo "Expected backend, frontend, worker, both, or all. Got: $SERVICE_SCOPE" >&2
     exit 1
     ;;
 esac
@@ -54,6 +55,7 @@ fi
 
 BACKEND_ECR_REPO="${BACKEND_ECR_REPO:-mscqr-backend}"
 FRONTEND_ECR_REPO="${FRONTEND_ECR_REPO:-mscqr-web}"
+WORKER_ECR_REPO="${WORKER_ECR_REPO:-mscqr-worker}"
 KEEP_TAGGED_COUNT="${KEEP_TAGGED_COUNT:-120}"
 UNTAGGED_DAYS="${UNTAGGED_DAYS:-7}"
 
@@ -61,7 +63,9 @@ declare -a REPOSITORIES=()
 case "$SERVICE_SCOPE" in
   backend) REPOSITORIES=("$BACKEND_ECR_REPO") ;;
   frontend) REPOSITORIES=("$FRONTEND_ECR_REPO") ;;
+  worker) REPOSITORIES=("$WORKER_ECR_REPO") ;;
   both) REPOSITORIES=("$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO") ;;
+  all) REPOSITORIES=("$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO" "$WORKER_ECR_REPO") ;;
 esac
 
 POLICY_FILE="$(mktemp)"

@@ -159,3 +159,22 @@ export const getRedisHealth = async () => {
     return { configured: true, ready: false };
   }
 };
+
+export const closeRedisConnections = async () => {
+  const clients = [subscriber, publisher, client].filter(Boolean) as Redis[];
+  subscriber = null;
+  publisher = null;
+  client = null;
+  subscriberInitialized = false;
+  subscriberHandlers.clear();
+
+  await Promise.all(
+    clients.map(async (redis) => {
+      try {
+        await redis.quit();
+      } catch {
+        redis.disconnect();
+      }
+    })
+  );
+};

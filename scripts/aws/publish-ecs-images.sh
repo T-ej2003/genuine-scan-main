@@ -3,9 +3,9 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/aws/publish-ecs-images.sh <backend|frontend|both>
+Usage: scripts/aws/publish-ecs-images.sh <backend|frontend|worker|both|all>
 
-Build and push the production backend/frontend runtime images to ECR with
+Build and push the production backend/frontend/worker runtime images to ECR with
 docker buildx. The default output is an ECS/Fargate-ready linux/amd64 manifest
 tagged with the immutable current git SHA.
 
@@ -17,16 +17,19 @@ Environment:
   PLATFORMS          Optional. Defaults to linux/amd64.
   BACKEND_ECR_REPO   Optional. Defaults to mscqr-backend.
   FRONTEND_ECR_REPO  Optional. Defaults to mscqr-web.
+  WORKER_ECR_REPO    Optional. Defaults to mscqr-worker.
   BACKEND_DOCKERFILE Optional. Defaults to backend/Dockerfile.
   FRONTEND_DOCKERFILE Optional. Defaults to Dockerfile.ecs-frontend.
+  WORKER_DOCKERFILE  Optional. Defaults to backend/Dockerfile.
   BACKEND_BUILD_CONTEXT Optional. Defaults to .
   FRONTEND_BUILD_CONTEXT Optional. Defaults to .
+  WORKER_BUILD_CONTEXT Optional. Defaults to .
   BUILDER_NAME       Optional. Defaults to mscqr-multiarch.
   OUTPUT_FILE        Optional JSON Lines output file with published image refs.
 
 Examples:
   AWS_REGION=eu-west-2 ./scripts/aws/publish-ecs-images.sh backend
-  AWS_REGION=eu-west-2 ./scripts/aws/publish-ecs-images.sh both
+  AWS_REGION=eu-west-2 ./scripts/aws/publish-ecs-images.sh all
 EOF
 }
 
@@ -42,9 +45,9 @@ if [[ -z "$SERVICE_SCOPE" ]]; then
 fi
 
 case "$SERVICE_SCOPE" in
-  backend|frontend|both) ;;
+  backend|frontend|worker|both|all) ;;
   *)
-    echo "Expected backend, frontend, or both. Got: $SERVICE_SCOPE" >&2
+    echo "Expected backend, frontend, worker, both, or all. Got: $SERVICE_SCOPE" >&2
     exit 1
     ;;
 esac
@@ -70,11 +73,14 @@ IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse HEAD)}"
 PLATFORMS="${PLATFORMS:-linux/amd64}"
 BACKEND_ECR_REPO="${BACKEND_ECR_REPO:-mscqr-backend}"
 FRONTEND_ECR_REPO="${FRONTEND_ECR_REPO:-mscqr-web}"
+WORKER_ECR_REPO="${WORKER_ECR_REPO:-mscqr-worker}"
 BUILDER_NAME="${BUILDER_NAME:-mscqr-multiarch}"
 BACKEND_DOCKERFILE="${BACKEND_DOCKERFILE:-backend/Dockerfile}"
 FRONTEND_DOCKERFILE="${FRONTEND_DOCKERFILE:-Dockerfile.ecs-frontend}"
+WORKER_DOCKERFILE="${WORKER_DOCKERFILE:-backend/Dockerfile}"
 BACKEND_BUILD_CONTEXT="${BACKEND_BUILD_CONTEXT:-.}"
 FRONTEND_BUILD_CONTEXT="${FRONTEND_BUILD_CONTEXT:-.}"
+WORKER_BUILD_CONTEXT="${WORKER_BUILD_CONTEXT:-.}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERIFY_SCRIPT="$REPO_ROOT/scripts/aws/verify-image-manifest.sh"
 
@@ -94,9 +100,17 @@ case "$SERVICE_SCOPE" in
     SERVICES=("frontend")
     REPOSITORIES=("$FRONTEND_ECR_REPO")
     ;;
+  worker)
+    SERVICES=("worker")
+    REPOSITORIES=("$WORKER_ECR_REPO")
+    ;;
   both)
     SERVICES=("backend" "frontend")
     REPOSITORIES=("$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO")
+    ;;
+  all)
+    SERVICES=("backend" "frontend" "worker")
+    REPOSITORIES=("$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO" "$WORKER_ECR_REPO")
     ;;
 esac
 
@@ -124,6 +138,7 @@ image_uri_for_service() {
   case "$service" in
     backend) printf '%s/%s:%s' "$ECR_REGISTRY" "$BACKEND_ECR_REPO" "$IMAGE_TAG" ;;
     frontend) printf '%s/%s:%s' "$ECR_REGISTRY" "$FRONTEND_ECR_REPO" "$IMAGE_TAG" ;;
+    worker) printf '%s/%s:%s' "$ECR_REGISTRY" "$WORKER_ECR_REPO" "$IMAGE_TAG" ;;
     *) echo "Unsupported service: $service" >&2; return 1 ;;
   esac
 }
@@ -133,6 +148,7 @@ dockerfile_for_service() {
   case "$service" in
     backend) printf '%s' "$BACKEND_DOCKERFILE" ;;
     frontend) printf '%s' "$FRONTEND_DOCKERFILE" ;;
+    worker) printf '%s' "$WORKER_DOCKERFILE" ;;
     *) echo "Unsupported service: $service" >&2; return 1 ;;
   esac
 }
@@ -142,6 +158,7 @@ context_for_service() {
   case "$service" in
     backend) printf '%s' "$BACKEND_BUILD_CONTEXT" ;;
     frontend) printf '%s' "$FRONTEND_BUILD_CONTEXT" ;;
+    worker) printf '%s' "$WORKER_BUILD_CONTEXT" ;;
     *) echo "Unsupported service: $service" >&2; return 1 ;;
   esac
 }

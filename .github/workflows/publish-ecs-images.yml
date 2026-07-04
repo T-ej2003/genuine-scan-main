@@ -7,11 +7,13 @@ on:
         description: "Which production image set to publish"
         required: true
         type: choice
-        default: both
+        default: all
         options:
           - backend
           - frontend
+          - worker
           - both
+          - all
       git_ref:
         description: "Git ref, branch, or SHA to publish. Defaults to the branch the workflow runs from."
         required: false
@@ -36,6 +38,11 @@ on:
         required: true
         type: string
         default: mscqr-web
+      worker_ecr_repo:
+        description: "ECR repository for the worker service image"
+        required: true
+        type: string
+        default: mscqr-worker
 
 permissions:
   contents: read
@@ -49,6 +56,7 @@ jobs:
       PLATFORMS: ${{ inputs.platforms }}
       BACKEND_ECR_REPO: ${{ inputs.backend_ecr_repo }}
       FRONTEND_ECR_REPO: ${{ inputs.frontend_ecr_repo }}
+      WORKER_ECR_REPO: ${{ inputs.worker_ecr_repo }}
       SERVICES: ${{ inputs.services }}
       COSIGN_EXPERIMENTAL: "1"
     steps:
@@ -195,6 +203,7 @@ jobs:
             echo "- Platforms requested: \`$PLATFORMS\`"
             echo "- ECS/Fargate requirement: \`linux/amd64\` must be present before task definition updates."
             echo "- ECR tags are enforced as immutable and lifecycle-controlled before publish."
+            echo "- Worker images use the backend runtime image and are deployed with the worker ECS command."
             echo "- Cosign signatures plus SBOM and provenance attestations were verified before publish completed."
             echo
             while IFS= read -r record; do

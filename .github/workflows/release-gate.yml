@@ -101,30 +101,126 @@ jobs:
     needs: resolve-deploy-target
     if: ${{ needs.resolve-deploy-target.outputs.deploy_sha != '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     environment: production
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: mscqr_integration_admin_test
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mscqr_integration_admin_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       AWS_ACCOUNT_ID_EXPECTED: "368992683803"
       AWS_REGION: eu-west-2
       BACKEND_ECR_REPO: mscqr-backend
       FRONTEND_ECR_REPO: mscqr-web
+      WORKER_ECR_REPO: mscqr-worker
       CLUSTER_NAME: mscqr-prod-euw2-main
       BACKEND_SERVICE_NAME: mscqr-backend-servi-euw2
       FRONTEND_SERVICE_NAME: mscqr-frontend-servi-euw2
+      WORKER_SERVICE_NAME: ${{ vars.PRODUCTION_WORKER_SERVICE_NAME }}
       BACKEND_TASK_DEFINITION: mscqr-backend
       FRONTEND_TASK_DEFINITION: mscqr-frontend
+      WORKER_TASK_DEFINITION: ${{ vars.PRODUCTION_WORKER_TASK_DEFINITION }}
       BACKEND_CONTAINER_NAME: backend
       FRONTEND_CONTAINER_NAME: frontend
+      WORKER_CONTAINER_NAME: ${{ vars.PRODUCTION_WORKER_CONTAINER_NAME || 'worker' }}
       PLATFORMS: linux/amd64
       PUBLIC_BASE_URL: https://www.mscqr.com
       DEPLOY_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
       RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+      P2_TEST_DATABASE_REQUIRED: "true"
+      P2_TEST_DB_PROTOCOL: postgresql
+      P2_TEST_DB_USER: postgres
+      P2_TEST_DB_HOST: 127.0.0.1
+      P2_TEST_DB_PORT: "5432"
+      P2_TEST_DB_NAME: mscqr_integration_admin_test
+      REDIS_URL: redis://127.0.0.1:6379/0
+      REDIS_TLS: "false"
     steps:
       - name: Checkout exact deployment target
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           fetch-depth: 0
+
+      - name: Verify exact clean main checkout
+        run: |
+          set -euo pipefail
+
+          actual_sha="$(git rev-parse HEAD)"
+          if [ "$actual_sha" != "$DEPLOY_SHA" ]; then
+            echo "::error::Checked out ${actual_sha}; expected ${DEPLOY_SHA}."
+            exit 1
+          fi
+
+          git fetch --prune origin main
+          if ! git merge-base --is-ancestor "$DEPLOY_SHA" origin/main; then
+            echo "::error::Production deploy target must remain reachable from origin/main."
+            exit 1
+          fi
+
+          if [ -n "$(git status --short)" ]; then
+            echo "::error::Deployment checkout is not clean."
+            git status --short
+            exit 1
+          fi
+
+          echo "Deploy SHA verified: ${DEPLOY_SHA}"
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install dependencies deterministically
+        run: |
+          set -euo pipefail
+          npm ci
+          npm --prefix backend ci
+
+      - name: Backend build and tests
+        run: |
+          set -euo pipefail
+          npm --prefix backend run build
+          npm --prefix backend test
+
+      - name: Frontend typecheck, tests, and build
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Disposable integration tests
+        run: |
+          admin_scheme="${P2_TEST_DB_PROTOCOL}:"
+          admin_authority="${P2_TEST_DB_USER}@${P2_TEST_DB_HOST}:${P2_TEST_DB_PORT}"
+          P2_TEST_DATABASE_ADMIN_URL="${admin_scheme}//${admin_authority}/${P2_TEST_DB_NAME}" npm run test:integration:ci
 
       - name: Verify production environment requires approval
         env:
@@ -222,11 +318,12 @@ jobs:
           echo "image_tag=$DEPLOY_SHA" >> "$GITHUB_OUTPUT"
           echo "backend_metadata_file=$RUNNER_TEMP/backend-deployment.json" >> "$GITHUB_OUTPUT"
           echo "frontend_metadata_file=$RUNNER_TEMP/frontend-deployment.json" >> "$GITHUB_OUTPUT"
+          echo "worker_metadata_file=$RUNNER_TEMP/worker-deployment.json" >> "$GITHUB_OUTPUT"
 
       - name: Enforce ECR repository controls
         run: |
           set -euo pipefail
-          ./scripts/aws/apply-ecr-repository-controls.sh both
+          ./scripts/aws/apply-ecr-repository-controls.sh all
 
       - name: Publish immutable ECS images
         env:
@@ -235,9 +332,9 @@ jobs:
           OUTPUT_FILE: ${{ steps.image-meta.outputs.images_file }}
         run: |
           set -euo pipefail
-          ./scripts/aws/publish-ecs-images.sh both
+          ./scripts/aws/publish-ecs-images.sh all
 
-      - name: Resolve backend and frontend digest refs
+      - name: Resolve backend, frontend, and worker digest refs
         id: images
         env:
           IMAGES_FILE: ${{ steps.image-meta.outputs.images_file }}
@@ -253,7 +350,7 @@ jobs:
             .filter(Boolean)
             .map((line) => JSON.parse(line));
 
-          for (const service of ["backend", "frontend"]) {
+          for (const service of ["backend", "frontend", "worker"]) {
             const record = records.find((item) => item.service === service);
             if (!record?.image_ref) {
               throw new Error(`Missing published image record for ${service}.`);
@@ -286,6 +383,28 @@ jobs:
           set -euo pipefail
           ./scripts/aws/verify-production-smoke.sh
 
+      - name: Deploy worker ECS service
+        if: ${{ env.WORKER_SERVICE_NAME != '' && env.WORKER_TASK_DEFINITION != '' }}
+        env:
+          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+          SERVICE_NAME: ${{ env.WORKER_SERVICE_NAME }}
+          TASK_DEFINITION: ${{ env.WORKER_TASK_DEFINITION }}
+          CONTAINER_NAME: ${{ env.WORKER_CONTAINER_NAME }}
+          IMAGE_URI: ${{ steps.images.outputs.worker_image_ref }}
+          METADATA_FILE: ${{ steps.image-meta.outputs.worker_metadata_file }}
+          ENV_UPDATES: GIT_SHA,RELEASE_GIT_SHA
+          GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+        run: |
+          set -euo pipefail
+          ./scripts/aws/deploy-ecs-service.sh
+
+      - name: Record absent worker ECS deployment
+        if: ${{ env.WORKER_SERVICE_NAME == '' || env.WORKER_TASK_DEFINITION == '' }}
+        run: |
+          set -euo pipefail
+          echo "Worker image was built and pushed, but no production worker ECS service/task definition is configured in GitHub Environment variables."
+
       - name: Deploy frontend ECS service
         env:
           CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
@@ -309,8 +428,10 @@ jobs:
         env:
           BACKEND_METADATA_FILE: ${{ steps.image-meta.outputs.backend_metadata_file }}
           FRONTEND_METADATA_FILE: ${{ steps.image-meta.outputs.frontend_metadata_file }}
+          WORKER_METADATA_FILE: ${{ steps.image-meta.outputs.worker_metadata_file }}
           BACKEND_IMAGE_REF: ${{ steps.images.outputs.backend_image_ref }}
           FRONTEND_IMAGE_REF: ${{ steps.images.outputs.frontend_image_ref }}
+          WORKER_IMAGE_REF: ${{ steps.images.outputs.worker_image_ref }}
         run: |
           set -euo pipefail
 
@@ -326,6 +447,16 @@ jobs:
           frontend_previous_task="$(
             node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.previousTaskDefinitionArn || "");' "$FRONTEND_METADATA_FILE"
           )"
+          worker_new_task=""
+          worker_previous_task=""
+          if [ -f "$WORKER_METADATA_FILE" ]; then
+            worker_new_task="$(
+              node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.newTaskDefinitionArn || "");' "$WORKER_METADATA_FILE"
+            )"
+            worker_previous_task="$(
+              node --input-type=module -e 'import fs from "node:fs"; const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(payload.previousTaskDefinitionArn || "");' "$WORKER_METADATA_FILE"
+            )"
+          fi
 
           {
             echo "## Production ECS deployment"
@@ -343,6 +474,18 @@ jobs:
             echo "- Previous task definition: \`${backend_previous_task}\`"
             echo "- New task definition: \`${backend_new_task}\`"
             echo "- Health: \`/api/health\` and \`/health/ready\` passed"
+            echo
+            echo "### Worker"
+            echo
+            echo "- Image: \`${WORKER_IMAGE_REF}\`"
+            if [ -n "$worker_new_task" ]; then
+              echo "- Service: \`${WORKER_SERVICE_NAME}\`"
+              echo "- Previous task definition: \`${worker_previous_task}\`"
+              echo "- New task definition: \`${worker_new_task}\`"
+              echo "- Stability: ECS service-stable waiter passed"
+            else
+              echo "- Service update: skipped because no production worker ECS service/task definition is configured."
+            fi
             echo
             echo "### Frontend"
             echo

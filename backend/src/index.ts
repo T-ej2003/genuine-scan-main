@@ -21,7 +21,7 @@ import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
 import { hasConfiguredSecret } from "./utils/secretConfig";
 import { getObjectStorageConfiguration } from "./services/objectStorageService";
-import { isRedisConfigured } from "./services/redisService";
+import { closeRedisConnections, isRedisConfigured } from "./services/redisService";
 import {
   getQrSigningProfile,
   hasEd25519QrSigningKeys,
@@ -382,6 +382,7 @@ const shutdown = async (signal: string) => {
     stopPrintConfirmationReconcilerWorker = null;
     stopAnalyticsRollupWorker?.();
     stopAnalyticsRollupWorker = null;
+    await closeRedisConnections();
     await prisma.$disconnect();
     await flushBackendMonitoring();
     clearTimeout(forceExit);
