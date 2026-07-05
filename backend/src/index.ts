@@ -276,8 +276,9 @@ for (const warning of legacyFallbackWarnings) {
 
 const app = createBackendApp();
 const PORT = process.env.PORT || 4000;
+const runBackgroundWorkers = parseBool(process.env.RUN_BACKGROUND_WORKERS, true);
 const integrationBackgroundLoopsDisabled = parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false);
-const runBackgroundWorkers = !integrationBackgroundLoopsDisabled && parseBool(process.env.RUN_BACKGROUND_WORKERS, true);
+const startBackgroundLoops = runBackgroundWorkers && !integrationBackgroundLoopsDisabled;
 const sentryEnabled = initBackendMonitoring();
 
 if (sentryEnabled) {
@@ -330,7 +331,7 @@ const startServer = async () => {
     logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
     logger.info(`⏱️ Latency summary at http://localhost:${PORT}/health/latency`);
     attachPrinterAgentSessionWebSocket(server!);
-    if (runBackgroundWorkers) {
+    if (startBackgroundLoops) {
       startAuditLogOutboxWorker();
       startSecurityEventOutboxWorker();
       startCompliancePackScheduler();
