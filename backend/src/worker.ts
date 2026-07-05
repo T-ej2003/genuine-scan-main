@@ -41,6 +41,8 @@ const parseBool = (value: unknown, fallback = false) => {
   return fallback;
 };
 
+const integrationBackgroundLoopsDisabled = () => parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false);
+
 const startKeepAlive = () => {
   keepAlive = setInterval(() => {
     logger.debug("Worker heartbeat", {
@@ -64,6 +66,14 @@ const boot = async () => {
       }
     }
     logger.info("Worker boot-only mode completed; long-running workers skipped");
+    await closeRedisConnections().catch(() => undefined);
+    await prisma.$disconnect().catch(() => undefined);
+    process.exitCode = 0;
+    return;
+  }
+
+  if (integrationBackgroundLoopsDisabled()) {
+    logger.info("Worker background loops disabled by integration harness");
     await closeRedisConnections().catch(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
     process.exitCode = 0;

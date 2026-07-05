@@ -15,6 +15,13 @@ const parseIntEnv = (key: string, fallback: number, min: number, max: number) =>
   return Math.max(min, Math.min(max, Math.floor(raw)));
 };
 
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
 const computeSignature = (body: string) => {
   const secret = webhookSecret();
   if (!secret) return null;
@@ -124,6 +131,13 @@ let started = false;
 let timer: NodeJS.Timeout | null = null;
 
 export const startSecurityEventOutboxWorker = () => {
+  if (
+    parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false) ||
+    !parseBool(process.env.RUN_SECURITY_EVENT_OUTBOX_WORKER, true)
+  ) {
+    logger.info("SIEM outbox worker disabled by runtime configuration");
+    return;
+  }
   if (started) return;
 
   const url = webhookUrl();

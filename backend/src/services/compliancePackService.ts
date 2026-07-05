@@ -40,6 +40,13 @@ const parseIntEnv = (key: string, fallback: number, min: number, max: number) =>
   return Math.max(min, Math.min(max, Math.floor(raw)));
 };
 
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
 const signPayload = (payload: string) => {
   const payloadHash = createHash("sha256").update(payload).digest();
   const privateKeyPem = process.env.QR_SIGN_PRIVATE_KEY;
@@ -336,6 +343,12 @@ let schedulerTimer: NodeJS.Timeout | null = null;
 let lastRunStamp = "";
 
 export const startCompliancePackScheduler = () => {
+  if (
+    parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false) ||
+    !parseBool(process.env.RUN_COMPLIANCE_PACK_SCHEDULER, true)
+  ) {
+    return;
+  }
   if (schedulerStarted) return;
   const enabled = ["1", "true", "yes", "on"].includes(
     String(process.env.COMPLIANCE_PACK_SCHEDULER_ENABLED || "false").trim().toLowerCase()

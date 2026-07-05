@@ -11,19 +11,21 @@ The frontend smoke test also asserted the seeded fixture brand text `P2 Brand A`
 The system integration runner now:
 
 1. Starts the backend HTTP process with background workers disabled.
-2. Starts the worker only as a Redis-backed boot proof when `REDIS_URL` is present.
-3. Requires the worker boot proof to exit with code 0 before the test body continues.
-4. Marks integration shutdown as started in `finally`.
-5. Stops any remaining worker process with SIGTERM, then SIGKILL if needed, and waits for exit.
-6. Stops the backend HTTP process with SIGTERM, then SIGKILL if needed, and waits for exit.
-7. Disconnects the runner Prisma client.
-8. Drops the disposable database only after child process exits are confirmed.
+2. Exports explicit integration loop-disable flags for DB-backed recurring services.
+3. Starts the worker only as a Redis-backed boot proof when `REDIS_URL` is present.
+4. Requires the worker boot proof to exit with code 0 before the test body continues.
+5. Marks integration shutdown as started in `finally`.
+6. Stops any remaining worker process with SIGTERM, then SIGKILL if needed, and waits for exit.
+7. Stops the backend HTTP process with SIGTERM, then SIGKILL if needed, and waits for exit.
+8. Disconnects the runner Prisma client.
+9. Drops the disposable database only after child process exits are confirmed.
 
 ## Hardening Notes
 
 - Redis shutdown is idempotent, so repeated process shutdown paths can safely call the same close function.
 - Distributed leases refuse new work after shutdown begins.
-- Audit outbox and print confirmation reconciliation loops check shutdown state before DB work and suppress PostgreSQL administrator-termination errors only when shutdown is already active.
+- The integration harness disables audit outbox, SIEM outbox, print reconciliation, analytics rollups, compliance pack scheduling, legacy QR risk reports, hot event partition maintenance, and distributed-lease work before the backend process starts.
+- Audit outbox and print confirmation reconciliation loops check shutdown state before DB work.
 - The worker boot-only path connects to Redis for readiness proof, skips recurring jobs, closes Redis and Prisma, and exits by itself.
 
 ## Frontend Smoke Contract
@@ -31,8 +33,9 @@ The system integration runner now:
 The Playwright smoke now asserts stable public verification semantics:
 
 - Verification summary is visible for the seeded valid QR.
-- The valid result includes customer-visible valid-verification language.
-- The valid result does not show not-found/could-not-match text.
+- The valid result includes customer-visible valid-verification language inside the visible main result area.
+- The valid result does not show visible not-found/could-not-match text inside that main result area.
+- The invalid result is checked in a fresh page so valid and invalid state cannot bleed between assertions.
 - The page does not leak `P2 Brand B`.
 - The page does not leak secrets, stack traces, Prisma internals, bearer tokens, or token/hash fields.
 

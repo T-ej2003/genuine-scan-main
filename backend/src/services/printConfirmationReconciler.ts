@@ -17,10 +17,16 @@ const ISSUED_WITHOUT_ACK_TIMEOUT_MS = Math.max(
 );
 let shutdownRequested = false;
 
-const isShutdownDbError = (error: unknown) => {
-  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error || "");
-  return /E57P01|terminating connection due to administrator command/i.test(text);
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
 };
+
+const printReconcilerDisabled = () =>
+  parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false) ||
+  !parseBool(process.env.RUN_PRINT_RECONCILER, true);
 
 const isShutdownStarted = () => {
   const normalized = String(process.env.INTEGRATION_SHUTDOWN_STARTED || "").trim().toLowerCase();
@@ -133,7 +139,6 @@ export const reconcileExpiredAcknowledgedItems = async () => {
         },
       });
     } catch (error: any) {
-      if (isShutdownStarted() && isShutdownDbError(error)) return;
       logger.error("Failed to reconcile expired acknowledged print item", {
         printItemId: item.id,
         printSessionId: item.printSessionId,
@@ -151,6 +156,8 @@ export const runPrintConfirmationReconciliationCycle = async () => {
 };
 
 export const startPrintConfirmationReconciler = () => {
+  if (printReconcilerDisabled()) return () => undefined;
+
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
   shutdownRequested = false;
@@ -164,7 +171,6 @@ export const startPrintConfirmationReconciler = () => {
         runPrintConfirmationReconciliationCycle
       );
     } catch (error: any) {
-      if (isShutdownStarted() && isShutdownDbError(error)) return;
       logger.error("Print confirmation reconciliation cycle failed", {
         error: error?.message || error,
       });

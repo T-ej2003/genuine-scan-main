@@ -4,10 +4,15 @@ import prisma from "../config/database";
 import { withDistributedLease } from "./distributedLeaseService";
 
 const getStore = () => (prisma as any).auditLogOutbox;
-const isShutdownDbError = (error: unknown) => {
-  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error || "");
-  return /E57P01|terminating connection due to administrator command/i.test(text);
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
 };
+const auditOutboxWorkerDisabled = () =>
+  parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false) ||
+  !parseBool(process.env.RUN_AUDIT_OUTBOX_WORKER, true);
 const isShutdownStarted = () => {
   const normalized = String(process.env.INTEGRATION_SHUTDOWN_STARTED || "").trim().toLowerCase();
   return stopping || ["1", "true", "yes", "on"].includes(normalized);
@@ -74,7 +79,6 @@ export const flushAuditLogOutbox = async () => {
         },
       });
     } catch (error) {
-      if (isShutdownStarted() && isShutdownDbError(error)) return;
       const attempts = Number(row.attempts || 0) + 1;
       const retryDelaySec = Math.min(300, Math.max(10, 2 ** attempts));
       await store.update({
@@ -95,6 +99,7 @@ let stopping = false;
 let timer: NodeJS.Timeout | null = null;
 
 export const startAuditLogOutboxWorker = () => {
+  if (auditOutboxWorkerDisabled()) return;
   const store = getStore();
   if (started || !store?.findMany || !store?.update) return;
 
@@ -104,7 +109,6 @@ export const startAuditLogOutboxWorker = () => {
   timer = setInterval(() => {
     if (isShutdownStarted()) return;
     void withDistributedLease("audit-log-outbox-worker", Math.max(15_000, pollMs * 3), flushAuditLogOutbox).catch((error) => {
-      if (isShutdownStarted() && isShutdownDbError(error)) return;
       console.warn("audit outbox flush failed:", error);
     });
   }, pollMs);
