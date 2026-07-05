@@ -21,6 +21,7 @@ import {
   stopHotEventPartitionMaintenanceWorker,
 } from "./services/hotEventPartitionService";
 import { closeRedisConnections, getRedisHealth } from "./services/redisService";
+import { markDistributedLeaseShutdown } from "./services/distributedLeaseService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -62,8 +63,10 @@ const boot = async () => {
         throw new Error("Integration worker boot-only mode requires a ready Redis dependency.");
       }
     }
-    logger.info("Worker boot-only mode enabled; long-running workers skipped");
-    startKeepAlive();
+    logger.info("Worker boot-only mode completed; long-running workers skipped");
+    await closeRedisConnections().catch(() => undefined);
+    await prisma.$disconnect().catch(() => undefined);
+    process.exitCode = 0;
     return;
   }
 
@@ -88,6 +91,7 @@ const shutdown = async (signal: string) => {
   shuttingDown = true;
   logger.info("Worker shutting down", { signal });
 
+  markDistributedLeaseShutdown();
   if (keepAlive) clearInterval(keepAlive);
   keepAlive = null;
   stopPrintConfirmationReconcilerWorker?.();
@@ -103,6 +107,7 @@ const shutdown = async (signal: string) => {
   stopLegacyQrRiskReportScheduler();
   await closeRedisConnections().catch(() => undefined);
   await prisma.$disconnect().catch(() => undefined);
+  process.exitCode = 0;
   process.exit(0);
 };
 

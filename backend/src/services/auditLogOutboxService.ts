@@ -4,6 +4,14 @@ import prisma from "../config/database";
 import { withDistributedLease } from "./distributedLeaseService";
 
 const getStore = () => (prisma as any).auditLogOutbox;
+const isShutdownDbError = (error: unknown) => {
+  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error || "");
+  return /E57P01|terminating connection due to administrator command/i.test(text);
+};
+const isShutdownStarted = () => {
+  const normalized = String(process.env.INTEGRATION_SHUTDOWN_STARTED || "").trim().toLowerCase();
+  return stopping || ["1", "true", "yes", "on"].includes(normalized);
+};
 
 const parseIntEnv = (key: string, fallback: number, min: number, max: number) => {
   const raw = Number(String(process.env[key] || "").trim());
@@ -31,6 +39,7 @@ export const queueAuditLogOutbox = async (payload: Record<string, unknown>, erro
 };
 
 export const flushAuditLogOutbox = async () => {
+  if (isShutdownStarted()) return;
   const store = getStore();
   if (!store?.findMany || !store?.update) return;
 
@@ -46,10 +55,12 @@ export const flushAuditLogOutbox = async () => {
   });
 
   if (!rows.length) return;
+  if (isShutdownStarted()) return;
 
   const { createAuditLog } = await import("./auditService");
 
   for (const row of rows) {
+    if (isShutdownStarted()) return;
     try {
       const log = await createAuditLog((row.payload || {}) as any);
       await store.update({
@@ -63,6 +74,7 @@ export const flushAuditLogOutbox = async () => {
         },
       });
     } catch (error) {
+      if (isShutdownStarted() && isShutdownDbError(error)) return;
       const attempts = Number(row.attempts || 0) + 1;
       const retryDelaySec = Math.min(300, Math.max(10, 2 ** attempts));
       await store.update({
@@ -79,6 +91,7 @@ export const flushAuditLogOutbox = async () => {
 };
 
 let started = false;
+let stopping = false;
 let timer: NodeJS.Timeout | null = null;
 
 export const startAuditLogOutboxWorker = () => {
@@ -86,9 +99,12 @@ export const startAuditLogOutboxWorker = () => {
   if (started || !store?.findMany || !store?.update) return;
 
   started = true;
+  stopping = false;
   const pollMs = parseIntEnv("AUDIT_OUTBOX_POLL_MS", 5000, 1000, 60000);
   timer = setInterval(() => {
+    if (isShutdownStarted()) return;
     void withDistributedLease("audit-log-outbox-worker", Math.max(15_000, pollMs * 3), flushAuditLogOutbox).catch((error) => {
+      if (isShutdownStarted() && isShutdownDbError(error)) return;
       console.warn("audit outbox flush failed:", error);
     });
   }, pollMs);
@@ -96,6 +112,7 @@ export const startAuditLogOutboxWorker = () => {
 };
 
 export const stopAuditLogOutboxWorker = () => {
+  stopping = true;
   if (timer) clearInterval(timer);
   timer = null;
   started = false;

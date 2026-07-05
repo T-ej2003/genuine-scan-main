@@ -22,6 +22,7 @@ import { captureBackendException, flushBackendMonitoring, initBackendMonitoring 
 import { hasConfiguredSecret } from "./utils/secretConfig";
 import { getObjectStorageConfiguration } from "./services/objectStorageService";
 import { closeRedisConnections, isRedisConfigured } from "./services/redisService";
+import { markDistributedLeaseShutdown } from "./services/distributedLeaseService";
 import {
   getQrSigningProfile,
   hasEd25519QrSigningKeys,
@@ -361,6 +362,7 @@ const shutdown = async (signal: string) => {
   shuttingDown = true;
 
   logger.info(`Received ${signal}; shutting down gracefully...`);
+  markDistributedLeaseShutdown();
 
   const forceExit = setTimeout(() => {
     logger.error("Forced shutdown after timeout");
@@ -387,6 +389,7 @@ const shutdown = async (signal: string) => {
     await flushBackendMonitoring();
     clearTimeout(forceExit);
     logger.info("Shutdown complete");
+    process.exitCode = 0;
     process.exit(0);
   } catch (error: unknown) {
     const errorRecord = asErrorRecord(error);

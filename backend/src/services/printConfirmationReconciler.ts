@@ -15,8 +15,20 @@ const ISSUED_WITHOUT_ACK_TIMEOUT_MS = Math.max(
   10_000,
   Math.min(30 * 60_000, Number(process.env.PRINT_ISSUED_WITHOUT_ACK_TIMEOUT_MS || 5 * 60_000) || 5 * 60_000)
 );
+let shutdownRequested = false;
+
+const isShutdownDbError = (error: unknown) => {
+  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error || "");
+  return /E57P01|terminating connection due to administrator command/i.test(text);
+};
+
+const isShutdownStarted = () => {
+  const normalized = String(process.env.INTEGRATION_SHUTDOWN_STARTED || "").trim().toLowerCase();
+  return shutdownRequested || ["1", "true", "yes", "on"].includes(normalized);
+};
 
 export const reconcileExpiredAcknowledgedItems = async () => {
+  if (isShutdownStarted()) return;
   const now = new Date();
   const issuedAckCutoff = new Date(now.getTime() - ISSUED_WITHOUT_ACK_TIMEOUT_MS);
   const expiredItems = await prisma.printItem.findMany({
@@ -86,8 +98,11 @@ export const reconcileExpiredAcknowledgedItems = async () => {
     take: 50,
   });
 
+  if (isShutdownStarted()) return;
+
   const seenSessions = new Set<string>();
   for (const item of expiredItems) {
+    if (isShutdownStarted()) return;
     if (seenSessions.has(item.printSessionId)) continue;
     seenSessions.add(item.printSessionId);
 
@@ -118,6 +133,7 @@ export const reconcileExpiredAcknowledgedItems = async () => {
         },
       });
     } catch (error: any) {
+      if (isShutdownStarted() && isShutdownDbError(error)) return;
       logger.error("Failed to reconcile expired acknowledged print item", {
         printItemId: item.id,
         printSessionId: item.printSessionId,
@@ -128,16 +144,19 @@ export const reconcileExpiredAcknowledgedItems = async () => {
 };
 
 export const runPrintConfirmationReconciliationCycle = async () => {
+  if (isShutdownStarted()) return;
   await reconcileExpiredAcknowledgedItems();
+  if (isShutdownStarted()) return;
   await Promise.allSettled([resumePendingNetworkDirectJobs(), resumePendingNetworkIppJobs()]);
 };
 
 export const startPrintConfirmationReconciler = () => {
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
+  shutdownRequested = false;
 
   const tick = async () => {
-    if (stopped) return;
+    if (stopped || isShutdownStarted()) return;
     try {
       await withDistributedLease(
         "print-confirmation-reconciler",
@@ -145,6 +164,7 @@ export const startPrintConfirmationReconciler = () => {
         runPrintConfirmationReconciliationCycle
       );
     } catch (error: any) {
+      if (isShutdownStarted() && isShutdownDbError(error)) return;
       logger.error("Print confirmation reconciliation cycle failed", {
         error: error?.message || error,
       });
@@ -161,6 +181,7 @@ export const startPrintConfirmationReconciler = () => {
 
   return () => {
     stopped = true;
+    shutdownRequested = true;
     if (timer) {
       clearTimeout(timer);
       timer = null;

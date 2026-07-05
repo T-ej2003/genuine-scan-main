@@ -60,25 +60,55 @@ const startProcess = (cmd, args, env) => {
   return child;
 };
 
-const stopProcess = async (child, label) => {
-  if (!child || child.killed || child.exitCode !== null) return;
+const waitForChildExit = async (child, label, timeoutMs) => {
+  if (!child) return { code: null, signal: null };
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return { code: child.exitCode, signal: child.signalCode };
+  }
 
-  await new Promise((resolve, reject) => {
-    const sigkillTimer = setTimeout(() => {
-      if (child.exitCode === null) child.kill("SIGKILL");
-    }, 10_000);
-    const exitTimer = setTimeout(() => {
-      reject(new Error(`${label} did not exit after SIGTERM/SIGKILL.`));
-    }, 15_000);
+  return new Promise((resolve, reject) => {
+    const onExit = (code, signal) => {
+      clearTimeout(timer);
+      console.log(`integration: ${label} exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
+      resolve({ code, signal });
+    };
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      reject(new Error(`${label} did not exit within ${timeoutMs}ms.`));
+    }, timeoutMs);
 
-    child.once("exit", () => {
-      clearTimeout(sigkillTimer);
-      clearTimeout(exitTimer);
-      resolve();
-    });
-
-    child.kill("SIGTERM");
+    child.once("exit", onExit);
   });
+};
+
+const stopProcess = async (child, label) => {
+  if (!child) return;
+  if (child.exitCode !== null || child.signalCode !== null) {
+    console.log(
+      `integration: ${label} already exited with code ${child.exitCode ?? "null"} signal ${child.signalCode ?? "null"}`
+    );
+    return;
+  }
+
+  console.log(`integration: stopping ${label} with SIGTERM`);
+  const termWait = waitForChildExit(child, label, 10_000).catch(() => null);
+  const termSent = child.kill("SIGTERM");
+  if (!termSent && child.exitCode === null && child.signalCode === null) {
+    throw new Error(`${label} could not be signalled with SIGTERM.`);
+  }
+
+  const termExit = await termWait;
+  if (termExit) return;
+
+  console.warn(`integration: ${label} did not exit after SIGTERM; sending SIGKILL`);
+  const killWait = waitForChildExit(child, label, 5_000).catch(() => null);
+  const killSent = child.kill("SIGKILL");
+  if (!killSent && child.exitCode === null && child.signalCode === null) {
+    throw new Error(`${label} could not be signalled with SIGKILL.`);
+  }
+
+  const killExit = await killWait;
+  if (!killExit) throw new Error(`${label} did not exit after SIGTERM/SIGKILL.`);
 };
 
 const jsonRequest = async (method, path, body, options = {}) => {
@@ -170,8 +200,13 @@ const main = async () => {
         INTEGRATION_WORKER_BOOT_ONLY: "true",
         INTEGRATION_WORKER_ASSERT_REDIS_READY: "true",
       });
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-      if (worker.exitCode !== null) throw new Error(`worker exited early with code ${worker.exitCode}`);
+      const workerExit = await waitForChildExit(worker, "worker boot proof", 20_000);
+      if (workerExit.code !== 0 || workerExit.signal) {
+        throw new Error(
+          `worker boot proof failed with code ${workerExit.code ?? "null"} signal ${workerExit.signal ?? "null"}`
+        );
+      }
+      worker = null;
     }
 
     const ready = await jsonRequest("GET", "/health/ready");
@@ -222,13 +257,19 @@ const main = async () => {
 
     console.log("MSCQR system integration tests passed");
   } finally {
-    const stopResults = await Promise.allSettled([stopProcess(worker, "worker"), stopProcess(backend, "backend")]);
-    if (prisma?.$disconnect) await prisma.$disconnect().catch(() => undefined);
-    const stopFailures = stopResults.filter((result) => result.status === "rejected");
-    if (stopFailures.length > 0) {
-      for (const failure of stopFailures) console.error(failure.reason);
-      throw stopFailures[0].reason;
+    process.env.INTEGRATION_SHUTDOWN_STARTED = "true";
+    console.log("integration: shutdown started");
+    let stopFailure = null;
+
+    try {
+      await stopProcess(worker, "worker");
+      await stopProcess(backend, "backend");
+    } catch (error) {
+      stopFailure = error;
     }
+
+    if (prisma?.$disconnect) await prisma.$disconnect().catch(() => undefined);
+    if (stopFailure) throw stopFailure;
     if (databaseInfo?.createdDatabaseName) dropP2TestDatabase(databaseInfo);
   }
 };
