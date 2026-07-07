@@ -38,9 +38,44 @@ output "rds_identifier" {
   value       = aws_db_instance.staging.identifier
 }
 
+output "staging_rds_address" {
+  description = "Staging RDS hostname only. Does not include username, password, database name, or URL query parameters."
+  value       = aws_db_instance.staging.address
+}
+
+output "staging_rds_endpoint" {
+  description = "Staging RDS endpoint in host:port form. Does not include username, password, database name, or URL query parameters."
+  value       = aws_db_instance.staging.endpoint
+}
+
+output "staging_rds_port" {
+  description = "Staging RDS port only."
+  value       = aws_db_instance.staging.port
+}
+
+output "staging_rds_database_name" {
+  description = "Staging database name only. Does not include credentials or a full connection URL."
+  value       = aws_db_instance.staging.db_name
+}
+
+output "staging_rds_username" {
+  description = "Staging database username only. Does not include the database password or a full connection URL."
+  value       = aws_db_instance.staging.username
+}
+
 output "redis_replication_group_id" {
   description = "Staging Valkey replication group ID."
   value       = aws_elasticache_replication_group.staging.replication_group_id
+}
+
+output "staging_redis_primary_endpoint_address" {
+  description = "Staging Valkey primary endpoint hostname only. Does not include credentials or a full Redis URL."
+  value       = aws_elasticache_replication_group.staging.primary_endpoint_address
+}
+
+output "staging_redis_port" {
+  description = "Staging Valkey port only."
+  value       = aws_elasticache_replication_group.staging.port
 }
 
 output "artifacts_bucket" {

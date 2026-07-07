@@ -70,6 +70,79 @@ on 5432, Redis ingress outside the ECS security group on 6379, ECS ingress
 outside the ALB security group on 4000, or ALB egress outside the ECS security
 group on 4000.
 
+## Post-Apply Runtime Secret Sync
+
+Terraform creates the staging RDS and Valkey/Redis endpoints, but it does not
+write full runtime connection strings into Terraform code, plans, state, docs,
+or git. After a separately approved `terraform apply`, update only these
+existing runtime placeholders:
+
+- `mscqr/staging/database-url`
+- `mscqr/staging/redis-url`
+
+The safe outputs in this module expose only non-secret endpoint metadata:
+
+- `staging_rds_address`, `staging_rds_endpoint`, `staging_rds_port`
+- `staging_rds_database_name`, `staging_rds_username`
+- `staging_redis_primary_endpoint_address`, `staging_redis_port`
+
+They do not include passwords, tokens, or full connection URLs. Terraform state
+will contain normal Terraform resource metadata and those non-secret outputs;
+it must not contain the final `DATABASE_URL`, final `REDIS_URL`, DB password,
+or Redis credentials from the post-apply sync.
+
+Run the validation dry-run first:
+
+```sh
+set +x
+AWS_PROFILE="<staging-provisioning-profile>" \
+AWS_REGION="eu-west-2" \
+node scripts/sync-staging-runtime-secrets.mjs --dry-run
+```
+
+The equivalent non-mutating npm wrapper is
+`npm run check:staging-runtime-secret-sync`; use it only after apply has created
+the staging endpoints.
+
+If the dry-run evidence is clean and the human apply approval record authorizes
+post-apply secret sync, update the two runtime secrets:
+
+```sh
+set +x
+AWS_PROFILE="<staging-provisioning-profile>" \
+AWS_REGION="eu-west-2" \
+MSCQR_STAGING_SECRET_SYNC_ENABLED=true \
+MSCQR_STAGING_SECRET_SYNC_CONFIRM=MSCQR_UPDATE_STAGING_RUNTIME_SECRETS \
+node scripts/sync-staging-runtime-secrets.mjs --sync-secrets
+```
+
+`DATABASE_URL` is constructed in memory from staging RDS host, port, database
+name, username, and a password source. The password source is, in order:
+`MSCQR_STAGING_DATABASE_PASSWORD`, `MSCQR_STAGING_DATABASE_PASSWORD_SECRET_ID`,
+or the RDS-managed master user secret returned by `describe-db-instances`.
+The final URL is written only to Secrets Manager and is never printed.
+
+`REDIS_URL` is constructed in memory from the staging Valkey primary endpoint
+and port. Terraform does not configure Redis auth yet, so the first staging
+URL is unauthenticated unless `MSCQR_STAGING_REDIS_PASSWORD` is explicitly
+provided by an approved operator flow. The script still refuses production-
+looking hosts and never prints a credential-bearing Redis URL.
+
+After secrets are updated, force a new staging ECS deployment only with the
+separate redeploy approval gate:
+
+```sh
+set +x
+AWS_PROFILE="<staging-provisioning-profile>" \
+AWS_REGION="eu-west-2" \
+MSCQR_STAGING_ECS_REDEPLOY_ENABLED=true \
+MSCQR_STAGING_ECS_REDEPLOY_CONFIRM=MSCQR_FORCE_STAGING_ECS_REDEPLOY \
+node scripts/sync-staging-runtime-secrets.mjs --force-ecs-redeploy
+```
+
+Then run the staging health check against the reviewed staging ALB URL. Do not
+use `mscqr.com` or any production hostname for staging health evidence.
+
 ## Required GitHub Checks
 
 Before any staging Terraform plan/apply review continues, GitHub required checks
