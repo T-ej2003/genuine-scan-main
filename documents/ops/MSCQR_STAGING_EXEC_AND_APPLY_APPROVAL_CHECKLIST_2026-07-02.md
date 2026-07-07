@@ -22,6 +22,7 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] First staging plan was generated through `npm run plan:staging-terraform`; raw first-plan commands are not accepted. See `documents/ops/MSCQR_STAGING_TERRAFORM_PLAN_RUNBOOK_2026-07-02.md`.
 - [ ] Plan evidence is stored privately under `.terraform-plans/staging/` or the approved private evidence store, not committed to git.
 - [ ] Private tfvars were prepared with `documents/ops/MSCQR_STAGING_PRIVATE_TFVARS_PREPARATION_2026-07-02.md` and passed `npm run check:staging-private-inputs`.
+- [ ] `npm run check:staging-private-inputs` reported zero tracked private tfvars and zero tracked `.terraform-plans/` artifacts.
 - [ ] Cost evidence was created after the first real plan using `documents/ops/MSCQR_STAGING_COST_ESTIMATION_EVIDENCE_2026-07-02.md`.
 - [ ] `terraform apply` remains forbidden until a separate apply approval PR/checklist is approved.
 - [ ] `npm run check:staging-terraform` passed locally or in CI.
@@ -39,8 +40,18 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] The caller assumed a least-privilege staging provisioning role explicitly.
 - [ ] The state/backend decision is documented, including where state is stored and who can read or write it.
 - [ ] Every planned resource name is staging or stg scoped.
+- [ ] No planned resource name looks production-scoped; any prod/production-looking resource name blocks apply.
 - [ ] No production DB, Redis, S3 bucket, ECS cluster, ALB, subnet, security group, or Secrets Manager ARN is referenced.
 - [ ] `allowed_operator_cidrs` are narrow, reviewed, and do not include `0.0.0.0/0`, `::/0`, or broad office/VPN ranges without written justification.
+- [ ] The plan has `destroy = 0`; any destroy count blocks apply unless a separate explicit destroy approval record exists.
+- [ ] No security group ingress rule allows `0.0.0.0/0`; any IPv4 world-open ingress blocks apply.
+- [ ] No security group ingress rule allows `::/0`; any IPv6 world-open ingress blocks apply.
+- [ ] ALB ingress is restricted to reviewed operator CIDRs only.
+- [ ] ALB egress is restricted to the staging ECS security group on port 4000.
+- [ ] ECS ingress is restricted to the staging ALB security group on port 4000.
+- [ ] DB ingress is restricted to the staging ECS security group on port 5432.
+- [ ] Redis ingress is restricted to the staging ECS security group on port 6379.
+- [ ] ECS broad egress, if still present, is accepted only as temporary staging outbound access for ECR, Secrets Manager, CloudWatch Logs, STS, package endpoints, and AWS APIs; it is not inbound exposure.
 - [ ] ECS Exec logging is configured with `logging = "OVERRIDE"`.
 - [ ] ECS Exec CloudWatch log group is `/aws/ecs/mscqr-staging/exec`.
 - [ ] ECS Exec log retention is at least 30 days and not more than the approved staging retention window.
@@ -96,3 +107,4 @@ Record these fields in the associated ticket or evidence pack:
 - Treat ECS Exec access as a temporary control plane, not an operating model. The scalable path is repeatable migrations, seed jobs, and one-shot task definitions that produce structured evidence without shell access.
 - Add an EventBridge rule for `ExecuteCommand` CloudTrail events before routine staging usage, then send alerts to the operational channel and evidence ledger.
 - Prefer a dedicated staging provisioning role and a separate break-glass operator role. Combining infrastructure apply and shell access in one role increases blast radius.
+- Replace temporary broad ECS egress with VPC endpoints and prefix-list scoped rules before production reuse, then make broad ECS egress a plan-review blocker too.

@@ -11,6 +11,9 @@ Hard rules:
 - The provider pins `allowed_account_ids = [var.account_id]`; wrong active AWS credentials should fail provider initialization or plan.
 - Account `368992683803` may be used for staging only through a least-privilege staging provisioning role. Root credentials must not be used for apply.
 - `allowed_operator_cidrs` must stay narrow. Broad public ingress such as `0.0.0.0/0`, `::/0`, and broad IPv4 masks are rejected by variable validation.
+- Any planned `0.0.0.0/0` ingress, `::/0` ingress, destroy action, or production-looking resource name is an apply blocker.
+- ALB ingress must remain restricted to reviewed operator CIDRs only. ALB egress must remain restricted to the staging ECS security group on backend port 4000.
+- ECS egress is temporarily broad for staging-only outbound access to ECR, Secrets Manager, CloudWatch Logs, STS, package endpoints, and AWS APIs. It is not inbound exposure and should be narrowed with VPC endpoints or prefix-list controls before production reuse.
 - ECS Exec is enabled on the staging backend service only for controlled staging migration and seed execution. Operators still need explicit IAM permission for `ecs:ExecuteCommand`, and command activity must be reviewed through CloudTrail plus the backend CloudWatch log group and the dedicated ECS Exec CloudWatch log group.
 - ECS Exec session logging is configured at the cluster level with `logging = "OVERRIDE"` and a staging KMS-backed CloudWatch log group at `/aws/ecs/mscqr-staging/exec`.
 - S3 ECS Exec session logging is intentionally not enabled in this PR. Add it later only with a dedicated staging prefix, lifecycle policy, public access block, and KMS-backed bucket encryption reviewed against the same break-glass approval checklist.
@@ -56,6 +59,16 @@ unsafe identities and arguments, writes local private evidence under
 metadata. Plan evidence is private and must not be committed. Cost evidence must
 be created after the first real plan and before any apply approval. `terraform
 apply` remains forbidden until a separate apply approval PR/checklist exists.
+`npm run check:staging-private-inputs` must report zero tracked private tfvars
+and zero tracked `.terraform-plans/` artifacts; force-added private inputs or
+plan evidence block the workflow.
+
+Plan review must block apply if the plan includes any `0.0.0.0/0` ingress,
+`::/0` ingress, destroy action, production-looking resource name, ALB ingress
+outside the reviewed operator CIDRs, DB ingress outside the ECS security group
+on 5432, Redis ingress outside the ECS security group on 6379, ECS ingress
+outside the ALB security group on 4000, or ALB egress outside the ECS security
+group on 4000.
 
 ## Required GitHub Checks
 

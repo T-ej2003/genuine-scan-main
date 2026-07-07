@@ -23,17 +23,31 @@ staging_secret_arns = {
 }
 `;
 
-test("missing tfvars returns blocked_missing_private_tfvars without failing non-strict", () => {
-  const result = spawnSync(process.execPath, ["scripts/check-staging-private-inputs.mjs"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
+test("missing tfvars returns blocked_missing_private_tfvars", () => {
+  const tempRoot = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "mscqr-private-inputs-missing-"));
+  try {
+    fs.mkdirSync(path.join(tempRoot, "infra/terraform/staging-api"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, ".gitignore"),
+      [
+        ".terraform-plans/",
+        "infra/terraform/staging-api/staging.auto.tfvars",
+        "infra/terraform/staging-api/terraform.tfvars",
+        "infra/terraform/staging-api/*.local.tfvars",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    assert.equal(spawnSync("git", ["init"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
 
-  assert.equal(result.status, 0);
-  const parsed = JSON.parse(result.stdout);
-  assert.equal(parsed.status, "blocked_missing_private_tfvars");
-  assert.equal(parsed.foundTfvarsFile, false);
-  assert.equal(parsed.rawValuesPrinted, false);
+    const result = evaluatePrivateInputs({ root: tempRoot });
+
+    assert.equal(result.status, "blocked_missing_private_tfvars");
+    assert.equal(result.foundTfvarsFile, false);
+    assert.equal(result.rawValuesPrinted, false);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test("redacted safe template passes required structure", () => {
@@ -69,6 +83,7 @@ test("gitignore coverage is asserted", () => {
 
   assert.equal(result.gitIgnored["infra/terraform/staging-api/staging.auto.tfvars"], true);
   assert.equal(result.gitIgnored["infra/terraform/staging-api/example.local.tfvars"], true);
+  assert.equal(result.gitIgnored[".terraform-plans/staging/example.tfplan"], true);
 });
 
 test("safe JSON output does not include raw private-looking values", () => {
@@ -110,6 +125,43 @@ test("force-added private tfvars are blocked even when gitignored", () => {
     assert.equal(result.status, "blocked_private_tfvars_invalid");
     assert.equal(result.trackedPrivateTfvarsCount, 1);
     assert(result.blockerCodes.includes("private_tfvars_tracked_or_staged"));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("force-added Terraform plan artifacts are blocked even when gitignored", () => {
+  const tempRoot = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "mscqr-plan-artifacts-git-"));
+  try {
+    const tfRoot = path.join(tempRoot, "infra/terraform/staging-api");
+    const planRoot = path.join(tempRoot, ".terraform-plans/staging");
+    fs.mkdirSync(tfRoot, { recursive: true });
+    fs.mkdirSync(planRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, ".gitignore"),
+      [
+        ".terraform-plans/",
+        "infra/terraform/staging-api/staging.auto.tfvars",
+        "infra/terraform/staging-api/terraform.tfvars",
+        "infra/terraform/staging-api/*.local.tfvars",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    fs.writeFileSync(path.join(tfRoot, "staging.auto.tfvars"), safeTemplate, "utf8");
+    fs.writeFileSync(path.join(planRoot, "staging-plan.tfplan"), "PRIVATE PLAN BINARY PLACEHOLDER", "utf8");
+    assert.equal(spawnSync("git", ["init"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", ".gitignore"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", "-f", ".terraform-plans/staging/staging-plan.tfplan"], {
+      cwd: tempRoot,
+      stdio: "ignore",
+    }).status, 0);
+
+    const result = evaluatePrivateInputs({ root: tempRoot });
+
+    assert.equal(result.status, "blocked_private_tfvars_invalid");
+    assert.equal(result.trackedTerraformPlanArtifactsCount, 1);
+    assert(result.blockerCodes.includes("terraform_plan_artifacts_tracked_or_staged"));
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
