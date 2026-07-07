@@ -473,6 +473,13 @@ process.on("SIGINT", () => {
   void shutdown("SIGINT");
 });
 
+(process as NodeJS.Process & { on(event: "mscqr:integration-shutdown-requested", listener: () => void): NodeJS.Process }).on(
+  "mscqr:integration-shutdown-requested",
+  () => {
+    void shutdown("integration shutdown endpoint");
+  }
+);
+
 process.on("unhandledRejection", (reason) => {
   captureBackendException(reason);
   logger.error("Unhandled promise rejection", { error: reason instanceof Error ? reason.message : String(reason) });

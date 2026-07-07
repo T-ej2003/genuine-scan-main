@@ -118,6 +118,41 @@ const stopProcess = async (child, label) => {
   if (!killExit) throw new Error(`${label} did not exit after SIGTERM/SIGKILL.`);
 };
 
+const requestBackendGracefulShutdown = async (child, token) => {
+  if (!child) return true;
+  if (child.exitCode !== null || child.signalCode !== null) {
+    console.log(
+      `integration: backend already exited before graceful shutdown with code ${child.exitCode ?? "null"} signal ${child.signalCode ?? "null"}`
+    );
+    return child.exitCode === 0 && !child.signalCode;
+  }
+
+  console.log("integration: requesting backend graceful integration shutdown");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await fetch(`${backendBaseUrl}/__integration/shutdown`, {
+      method: "POST",
+      headers: {
+        "x-integration-shutdown-token": token,
+      },
+      signal: controller.signal,
+    });
+    if (response.status !== 202) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`backend graceful shutdown endpoint returned HTTP ${response.status}: ${text.slice(0, 300)}`);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const exit = await waitForChildExit(child, "backend graceful shutdown", 20_000);
+  if (exit.code === 0 && !exit.signal) return true;
+  throw new Error(
+    `backend graceful shutdown did not exit cleanly; code ${exit.code ?? "null"} signal ${exit.signal ?? "null"}`
+  );
+};
+
 const jsonRequest = async (method, path, body, options = {}) => {
   const response = await request(backendBaseUrl, method, path, body, options);
   if (forbiddenPublicText.test(response.text || "")) {
@@ -135,6 +170,7 @@ const assertStatus = (response, expected, label) => {
 const bearer = (token) => ({ authorization: `Bearer ${token}` });
 
 const main = async () => {
+  const integrationShutdownToken = randomSecret();
   const testEnv = {
     ...process.env,
     NODE_ENV: "test",
@@ -158,6 +194,7 @@ const main = async () => {
     PUBLIC_VERIFY_RATE_LIMIT_PER_MIN: "1000",
     SCAN_RATE_LIMIT_PER_MIN: "1000",
     PUBLIC_STATUS_RATE_LIMIT_PER_MIN: "5000",
+    INTEGRATION_TEST_SHUTDOWN_TOKEN: integrationShutdownToken,
     INTEGRATION_DISABLE_BACKGROUND_LOOPS: "true",
     RUN_BACKGROUND_WORKERS: "false",
     RUN_AUDIT_OUTBOX_WORKER: "false",
@@ -283,9 +320,16 @@ const main = async () => {
     let stopFailure = null;
 
     try {
-      await waitForFrontendTrafficDrain(2_000);
+      await waitForFrontendTrafficDrain(5_000);
       await stopProcess(worker, "worker");
-      await stopProcess(backend, "backend");
+      try {
+        await requestBackendGracefulShutdown(backend, integrationShutdownToken);
+      } catch (error) {
+        console.warn("integration: backend graceful shutdown failed; falling back to SIGTERM/SIGKILL", {
+          error: error?.message || String(error),
+        });
+        await stopProcess(backend, "backend fallback");
+      }
     } catch (error) {
       stopFailure = error;
     }

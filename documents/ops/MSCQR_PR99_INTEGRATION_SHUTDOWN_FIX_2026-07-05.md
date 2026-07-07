@@ -18,11 +18,13 @@ The system integration runner now:
 6. Requires each Playwright test to close its isolated browser context after assertions.
 7. Waits for a frontend/browser traffic drain window after Playwright returns.
 8. Marks integration shutdown as started in `finally`.
-9. Waits for a final short traffic drain before child process termination.
+9. Waits for a final traffic drain before backend termination.
 10. Stops any remaining worker process with SIGTERM, then SIGKILL if needed, and waits for exit.
-11. Stops the backend HTTP process with SIGTERM, then SIGKILL if needed, and waits for exit.
-12. Disconnects the runner Prisma client.
-13. Drops the disposable database only after child process exits are confirmed.
+11. Calls the backend-owned `POST /__integration/shutdown` endpoint with the per-run shutdown token.
+12. Requires the backend child process to exit with code 0 after the graceful shutdown request.
+13. Uses SIGTERM/SIGKILL for the backend only as a fallback after the graceful shutdown endpoint fails or times out.
+14. Disconnects the runner Prisma client.
+15. Drops the disposable database only after child process exits are confirmed.
 
 ## Hardening Notes
 
@@ -33,6 +35,8 @@ The system integration runner now:
 - Audit outbox and print confirmation reconciliation loops check shutdown state before DB work.
 - The worker boot-only path connects to Redis for readiness proof, skips recurring jobs, closes Redis and Prisma, and exits by itself.
 - Backend SIGTERM handling tracks active HTTP requests and sockets, closes idle connections, waits briefly for in-flight requests, then force-closes remaining sockets before disconnecting Redis and Prisma.
+- The backend integration shutdown endpoint is registered only when `NODE_ENV=test` and `INTEGRATION_TEST_SHUTDOWN_TOKEN` are both set. It returns 404 for missing or incorrect tokens and is not registered in production.
+- Successful integration teardown is backend-owned: the endpoint responds 202, emits an internal shutdown request, closes HTTP traffic, disconnects Redis and Prisma, and exits with code 0.
 
 ## Frontend Smoke Contract
 
