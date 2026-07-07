@@ -62,6 +62,26 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Cost limit is understood for ALB, ECS, RDS, Redis, CloudWatch Logs, and KMS.
 - [ ] Approval record includes approver, ticket or evidence ID, date, exact branch/commit, and exact plan command.
 
+## After Terraform Apply
+
+- [ ] Apply was run only after separate human approval; this checklist entry records the result and does not authorize apply by itself.
+- [ ] Terraform output review confirms staging RDS endpoint/address/port and staging Redis primary endpoint/address/port exist.
+- [ ] Terraform output review confirms no password, token, or full connection URL was emitted.
+- [ ] Terraform state location remains private and access controlled.
+- [ ] Terraform state does not contain the final `DATABASE_URL` or final `REDIS_URL` written by the post-apply sync script.
+- [ ] `node scripts/sync-staging-runtime-secrets.mjs --dry-run` passed with `AWS_PROFILE="<staging-provisioning-profile>"` and `AWS_REGION="eu-west-2"`.
+- [ ] Dry-run evidence printed only redacted URL previews and did not print passwords, tokens, full secret values, private tfvars, Terraform state, or plan artifacts.
+- [ ] Runtime secret sync was approved after dry-run evidence review.
+- [ ] Runtime secret sync used `MSCQR_STAGING_SECRET_SYNC_ENABLED=true` and `MSCQR_STAGING_SECRET_SYNC_CONFIRM=MSCQR_UPDATE_STAGING_RUNTIME_SECRETS`.
+- [ ] Runtime secret sync updated only `mscqr/staging/database-url` and `mscqr/staging/redis-url`.
+- [ ] `DATABASE_URL` was constructed from staging RDS endpoint metadata plus an approved password source and was written only to Secrets Manager.
+- [ ] `REDIS_URL` was constructed from the staging Valkey endpoint and port and was written only to Secrets Manager.
+- [ ] Redis auth/TLS status is recorded. Current Terraform does not configure Redis auth or in-transit TLS; if no approved `MSCQR_STAGING_REDIS_PASSWORD` was supplied and TLS has not been added, the staging Redis URL is unauthenticated `redis://`.
+- [ ] ECS redeploy was approved after the two runtime secrets were updated.
+- [ ] ECS redeploy used `MSCQR_STAGING_ECS_REDEPLOY_ENABLED=true` and `MSCQR_STAGING_ECS_REDEPLOY_CONFIRM=MSCQR_FORCE_STAGING_ECS_REDEPLOY`.
+- [ ] Health check used only the reviewed staging ALB URL and did not use `mscqr.com` or a production hostname.
+- [ ] Post-apply evidence records plan evidence, apply approval, secret sync redacted evidence, ECS redeploy evidence, and health check result without secrets.
+
 ## Before ECS Execute-Command
 
 - [ ] Ticket, approval, or evidence ID exists for this ECS Exec session.

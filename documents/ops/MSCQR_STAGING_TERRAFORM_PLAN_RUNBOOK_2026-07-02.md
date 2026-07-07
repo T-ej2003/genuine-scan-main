@@ -103,6 +103,71 @@ Cost evidence must be created after the first real plan and before any future
 apply approval. Use
 `documents/ops/MSCQR_STAGING_COST_ESTIMATION_EVIDENCE_2026-07-02.md`.
 
+## End-to-End Apply Sequence
+
+Use this sequence when the plan has passed review and a separate human apply
+approval exists:
+
+A. Generate plan-only evidence through
+`MSCQR_STAGING_TERRAFORM_PLAN_ENABLED=true
+MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM=MSCQR_GENERATE_STAGING_PLAN_ONLY npm run
+plan:staging-terraform`.
+
+B. Record separate human apply approval with reviewed plan counts, security
+group evidence, private-input guard evidence, identity guard evidence, cost
+evidence, rollback notes, and the exact commit.
+
+C. Run `terraform apply` only from the approved operator context and only after
+the apply approval is signed. This runbook does not authorize that command.
+
+D. Sync the staging runtime endpoint secrets with the post-apply script. First
+run the dry-run:
+
+```sh
+set +x
+AWS_PROFILE="<staging-provisioning-profile>" \
+AWS_REGION="eu-west-2" \
+node scripts/sync-staging-runtime-secrets.mjs --dry-run
+```
+
+Then, only after the dry-run evidence is accepted:
+
+```sh
+set +x
+AWS_PROFILE="<staging-provisioning-profile>" \
+AWS_REGION="eu-west-2" \
+MSCQR_STAGING_SECRET_SYNC_ENABLED=true \
+MSCQR_STAGING_SECRET_SYNC_CONFIRM=MSCQR_UPDATE_STAGING_RUNTIME_SECRETS \
+node scripts/sync-staging-runtime-secrets.mjs --sync-secrets
+```
+
+The script updates only `mscqr/staging/database-url` and
+`mscqr/staging/redis-url`. It refuses root, non-`eu-west-2`, production-looking
+secret names, DB identifiers, endpoints, hosts, URLs, and `mscqr.com` domains.
+It prints redacted evidence only.
+Current Terraform does not configure Redis auth or in-transit TLS; record that
+temporary staging limitation in the apply evidence until the cache is upgraded.
+
+E. Force a new staging ECS deployment only after secret sync:
+
+```sh
+set +x
+AWS_PROFILE="<staging-provisioning-profile>" \
+AWS_REGION="eu-west-2" \
+MSCQR_STAGING_ECS_REDEPLOY_ENABLED=true \
+MSCQR_STAGING_ECS_REDEPLOY_CONFIRM=MSCQR_FORCE_STAGING_ECS_REDEPLOY \
+node scripts/sync-staging-runtime-secrets.mjs --force-ecs-redeploy
+```
+
+F. Run the staging health check against the reviewed staging ALB URL. Do not use
+`mscqr.com`, production CloudFront, production ALB, production RDS, production
+Redis, or production Secrets Manager values as staging evidence.
+
+Terraform outputs and state may contain staging endpoint hostnames, ports,
+resource identifiers, database name, and database username. They must not
+contain the DB password, the final `DATABASE_URL`, the final `REDIS_URL`, Redis
+credentials, private tfvars, or plan artifacts committed to git.
+
 ## Human Review Before Any Future Apply
 
 Before any future apply approval is considered, a reviewer must confirm:
