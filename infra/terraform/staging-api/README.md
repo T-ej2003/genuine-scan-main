@@ -59,6 +59,9 @@ unsafe identities and arguments, writes local private evidence under
 metadata. Plan evidence is private and must not be committed. Cost evidence must
 be created after the first real plan and before any apply approval. `terraform
 apply` remains forbidden until a separate apply approval PR/checklist exists.
+`npm run check:staging-private-inputs` must report zero tracked private tfvars
+and zero tracked `.terraform-plans/` artifacts; force-added private inputs or
+plan evidence block the workflow.
 
 Plan review must block apply if the plan includes any `0.0.0.0/0` ingress,
 `::/0` ingress, destroy action, production-looking resource name, ALB ingress

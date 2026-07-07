@@ -22,6 +22,7 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] First staging plan was generated through `npm run plan:staging-terraform`; raw first-plan commands are not accepted. See `documents/ops/MSCQR_STAGING_TERRAFORM_PLAN_RUNBOOK_2026-07-02.md`.
 - [ ] Plan evidence is stored privately under `.terraform-plans/staging/` or the approved private evidence store, not committed to git.
 - [ ] Private tfvars were prepared with `documents/ops/MSCQR_STAGING_PRIVATE_TFVARS_PREPARATION_2026-07-02.md` and passed `npm run check:staging-private-inputs`.
+- [ ] `npm run check:staging-private-inputs` reported zero tracked private tfvars and zero tracked `.terraform-plans/` artifacts.
 - [ ] Cost evidence was created after the first real plan using `documents/ops/MSCQR_STAGING_COST_ESTIMATION_EVIDENCE_2026-07-02.md`.
 - [ ] `terraform apply` remains forbidden until a separate apply approval PR/checklist is approved.
 - [ ] `npm run check:staging-terraform` passed locally or in CI.

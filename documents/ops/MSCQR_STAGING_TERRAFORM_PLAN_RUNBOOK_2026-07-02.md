@@ -36,7 +36,8 @@ under `.terraform-plans/staging/` and prints only a safe summary.
 - Private inputs include staging-only VPC/subnet IDs, narrow operator CIDRs,
   an immutable staging backend image URI, and staging Secrets Manager ARNs under
   `mscqr/staging/*`.
-- Private inputs pass `npm run check:staging-private-inputs`.
+- Private inputs pass `npm run check:staging-private-inputs`, including zero
+  tracked private tfvars and zero tracked `.terraform-plans/` artifacts.
 
 ## Commands
 
@@ -84,6 +85,7 @@ Save these privately outside the repository or in the ignored
 Do not commit:
 
 - Terraform plan binary.
+- Terraform plan text, summary JSON, or error evidence from `.terraform-plans/`.
 - Real tfvars.
 - Subnet IDs if considered private.
 - VPC IDs if considered private.

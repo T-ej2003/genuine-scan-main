@@ -20,6 +20,7 @@ const requiredKeys = [
 const gitignoreProbePaths = [
   "infra/terraform/staging-api/staging.auto.tfvars",
   "infra/terraform/staging-api/example.local.tfvars",
+  ".terraform-plans/staging/example.tfplan",
 ];
 const productionFragments = [
   "prod",
@@ -148,6 +149,20 @@ function trackedPrivateTfvars(root = repoRoot) {
   return result.stdout.split("\n").map((entry) => entry.trim()).filter(Boolean);
 }
 
+function trackedTerraformPlanArtifacts(root = repoRoot) {
+  const result = spawnSync("git", [
+    "ls-files",
+    "--",
+    ".terraform-plans",
+  ], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0) return [];
+  return result.stdout.split("\n").map((entry) => entry.trim()).filter(Boolean);
+}
+
 export function evaluatePrivateInputs({ root = repoRoot } = {}) {
   const tfvarsFiles = listPrivateTfvars(root);
   const gitIgnored = checkGitIgnored(root);
@@ -156,25 +171,35 @@ export function evaluatePrivateInputs({ root = repoRoot } = {}) {
     .map(([relPath]) => `gitignore_missing:${relPath}`);
   const trackedTfvars = trackedPrivateTfvars(root);
   const trackedBlockers = trackedTfvars.length > 0 ? ["private_tfvars_tracked_or_staged"] : [];
+  const trackedPlanArtifacts = trackedTerraformPlanArtifacts(root);
+  const trackedPlanArtifactBlockers = trackedPlanArtifacts.length > 0
+    ? ["terraform_plan_artifacts_tracked_or_staged"]
+    : [];
 
   if (tfvarsFiles.length === 0) {
     return {
       status: "blocked_missing_private_tfvars",
       foundTfvarsFile: false,
       requiredKeysPresent: Object.fromEntries(requiredKeys.map((key) => [key, false])),
-      blockersCount: gitignoreBlockers.length + trackedBlockers.length,
+      blockersCount: gitignoreBlockers.length + trackedBlockers.length + trackedPlanArtifactBlockers.length,
       warningsCount: 0,
-      blockerCodes: [...gitignoreBlockers, ...trackedBlockers].sort(),
+      blockerCodes: [...gitignoreBlockers, ...trackedBlockers, ...trackedPlanArtifactBlockers].sort(),
       warningCodes: [],
       gitIgnored,
       trackedPrivateTfvarsCount: trackedTfvars.length,
+      trackedTerraformPlanArtifactsCount: trackedPlanArtifacts.length,
       rawValuesPrinted: false,
     };
   }
 
   const combined = tfvarsFiles.map((relPath) => fs.readFileSync(path.join(root, relPath), "utf8")).join("\n");
   const evaluated = evaluatePrivateInputSource(combined);
-  const blockerCodes = [...evaluated.blockers, ...gitignoreBlockers, ...trackedBlockers].sort();
+  const blockerCodes = [
+    ...evaluated.blockers,
+    ...gitignoreBlockers,
+    ...trackedBlockers,
+    ...trackedPlanArtifactBlockers,
+  ].sort();
   const warningCodes = evaluated.warnings.sort();
 
   return {
@@ -187,6 +212,7 @@ export function evaluatePrivateInputs({ root = repoRoot } = {}) {
     warningCodes,
     gitIgnored,
     trackedPrivateTfvarsCount: trackedTfvars.length,
+    trackedTerraformPlanArtifactsCount: trackedPlanArtifacts.length,
     rawValuesPrinted: false,
   };
 }
