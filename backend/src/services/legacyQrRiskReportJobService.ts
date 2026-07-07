@@ -175,6 +175,12 @@ const parseIntEnv = (name: string, fallback: number, min: number, max: number) =
 };
 
 export const startLegacyQrRiskReportScheduler = () => {
+  if (
+    parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false) ||
+    !parseBool(process.env.RUN_LEGACY_QR_RISK_REPORT_SCHEDULER, true)
+  ) {
+    return;
+  }
   if (!parseBool(process.env.LEGACY_QR_REPORT_SCHEDULER_ENABLED, false)) return;
   if (schedulerTimer) return;
 

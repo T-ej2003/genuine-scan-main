@@ -15,8 +15,26 @@ const ISSUED_WITHOUT_ACK_TIMEOUT_MS = Math.max(
   10_000,
   Math.min(30 * 60_000, Number(process.env.PRINT_ISSUED_WITHOUT_ACK_TIMEOUT_MS || 5 * 60_000) || 5 * 60_000)
 );
+let shutdownRequested = false;
+
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
+const printReconcilerDisabled = () =>
+  parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false) ||
+  !parseBool(process.env.RUN_PRINT_RECONCILER, true);
+
+const isShutdownStarted = () => {
+  const normalized = String(process.env.INTEGRATION_SHUTDOWN_STARTED || "").trim().toLowerCase();
+  return shutdownRequested || ["1", "true", "yes", "on"].includes(normalized);
+};
 
 export const reconcileExpiredAcknowledgedItems = async () => {
+  if (isShutdownStarted()) return;
   const now = new Date();
   const issuedAckCutoff = new Date(now.getTime() - ISSUED_WITHOUT_ACK_TIMEOUT_MS);
   const expiredItems = await prisma.printItem.findMany({
@@ -86,8 +104,11 @@ export const reconcileExpiredAcknowledgedItems = async () => {
     take: 50,
   });
 
+  if (isShutdownStarted()) return;
+
   const seenSessions = new Set<string>();
   for (const item of expiredItems) {
+    if (isShutdownStarted()) return;
     if (seenSessions.has(item.printSessionId)) continue;
     seenSessions.add(item.printSessionId);
 
@@ -128,16 +149,21 @@ export const reconcileExpiredAcknowledgedItems = async () => {
 };
 
 export const runPrintConfirmationReconciliationCycle = async () => {
+  if (isShutdownStarted()) return;
   await reconcileExpiredAcknowledgedItems();
+  if (isShutdownStarted()) return;
   await Promise.allSettled([resumePendingNetworkDirectJobs(), resumePendingNetworkIppJobs()]);
 };
 
 export const startPrintConfirmationReconciler = () => {
+  if (printReconcilerDisabled()) return () => undefined;
+
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
+  shutdownRequested = false;
 
   const tick = async () => {
-    if (stopped) return;
+    if (stopped || isShutdownStarted()) return;
     try {
       await withDistributedLease(
         "print-confirmation-reconciler",
@@ -161,6 +187,7 @@ export const startPrintConfirmationReconciler = () => {
 
   return () => {
     stopped = true;
+    shutdownRequested = true;
     if (timer) {
       clearTimeout(timer);
       timer = null;

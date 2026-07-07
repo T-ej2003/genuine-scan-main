@@ -18,6 +18,7 @@ const getNetworkType = () => {
 };
 
 const TELEMETRY_STORAGE_PREFIX = "mscqr:route-transition:v1:";
+const DISABLE_E2E_TELEMETRY = import.meta.env.VITE_E2E_DISABLE_TELEMETRY === "true";
 
 const recentlySentRouteTransition = (signature: string, ttlMs: number) => {
   try {
@@ -46,6 +47,11 @@ export default function RouteMetricsTracker() {
 
   useEffect(() => {
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+    if (DISABLE_E2E_TELEMETRY) {
+      prevRef.current = { route, at: now };
+      return;
+    }
 
     if (isActivePrintSessionSuppressed()) {
       prevRef.current = { route, at: now };

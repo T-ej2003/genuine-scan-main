@@ -56,6 +56,7 @@ type ProviderOption = {
 };
 
 type CustomerResultCategory = "genuine" | "suspicious" | "invalid" | "blocked" | "pending";
+const DISABLE_E2E_VERIFY_SESSION_POLLING = import.meta.env.VITE_E2E_DISABLE_VERIFY_SESSION_POLLING === "true";
 
 const RESULT_COPY: Record<
   CustomerResultCategory,
@@ -914,6 +915,7 @@ export default function VerifyExperience() {
   }, [hydrateCustomerAuthSession, toast]);
 
   useEffect(() => {
+    if (DISABLE_E2E_VERIFY_SESSION_POLLING) return;
     let cancelled = false;
 
     const loadProviders = async () => {
@@ -930,6 +932,7 @@ export default function VerifyExperience() {
   }, []);
 
   useEffect(() => {
+    if (DISABLE_E2E_VERIFY_SESSION_POLLING) return;
     let cancelled = false;
 
     const loadCustomerAuthSession = async () => {
@@ -1006,6 +1009,12 @@ export default function VerifyExperience() {
 
       const nextResult = verificationResponse.data as VerifyPayload;
       setLockedResult(nextResult);
+
+      if (DISABLE_E2E_VERIFY_SESSION_POLLING) {
+        setResult(nextResult);
+        setFlowStep("result");
+        return;
+      }
 
       const sessionStartHandle = String(nextResult.sessionStartToken || nextResult.decisionId || "").trim();
       if (!sessionStartHandle) {
@@ -1162,6 +1171,15 @@ export default function VerifyExperience() {
       const nextResult = verificationResponse.data as VerifyPayload;
       setLockedResult(nextResult);
       setResult(nextResult);
+
+      if (DISABLE_E2E_VERIFY_SESSION_POLLING) {
+        setFlowStep("result");
+        toast({
+          title: "Review check updated",
+          description: "MSCQR re-checked this label with your verified identity.",
+        });
+        return;
+      }
 
       const sessionStartHandle = String(nextResult.sessionStartToken || nextResult.decisionId || "").trim();
       if (!sessionStartHandle) {

@@ -300,6 +300,23 @@ export const createBackendApp = () => {
     });
   });
 
+  const integrationShutdownToken = String(process.env.INTEGRATION_TEST_SHUTDOWN_TOKEN || "").trim();
+  if (process.env.NODE_ENV === "test" && integrationShutdownToken) {
+    app.post("/__integration/shutdown", (req, res) => {
+      const providedToken = String(req.get("x-integration-shutdown-token") || "").trim();
+      if (providedToken !== integrationShutdownToken) {
+        return res.status(404).json({ success: false, error: "Endpoint not found" });
+      }
+
+      res.status(202).json({ success: true });
+      setImmediate(() => {
+        (process as NodeJS.Process & { emit(event: "mscqr:integration-shutdown-requested"): boolean }).emit(
+          "mscqr:integration-shutdown-requested"
+        );
+      });
+    });
+  }
+
   const scannerProbePattern =
     /(?:^|\/)(?:\.env(?:\.|$)|\.git(?:\/|$)|actuator(?:\/|$)|phpinfo\.php$|docker-compose\.ya?ml$|secrets\.json$|config\.json$|application\.ya?ml$|aws\.json$|database\.ya?ml$|wp-config\.php$|server-status$)/i;
 

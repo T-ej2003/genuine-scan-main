@@ -13,6 +13,12 @@ const ROLLUP_INTERVAL_MS = Math.max(
   Math.min(15 * 60_000, Number(process.env.ANALYTICS_ROLLUP_REFRESH_MS || 180_000) || 180_000)
 );
 const ROLLUP_LEASE_MS = Math.max(ROLLUP_INTERVAL_MS * 2, 5 * 60_000);
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
 
 type InventoryStatusCountField =
   | "dormant"
@@ -326,6 +332,13 @@ export const refreshAnalyticsRollups = async () => {
 };
 
 export const startAnalyticsRollupWorker = () => {
+  if (
+    parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false) ||
+    !parseBool(process.env.RUN_ANALYTICS_ROLLUP_WORKER, true)
+  ) {
+    return () => undefined;
+  }
+
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
 

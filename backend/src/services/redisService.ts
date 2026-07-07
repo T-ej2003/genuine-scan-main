@@ -32,6 +32,7 @@ let publisher: Redis | null = null;
 let subscriber: Redis | null = null;
 let warnedUnavailable = false;
 let subscriberInitialized = false;
+let closingPromise: Promise<void> | null = null;
 
 const subscriberHandlers = new Map<string, Set<(payload: any) => void>>();
 
@@ -158,4 +159,35 @@ export const getRedisHealth = async () => {
   } catch {
     return { configured: true, ready: false };
   }
+};
+
+export const closeRedisConnections = async () => {
+  if (closingPromise) return closingPromise;
+
+  const clients = [subscriber, publisher, client].filter(Boolean) as Redis[];
+  subscriber = null;
+  publisher = null;
+  client = null;
+  subscriberInitialized = false;
+  subscriberHandlers.clear();
+
+  closingPromise = Promise.allSettled(
+    clients.map(async (redis) => {
+      try {
+        await redis.quit();
+      } catch {
+        try {
+          redis.disconnect();
+        } catch {
+          // Already closed.
+        }
+      }
+    })
+  )
+    .then(() => undefined)
+    .finally(() => {
+      closingPromise = null;
+    });
+
+  return closingPromise;
 };

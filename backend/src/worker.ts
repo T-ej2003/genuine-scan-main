@@ -20,6 +20,8 @@ import {
   startHotEventPartitionMaintenanceWorker,
   stopHotEventPartitionMaintenanceWorker,
 } from "./services/hotEventPartitionService";
+import { closeRedisConnections, getRedisHealth } from "./services/redisService";
+import { markDistributedLeaseShutdown } from "./services/distributedLeaseService";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -32,12 +34,51 @@ let stopHotEventPartitionWorker: (() => void) | null = null;
 let keepAlive: NodeJS.Timeout | null = null;
 let shuttingDown = false;
 
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
+const integrationBackgroundLoopsDisabled = () => parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false);
+
+const startKeepAlive = () => {
+  keepAlive = setInterval(() => {
+    logger.debug("Worker heartbeat", {
+      release: releaseMetadata.release,
+    });
+  }, 60_000);
+};
+
 const boot = async () => {
   logger.info("Worker starting", {
     release: releaseMetadata.release,
     gitSha: releaseMetadata.shortGitSha,
     environment: releaseMetadata.environment,
   });
+
+  if (parseBool(process.env.INTEGRATION_WORKER_BOOT_ONLY, false)) {
+    if (parseBool(process.env.INTEGRATION_WORKER_ASSERT_REDIS_READY, false)) {
+      const redis = await getRedisHealth();
+      if (!redis.ready) {
+        throw new Error("Integration worker boot-only mode requires a ready Redis dependency.");
+      }
+    }
+    logger.info("Worker boot-only mode completed; long-running workers skipped");
+    await closeRedisConnections().catch(() => undefined);
+    await prisma.$disconnect().catch(() => undefined);
+    process.exitCode = 0;
+    return;
+  }
+
+  if (integrationBackgroundLoopsDisabled()) {
+    logger.info("Worker background loops disabled by integration harness");
+    await closeRedisConnections().catch(() => undefined);
+    await prisma.$disconnect().catch(() => undefined);
+    process.exitCode = 0;
+    return;
+  }
 
   startSecurityEventOutboxWorker();
   startAuditLogOutboxWorker();
@@ -52,12 +93,7 @@ const boot = async () => {
   stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
   stopAnalyticsRollupWorker = startAnalyticsRollupWorker();
   stopHotEventPartitionWorker = startHotEventPartitionMaintenanceWorker();
-
-  keepAlive = setInterval(() => {
-    logger.debug("Worker heartbeat", {
-      release: releaseMetadata.release,
-    });
-  }, 60_000);
+  startKeepAlive();
 };
 
 const shutdown = async (signal: string) => {
@@ -65,6 +101,7 @@ const shutdown = async (signal: string) => {
   shuttingDown = true;
   logger.info("Worker shutting down", { signal });
 
+  markDistributedLeaseShutdown();
   if (keepAlive) clearInterval(keepAlive);
   keepAlive = null;
   stopPrintConfirmationReconcilerWorker?.();
@@ -78,7 +115,9 @@ const shutdown = async (signal: string) => {
   stopAuditLogOutboxWorker();
   stopCompliancePackScheduler();
   stopLegacyQrRiskReportScheduler();
+  await closeRedisConnections().catch(() => undefined);
   await prisma.$disconnect().catch(() => undefined);
+  process.exitCode = 0;
   process.exit(0);
 };
 

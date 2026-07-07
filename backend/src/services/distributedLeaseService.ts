@@ -3,8 +3,18 @@ import { randomUUID } from "crypto";
 import { getRedisClient, isRedisConfigured } from "./redisService";
 
 const localLeases = new Map<string, { token: string; expiresAt: number }>();
+let shuttingDown = false;
 
 const nowMs = () => Date.now();
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+const leasesDisabled = () =>
+  parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false) ||
+  !parseBool(process.env.RUN_DISTRIBUTED_LEASES, true);
 
 const cleanupLocalLeases = () => {
   const now = nowMs();
@@ -16,6 +26,7 @@ const cleanupLocalLeases = () => {
 };
 
 const acquireLocalLease = async (key: string, ttlMs: number) => {
+  if (shuttingDown || leasesDisabled()) return null;
   cleanupLocalLeases();
   const current = localLeases.get(key);
   if (current && current.expiresAt > nowMs()) return null;
@@ -35,6 +46,7 @@ const acquireLocalLease = async (key: string, ttlMs: number) => {
 };
 
 const acquireRedisLease = async (key: string, ttlMs: number) => {
+  if (shuttingDown || leasesDisabled()) return null;
   const redis = await getRedisClient();
   if (!redis) return acquireLocalLease(key, ttlMs);
 
@@ -54,11 +66,20 @@ const acquireRedisLease = async (key: string, ttlMs: number) => {
   };
 };
 
+export const markDistributedLeaseShutdown = () => {
+  shuttingDown = true;
+  localLeases.clear();
+};
+
+export const isDistributedLeaseShuttingDown = () => shuttingDown;
+
 export const withDistributedLease = async <T>(
   key: string,
   ttlMs: number,
   fn: () => Promise<T>
 ): Promise<{ acquired: boolean; result?: T }> => {
+  if (shuttingDown || leasesDisabled()) return { acquired: false };
+
   const release = isRedisConfigured()
     ? await acquireRedisLease(key, ttlMs)
     : await acquireLocalLease(key, ttlMs);
@@ -68,6 +89,7 @@ export const withDistributedLease = async <T>(
   }
 
   try {
+    if (shuttingDown) return { acquired: false };
     const result = await fn();
     return { acquired: true, result };
   } finally {

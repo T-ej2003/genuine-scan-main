@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import path from "path";
 import { createHash } from "crypto";
+import type { Socket } from "net";
 import packageJson from "../package.json";
 import { createBackendApp } from "./app";
 import prisma from "./config/database";
@@ -21,7 +22,8 @@ import { releaseMetadata } from "./observability/release";
 import { captureBackendException, flushBackendMonitoring, initBackendMonitoring } from "./observability/sentry";
 import { hasConfiguredSecret } from "./utils/secretConfig";
 import { getObjectStorageConfiguration } from "./services/objectStorageService";
-import { isRedisConfigured } from "./services/redisService";
+import { closeRedisConnections, isRedisConfigured } from "./services/redisService";
+import { markDistributedLeaseShutdown } from "./services/distributedLeaseService";
 import {
   getQrSigningProfile,
   hasEd25519QrSigningKeys,
@@ -276,6 +278,8 @@ for (const warning of legacyFallbackWarnings) {
 const app = createBackendApp();
 const PORT = process.env.PORT || 4000;
 const runBackgroundWorkers = parseBool(process.env.RUN_BACKGROUND_WORKERS, true);
+const integrationBackgroundLoopsDisabled = parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false);
+const startBackgroundLoops = runBackgroundWorkers && !integrationBackgroundLoopsDisabled;
 const sentryEnabled = initBackendMonitoring();
 
 if (sentryEnabled) {
@@ -289,6 +293,58 @@ let server: ReturnType<typeof app.listen> | null = null;
 let shuttingDown = false;
 let stopPrintConfirmationReconcilerWorker: (() => void) | null = null;
 let stopAnalyticsRollupWorker: (() => void) | null = null;
+let activeHttpRequests = 0;
+const openHttpSockets = new Set<Socket>();
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const waitForActiveHttpRequestsToDrain = async (timeoutMs: number) => {
+  const deadline = Date.now() + timeoutMs;
+  while (activeHttpRequests > 0 && Date.now() < deadline) {
+    await wait(100);
+  }
+  return activeHttpRequests === 0;
+};
+
+const closeHttpServer = async () => {
+  if (!server) return;
+
+  const serverRef = server;
+  let closed = false;
+  const closePromise = new Promise<void>((resolve, reject) => {
+    serverRef.close((err) => (err ? reject(err) : resolve()));
+  })
+    .then(() => {
+      closed = true;
+    })
+    .catch((error: unknown) => {
+      const errorRecord = asErrorRecord(error);
+      logger.warn("HTTP server close callback reported an error during shutdown", {
+        error: errorRecord?.message || error,
+      });
+      closed = true;
+    });
+
+  serverRef.closeIdleConnections?.();
+  const drained = await waitForActiveHttpRequestsToDrain(3_000);
+  serverRef.closeIdleConnections?.();
+
+  if (!drained || openHttpSockets.size > 0) {
+    logger.warn("Closing remaining HTTP sockets during shutdown", {
+      activeHttpRequests,
+      openHttpSockets: openHttpSockets.size,
+    });
+    serverRef.closeAllConnections?.();
+    for (const socket of openHttpSockets) {
+      socket.destroy();
+    }
+  }
+
+  await Promise.race([closePromise, wait(2_000)]);
+  if (!closed) {
+    logger.warn("HTTP server close callback did not finish within shutdown drain window; proceeding after socket close");
+  }
+};
 
 const startServer = async () => {
   const bootstrapResult = await bootstrapConfiguredSuperAdmin();
@@ -328,7 +384,22 @@ const startServer = async () => {
     logger.info(`🔍 Health check at http://localhost:${PORT}/health`);
     logger.info(`⏱️ Latency summary at http://localhost:${PORT}/health/latency`);
     attachPrinterAgentSessionWebSocket(server!);
-    if (runBackgroundWorkers) {
+    server!.on("connection", (socket: Socket) => {
+      openHttpSockets.add(socket);
+      socket.on("close", () => openHttpSockets.delete(socket));
+    });
+    server!.on("request", (_req, res) => {
+      activeHttpRequests += 1;
+      let settled = false;
+      const markSettled = () => {
+        if (settled) return;
+        settled = true;
+        activeHttpRequests = Math.max(0, activeHttpRequests - 1);
+      };
+      res.once("finish", markSettled);
+      res.once("close", markSettled);
+    });
+    if (startBackgroundLoops) {
       startAuditLogOutboxWorker();
       startSecurityEventOutboxWorker();
       startCompliancePackScheduler();
@@ -361,6 +432,7 @@ const shutdown = async (signal: string) => {
   shuttingDown = true;
 
   logger.info(`Received ${signal}; shutting down gracefully...`);
+  markDistributedLeaseShutdown();
 
   const forceExit = setTimeout(() => {
     logger.error("Forced shutdown after timeout");
@@ -369,11 +441,6 @@ const shutdown = async (signal: string) => {
   forceExit.unref?.();
 
   try {
-    if (server) {
-      await new Promise<void>((resolve, reject) => {
-        server!.close((err) => (err ? reject(err) : resolve()));
-      });
-    }
     stopSecurityEventOutboxWorker();
     stopAuditLogOutboxWorker();
     stopCompliancePackScheduler();
@@ -382,10 +449,13 @@ const shutdown = async (signal: string) => {
     stopPrintConfirmationReconcilerWorker = null;
     stopAnalyticsRollupWorker?.();
     stopAnalyticsRollupWorker = null;
+    await closeHttpServer();
+    await closeRedisConnections();
     await prisma.$disconnect();
     await flushBackendMonitoring();
     clearTimeout(forceExit);
     logger.info("Shutdown complete");
+    process.exitCode = 0;
     process.exit(0);
   } catch (error: unknown) {
     const errorRecord = asErrorRecord(error);
@@ -402,6 +472,13 @@ process.on("SIGTERM", () => {
 process.on("SIGINT", () => {
   void shutdown("SIGINT");
 });
+
+(process as NodeJS.Process & { on(event: "mscqr:integration-shutdown-requested", listener: () => void): NodeJS.Process }).on(
+  "mscqr:integration-shutdown-requested",
+  () => {
+    void shutdown("integration shutdown endpoint");
+  }
+);
 
 process.on("unhandledRejection", (reason) => {
   captureBackendException(reason);

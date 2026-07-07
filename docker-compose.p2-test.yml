@@ -19,3 +19,16 @@ services:
       start_period: 5s
     tmpfs:
       - /var/lib/postgresql/data
+
+  p2-redis:
+    image: redis:8-alpine
+    container_name: mscqr-p2-auth-security-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s

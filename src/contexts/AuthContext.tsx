@@ -22,6 +22,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const AUTH_BOOTSTRAP_MIN_INTERVAL_MS = 60_000;
+const DISABLE_E2E_AUTH_POLLING = import.meta.env.VITE_E2E_DISABLE_AUTH_POLLING === "true";
 
 const normalizeRole = (role: any): User["role"] => {
   const r = String(role || "").trim().toUpperCase();
@@ -175,6 +176,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (DISABLE_E2E_AUTH_POLLING) {
+      setIsLoading(false);
+      setAuthBootstrapStatus(user ? "authenticated" : "unauthenticated");
+      return;
+    }
+
     if (!shouldBootstrapCurrentUser(location.pathname)) {
       setIsLoading(false);
       setAuthBootstrapStatus(user ? "authenticated" : "unauthenticated");

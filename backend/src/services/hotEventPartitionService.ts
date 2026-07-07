@@ -4,6 +4,13 @@ import prisma from "../config/database";
 import { logger } from "../utils/logger";
 import { withDistributedLease } from "./distributedLeaseService";
 
+const parseBool = (value: unknown, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
+
 export type HotEventPartitionTableName =
   | "AuditLog"
   | "TraceEvent"
@@ -780,6 +787,13 @@ const performMaintenancePass = async () => {
 };
 
 export const startHotEventPartitionMaintenanceWorker = () => {
+  if (
+    parseBool(process.env.INTEGRATION_DISABLE_BACKGROUND_LOOPS, false) ||
+    !parseBool(process.env.RUN_HOT_EVENT_PARTITION_MAINTENANCE, true)
+  ) {
+    return () => undefined;
+  }
+
   if (maintenanceTimer) return () => undefined;
 
   void withDistributedLease(

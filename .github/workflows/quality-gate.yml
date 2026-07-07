@@ -226,6 +226,77 @@ jobs:
       - name: Backend quality contract
         run: npm run verify:ci:backend
 
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: mscqr_integration_admin_test
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mscqr_integration_admin_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      P2_TEST_DATABASE_REQUIRED: "true"
+      P2_TEST_DB_PROTOCOL: postgresql
+      P2_TEST_DB_USER: postgres
+      P2_TEST_DB_HOST: 127.0.0.1
+      P2_TEST_DB_PORT: "5432"
+      P2_TEST_DB_NAME: mscqr_integration_admin_test
+      REDIS_URL: redis://127.0.0.1:6379/0
+      REDIS_TLS: "false"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Disposable system integration suite
+        run: |
+          admin_scheme="${P2_TEST_DB_PROTOCOL}:"
+          admin_authority="${P2_TEST_DB_USER}@${P2_TEST_DB_HOST}:${P2_TEST_DB_PORT}"
+          P2_TEST_DATABASE_ADMIN_URL="${admin_scheme}//${admin_authority}/${P2_TEST_DB_NAME}" npm run test:integration:ci
+
+      - name: Upload system integration artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: system-integration-artifacts
+          path: |
+            playwright-report/system-integration
+            test-results
+          if-no-files-found: ignore
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 30

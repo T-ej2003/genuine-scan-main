@@ -4,6 +4,7 @@ const { execFileSync } = require("child_process");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const { assertSafeTestDatabaseUrl } = require("./testDbSafetyGuard");
 
 class P2TestDbSkip extends Error {
   constructor(message) {
@@ -15,51 +16,11 @@ class P2TestDbSkip extends Error {
 const backendRoot = path.resolve(__dirname, "../..");
 const distRoot = path.join(backendRoot, "dist");
 
-const isTruthy = (value) => ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
 const randomSecret = () => randomBytes(32).toString("hex");
 
 const quoteIdent = (value) => {
   assert.match(value, /^[a-z0-9_]+$/i, "Unsafe database identifier");
   return `"${value.replace(/"/g, '""')}"`;
-};
-
-const parseDatabaseName = (databaseUrl) => {
-  try {
-    const parsed = new URL(databaseUrl);
-    return decodeURIComponent(parsed.pathname.replace(/^\//, ""));
-  } catch {
-    return "";
-  }
-};
-
-const assertSafeTestDatabaseUrl = (databaseUrl) => {
-  const raw = String(databaseUrl || "").trim();
-  if (!raw) throw new Error("Missing database URL");
-  const parsed = new URL(raw);
-  if (parsed.protocol !== "postgresql:" && parsed.protocol !== "postgres:") {
-    throw new Error("P2 disposable DB harness only supports PostgreSQL URLs.");
-  }
-
-  const databaseName = parseDatabaseName(raw).toLowerCase();
-  const host = String(parsed.hostname || "").toLowerCase();
-  const urlLower = raw.toLowerCase();
-  const clearlyTest = /\b(test|tests|p2|ci|tmp|temporary)\b/.test(databaseName.replace(/[_-]/g, " "));
-  const productionMarkers = ["prod", "production", "rds.amazonaws.com", "database.azure.com", "supabase", "neon.tech", "railway.app", "render.com"];
-
-  if (!clearlyTest) {
-    throw new Error(`Refusing to use database "${databaseName}". P2 DB name must clearly contain test, p2, ci, tmp, or temporary.`);
-  }
-  if (productionMarkers.some((marker) => urlLower.includes(marker))) {
-    throw new Error("Refusing to use a production-looking database URL for P2 tests.");
-  }
-  if (
-    host &&
-    !["localhost", "127.0.0.1", "::1", "postgres"].includes(host) &&
-    !host.endsWith(".local") &&
-    !isTruthy(process.env.P2_TEST_DATABASE_ALLOW_REMOTE)
-  ) {
-    throw new Error("Refusing non-local P2 database host without P2_TEST_DATABASE_ALLOW_REMOTE=true.");
-  }
 };
 
 const runPsql = (adminUrl, sql) => {
