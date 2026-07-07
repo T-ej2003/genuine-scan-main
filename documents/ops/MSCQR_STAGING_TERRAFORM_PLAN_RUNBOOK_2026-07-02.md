@@ -109,12 +109,20 @@ Before any future apply approval is considered, a reviewer must confirm:
 - Account ID is correct.
 - No production DB, Redis, S3, ECS, ALB, subnet, security group, or Secrets
   Manager reference appears.
-- Ingress CIDRs are narrow and reviewed.
+- Any production-looking resource name is an apply blocker.
+- Any planned destroy action is an apply blocker.
+- Any `0.0.0.0/0` ingress or `::/0` ingress is an apply blocker.
+- ALB ingress is restricted to reviewed operator CIDRs only.
+- ALB egress is restricted to the staging ECS security group on port 4000.
+- ECS ingress is restricted to the staging ALB security group on port 4000.
+- DB ingress is restricted to the staging ECS security group on port 5432.
+- Redis ingress is restricted to the staging ECS security group on port 6379.
+- ECS broad egress, if still present, is documented as temporary staging-only
+  outbound access for ECR, Secrets Manager, CloudWatch Logs, STS, package
+  endpoints, and AWS APIs. It is not inbound exposure.
 - ECS Exec logging is present.
 - ECS Exec CloudWatch logging uses KMS-backed encryption.
 - KMS key and rotation settings are present.
-- No destroy of existing resources is planned unless intentionally approved in
-  a future apply record.
 - Cost estimate is accepted for ALB, ECS, RDS, Redis, CloudWatch Logs, KMS, and
   S3.
 
@@ -144,3 +152,6 @@ state handling, resource rollback, and evidence preservation.
 - Keep real networking inputs and operator CIDRs outside git permanently; use a
   secrets manager, secure runbook vault, or approved local operator store for
   plan-only execution.
+- Replace temporary broad ECS egress with private VPC endpoints and managed
+  prefix-list scoped egress before this staging pattern is promoted to a
+  production baseline.

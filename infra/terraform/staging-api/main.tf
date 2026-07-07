@@ -311,72 +311,79 @@ resource "aws_security_group" "alb" {
   name        = "mscqr-stg-alb-sg-euw2"
   description = "Staging ALB ingress from approved operator or CI CIDRs only"
   vpc_id      = var.vpc_id
-
-  ingress {
-    description = "Temporary staging HTTP ingress"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_operator_cidrs
-  }
-
-  egress {
-    description = "ALB to staging ECS targets"
-    from_port   = 4000
-    to_port     = 4000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 }
 
 resource "aws_security_group" "ecs" {
   name        = "mscqr-stg-ecs-sg-euw2"
   description = "Staging ECS backend accepts traffic only from staging ALB"
   vpc_id      = var.vpc_id
+}
 
-  ingress {
-    description     = "Backend port from staging ALB"
-    from_port       = 4000
-    to_port         = 4000
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
+resource "aws_vpc_security_group_ingress_rule" "alb_operator_http" {
+  for_each = toset(var.allowed_operator_cidrs)
 
-  egress {
-    description = "Staging ECS controlled egress for AWS APIs, package endpoints, DB, and cache"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  security_group_id = aws_security_group.alb.id
+  description       = "Temporary staging HTTP ingress"
+  from_port         = 80
+  to_port           = 80
+  ip_protocol       = "tcp"
+  cidr_ipv4         = can(regex(":", each.value)) ? null : each.value
+  cidr_ipv6         = can(regex(":", each.value)) ? each.value : null
+}
+
+resource "aws_vpc_security_group_egress_rule" "alb_to_ecs_backend" {
+  security_group_id            = aws_security_group.alb.id
+  description                  = "ALB to staging ECS targets"
+  from_port                    = 4000
+  to_port                      = 4000
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.ecs.id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "ecs_from_alb_backend" {
+  security_group_id            = aws_security_group.ecs.id
+  description                  = "Backend port from staging ALB"
+  from_port                    = 4000
+  to_port                      = 4000
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.alb.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "ecs_temporary_outbound" {
+  security_group_id = aws_security_group.ecs.id
+  description       = "Temporary staging ECS outbound for AWS APIs, package endpoints, DB, and cache"
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
 }
 
 resource "aws_security_group" "db" {
   name        = "mscqr-stg-db-sg-euw2"
   description = "Staging Postgres accepts traffic only from staging ECS"
   vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "Postgres from staging ECS"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ecs.id]
-  }
 }
 
 resource "aws_security_group" "redis" {
   name        = "mscqr-stg-redis-sg-euw2"
   description = "Staging Valkey accepts traffic only from staging ECS"
   vpc_id      = var.vpc_id
+}
 
-  ingress {
-    description     = "Valkey from staging ECS"
-    from_port       = 6379
-    to_port         = 6379
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ecs.id]
-  }
+resource "aws_vpc_security_group_ingress_rule" "db_from_ecs_postgres" {
+  security_group_id            = aws_security_group.db.id
+  description                  = "Postgres from staging ECS"
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.ecs.id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "redis_from_ecs_valkey" {
+  security_group_id            = aws_security_group.redis.id
+  description                  = "Valkey from staging ECS"
+  from_port                    = 6379
+  to_port                      = 6379
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.ecs.id
 }
 
 resource "aws_lb" "staging" {
