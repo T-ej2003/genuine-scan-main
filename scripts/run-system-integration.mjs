@@ -48,6 +48,13 @@ const waitForReady = async (url, label, attempts = 90) => {
   throw new Error(`${label} did not become ready at ${url}. Last error: ${lastError}`);
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const waitForFrontendTrafficDrain = async (ms = 5_000) => {
+  console.log(`integration: draining frontend/browser traffic for ${ms}ms before backend shutdown`);
+  await sleep(ms);
+};
+
 const startProcess = (cmd, args, env) => {
   const child = spawn(cmd, args, {
     cwd: process.cwd(),
@@ -175,6 +182,9 @@ const main = async () => {
     E2E_MANUFACTURER_EMAIL: emails.manufacturerA,
     E2E_MANUFACTURER_PASSWORD: passwords.manufacturerA,
     VITE_API_PROXY_TARGET: backendBaseUrl,
+    VITE_E2E_DISABLE_TELEMETRY: "true",
+    VITE_E2E_DISABLE_AUTH_POLLING: "true",
+    VITE_E2E_DISABLE_VERIFY_SESSION_POLLING: "true",
     VITE_E2E_DISABLE_PRINTER_AGENT_POLLING: "true",
   };
 
@@ -264,6 +274,7 @@ const main = async () => {
     run("npx", ["playwright", "test", "--config=playwright.system.config.ts", "e2e/system-integration.spec.ts"], {
       env: testEnv,
     });
+    await waitForFrontendTrafficDrain();
 
     console.log("MSCQR system integration tests passed");
   } finally {
@@ -272,6 +283,7 @@ const main = async () => {
     let stopFailure = null;
 
     try {
+      await waitForFrontendTrafficDrain(2_000);
       await stopProcess(worker, "worker");
       await stopProcess(backend, "backend");
     } catch (error) {

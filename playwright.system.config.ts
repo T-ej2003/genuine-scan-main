@@ -29,6 +29,9 @@ export default defineConfig({
     env: {
       ...process.env,
       VITE_API_PROXY_TARGET: backendURL,
+      VITE_E2E_DISABLE_TELEMETRY: "true",
+      VITE_E2E_DISABLE_AUTH_POLLING: "true",
+      VITE_E2E_DISABLE_VERIFY_SESSION_POLLING: "true",
       VITE_E2E_DISABLE_PRINTER_AGENT_POLLING: "true",
     },
   },
