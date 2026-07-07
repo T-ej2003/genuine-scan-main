@@ -22,6 +22,9 @@ const knownProductionFragments = [
   "mscqr-prod-db-proxy",
   "mscqr-redis-euw2-primary",
 ];
+const productionDomainHostnames = new Set(["mscqr.com", "www.mscqr.com"]);
+const urlSchemePattern = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
+const rawHostUnsafePattern = /[/?#@\\\s]/;
 
 export function usage() {
   return `Usage:
@@ -62,12 +65,79 @@ function normalizePort(value, fallback) {
   return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
 }
 
-function isProductionLooking(value) {
-  const normalized = String(value || "").toLowerCase();
+function normalizeHostname(hostname) {
+  return String(hostname || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\.$/, "");
+}
+
+export function isProductionDomainHostname(hostname) {
+  const normalized = normalizeHostname(hostname);
+  const labels = normalized.split(".").filter(Boolean);
+  const parentDomainLabels = labels.slice(-2);
+  return productionDomainHostnames.has(normalized) ||
+    (parentDomainLabels[0] === "mscqr" && parentDomainLabels[1] === "com");
+}
+
+function hasWrappedProductionDomainLabels(hostname) {
+  const labels = normalizeHostname(hostname).split(".").filter(Boolean);
+  return labels.some((label, index) => label === "mscqr" && labels[index + 1] === "com");
+}
+
+function parseUrlHostname(value) {
+  const parsed = new URL(value);
+  if (!parsed.hostname) throw new Error("URL must include a hostname.");
+  return normalizeHostname(parsed.hostname);
+}
+
+export function parseRawHostname(value) {
+  const text = String(value || "").trim();
+  if (!text) throw new Error("hostname is required.");
+  if (urlSchemePattern.test(text)) throw new Error("hostname must not include a URL scheme.");
+  if (rawHostUnsafePattern.test(text)) {
+    throw new Error("hostname must not include URL path, query, fragment, userinfo, or whitespace.");
+  }
+
+  const parsed = new URL(`http://${text}`);
+  if (!parsed.hostname) throw new Error("hostname is required.");
+  return normalizeHostname(parsed.hostname);
+}
+
+function parseRawHostnameOrNull(value) {
+  try {
+    return parseRawHostname(value);
+  } catch {
+    return null;
+  }
+}
+
+function hostnameHasProductionFragment(hostname) {
+  const normalized = normalizeHostname(hostname);
+  return knownProductionFragments.some((fragment) => normalized.includes(fragment));
+}
+
+export function isProductionLooking(value) {
+  const text = String(value || "").trim();
+  const normalized = text.toLowerCase();
   if (!normalized) return false;
-  if (normalized === "mscqr.com" || normalized === "www.mscqr.com") return true;
-  if (normalized.includes("://mscqr.com") || normalized.includes("://www.mscqr.com")) return true;
-  if (normalized.includes(".mscqr.com")) return true;
+
+  if (urlSchemePattern.test(text)) {
+    try {
+      const hostname = parseUrlHostname(text);
+      return isProductionDomainHostname(hostname) ||
+        hasWrappedProductionDomainLabels(hostname) ||
+        hostnameHasProductionFragment(hostname);
+    } catch {
+      return true;
+    }
+  }
+
+  const hostname = parseRawHostnameOrNull(text);
+  if (hostname && (isProductionDomainHostname(hostname) || hasWrappedProductionDomainLabels(hostname))) {
+    return true;
+  }
+
   return knownProductionFragments.some((fragment) => normalized.includes(fragment));
 }
 
@@ -81,6 +151,24 @@ function requireSafeStagingValue(label, value, { requireMarker = true } = {}) {
   if (isProductionLooking(text)) throw new Error(`${label} is production-looking and is refused.`);
   if (requireMarker && !hasStagingMarker(text)) throw new Error(`${label} must include a staging/stg marker.`);
   return text;
+}
+
+function requireSafeStagingHostname(label, value) {
+  let hostname;
+  try {
+    hostname = parseRawHostname(value);
+  } catch (error) {
+    throw new Error(`${label} ${error.message}`);
+  }
+  if (
+    isProductionDomainHostname(hostname) ||
+    hasWrappedProductionDomainLabels(hostname) ||
+    hostnameHasProductionFragment(hostname)
+  ) {
+    throw new Error(`${label} is production-looking and is refused.`);
+  }
+  if (!hasStagingMarker(hostname)) throw new Error(`${label} must include a staging/stg marker.`);
+  return hostname;
 }
 
 function requireAllowedSecretId(secretId) {
@@ -105,7 +193,7 @@ export function buildDatabaseUrl({
   sslmode = "require",
 }) {
   const safeUsername = requireSafeStagingValue("database username", username, { requireMarker: false });
-  const safeHost = requireSafeStagingValue("database host", host);
+  const safeHost = requireSafeStagingHostname("database host", host);
   const safeDatabaseName = requireSafeStagingValue("database name", databaseName);
   const safePort = normalizePort(port, 5432);
   if (!safePort) throw new Error("database port must be a valid TCP port.");
@@ -115,7 +203,7 @@ export function buildDatabaseUrl({
 }
 
 export function buildRedisUrl({ host, port, database = 0, password = "" }) {
-  const safeHost = requireSafeStagingValue("redis host", host);
+  const safeHost = requireSafeStagingHostname("redis host", host);
   const safePort = normalizePort(port, 6379);
   if (!safePort) throw new Error("redis port must be a valid TCP port.");
   const auth = password ? `:${encodeUrlPart(password)}@` : "";

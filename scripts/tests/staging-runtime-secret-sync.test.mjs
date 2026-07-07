@@ -6,6 +6,9 @@ import {
   buildDatabaseUrl,
   buildRedisUrl,
   checkSecretSyncGates,
+  isProductionDomainHostname,
+  isProductionLooking,
+  parseRawHostname,
   runSyncWorkflow,
   safeUrlPreview,
 } from "../sync-staging-runtime-secrets.mjs";
@@ -55,7 +58,7 @@ function fakeDeps(overrides = {}) {
       DBName: "mscqr_staging",
       MasterUsername: "mscqr_staging_admin",
       MasterUserSecret: {
-        SecretArn: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/rds-master",
+        SecretArn: "mscqr/staging/rds-master-test-fixture",
       },
     }),
     describeRedisReplicationGroup: () => ({
@@ -177,6 +180,51 @@ test("database URL construction never permits production hostnames", () => {
     port: 5432,
     databaseName: "mscqr_staging",
   }), /production-looking/);
+});
+
+test("production domain checks are URL hostname-aware", () => {
+  assert.equal(isProductionLooking("https://evil.com/?next=//mscqr.com"), false);
+  assert.equal(isProductionLooking("https://mscqr.com"), true);
+  assert.equal(isProductionLooking("https://www.mscqr.com"), true);
+  assert.equal(isProductionLooking("https://api.mscqr.com"), true);
+  assert.equal(isProductionLooking("https://mscqr.com.evil.com"), true);
+  assert.equal(isProductionLooking("https://evilmscqr.com"), false);
+  assert.equal(isProductionDomainHostname("mscqr.com"), true);
+  assert.equal(isProductionDomainHostname("www.mscqr.com"), true);
+  assert.equal(isProductionDomainHostname("api.mscqr.com"), true);
+  assert.equal(isProductionDomainHostname("mscqr.com.evil.com"), false);
+  assert.equal(isProductionDomainHostname("evilmscqr.com"), false);
+});
+
+test("raw host validation rejects malformed hosts and production-domain bypasses", () => {
+  assert.throws(() => parseRawHostname("evil.com/?next=//mscqr.com"), /must not include URL path/);
+  assert.throws(() => parseRawHostname("https://staging.example.internal"), /must not include a URL scheme/);
+  assert.equal(parseRawHostname("mscqr-staging-db.abc123.eu-west-2.rds.amazonaws.com"), "mscqr-staging-db.abc123.eu-west-2.rds.amazonaws.com");
+  assert.equal(parseRawHostname("mscqr-staging-redis.abc123.euw2.cache.amazonaws.com:6379"), "mscqr-staging-redis.abc123.euw2.cache.amazonaws.com");
+  assert.throws(() => buildRedisUrl({ host: "mscqr.com", port: 6379 }), /production-looking/);
+  assert.throws(() => buildRedisUrl({ host: "www.mscqr.com", port: 6379 }), /production-looking/);
+  assert.throws(() => buildRedisUrl({ host: "api.mscqr.com", port: 6379 }), /production-looking/);
+  assert.throws(() => buildRedisUrl({ host: "mscqr.com.evil.com", port: 6379 }), /production-looking/);
+  assert.throws(() => buildRedisUrl({ host: "evilmscqr.com", port: 6379 }), /staging\/stg marker/);
+});
+
+test("safe staging hosts containing mscqr text but not production domain pass", () => {
+  assert.equal(
+    buildRedisUrl({ host: "staging-mscqr-com.internal", port: 6379 }),
+    "redis://staging-mscqr-com.internal:6379/0",
+  );
+  const databaseUrl = buildDatabaseUrl({
+    username: "mscqr_staging_admin",
+    password: "not-a-real-password",
+    host: "mscqr-staging-db.abc123.eu-west-2.rds.amazonaws.com",
+    port: 5432,
+    databaseName: "mscqr_staging",
+  });
+  const parsed = new URL(databaseUrl);
+  assert.equal(parsed.hostname, "mscqr-staging-db.abc123.eu-west-2.rds.amazonaws.com");
+  assert.equal(parsed.port, "5432");
+  assert.equal(parsed.pathname, "/mscqr_staging");
+  assert.equal(safeUrlPreview(databaseUrl), "postgresql://<redacted>@mscqr-staging-db.abc123.eu-west-2.rds.amazonaws.com:5432/mscqr_staging?sslmode=require");
 });
 
 test("gate helper accepts only the exact secret sync confirmation", () => {
