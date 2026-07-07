@@ -20,7 +20,15 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Required status check is enabled and verified: `Staging Infra Validation/Terraform staging validate`.
 - [ ] Required status check is enabled and verified: `Staging Infra Validation/Staging IAM policy lint`.
 - [ ] First staging plan was generated through `npm run plan:staging-terraform`; raw first-plan commands are not accepted. See `documents/ops/MSCQR_STAGING_TERRAFORM_PLAN_RUNBOOK_2026-07-02.md`.
+- [ ] Staging apply role setup is complete using `documents/ops/MSCQR_STAGING_APPLY_ROLE_SETUP_2026-07-08.md`.
+- [ ] The staging plan role remains read/plan only and will not be used for apply.
+- [ ] The selected apply profile is the staging apply profile, not a plan/read profile and not production-looking.
+- [ ] `npm run check:staging-aws-apply-identity` passed with `AWS_PROFILE="<staging-apply-profile>"` and `AWS_REGION="eu-west-2"`.
 - [ ] Plan evidence is stored privately under `.terraform-plans/staging/` or the approved private evidence store, not committed to git.
+- [ ] The exact saved `.tfplan` path is recorded and matches the reviewed summary JSON and plan text evidence.
+- [ ] The apply command is `npm run apply:staging-terraform -- ".terraform-plans/staging/<approved-plan>.tfplan"` with explicit gates; raw `terraform apply` is not accepted.
+- [ ] Apply gates are recorded exactly: `MSCQR_STAGING_TERRAFORM_APPLY_ENABLED=true` and `MSCQR_STAGING_TERRAFORM_APPLY_CONFIRM=MSCQR_APPLY_STAGING_TERRAFORM_ONCE`.
+- [ ] Expected apply counts are recorded with `MSCQR_STAGING_TERRAFORM_APPLY_EXPECTED_ADD_COUNT=<reviewed-add-count>` and `MSCQR_STAGING_TERRAFORM_APPLY_EXPECTED_CHANGE_COUNT=<reviewed-change-count>`.
 - [ ] Private tfvars were prepared with `documents/ops/MSCQR_STAGING_PRIVATE_TFVARS_PREPARATION_2026-07-02.md` and passed `npm run check:staging-private-inputs`.
 - [ ] `npm run check:staging-private-inputs` reported zero tracked private tfvars and zero tracked `.terraform-plans/` artifacts.
 - [ ] Cost evidence was created after the first real plan using `documents/ops/MSCQR_STAGING_COST_ESTIMATION_EVIDENCE_2026-07-02.md`.
@@ -42,6 +50,7 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Every planned resource name is staging or stg scoped.
 - [ ] No planned resource name looks production-scoped; any prod/production-looking resource name blocks apply.
 - [ ] No production DB, Redis, S3 bucket, ECS cluster, ALB, subnet, security group, or Secrets Manager ARN is referenced.
+- [ ] Plan text does not contain `DATABASE_URL`, `REDIS_URL`, `postgres://`, `postgresql://`, or `redis://`.
 - [ ] `allowed_operator_cidrs` are narrow, reviewed, and do not include `0.0.0.0/0`, `::/0`, or broad office/VPN ranges without written justification.
 - [ ] The plan has `destroy = 0`; any destroy count blocks apply unless a separate explicit destroy approval record exists.
 - [ ] No security group ingress rule allows `0.0.0.0/0`; any IPv4 world-open ingress blocks apply.
@@ -61,10 +70,13 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Rollback plan is written, including Terraform rollback, ECS desired count handling, and evidence preservation.
 - [ ] Cost limit is understood for ALB, ECS, RDS, Redis, CloudWatch Logs, and KMS.
 - [ ] Approval record includes approver, ticket or evidence ID, date, exact branch/commit, and exact plan command.
+- [ ] Approval record includes the exact apply wrapper command and confirms this PR/checklist did not pre-approve execution without a separate human approval.
 
 ## After Terraform Apply
 
 - [ ] Apply was run only after separate human approval; this checklist entry records the result and does not authorize apply by itself.
+- [ ] Apply evidence was produced by `scripts/apply-staging-terraform.mjs` and did not include Terraform stdout/stderr, secrets, private tfvars, state, or plan artifact contents.
+- [ ] After apply, the operator switched back to the staging plan role for inspection.
 - [ ] Terraform output review confirms staging RDS endpoint/address/port and staging Redis primary endpoint/address/port exist.
 - [ ] Terraform output review confirms no password, token, or full connection URL was emitted.
 - [ ] Terraform state location remains private and access controlled.

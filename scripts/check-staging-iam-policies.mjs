@@ -6,6 +6,8 @@ import process from "node:process";
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const policyRelPath = "documents/ops/iam/MSCQR_STAGING_ECS_EXEC_OPERATOR_POLICY_2026-07-02.json";
 const policyPath = path.join(repoRoot, policyRelPath);
+const applyPolicyRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_OPERATOR_POLICY_2026-07-08.json";
+const applyPolicyPath = path.join(repoRoot, applyPolicyRelPath);
 
 const allowedWildcardResourceActions = new Set([]);
 const allowedActions = new Set([
@@ -49,22 +51,22 @@ const hasWildcard = (value) => value === "*" || value.endsWith(":*");
 const isWriteLikeAction = (action) =>
   /:(Create|Delete|Put|Update|Attach|Detach|Pass|Assume|Start|Stop|Run|Terminate|Write|Execute|Generate)/i.test(action);
 
-const readPolicy = () => {
-  if (!fs.existsSync(policyPath)) {
-    addFailure(`${policyRelPath}: policy file does not exist.`);
+const readPolicy = (relPath, absPath) => {
+  if (!fs.existsSync(absPath)) {
+    addFailure(`${relPath}: policy file does not exist.`);
     return null;
   }
 
-  const source = fs.readFileSync(policyPath, "utf8");
+  const source = fs.readFileSync(absPath, "utf8");
   try {
     return { source, json: JSON.parse(source) };
   } catch (error) {
-    addFailure(`${policyRelPath}: JSON parse failed: ${error.message}`);
+    addFailure(`${relPath}: JSON parse failed: ${error.message}`);
     return { source, json: null };
   }
 };
 
-const { source, json: policy } = readPolicy() || {};
+const { source, json: policy } = readPolicy(policyRelPath, policyPath) || {};
 
 if (source) {
   const normalized = source.toLowerCase();
@@ -74,6 +76,56 @@ if (source) {
     }
   }
 }
+
+const validateApplyOperatorPolicy = () => {
+  const result = readPolicy(applyPolicyRelPath, applyPolicyPath);
+  if (!result) return;
+
+  const { source: applySource, json: applyPolicy } = result;
+  if (applySource) {
+    const normalized = applySource.toLowerCase();
+    for (const fragment of forbiddenProductionFragments) {
+      if (normalized.includes(fragment)) {
+        addFailure(`${applyPolicyRelPath}: contains forbidden production fragment "${fragment}".`);
+      }
+    }
+  }
+
+  if (!applyPolicy) return;
+
+  if (applyPolicy.Version !== "2012-10-17") {
+    addFailure(`${applyPolicyRelPath}: Version must be 2012-10-17.`);
+  }
+  if (!Array.isArray(applyPolicy.Statement) || applyPolicy.Statement.length !== 1) {
+    addFailure(`${applyPolicyRelPath}: Statement must contain exactly one allow statement.`);
+  }
+
+  const [statement] = applyPolicy.Statement || [];
+  if (!statement) return;
+
+  if (statement.Effect !== "Allow") {
+    addFailure(`${applyPolicyRelPath}: apply operator policy must use one explicit Allow statement.`);
+  }
+
+  const actions = asArray(statement.Action);
+  const resources = asArray(statement.Resource);
+  const expectedRoleArn = "arn:aws:iam::368992683803:role/mscqr-staging-terraform-apply-role";
+
+  if (actions.length !== 1 || actions[0] !== "sts:AssumeRole") {
+    addFailure(`${applyPolicyRelPath}: only sts:AssumeRole is allowed.`);
+  }
+  if (resources.length !== 1 || resources[0] !== expectedRoleArn) {
+    addFailure(`${applyPolicyRelPath}: resource must be exactly ${expectedRoleArn}.`);
+  }
+  if (resources.some((resource) => resource === "*" || !/(staging|stg)/i.test(resource) || !/apply/i.test(resource))) {
+    addFailure(`${applyPolicyRelPath}: resource must be scoped to the staging apply role.`);
+  }
+  if (actions.some((action) => hasWildcard(action) || /^iam:/i.test(action) || /^secretsmanager:/i.test(action))) {
+    addFailure(`${applyPolicyRelPath}: wildcard, IAM, and Secrets Manager actions are forbidden.`);
+  }
+};
+
+validateApplyOperatorPolicy();
 
 if (policy) {
   if (policy.Version !== "2012-10-17") {
@@ -178,4 +230,5 @@ if (failures.length > 0) {
 
 console.log("Staging IAM policy lint passed.");
 console.log(`Validated policy: ${policyRelPath}`);
+console.log(`Validated policy: ${applyPolicyRelPath}`);
 console.log("Allowed Resource=\"*\" exceptions: none.");
