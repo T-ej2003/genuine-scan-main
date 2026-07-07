@@ -145,6 +145,8 @@ The script updates only `mscqr/staging/database-url` and
 `mscqr/staging/redis-url`. It refuses root, non-`eu-west-2`, production-looking
 secret names, DB identifiers, endpoints, hosts, URLs, and `mscqr.com` domains.
 It prints redacted evidence only.
+Current Terraform does not configure Redis auth or in-transit TLS; record that
+temporary staging limitation in the apply evidence until the cache is upgraded.
 
 E. Force a new staging ECS deployment only after secret sync:
 

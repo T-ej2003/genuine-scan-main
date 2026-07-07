@@ -123,10 +123,12 @@ or the RDS-managed master user secret returned by `describe-db-instances`.
 The final URL is written only to Secrets Manager and is never printed.
 
 `REDIS_URL` is constructed in memory from the staging Valkey primary endpoint
-and port. Terraform does not configure Redis auth yet, so the first staging
-URL is unauthenticated unless `MSCQR_STAGING_REDIS_PASSWORD` is explicitly
-provided by an approved operator flow. The script still refuses production-
-looking hosts and never prints a credential-bearing Redis URL.
+and port. Terraform does not configure Redis auth or in-transit TLS yet, so the
+first staging URL is unauthenticated and uses `redis://` unless
+`MSCQR_STAGING_REDIS_PASSWORD` is explicitly provided by an approved operator
+flow and the Terraform cache configuration is upgraded for TLS. The script
+still refuses production-looking hosts and never prints a credential-bearing
+Redis URL.
 
 After secrets are updated, force a new staging ECS deployment only with the
 separate redeploy approval gate:

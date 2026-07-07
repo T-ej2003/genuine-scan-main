@@ -76,7 +76,7 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Runtime secret sync updated only `mscqr/staging/database-url` and `mscqr/staging/redis-url`.
 - [ ] `DATABASE_URL` was constructed from staging RDS endpoint metadata plus an approved password source and was written only to Secrets Manager.
 - [ ] `REDIS_URL` was constructed from the staging Valkey endpoint and port and was written only to Secrets Manager.
-- [ ] Redis auth status is recorded. Current Terraform does not configure Redis auth; if no approved `MSCQR_STAGING_REDIS_PASSWORD` was supplied, the staging Redis URL is unauthenticated.
+- [ ] Redis auth/TLS status is recorded. Current Terraform does not configure Redis auth or in-transit TLS; if no approved `MSCQR_STAGING_REDIS_PASSWORD` was supplied and TLS has not been added, the staging Redis URL is unauthenticated `redis://`.
 - [ ] ECS redeploy was approved after the two runtime secrets were updated.
 - [ ] ECS redeploy used `MSCQR_STAGING_ECS_REDEPLOY_ENABLED=true` and `MSCQR_STAGING_ECS_REDEPLOY_CONFIRM=MSCQR_FORCE_STAGING_ECS_REDEPLOY`.
 - [ ] Health check used only the reviewed staging ALB URL and did not use `mscqr.com` or a production hostname.
