@@ -11,8 +11,18 @@
       "Sid": "DenyOutsideApprovedStagingRegion",
       "Effect": "Deny",
       "NotAction": [
+        "iam:AttachRolePolicy",
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
         "iam:Get*",
+        "iam:DetachRolePolicy",
         "iam:List*",
+        "iam:PassRole",
+        "iam:PutRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateAssumeRolePolicy",
         "sts:GetCallerIdentity"
       ],
       "Resource": "*",
@@ -37,19 +47,58 @@
       }
     },
     {
-      "Sid": "DenyBoundaryRemovalAndPolicyEscalation",
+      "Sid": "DenyPermissionsBoundaryTampering",
       "Effect": "Deny",
       "Action": [
-        "iam:AttachRolePolicy",
         "iam:CreatePolicyVersion",
         "iam:DeleteRolePermissionsBoundary",
-        "iam:DeleteRolePolicy",
-        "iam:DetachRolePolicy",
         "iam:PutRolePermissionsBoundary",
-        "iam:PutRolePolicy",
         "iam:SetDefaultPolicyVersion"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "DenyIamRoleManagementOutsideTerraformManagedStagingEcsRoles",
+      "Effect": "Deny",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PassRole",
+        "iam:PutRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "NotResource": [
+        "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role",
+        "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role"
+      ]
+    },
+    {
+      "Sid": "DenyUnreviewedManagedPolicyAttachments",
+      "Effect": "Deny",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role",
+      "Condition": {
+        "StringNotEquals": {
+          "iam:PolicyARN": "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+        }
+      }
+    },
+    {
+      "Sid": "DenyManagedPolicyAttachmentsOnStagingTaskRole",
+      "Effect": "Deny",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role"
     }
   ]
 }

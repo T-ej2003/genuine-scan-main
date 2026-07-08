@@ -1,0 +1,51 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManageTerraformManagedStagingEcsRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:PassRole",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role",
+        "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role"
+      ]
+    },
+    {
+      "Sid": "ManageTerraformManagedStagingEcsInlineRolePolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:PutRolePolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role",
+        "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role"
+      ]
+    },
+    {
+      "Sid": "AttachReviewedAwsManagedEcsExecutionPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role",
+      "Condition": {
+        "StringEquals": {
+          "iam:PolicyARN": "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+        }
+      }
+    }
+  ]
+}

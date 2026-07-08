@@ -22,6 +22,9 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] First staging plan was generated through `npm run plan:staging-terraform`; raw first-plan commands are not accepted. See `documents/ops/MSCQR_STAGING_TERRAFORM_PLAN_RUNBOOK_2026-07-02.md`.
 - [ ] Staging apply role setup is complete using `documents/ops/MSCQR_STAGING_APPLY_ROLE_SETUP_2026-07-08.md`.
 - [ ] The permissions boundary template `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json` is attached to `mscqr-staging-terraform-apply-role`.
+- [ ] The least-privilege apply role policy template `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_ROLE_POLICY_2026-07-08.json` is attached to `mscqr-staging-terraform-apply-role`; do not rely on `PowerUserAccess` alone.
+- [ ] The apply role policy grants IAM management only for `mscqr-staging-ecs-execution-role`, `mscqr-staging-ecs-task-role`, and the reviewed `AmazonECSTaskExecutionRolePolicy` attachment on the execution role.
+- [ ] No `AdministratorAccess`, general IAM administrator policy, production-looking role ARN, or IAM `Resource="*"` write permission is attached to the apply role.
 - [ ] The staging plan role remains read/plan only and will not be used for apply.
 - [ ] The selected apply profile is the staging apply profile, not a plan/read profile and not production-looking.
 - [ ] `npm run check:staging-aws-apply-identity` passed with `AWS_PROFILE="<staging-apply-profile>"` and `AWS_REGION="eu-west-2"`.
@@ -77,6 +80,8 @@ This checklist is preparation-only. It does not authorize production changes, da
 
 - [ ] Apply was run only after separate human approval; this checklist entry records the result and does not authorize apply by itself.
 - [ ] Apply evidence was produced by `scripts/apply-staging-terraform.mjs` and did not include Terraform stdout/stderr, secrets, private tfvars, state, or plan artifact contents.
+- [ ] If apply failed, inspect only `.terraform-plans/staging/<approved-plan>.apply-error-evidence.json`; it must be redacted and referenced through the wrapper's `errorEvidencePath`.
+- [ ] If apply failed after invocation, treat `mutatesAws: true` as conservative and run only approved read-only staging inspection before any retry.
 - [ ] After apply, the operator switched back to the staging plan role for inspection.
 - [ ] Any long-lived access keys for `mscqr-staging-apply-operator` were disabled or deleted after the controlled apply window and key shutdown evidence is recorded.
 - [ ] Terraform output review confirms staging RDS endpoint/address/port and staging Redis primary endpoint/address/port exist.
@@ -142,3 +147,6 @@ Record these fields in the associated ticket or evidence pack:
 - Add an EventBridge rule for `ExecuteCommand` CloudTrail events before routine staging usage, then send alerts to the operational channel and evidence ledger.
 - Prefer a dedicated staging provisioning role and a separate break-glass operator role. Combining infrastructure apply and shell access in one role increases blast radius.
 - Replace temporary broad ECS egress with VPC endpoints and prefix-list scoped rules before production reuse, then make broad ECS egress a plan-review blocker too.
+- Keep the staging apply IAM policy generated from reviewed Terraform resource
+  names. If Terraform adds another IAM role, the linter should fail until the
+  policy, boundary, and approval checklist are deliberately updated.

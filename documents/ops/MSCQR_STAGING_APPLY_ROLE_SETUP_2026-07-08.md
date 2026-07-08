@@ -18,6 +18,12 @@ wrapper.
 - The apply role must have the permissions boundary template
   `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json`
   attached before the real apply window.
+- The apply role must also have the least-privilege staging Terraform apply role
+  policy template
+  `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_ROLE_POLICY_2026-07-08.json`
+  attached before the real apply window. Do not rely on `PowerUserAccess`
+  alone; it does not grant IAM management, and the boundary still controls the
+  maximum permissions.
 - The apply role is for staging Terraform apply only. Do not use it for plan
   generation, production resources, production DB work, deployment, RLS
   enablement, or routine inspection.
@@ -50,9 +56,14 @@ checker, and only then rerun the failed bootstrap step.
 6. Attach the permissions boundary template
    `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json`
    to `mscqr-staging-terraform-apply-role`.
-7. Attach a staging-only Terraform apply permissions policy to the role. Scope
-   it to the reviewed staging API resources, `eu-west-2`, and account
-   `368992683803`. Do not attach a broad AWS managed full-access policy.
+7. Attach the least-privilege staging Terraform apply role policy template
+   `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_ROLE_POLICY_2026-07-08.json`
+   to `mscqr-staging-terraform-apply-role`. This policy allows Terraform to
+   create and manage only the Terraform-managed staging ECS IAM roles
+   `mscqr-staging-ecs-execution-role` and `mscqr-staging-ecs-task-role`, plus
+   the reviewed `AmazonECSTaskExecutionRolePolicy` attachment on the execution
+   role. Do not attach AdministratorAccess or a general IAM administrator
+   policy.
 8. Confirm `npm run check:staging-iam-policies` passes after the apply operator
    policy and boundary template are reviewed.
 9. Configure a local AWS profile named with staging and apply markers, for
@@ -67,6 +78,24 @@ npm run check:staging-aws-apply-identity
 
 The checker must return `allowed: true`, `arnType: "assumed-role"`, and
 `classification: "staging-apply-role"` before the apply wrapper can proceed.
+
+## Apply Failure Evidence
+
+If Terraform exits non-zero after the wrapper invokes the saved plan, the
+wrapper does not print raw Terraform stdout or stderr. It writes a local
+redacted evidence file beside the private plan artifacts:
+
+```text
+.terraform-plans/staging/<approved-plan>.apply-error-evidence.json
+```
+
+The wrapper JSON includes `status: "apply_failed"`, `applyAttempted: true`,
+`mutatesAws: true`, and `errorEvidencePath`. Treat `mutatesAws: true` as
+conservative: a failed `terraform apply` may have created some resources before
+exiting. Inspect only the redacted evidence file and follow up with read-only
+staging inspection through the plan role. Do not paste raw Terraform
+stdout/stderr, state, private tfvars, credentials, ARNs, account IDs, service
+URLs, or secret values into tickets or chat.
 
 ## Apply Wrapper Contract
 
@@ -118,9 +147,15 @@ least-privilege staging apply policy. It:
 
 - allows the role policy to define the actual staging permissions;
 - denies non-`eu-west-2` requests except global IAM/STS reads required for
-  identity and role inspection;
+  identity, role inspection, and the exact global IAM role actions required for
+  the Terraform-managed staging ECS roles;
 - denies resources tagged `Environment=prod` or `Environment=production`;
-- denies permissions-boundary removal and IAM policy escalation actions.
+- denies permissions-boundary tampering and managed-policy version escalation;
+- denies IAM role management outside `mscqr-staging-ecs-execution-role` and
+  `mscqr-staging-ecs-task-role`;
+- denies unreviewed managed-policy attachment to the staging ECS execution
+  role;
+- denies all managed-policy attachment to the staging ECS task role.
 
 AWS IAM does not accept generic production-name Resource ARNs with wildcarded
 service segments such as `arn:aws:*:*:368992683803:*prod*`. Production-looking
@@ -135,3 +170,6 @@ approval checklist.
   once the manual first-apply path is proven.
 - Replace long-lived apply-operator access keys with short-lived federation as
   soon as the first controlled apply flow is proven.
+- Add an automated post-apply drift check that confirms only the reviewed
+  staging IAM roles and policies were created, then store the redacted evidence
+  with the approval record.
