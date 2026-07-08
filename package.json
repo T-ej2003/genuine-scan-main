@@ -78,6 +78,7 @@
     "test:route53-regional-rollback": "node --test scripts/tests/route53-regional-rollback.test.mjs",
     "test:staging-smoke-config": "node --test scripts/tests/staging-smoke-config.test.mjs scripts/tests/smoke-release-pr-soft.test.mjs",
     "test:staging-terraform-apply": "node --test scripts/tests/staging-terraform-apply.test.mjs",
+    "test:staging-terraform-backend": "node --test scripts/tests/staging-terraform-backend.test.mjs",
     "test:staging-runtime-secret-sync": "node --test scripts/tests/staging-runtime-secret-sync.test.mjs",
     "test:db-safety-guard": "node backend/tests/testDbSafetyGuard.test.js",
     "test:system": "playwright test --config=playwright.system.config.ts e2e/system-integration.spec.ts",

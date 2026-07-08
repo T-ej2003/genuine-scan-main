@@ -9,6 +9,7 @@ Hard rules:
 - Do not put secret values in `terraform.tfvars` or committed files.
 - Keep resource names containing `staging` or `stg`; production names are forbidden.
 - The provider pins `allowed_account_ids = [var.account_id]`; wrong active AWS credentials should fail provider initialization or plan.
+- Terraform state uses the staging-only S3 backend in `backend.tf`: bucket `mscqr-staging-terraform-state-368992683803`, key `staging-api/terraform.tfstate`, region `eu-west-2`, encryption enabled, `allowed_account_ids = ["368992683803"]`, and S3 lockfile locking with `use_lockfile = true`.
 - Account `368992683803` may be used for staging only through least-privilege staging roles. Root credentials must not be used for plan or apply.
 - The staging plan role and staging apply role must remain separate. The plan role is read/plan only; the apply role is selected only after a separate human apply approval.
 - Staging apply must use `npm run apply:staging-terraform -- ".terraform-plans/staging/<approved-plan>.tfplan"` with explicit gates and a saved plan file. Raw `terraform apply` is not an accepted operator path.
@@ -19,6 +20,7 @@ Hard rules:
 - ECS Exec is enabled on the staging backend service only for controlled staging migration and seed execution. Operators still need explicit IAM permission for `ecs:ExecuteCommand`, and command activity must be reviewed through CloudTrail plus the backend CloudWatch log group and the dedicated ECS Exec CloudWatch log group.
 - ECS Exec session logging is configured at the cluster level with `logging = "OVERRIDE"` and a staging KMS-backed CloudWatch log group at `/aws/ecs/mscqr-staging/exec`.
 - S3 ECS Exec session logging is intentionally not enabled in this PR. Add it later only with a dedicated staging prefix, lifecycle policy, public access block, and KMS-backed bucket encryption reviewed against the same break-glass approval checklist.
+- Do not use DynamoDB locking for new staging backend setup. HashiCorp documents DynamoDB locking for S3 backends as deprecated; this module uses the S3 `.tflock` lockfile by default.
 
 Review commands:
 
@@ -26,6 +28,7 @@ Review commands:
 npm run check:staging-terraform
 npm run check:staging-iam-policies
 npm run check:staging-private-inputs
+npm run test:staging-terraform-backend
 npm run check:staging-aws-identity
 MSCQR_STAGING_TERRAFORM_PLAN_ENABLED=true MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM=MSCQR_GENERATE_STAGING_PLAN_ONLY npm run plan:staging-terraform
 ```
@@ -47,6 +50,54 @@ npm run check:staging-iam-policies
 ```
 
 These CI checks prove syntax and repository safety constraints only. They do not prove AWS deployability, do not replace a real `terraform plan`, and do not authorize `terraform apply`.
+
+## Remote State Backend
+
+The staging backend bucket is bootstrapped outside Terraform because Terraform
+cannot store its own first state in a backend that does not exist yet. Use only
+the gated bootstrap script; it creates or reconciles the backend S3 bucket and
+its controls, not application resources:
+
+```sh
+set +x
+AWS_PROFILE="<staging-terraform-provisioning-or-apply-profile>" \
+AWS_REGION="eu-west-2" \
+MSCQR_STAGING_TERRAFORM_BACKEND_BOOTSTRAP_ENABLED=true \
+MSCQR_STAGING_TERRAFORM_BACKEND_BOOTSTRAP_CONFIRM=MSCQR_BOOTSTRAP_STAGING_TERRAFORM_BACKEND_ONCE \
+node scripts/bootstrap-staging-terraform-backend.mjs
+```
+
+The bucket controls are versioning, SSE-S3 encryption, public access block,
+bucket-owner-enforced ownership, noncurrent version lifecycle retention, and a
+deny-insecure-transport bucket policy. Backend access for the plan and apply
+roles is defined separately in
+`documents/ops/iam/MSCQR_STAGING_TERRAFORM_BACKEND_ACCESS_POLICY_2026-07-08.json`.
+That policy grants `s3:ListBucket` only on prefix
+`staging-api/terraform.tfstate*`, `s3:GetObject`/`s3:PutObject` on the state
+object, and `s3:GetObject`/`s3:PutObject`/`s3:DeleteObject` on the
+`staging-api/terraform.tfstate.tflock` lockfile. It does not grant `s3:*`,
+`Resource="*"`, production buckets, or DynamoDB locking permissions.
+
+Migrate only from the reviewed reconciled 39-resource local backup, and only
+after the backend bucket and IAM policies have been reviewed:
+
+```sh
+set +x
+AWS_PROFILE="<staging-terraform-provisioning-or-apply-profile>" \
+AWS_REGION="eu-west-2" \
+MSCQR_STAGING_TERRAFORM_STATE_MIGRATION_ENABLED=true \
+MSCQR_STAGING_TERRAFORM_STATE_MIGRATION_CONFIRM=MSCQR_MIGRATE_STAGING_TERRAFORM_STATE_ONCE \
+node scripts/migrate-staging-terraform-state-to-s3.mjs \
+  --source-state ".terraform-plans/staging/state-backups/terraform.tfstate.final-reconciled-39-resources-2026-07-08.json"
+```
+
+The migration wrapper validates the explicit source state path, exactly 39
+managed resource addresses by default, required staging resource addresses,
+production-looking values, AWS identity, region, profile, and gates before it
+runs `terraform init -migrate-state` from a temporary copy of this Terraform
+root. It never prints state contents and writes only redacted evidence under
+`.terraform-plans/staging/`. Full steps and recovery guidance are in
+`documents/ops/MSCQR_STAGING_TERRAFORM_REMOTE_STATE_RUNBOOK_2026-07-08.md`.
 
 The first staging Terraform plan must be generated through the repository
 wrapper:

@@ -81,9 +81,16 @@ test("multiline broad operator CIDRs are refused", () => {
 test("gitignore coverage is asserted", () => {
   const result = evaluatePrivateInputs({ root: repoRoot });
 
+  assert.equal(result.gitIgnored[".terraform/example-provider-cache"], true);
   assert.equal(result.gitIgnored["infra/terraform/staging-api/staging.auto.tfvars"], true);
   assert.equal(result.gitIgnored["infra/terraform/staging-api/example.local.tfvars"], true);
+  assert.equal(result.gitIgnored["infra/terraform/staging-api/terraform.tfstate"], true);
+  assert.equal(result.gitIgnored["infra/terraform/staging-api/terraform.tfstate.backup"], true);
   assert.equal(result.gitIgnored[".terraform-plans/staging/example.tfplan"], true);
+  assert.equal(result.gitIgnored[".terraform-plans/staging/state-backups/terraform.tfstate.final-reconciled-39-resources-2026-07-08.json"], true);
+  assert.equal(result.gitIgnored["scratch/example.tfstate"], true);
+  assert.equal(result.gitIgnored["scratch/example.tfstate.backup"], true);
+  assert.equal(result.gitIgnored["scratch/example.tfplan"], true);
 });
 
 test("safe JSON output does not include raw private-looking values", () => {
@@ -161,7 +168,129 @@ test("force-added Terraform plan artifacts are blocked even when gitignored", ()
 
     assert.equal(result.status, "blocked_private_tfvars_invalid");
     assert.equal(result.trackedTerraformPlanArtifactsCount, 1);
-    assert(result.blockerCodes.includes("terraform_plan_artifacts_tracked_or_staged"));
+    assert(result.blockerCodes.includes("terraform_sensitive_artifacts_tracked_or_staged"));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("force-added Terraform state artifacts are blocked even when gitignored", () => {
+  const tempRoot = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "mscqr-state-artifacts-git-"));
+  try {
+    const tfRoot = path.join(tempRoot, "infra/terraform/staging-api");
+    fs.mkdirSync(tfRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, ".gitignore"),
+      [
+        "*.tfstate",
+        "*.tfstate.*",
+        "infra/terraform/staging-api/staging.auto.tfvars",
+        "infra/terraform/staging-api/terraform.tfvars",
+        "infra/terraform/staging-api/*.local.tfvars",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    fs.writeFileSync(path.join(tfRoot, "staging.auto.tfvars"), safeTemplate, "utf8");
+    fs.writeFileSync(path.join(tfRoot, "terraform.tfstate"), "PRIVATE STATE PLACEHOLDER", "utf8");
+    assert.equal(spawnSync("git", ["init"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", ".gitignore"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", "-f", "infra/terraform/staging-api/terraform.tfstate"], {
+      cwd: tempRoot,
+      stdio: "ignore",
+    }).status, 0);
+
+    const result = evaluatePrivateInputs({ root: tempRoot });
+
+    assert.equal(result.status, "blocked_private_tfvars_invalid");
+    assert.equal(result.trackedTerraformSensitiveArtifactsCount, 1);
+    assert(result.blockerCodes.includes("terraform_sensitive_artifacts_tracked_or_staged"));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("force-added Terraform state outside staging directory is blocked even when gitignored", () => {
+  const tempRoot = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "mscqr-global-state-artifacts-git-"));
+  try {
+    fs.mkdirSync(path.join(tempRoot, "scratch"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, ".gitignore"),
+      [
+        "*.tfstate",
+        "*.tfstate.*",
+        "*.tfplan",
+        ".terraform/",
+        "**/.terraform/",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    fs.writeFileSync(path.join(tempRoot, "scratch", "terraform.tfstate"), "PRIVATE STATE PLACEHOLDER", "utf8");
+    assert.equal(spawnSync("git", ["init"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", ".gitignore"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", "-f", "scratch/terraform.tfstate"], {
+      cwd: tempRoot,
+      stdio: "ignore",
+    }).status, 0);
+
+    const result = evaluatePrivateInputs({ root: tempRoot });
+
+    assert.equal(result.trackedTerraformSensitiveArtifactsCount, 1);
+    assert(result.blockerCodes.includes("terraform_sensitive_artifacts_tracked_or_staged"));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("force-added Terraform plan outside .terraform-plans is blocked even when gitignored", () => {
+  const tempRoot = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "mscqr-global-plan-artifacts-git-"));
+  try {
+    fs.mkdirSync(path.join(tempRoot, "scratch"), { recursive: true });
+    fs.writeFileSync(path.join(tempRoot, ".gitignore"), "*.tfplan\n", "utf8");
+    fs.writeFileSync(path.join(tempRoot, "scratch", "staging.tfplan"), "PRIVATE PLAN PLACEHOLDER", "utf8");
+    assert.equal(spawnSync("git", ["init"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", ".gitignore"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", "-f", "scratch/staging.tfplan"], {
+      cwd: tempRoot,
+      stdio: "ignore",
+    }).status, 0);
+
+    const result = evaluatePrivateInputs({ root: tempRoot });
+
+    assert.equal(result.trackedTerraformSensitiveArtifactsCount, 1);
+    assert(result.blockerCodes.includes("terraform_sensitive_artifacts_tracked_or_staged"));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("force-added .terraform provider cache is blocked even when gitignored", () => {
+  const tempRoot = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "mscqr-terraform-dir-git-"));
+  try {
+    const providerDir = path.join(tempRoot, "infra/terraform/staging-api/.terraform/providers");
+    fs.mkdirSync(providerDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, ".gitignore"),
+      [
+        ".terraform/",
+        "**/.terraform/",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    fs.writeFileSync(path.join(providerDir, "provider.bin"), "PROVIDER CACHE PLACEHOLDER", "utf8");
+    assert.equal(spawnSync("git", ["init"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", ".gitignore"], { cwd: tempRoot, stdio: "ignore" }).status, 0);
+    assert.equal(spawnSync("git", ["add", "-f", "infra/terraform/staging-api/.terraform/providers/provider.bin"], {
+      cwd: tempRoot,
+      stdio: "ignore",
+    }).status, 0);
+
+    const result = evaluatePrivateInputs({ root: tempRoot });
+
+    assert.equal(result.trackedTerraformSensitiveArtifactsCount, 1);
+    assert(result.blockerCodes.includes("terraform_sensitive_artifacts_tracked_or_staged"));
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

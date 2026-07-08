@@ -50,8 +50,9 @@ const runTerraform = (argsForTerraform, options = {}) => {
     throw new Error(`Internal guard refused forbidden terraform command: ${argsForTerraform.join(" ")}`);
   }
 
-  console.log(`$ terraform -chdir=${terraformRoot} ${argsForTerraform.join(" ")}`);
-  const result = spawnSync("terraform", [`-chdir=${terraformRoot}`, ...argsForTerraform], {
+  const chdir = options.chdir || terraformRoot;
+  console.log(`$ terraform -chdir=${chdir} ${argsForTerraform.join(" ")}`);
+  const result = spawnSync("terraform", [`-chdir=${chdir}`, ...argsForTerraform], {
     cwd: repoRoot,
     env,
     encoding: "utf8",
@@ -78,6 +79,24 @@ const runTerraform = (argsForTerraform, options = {}) => {
   return result;
 };
 
+const copyTerraformRootWithoutBackend = () => {
+  const schemaRoot = path.join(tempRoot, "schema-root");
+  fs.cpSync(terraformRootAbs, schemaRoot, {
+    recursive: true,
+    filter: (src) => {
+      const rel = path.relative(terraformRootAbs, src);
+      if (!rel) return true;
+      if (rel === ".terraform" || rel.startsWith(`.terraform${path.sep}`)) return false;
+      const base = path.basename(src);
+      if (base === "backend.tf") return false;
+      if (base === "staging.auto.tfvars" || base === "terraform.tfvars" || base.endsWith(".local.tfvars")) return false;
+      if (base.endsWith(".tfstate") || base.includes(".tfstate.")) return false;
+      return true;
+    },
+  });
+  return schemaRoot;
+};
+
 try {
   console.log("MSCQR staging Terraform clean validation guard");
   console.log(`Terraform root: ${terraformRoot}`);
@@ -89,7 +108,14 @@ try {
   runTerraform(["fmt", "-check"]);
   runTerraform(["validate"]);
 
-  const schema = runTerraform(["providers", "schema", "-json"], { capture: true });
+  const schemaRoot = copyTerraformRootWithoutBackend();
+  runTerraform(["init", "-backend=false"], {
+    chdir: schemaRoot,
+  });
+  const schema = runTerraform(["providers", "schema", "-json"], {
+    capture: true,
+    chdir: schemaRoot,
+  });
   const stdout = schema.stdout || "";
   try {
     const parsed = JSON.parse(stdout);
