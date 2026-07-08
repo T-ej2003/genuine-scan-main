@@ -1,0 +1,122 @@
+name: Staging Terraform Remote State Drift
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  remote-state-drift:
+    name: Zero-diff remote state plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_REGION: eu-west-2
+      AWS_DEFAULT_REGION: eu-west-2
+      TF_INPUT: "0"
+      TF_IN_AUTOMATION: "1"
+      MSCQR_STAGING_TERRAFORM_PLAN_ENABLED: "true"
+      MSCQR_STAGING_TERRAFORM_PLAN_CONFIRM: MSCQR_GENERATE_STAGING_PLAN_ONLY
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Require OIDC role and CloudTrail audit variables
+        env:
+          ROLE_ARN: ${{ vars.MSCQR_STAGING_TERRAFORM_PLAN_ROLE_ARN }}
+          TRAIL_NAME: ${{ vars.MSCQR_STAGING_TERRAFORM_STATE_CLOUDTRAIL_NAME }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::Set repository variable MSCQR_STAGING_TERRAFORM_PLAN_ROLE_ARN to a staging Terraform plan role that trusts this workflow via GitHub OIDC."
+            exit 1
+          fi
+          if [ -z "$TRAIL_NAME" ]; then
+            echo "::error::Set repository variable MSCQR_STAGING_TERRAFORM_STATE_CLOUDTRAIL_NAME for state bucket data-event audit verification."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials via GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: ${{ vars.MSCQR_STAGING_TERRAFORM_PLAN_ROLE_ARN }}
+
+      - name: Write private staging tfvars from GitHub secrets
+        env:
+          STAGING_TF_VAR_VPC_ID: ${{ secrets.STAGING_TF_VAR_VPC_ID }}
+          STAGING_TF_VAR_PUBLIC_SUBNET_IDS_JSON: ${{ secrets.STAGING_TF_VAR_PUBLIC_SUBNET_IDS_JSON }}
+          STAGING_TF_VAR_APP_PRIVATE_SUBNET_IDS_JSON: ${{ secrets.STAGING_TF_VAR_APP_PRIVATE_SUBNET_IDS_JSON }}
+          STAGING_TF_VAR_DB_PRIVATE_SUBNET_IDS_JSON: ${{ secrets.STAGING_TF_VAR_DB_PRIVATE_SUBNET_IDS_JSON }}
+          STAGING_TF_VAR_ALLOWED_OPERATOR_CIDRS_JSON: ${{ secrets.STAGING_TF_VAR_ALLOWED_OPERATOR_CIDRS_JSON }}
+          STAGING_TF_VAR_BACKEND_IMAGE_URI: ${{ secrets.STAGING_TF_VAR_BACKEND_IMAGE_URI }}
+          STAGING_TF_VAR_SECRET_ARNS_JSON: ${{ secrets.STAGING_TF_VAR_SECRET_ARNS_JSON }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const required = [
+            "STAGING_TF_VAR_VPC_ID",
+            "STAGING_TF_VAR_PUBLIC_SUBNET_IDS_JSON",
+            "STAGING_TF_VAR_APP_PRIVATE_SUBNET_IDS_JSON",
+            "STAGING_TF_VAR_DB_PRIVATE_SUBNET_IDS_JSON",
+            "STAGING_TF_VAR_ALLOWED_OPERATOR_CIDRS_JSON",
+            "STAGING_TF_VAR_BACKEND_IMAGE_URI",
+            "STAGING_TF_VAR_SECRET_ARNS_JSON",
+          ];
+          const missing = required.filter((key) => !process.env[key]);
+          if (missing.length > 0) {
+            console.error(`Missing required staging Terraform secret(s): ${missing.join(", ")}`);
+            process.exit(1);
+          }
+          const parseJson = (key) => {
+            try {
+              return JSON.stringify(JSON.parse(process.env[key]), null, 2);
+            } catch {
+              console.error(`${key} must be valid JSON.`);
+              process.exit(1);
+            }
+          };
+          const body = [
+            'account_id = "368992683803"',
+            `vpc_id = ${JSON.stringify(process.env.STAGING_TF_VAR_VPC_ID)}`,
+            `public_subnet_ids = ${parseJson("STAGING_TF_VAR_PUBLIC_SUBNET_IDS_JSON")}`,
+            `app_private_subnet_ids = ${parseJson("STAGING_TF_VAR_APP_PRIVATE_SUBNET_IDS_JSON")}`,
+            `db_private_subnet_ids = ${parseJson("STAGING_TF_VAR_DB_PRIVATE_SUBNET_IDS_JSON")}`,
+            `allowed_operator_cidrs = ${parseJson("STAGING_TF_VAR_ALLOWED_OPERATOR_CIDRS_JSON")}`,
+            `backend_image_uri = ${JSON.stringify(process.env.STAGING_TF_VAR_BACKEND_IMAGE_URI)}`,
+            `staging_secret_arns = ${parseJson("STAGING_TF_VAR_SECRET_ARNS_JSON")}`,
+            "",
+          ].join("\n");
+          const out = path.join("infra", "terraform", "staging-api", "staging.auto.tfvars");
+          fs.writeFileSync(out, body, { encoding: "utf8", mode: 0o600 });
+          NODE
+
+      - name: Verify state bucket CloudTrail data event coverage
+        env:
+          TRAIL_NAME: ${{ vars.MSCQR_STAGING_TERRAFORM_STATE_CLOUDTRAIL_NAME }}
+        run: |
+          set -euo pipefail
+          aws cloudtrail get-event-selectors --trail-name "$TRAIL_NAME" > "$RUNNER_TEMP/staging-state-event-selectors.json"
+          node scripts/check-staging-terraform-state-audit.mjs --event-selectors-json "$RUNNER_TEMP/staging-state-event-selectors.json"
+
+      - name: Generate remote-backend staging plan
+        run: npm run plan:staging-terraform
+
+      - name: Require zero-diff plan summary
+        run: |
+          set -euo pipefail
+          summary="$(ls -t .terraform-plans/staging/*.summary.json | head -n 1)"
+          node scripts/check-staging-terraform-drift-summary.mjs "$summary"

@@ -106,6 +106,11 @@ followed by a fresh plan that returns `add=0`, `change=0`, and `destroy=0`.
 DynamoDB locking is legacy compatibility only; the new backend uses
 `use_lockfile = true` with the S3 `.tflock` object.
 
+After migration, prefer GitHub OIDC for scheduled drift detection. The trust
+policy template is
+`documents/ops/iam/MSCQR_STAGING_TERRAFORM_GITHUB_OIDC_PLAN_ROLE_TRUST_POLICY_2026-07-08.json`.
+Do not give that role apply permissions.
+
 ## Apply Failure Evidence
 
 If Terraform exits non-zero after the wrapper invokes the saved plan, the
@@ -194,7 +199,8 @@ approval checklist.
 ## CTO Recommendations
 
 - Move toward OIDC-based role assumption from a protected GitHub environment
-  once the manual first-apply path is proven.
+  once the manual first-apply path is proven; PR #105 adds the plan-role trust
+  template and remote-state drift workflow.
 - Replace long-lived apply-operator access keys with short-lived federation as
   soon as the first controlled apply flow is proven.
 - Add an automated post-apply drift check that confirms only the reviewed

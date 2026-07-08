@@ -16,6 +16,8 @@ import {
   inspectStateSource,
   runMigrationWorkflow,
 } from "../migrate-staging-terraform-state-to-s3.mjs";
+import { evaluateDriftSummary } from "../check-staging-terraform-drift-summary.mjs";
+import { evaluateStateBucketAuditSelectors } from "../check-staging-terraform-state-audit.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const backendTfPath = path.join(repoRoot, "infra/terraform/staging-api/backend.tf");
@@ -266,4 +268,77 @@ test("backend IAM policy does not require DynamoDB locking by default", () => {
   });
   assert.equal(result.status, 0, combinedOutput(result));
   assert.match(combinedOutput(result), /S3 lockfile/);
+});
+
+test("zero-diff drift summary checker accepts only add change destroy zero", () => {
+  const ok = evaluateDriftSummary({
+    status: "plan_generated",
+    applyAllowed: false,
+    counts: { add: 0, change: 0, destroy: 0 },
+  });
+  const drift = evaluateDriftSummary({
+    status: "plan_generated",
+    applyAllowed: false,
+    counts: { add: 0, change: 1, destroy: 0 },
+  });
+
+  assert.equal(ok.status, "ok");
+  assert.equal(ok.rawPlanPrinted, false);
+  assert.equal(drift.status, "blocked_drift_detected");
+  assert(drift.blockerCodes.includes("change_count_not_zero"));
+});
+
+test("state bucket audit checker accepts classic S3 data event selector", () => {
+  const result = evaluateStateBucketAuditSelectors({
+    EventSelectors: [
+      {
+        ReadWriteType: "All",
+        DataResources: [
+          {
+            Type: "AWS::S3::Object",
+            Values: ["arn:aws:s3:::mscqr-staging-terraform-state-368992683803/"],
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.classicReadWriteCoverage, true);
+});
+
+test("state bucket audit checker rejects missing state bucket data events", () => {
+  const result = evaluateStateBucketAuditSelectors({
+    EventSelectors: [
+      {
+        ReadWriteType: "All",
+        DataResources: [
+          {
+            Type: "AWS::S3::Object",
+            Values: ["arn:aws:s3:::some-other-bucket/"],
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(result.status, "blocked_state_bucket_audit_missing");
+  assert(result.blockerCodes.includes("missing_state_bucket_s3_data_event_selector"));
+});
+
+test("state bucket audit checker accepts advanced S3 data event selector", () => {
+  const result = evaluateStateBucketAuditSelectors({
+    AdvancedEventSelectors: [
+      {
+        FieldSelectors: [
+          { Field: "eventCategory", Equals: ["Data"] },
+          { Field: "resources.type", Equals: ["AWS::S3::Object"] },
+          { Field: "resources.ARN", StartsWith: ["arn:aws:s3:::mscqr-staging-terraform-state-368992683803/"] },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.advancedCoverage, true);
 });

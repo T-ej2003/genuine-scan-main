@@ -27,6 +27,8 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Backend bucket bootstrap, if not already complete, used only `scripts/bootstrap-staging-terraform-backend.mjs` with `MSCQR_STAGING_TERRAFORM_BACKEND_BOOTSTRAP_ENABLED=true` and `MSCQR_STAGING_TERRAFORM_BACKEND_BOOTSTRAP_CONFIRM=MSCQR_BOOTSTRAP_STAGING_TERRAFORM_BACKEND_ONCE`.
 - [ ] Terraform backend is S3 bucket `mscqr-staging-terraform-state-368992683803`, key `staging-api/terraform.tfstate`, region `eu-west-2`, encrypted, with S3 lockfile locking through `use_lockfile = true`.
 - [ ] DynamoDB locking is not required for the default backend; it is legacy/deprecated compatibility only.
+- [ ] CloudTrail S3 object data-event coverage for `arn:aws:s3:::mscqr-staging-terraform-state-368992683803/` passed `node scripts/check-staging-terraform-state-audit.mjs --event-selectors-json <selectors.json>`.
+- [ ] Scheduled/manual remote-state drift detection is configured through `.github/workflows/staging-terraform-remote-state-drift.yml` using GitHub OIDC, not long-lived access keys.
 - [ ] State migration, if not already complete, used only `scripts/migrate-staging-terraform-state-to-s3.mjs` with an explicit final reconciled 39-resource source state backup path and the migration gates.
 - [ ] The local reconciled state backup remains preserved under ignored private storage until the remote state is verified by `terraform init` and a fresh zero-diff plan.
 - [ ] The apply role policy grants IAM management only for `mscqr-staging-ecs-execution-role`, `mscqr-staging-ecs-task-role`, and the reviewed `AmazonECSTaskExecutionRolePolicy` attachment on the execution role.

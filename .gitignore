@@ -53,6 +53,7 @@ shared/contracts/runtime/*.d.ts.map
 .terraform/
 **/.terraform/
 .terraform-plans/
+*.tfplan
 *.tfstate
 *.tfstate.*
 infra/terraform/staging-api/terraform.tfvars

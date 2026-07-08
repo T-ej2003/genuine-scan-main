@@ -131,6 +131,47 @@ The required post-migration result is `add=0`, `change=0`, and `destroy=0`.
 Any non-zero count means stop and inspect read-only evidence before considering
 another migration or plan.
 
+## OIDC Drift Detection
+
+After the first manual migration is verified, enable the scheduled workflow
+`.github/workflows/staging-terraform-remote-state-drift.yml`. It uses GitHub
+OIDC, not long-lived AWS keys, and runs a plan-only zero-diff check against the
+remote backend.
+
+Required repository variables:
+
+- `MSCQR_STAGING_TERRAFORM_PLAN_ROLE_ARN`
+- `MSCQR_STAGING_TERRAFORM_STATE_CLOUDTRAIL_NAME`
+
+Required GitHub secrets provide private Terraform inputs as JSON or strings:
+
+- `STAGING_TF_VAR_VPC_ID`
+- `STAGING_TF_VAR_PUBLIC_SUBNET_IDS_JSON`
+- `STAGING_TF_VAR_APP_PRIVATE_SUBNET_IDS_JSON`
+- `STAGING_TF_VAR_DB_PRIVATE_SUBNET_IDS_JSON`
+- `STAGING_TF_VAR_ALLOWED_OPERATOR_CIDRS_JSON`
+- `STAGING_TF_VAR_BACKEND_IMAGE_URI`
+- `STAGING_TF_VAR_SECRET_ARNS_JSON`
+
+Use
+`documents/ops/iam/MSCQR_STAGING_TERRAFORM_GITHUB_OIDC_PLAN_ROLE_TRUST_POLICY_2026-07-08.json`
+as the trust-policy template for the plan role. The workflow fails closed if the
+OIDC role or CloudTrail trail variable is missing.
+
+## State Bucket Audit
+
+The remote-state drift workflow verifies CloudTrail S3 object data-event
+coverage for `arn:aws:s3:::mscqr-staging-terraform-state-368992683803/` before
+running the plan. The local checker is:
+
+```sh
+aws cloudtrail get-event-selectors --trail-name "<trail-name>" > /tmp/staging-state-event-selectors.json
+node scripts/check-staging-terraform-state-audit.mjs --event-selectors-json /tmp/staging-state-event-selectors.json
+```
+
+This is read-only. It does not create trails, edit selectors, migrate state, or
+touch app resources.
+
 ## Recovery If Migration Fails
 
 1. Do not run `terraform apply`.
@@ -147,9 +188,18 @@ another migration or plan.
 ## CTO Recommendations
 
 - Replace long-lived human AWS profiles with short-lived federation or GitHub
-  OIDC once the first remote-state migration is proven.
+  OIDC once the first remote-state migration is proven. PR #105 adds the GitHub
+  OIDC trust-policy template and scheduled drift workflow.
 - Add a scheduled read-only drift check that runs `terraform plan` from the
-  remote backend and alerts on any non-zero add/change/destroy count.
-- Add S3 server access logging or CloudTrail data events for the backend bucket
-  before staging becomes shared by multiple operators.
-- Move Redis to AUTH plus in-transit TLS before staging becomes long-lived.
+  remote backend and alerts on any non-zero add/change/destroy count. PR #105
+  adds `.github/workflows/staging-terraform-remote-state-drift.yml` and
+  `scripts/check-staging-terraform-drift-summary.mjs`.
+- Add CloudTrail data-event audit coverage for the backend bucket before
+  staging becomes shared by multiple operators. PR #105 adds
+  `scripts/check-staging-terraform-state-audit.mjs` and wires it into the drift
+  workflow.
+- Move Redis to AUTH plus in-transit TLS before staging becomes long-lived. The
+  implementation plan is
+  `documents/ops/MSCQR_STAGING_REDIS_AUTH_TLS_HARDENING_PLAN_2026-07-08.md`;
+  apply it only after remote state is verified and a separate Redis-specific
+  no-destroy plan is reviewed.

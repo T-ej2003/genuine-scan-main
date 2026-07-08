@@ -18,12 +18,16 @@ const requiredKeys = [
   "staging_secret_arns",
 ];
 const gitignoreProbePaths = [
+  ".terraform/example-provider-cache",
   "infra/terraform/staging-api/staging.auto.tfvars",
   "infra/terraform/staging-api/example.local.tfvars",
   "infra/terraform/staging-api/terraform.tfstate",
   "infra/terraform/staging-api/terraform.tfstate.backup",
   ".terraform-plans/staging/example.tfplan",
   ".terraform-plans/staging/state-backups/terraform.tfstate.final-reconciled-39-resources-2026-07-08.json",
+  "scratch/example.tfstate",
+  "scratch/example.tfstate.backup",
+  "scratch/example.tfplan",
 ];
 const productionFragments = [
   "prod",
@@ -156,9 +160,12 @@ function trackedTerraformSensitiveArtifacts(root = repoRoot) {
   const result = spawnSync("git", [
     "ls-files",
     "--",
+    ".terraform",
     ".terraform-plans",
-    "infra/terraform/staging-api/*.tfstate",
-    "infra/terraform/staging-api/*.tfstate.*",
+    ":(glob)**/.terraform/**",
+    ":(glob)**/*.tfstate",
+    ":(glob)**/*.tfstate.*",
+    ":(glob)**/*.tfplan",
   ], {
     cwd: root,
     encoding: "utf8",
