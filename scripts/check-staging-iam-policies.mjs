@@ -12,6 +12,8 @@ const policyRelPath = "documents/ops/iam/MSCQR_STAGING_ECS_EXEC_OPERATOR_POLICY_
 const policyPath = resolvePolicyPath(policyRelPath, process.env.MSCQR_STAGING_IAM_ECS_EXEC_OPERATOR_POLICY_PATH);
 const applyPolicyRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_OPERATOR_POLICY_2026-07-08.json";
 const applyPolicyPath = resolvePolicyPath(applyPolicyRelPath, process.env.MSCQR_STAGING_IAM_APPLY_OPERATOR_POLICY_PATH);
+const applyRolePolicyRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_ROLE_POLICY_2026-07-08.json";
+const applyRolePolicyPath = resolvePolicyPath(applyRolePolicyRelPath, process.env.MSCQR_STAGING_IAM_APPLY_ROLE_POLICY_PATH);
 const applyBoundaryRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json";
 const applyBoundaryPath = resolvePolicyPath(applyBoundaryRelPath, process.env.MSCQR_STAGING_IAM_APPLY_BOUNDARY_PATH);
 
@@ -41,6 +43,28 @@ const explicitlyAllowedWriteActions = new Set([
   "ecs:ExecuteCommand",
   "kms:GenerateDataKey",
 ]);
+const stagingTerraformManagedRoleArns = new Set([
+  "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role",
+  "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role",
+]);
+const stagingTerraformExecutionRoleArn = "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role";
+const reviewedEcsExecutionManagedPolicyArn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy";
+const requiredStagingTerraformIamActions = new Set([
+  "iam:CreateRole",
+  "iam:DeleteRole",
+  "iam:GetRole",
+  "iam:ListAttachedRolePolicies",
+  "iam:ListRolePolicies",
+  "iam:PassRole",
+  "iam:TagRole",
+  "iam:UntagRole",
+  "iam:UpdateAssumeRolePolicy",
+  "iam:DeleteRolePolicy",
+  "iam:GetRolePolicy",
+  "iam:PutRolePolicy",
+  "iam:AttachRolePolicy",
+  "iam:DetachRolePolicy",
+]);
 
 const failures = [];
 
@@ -53,6 +77,19 @@ const asArray = (value) => {
 const addFailure = (message) => failures.push(message);
 
 const hasWildcard = (value) => value === "*" || value.endsWith(":*");
+const actionMatches = (pattern, action) => {
+  if (pattern === "*" || pattern.toLowerCase() === action.toLowerCase()) return true;
+  if (!pattern.includes("*")) return false;
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, ".*");
+  return new RegExp(`^${escaped}$`, "i").test(action);
+};
+const statementDeniesAction = (statement, action) => {
+  const actions = asArray(statement.Action);
+  const notActions = asArray(statement.NotAction);
+  if (actions.length > 0) return actions.some((pattern) => actionMatches(pattern, action));
+  if (notActions.length > 0) return !notActions.some((pattern) => actionMatches(pattern, action));
+  return true;
+};
 const invalidArnServiceWildcardReason = (resource) => {
   if (typeof resource !== "string" || !resource.startsWith("arn:")) return null;
   const [, partition, service] = resource.split(":", 4);
@@ -64,6 +101,7 @@ const invalidArnServiceWildcardReason = (resource) => {
 };
 const isWriteLikeAction = (action) =>
   /:(Create|Delete|Put|Update|Attach|Detach|Pass|Assume|Start|Stop|Run|Terminate|Write|Execute|Generate)/i.test(action);
+const isIamWriteLikeAction = (action) => /^iam:/i.test(action) && isWriteLikeAction(action);
 
 const readPolicy = (relPath, absPath) => {
   if (!fs.existsSync(absPath)) {
@@ -141,6 +179,98 @@ const validateApplyOperatorPolicy = () => {
 
 validateApplyOperatorPolicy();
 
+const validateApplyRolePolicy = () => {
+  const result = readPolicy(applyRolePolicyRelPath, applyRolePolicyPath);
+  if (!result) return;
+
+  const { source: applyRoleSource, json: applyRolePolicy } = result;
+  if (applyRoleSource) {
+    const normalized = applyRoleSource.toLowerCase();
+    for (const fragment of forbiddenProductionFragments) {
+      if (normalized.includes(fragment)) {
+        addFailure(`${applyRolePolicyRelPath}: contains forbidden production fragment "${fragment}".`);
+      }
+    }
+    if (/AdministratorAccess/i.test(applyRoleSource)) {
+      addFailure(`${applyRolePolicyRelPath}: AdministratorAccess is forbidden.`);
+    }
+  }
+
+  if (!applyRolePolicy) return;
+
+  if (applyRolePolicy.Version !== "2012-10-17") {
+    addFailure(`${applyRolePolicyRelPath}: Version must be 2012-10-17.`);
+  }
+  if (!Array.isArray(applyRolePolicy.Statement) || applyRolePolicy.Statement.length === 0) {
+    addFailure(`${applyRolePolicyRelPath}: Statement must be a non-empty array.`);
+    return;
+  }
+
+  const seenActions = new Set();
+
+  for (const [index, statement] of applyRolePolicy.Statement.entries()) {
+    const sid = statement.Sid || `ApplyRolePolicyStatement${index}`;
+    const actions = asArray(statement.Action);
+    const resources = asArray(statement.Resource);
+
+    if (statement.Effect !== "Allow") {
+      addFailure(`${applyRolePolicyRelPath}:${sid}: apply role policy must use explicit Allow statements only.`);
+    }
+    if (actions.length === 0) addFailure(`${applyRolePolicyRelPath}:${sid}: Action must be a string or array.`);
+    if (resources.length === 0) addFailure(`${applyRolePolicyRelPath}:${sid}: Resource must be a string or array.`);
+
+    for (const action of actions) {
+      seenActions.add(action);
+      if (hasWildcard(action)) addFailure(`${applyRolePolicyRelPath}:${sid}: wildcard action is forbidden: ${action}.`);
+      if (action === "iam:*") addFailure(`${applyRolePolicyRelPath}:${sid}: iam:* is forbidden.`);
+      if (!requiredStagingTerraformIamActions.has(action)) {
+        addFailure(`${applyRolePolicyRelPath}:${sid}: action is not approved for staging Terraform apply IAM management: ${action}.`);
+      }
+      if (isIamWriteLikeAction(action) && resources.includes("*")) {
+        addFailure(`${applyRolePolicyRelPath}:${sid}: Resource "*" is forbidden for IAM write action ${action}.`);
+      }
+    }
+
+    for (const resource of resources) {
+      const invalidReason = invalidArnServiceWildcardReason(resource);
+      if (invalidReason) {
+        addFailure(`${applyRolePolicyRelPath}:${sid}: ${invalidReason}: ${resource}.`);
+      }
+      if (resource === "*") {
+        addFailure(`${applyRolePolicyRelPath}:${sid}: Resource "*" is forbidden in the staging Terraform apply role policy.`);
+        continue;
+      }
+      if (!/^arn:aws:iam::368992683803:role\//.test(resource)) {
+        addFailure(`${applyRolePolicyRelPath}:${sid}: resource must be an IAM role ARN in the staging account: ${resource}.`);
+      }
+      if (!stagingTerraformManagedRoleArns.has(resource)) {
+        addFailure(`${applyRolePolicyRelPath}:${sid}: resource must be one of the Terraform-managed staging ECS role ARNs: ${resource}.`);
+      }
+      if (/(^|[-_/])(prod|production)([-_/]|$)/i.test(resource)) {
+        addFailure(`${applyRolePolicyRelPath}:${sid}: production-looking IAM role resource is forbidden: ${resource}.`);
+      }
+    }
+
+    if (actions.some((action) => action === "iam:AttachRolePolicy" || action === "iam:DetachRolePolicy")) {
+      const policyArn = statement.Condition?.StringEquals?.["iam:PolicyARN"];
+      if (policyArn !== reviewedEcsExecutionManagedPolicyArn) {
+        addFailure(`${applyRolePolicyRelPath}:${sid}: managed policy attach/detach must be limited to ${reviewedEcsExecutionManagedPolicyArn}.`);
+      }
+      if (resources.length !== 1 || resources[0] !== stagingTerraformExecutionRoleArn) {
+        addFailure(`${applyRolePolicyRelPath}:${sid}: managed policy attach/detach must target only ${stagingTerraformExecutionRoleArn}.`);
+      }
+    }
+  }
+
+  for (const requiredAction of requiredStagingTerraformIamActions) {
+    if (!seenActions.has(requiredAction)) {
+      addFailure(`${applyRolePolicyRelPath}: missing required Terraform staging IAM action ${requiredAction}.`);
+    }
+  }
+};
+
+validateApplyRolePolicy();
+
 const validateApplyPermissionsBoundary = () => {
   const result = readPolicy(applyBoundaryRelPath, applyBoundaryPath);
   if (!result?.json) return;
@@ -157,13 +287,17 @@ const validateApplyPermissionsBoundary = () => {
   let hasMaximumAllow = false;
   let hasRegionDeny = false;
   let hasProductionTagDeny = false;
-  let hasBoundaryEscalationDeny = false;
+  let hasBoundaryTamperingDeny = false;
+  let hasOutsideStagingRoleDeny = false;
+  let hasUnreviewedManagedPolicyAttachmentDeny = false;
+  const requiredDenyConflicts = [];
 
   for (const [index, statement] of boundary.Statement.entries()) {
     const sid = statement.Sid || `BoundaryStatement${index}`;
     const actions = asArray(statement.Action);
     const notActions = asArray(statement.NotAction);
     const resources = asArray(statement.Resource);
+    const notResources = asArray(statement.NotResource);
 
     if (!["Allow", "Deny"].includes(statement.Effect)) {
       addFailure(`${applyBoundaryRelPath}:${sid}: Effect must be Allow or Deny.`);
@@ -171,8 +305,11 @@ const validateApplyPermissionsBoundary = () => {
     if (actions.length > 0 && notActions.length > 0) {
       addFailure(`${applyBoundaryRelPath}:${sid}: use Action or NotAction, not both.`);
     }
-    if (resources.length === 0) {
-      addFailure(`${applyBoundaryRelPath}:${sid}: Resource must be present.`);
+    if (resources.length > 0 && notResources.length > 0) {
+      addFailure(`${applyBoundaryRelPath}:${sid}: use Resource or NotResource, not both.`);
+    }
+    if (resources.length === 0 && notResources.length === 0) {
+      addFailure(`${applyBoundaryRelPath}:${sid}: Resource or NotResource must be present.`);
     }
 
     if (
@@ -185,7 +322,7 @@ const validateApplyPermissionsBoundary = () => {
       hasMaximumAllow = true;
     }
 
-    for (const resource of resources) {
+    for (const resource of [...resources, ...notResources]) {
       const invalidReason = invalidArnServiceWildcardReason(resource);
       if (invalidReason) {
         addFailure(`${applyBoundaryRelPath}:${sid}: ${invalidReason}: ${resource}.`);
@@ -211,10 +348,55 @@ const validateApplyPermissionsBoundary = () => {
       statement.Effect === "Deny" &&
       actions.includes("iam:DeleteRolePermissionsBoundary") &&
       actions.includes("iam:PutRolePermissionsBoundary") &&
-      actions.includes("iam:AttachRolePolicy") &&
-      actions.includes("iam:PutRolePolicy")
+      actions.includes("iam:CreatePolicyVersion") &&
+      actions.includes("iam:SetDefaultPolicyVersion")
     ) {
-      hasBoundaryEscalationDeny = true;
+      hasBoundaryTamperingDeny = true;
+    }
+    if (
+      statement.Effect === "Deny" &&
+      notResources.length === stagingTerraformManagedRoleArns.size &&
+      [...stagingTerraformManagedRoleArns].every((resource) => notResources.includes(resource)) &&
+      actions.includes("iam:CreateRole") &&
+      actions.includes("iam:PutRolePolicy") &&
+      actions.includes("iam:AttachRolePolicy") &&
+      actions.includes("iam:PassRole")
+    ) {
+      hasOutsideStagingRoleDeny = true;
+    }
+    if (
+      statement.Effect === "Deny" &&
+      actions.includes("iam:AttachRolePolicy") &&
+      actions.includes("iam:DetachRolePolicy") &&
+      resources.length === 1 &&
+      resources[0] === stagingTerraformExecutionRoleArn &&
+      statement.Condition?.StringNotEquals?.["iam:PolicyARN"] === reviewedEcsExecutionManagedPolicyArn
+    ) {
+      hasUnreviewedManagedPolicyAttachmentDeny = true;
+    }
+
+    if (statement.Effect === "Deny") {
+      for (const requiredAction of requiredStagingTerraformIamActions) {
+        if (!statementDeniesAction(statement, requiredAction)) continue;
+
+        for (const roleArn of stagingTerraformManagedRoleArns) {
+          const resourceDenied =
+            resources.includes("*") ||
+            resources.includes(roleArn) ||
+            (notResources.length > 0 && !notResources.includes(roleArn));
+          if (!resourceDenied) continue;
+
+          const reviewedManagedAttachmentException =
+            (requiredAction === "iam:AttachRolePolicy" || requiredAction === "iam:DetachRolePolicy") &&
+            roleArn === stagingTerraformExecutionRoleArn &&
+            statement.Condition?.StringNotEquals?.["iam:PolicyARN"] === reviewedEcsExecutionManagedPolicyArn;
+          const productionTagException = statement.Condition?.StringEquals?.["aws:ResourceTag/Environment"] !== undefined;
+
+          if (!reviewedManagedAttachmentException && !productionTagException) {
+            requiredDenyConflicts.push(`${sid} denies ${requiredAction} on ${roleArn}`);
+          }
+        }
+      }
     }
   }
 
@@ -227,8 +409,19 @@ const validateApplyPermissionsBoundary = () => {
   if (!hasProductionTagDeny) {
     addFailure(`${applyBoundaryRelPath}: must deny prod/production tagged resources.`);
   }
-  if (!hasBoundaryEscalationDeny) {
-    addFailure(`${applyBoundaryRelPath}: must deny boundary removal and inline/attached policy escalation.`);
+  if (!hasBoundaryTamperingDeny) {
+    addFailure(`${applyBoundaryRelPath}: must deny boundary tampering and managed-policy version escalation.`);
+  }
+  if (!hasOutsideStagingRoleDeny) {
+    addFailure(`${applyBoundaryRelPath}: must deny IAM role management outside Terraform-managed staging ECS roles.`);
+  }
+  if (!hasUnreviewedManagedPolicyAttachmentDeny) {
+    addFailure(`${applyBoundaryRelPath}: must deny unreviewed managed policy attachment to the staging ECS execution role.`);
+  }
+  if (requiredDenyConflicts.length > 0) {
+    for (const conflict of requiredDenyConflicts) {
+      addFailure(`${applyBoundaryRelPath}: boundary must not deny required staging Terraform IAM action: ${conflict}.`);
+    }
   }
 };
 
@@ -338,6 +531,8 @@ if (failures.length > 0) {
 console.log("Staging IAM policy lint passed.");
 console.log(`Validated policy: ${policyRelPath}`);
 console.log(`Validated policy: ${applyPolicyRelPath}`);
+console.log(`Validated policy: ${applyRolePolicyRelPath}`);
 console.log(`Validated policy: ${applyBoundaryRelPath}`);
 console.log("ECS Exec and apply operator Resource=\"*\" exceptions: none.");
-console.log("Apply permissions boundary intentionally uses wildcard maximum and deny statements.");
+console.log("Apply role policy is scoped to Terraform-managed staging ECS IAM roles only.");
+console.log("Apply permissions boundary intentionally uses wildcard maximum and targeted deny statements.");

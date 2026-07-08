@@ -15,6 +15,12 @@ const planDirAbs = path.join(repoRoot, planDirRel);
 const requiredConfirmation = "MSCQR_APPLY_STAGING_TERRAFORM_ONCE";
 const secretUrlPattern = /\b(?:DATABASE_URL|REDIS_URL)\b|(?:postgres|postgresql|redis):\/\//i;
 const productionPattern = /\bproduction\b|\bprod\b|mscqr-prod|mscqr\.com/i;
+const serviceUrlPattern = /\b(?:postgres|postgresql|redis):\/\/[^\s"',<>]+/gi;
+const arnPattern = /\barn:aws[a-zA-Z-]*:[^\s"',<>]+/g;
+const awsAccessKeyPattern = /\b(?:AKIA|ASIA|A3T[A-Z0-9])[A-Z0-9]{16}\b/g;
+const accountIdPattern = /\b\d{12}\b/g;
+const secretAssignmentPattern =
+  /((?:secret|password|token|private[_-]?key|access[_-]?key|credential)[A-Za-z0-9_.-]*\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,}]+)/gi;
 const forbiddenArgFragments = [
   "apply",
   "destroy",
@@ -129,6 +135,8 @@ function resolvePlanPaths(planArg, root = repoRoot) {
     textPathAbs: `${base}.txt`,
     applyEvidencePathAbs: `${base}.apply-evidence.json`,
     applyEvidencePathRel: `${rel.slice(0, -".tfplan".length)}.apply-evidence.json`,
+    applyErrorEvidencePathAbs: `${base}.apply-error-evidence.json`,
+    applyErrorEvidencePathRel: `${rel.slice(0, -".tfplan".length)}.apply-error-evidence.json`,
   };
 }
 
@@ -243,14 +251,68 @@ function runTerraformApply(planPathAbs, env) {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  if (result.error?.code === "ENOENT") throw new Error("Terraform is not installed or is not on PATH.");
-  if (result.error || result.status !== 0) throw new Error("terraform apply failed; output was not printed.");
+  if (result.error?.code === "ENOENT") {
+    const error = new Error("Terraform is not installed or is not on PATH.");
+    error.applyAttempted = false;
+    throw error;
+  }
+  if (result.error || result.status !== 0) {
+    const error = new Error("terraform apply failed; output was not printed.");
+    error.applyAttempted = true;
+    error.terraformExitStatus = result.status;
+    error.terraformSignal = result.signal;
+    error.stdout = result.stdout || "";
+    error.stderr = result.stderr || "";
+    error.causeMessage = result.error?.message || "";
+    throw error;
+  }
   return result;
+}
+
+export function redactApplyFailureOutput(value) {
+  return String(value || "")
+    .replace(serviceUrlPattern, "<redacted-service-url>")
+    .replace(arnPattern, "<redacted-arn>")
+    .replace(awsAccessKeyPattern, "<redacted-aws-access-key>")
+    .replace(accountIdPattern, "<redacted-account-id>")
+    .replace(secretAssignmentPattern, "$1<redacted-secret-value>");
+}
+
+function redactApplyFailureValue(value) {
+  if (typeof value === "string") return redactApplyFailureOutput(value);
+  if (Array.isArray(value)) return value.map((item) => redactApplyFailureValue(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactApplyFailureValue(entry)]));
+  }
+  return value;
+}
+
+function buildApplyFailureEvidence({ error, plan, identityCheck, applyAttempted }) {
+  return {
+    status: "apply_failed",
+    checkedAt: new Date().toISOString(),
+    terraformRoot,
+    planFilePath: plan.paths.planPathRel,
+    counts: plan.counts,
+    expected: plan.expected,
+    textInspection: plan.textInspection,
+    identityCheck: redactApplyFailureValue(identityCheck),
+    applyAttempted,
+    mutatesAws: applyAttempted,
+    rawSecretValuesPrinted: false,
+    terraformExitStatus: Number.isInteger(error.terraformExitStatus) ? error.terraformExitStatus : null,
+    terraformSignal: error.terraformSignal || null,
+    errorMessage: redactApplyFailureOutput(error.message || "terraform apply failed; output was not printed."),
+    causeMessage: redactApplyFailureOutput(error.causeMessage || ""),
+    stdout: redactApplyFailureOutput(error.stdout || ""),
+    stderr: redactApplyFailureOutput(error.stderr || ""),
+  };
 }
 
 export function runApplyWorkflow({
   argv = [],
   env = process.env,
+  root = repoRoot,
   deps = {
     getIdentity: runAwsApplyCallerIdentity,
     apply: runTerraformApply,
@@ -289,7 +351,7 @@ export function runApplyWorkflow({
 
   let plan;
   try {
-    plan = evaluateSavedPlan({ planArg: argv[0], env });
+    plan = evaluateSavedPlan({ planArg: argv[0], env, root });
   } catch (error) {
     return { exitCode: 1, payload: blocked(error.message, { identityCheck }) };
   }
@@ -308,7 +370,9 @@ export function runApplyWorkflow({
     };
   }
 
+  let applyAttempted = false;
   try {
+    applyAttempted = true;
     deps.apply(plan.paths.planPathAbs, env);
     const evidence = {
       status: "apply_completed",
@@ -320,6 +384,7 @@ export function runApplyWorkflow({
       textInspection: plan.textInspection,
       identityCheck,
       mutatesAws: true,
+      applyAttempted: true,
       rawSecretValuesPrinted: false,
     };
     deps.writeFile(plan.paths.applyEvidencePathAbs, `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
@@ -331,13 +396,22 @@ export function runApplyWorkflow({
       },
     };
   } catch (error) {
+    if (error.applyAttempted === false) applyAttempted = false;
+    const failureEvidence = buildApplyFailureEvidence({ error, plan, identityCheck, applyAttempted });
+    deps.writeFile(plan.paths.applyErrorEvidencePathAbs, `${JSON.stringify(failureEvidence, null, 2)}\n`, "utf8");
     return {
       exitCode: 1,
-      payload: blocked(error.message, {
-        identityCheck,
+      payload: {
+        status: "apply_failed",
+        reason: error.message || "terraform apply failed; output was not printed.",
+        identityCheck: redactApplyFailureValue(identityCheck),
         planFilePath: plan.paths.planPathRel,
         counts: plan.counts,
-      }),
+        errorEvidencePath: plan.paths.applyErrorEvidencePathRel,
+        mutatesAws: applyAttempted,
+        applyAttempted,
+        rawSecretValuesPrinted: false,
+      },
     };
   }
 }

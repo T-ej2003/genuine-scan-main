@@ -98,6 +98,44 @@ function runIamPolicyCheckWithBoundaryResource(resource) {
   return result;
 }
 
+function runIamPolicyCheckWithFixtures({ applyRolePolicyMutator, boundaryMutator } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-iam-policy-test-"));
+  const applyRolePolicyPath = path.join(
+    process.cwd(),
+    "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_ROLE_POLICY_2026-07-08.json",
+  );
+  const boundaryPath = path.join(
+    process.cwd(),
+    "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json",
+  );
+  const applyRolePolicy = JSON.parse(fs.readFileSync(applyRolePolicyPath, "utf8"));
+  const boundary = JSON.parse(fs.readFileSync(boundaryPath, "utf8"));
+  if (applyRolePolicyMutator) applyRolePolicyMutator(applyRolePolicy);
+  if (boundaryMutator) boundaryMutator(boundary);
+
+  const fixtureApplyRolePolicyPath = path.join(root, "apply-role-policy.json");
+  const fixtureBoundaryPath = path.join(root, "boundary.json");
+  fs.writeFileSync(fixtureApplyRolePolicyPath, JSON.stringify(applyRolePolicy, null, 2), "utf8");
+  fs.writeFileSync(fixtureBoundaryPath, JSON.stringify(boundary, null, 2), "utf8");
+
+  const result = spawnSync("node", ["scripts/check-staging-iam-policies.mjs"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      MSCQR_STAGING_IAM_APPLY_ROLE_POLICY_PATH: fixtureApplyRolePolicyPath,
+      MSCQR_STAGING_IAM_APPLY_BOUNDARY_PATH: fixtureBoundaryPath,
+    },
+    encoding: "utf8",
+  });
+
+  fs.rmSync(root, { recursive: true, force: true });
+  return result;
+}
+
+function combinedOutput(result) {
+  return `${result.stdout}\n${result.stderr}`;
+}
+
 test("apply identity guard allows only assumed staging apply role", () => {
   const result = evaluateStagingAwsApplyIdentity({
     env: { AWS_REGION: "eu-west-2" },
@@ -204,6 +242,71 @@ test("staging IAM policy lint rejects boundary Resource ARN service wildcard pat
       assert.match(combinedOutput, new RegExp(resource.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     });
   }
+});
+
+test("staging Terraform apply role policy is scoped to reviewed staging ECS roles", () => {
+  const result = runIamPolicyCheckWithFixtures();
+
+  assert.equal(result.status, 0, combinedOutput(result));
+  assert.match(combinedOutput(result), /Apply role policy is scoped to Terraform-managed staging ECS IAM roles only/);
+});
+
+test("staging Terraform apply role policy rejects production-looking IAM role ARNs", () => {
+  const result = runIamPolicyCheckWithFixtures({
+    applyRolePolicyMutator: (policy) => {
+      policy.Statement[0].Resource = [
+        "arn:aws:iam::368992683803:role/mscqr-production-ecs-task-role",
+      ];
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(combinedOutput(result), /production|prod/i);
+});
+
+test("staging Terraform apply role policy rejects AdministratorAccess", () => {
+  const result = runIamPolicyCheckWithFixtures({
+    applyRolePolicyMutator: (policy) => {
+      policy.Statement[2].Condition.StringEquals["iam:PolicyARN"] =
+        "arn:aws:iam::aws:policy/AdministratorAccess";
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(combinedOutput(result), /AdministratorAccess is forbidden/);
+});
+
+test("staging Terraform apply role policy rejects global IAM write resources", () => {
+  const result = runIamPolicyCheckWithFixtures({
+    applyRolePolicyMutator: (policy) => {
+      policy.Statement[1].Resource = "*";
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(combinedOutput(result), /Resource "\*" is forbidden/);
+});
+
+test("staging Terraform apply boundary does not deny required staging IAM role policy actions", () => {
+  const result = runIamPolicyCheckWithFixtures();
+
+  assert.equal(result.status, 0, combinedOutput(result));
+});
+
+test("staging Terraform apply boundary rejects denies on required staging IAM role actions", () => {
+  const result = runIamPolicyCheckWithFixtures({
+    boundaryMutator: (boundary) => {
+      boundary.Statement.push({
+        Sid: "DenyRequiredStagingInlinePolicyFixture",
+        Effect: "Deny",
+        Action: "iam:PutRolePolicy",
+        Resource: "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role",
+      });
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(combinedOutput(result), /must not deny required staging Terraform IAM action/);
 });
 
 test("role markers must be segment-aware", () => {
@@ -384,6 +487,71 @@ test("dry-run/default mode does not mutate before gates", () => {
     assert.equal(result.exitCode, 1);
     assert.equal(result.payload.applyAttempted, false);
     assert.deepEqual(deps.calls, []);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("apply requires exact saved plan under staging plan directory", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-apply-test-"));
+  const planPath = path.join(root, "outside.tfplan");
+  fs.writeFileSync(planPath, "terraform plan fixture", "utf8");
+  try {
+    const result = runApplyWorkflow({
+      argv: [path.relative(root, planPath)],
+      env: baseEnv(),
+      deps: fakeDeps(),
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.payload.applyAttempted, false);
+    assert.match(result.payload.reason, /Saved plan must live under \.terraform-plans\/staging/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("terraform apply failure writes redacted local evidence path", () => {
+  const fixture = writePlanFixture();
+  const writes = new Map();
+  const rawArn = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/database-url";
+  const rawRedisUrl = "redis://staging-cache.internal:6379/0";
+  const rawPassword = "stagingPasswordValue";
+  const deps = fakeDeps({
+    apply: () => {
+      const error = new Error("terraform apply failed; output was not printed.");
+      error.applyAttempted = true;
+      error.terraformExitStatus = 1;
+      error.stdout = `creating ${rawArn} for 368992683803\n`;
+      error.stderr = `redis endpoint ${rawRedisUrl}\npassword = ${rawPassword}\n`;
+      throw error;
+    },
+    writeFile: (filePath, content) => writes.set(filePath, content),
+  });
+
+  try {
+    const result = runApplyWorkflow({
+      argv: [fixture.planPath],
+      env: baseEnv(),
+      root: fixture.root,
+      deps,
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.payload.status, "apply_failed");
+    assert.equal(result.payload.applyAttempted, true);
+    assert.equal(result.payload.mutatesAws, true);
+    assert.equal(result.payload.rawSecretValuesPrinted, false);
+    assert.match(result.payload.errorEvidencePath, /\.terraform-plans\/staging\/staging-plan\.apply-error-evidence\.json/);
+    assert.equal(writes.size, 1);
+
+    const evidence = [...writes.values()][0];
+    assert.doesNotMatch(JSON.stringify(result.payload), /368992683803|arn:aws:|redis:\/\/staging-cache|stagingPasswordValue/);
+    assert.doesNotMatch(evidence, /368992683803|arn:aws:|redis:\/\/staging-cache|stagingPasswordValue/);
+    assert.match(evidence, /<redacted-account-id>/);
+    assert.match(evidence, /<redacted-arn>/);
+    assert.match(evidence, /<redacted-service-url>/);
+    assert.match(evidence, /<redacted-secret-value>/);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

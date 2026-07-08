@@ -80,7 +80,12 @@ from `documents/ops/MSCQR_STAGING_APPLY_ROLE_SETUP_2026-07-08.md`. The plan role
 must not be reused for apply. The apply role must have the permissions boundary
 template
 `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json`
-attached before the real apply window.
+attached before the real apply window, and it must also have the
+least-privilege staging Terraform apply role policy template
+`documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_ROLE_POLICY_2026-07-08.json`.
+Do not rely on `PowerUserAccess` alone because it does not grant IAM
+management. Do not attach AdministratorAccess or general IAM administrator
+permissions.
 
 Validate the apply identity before the approved apply window:
 
@@ -110,6 +115,20 @@ plan evidence, destroy actions, unexpected change counts, world-open ingress,
 secret URL patterns, production-looking plan text, raw apply options, and
 `TF_CLI_ARGS*` overrides. It prints safe JSON only and does not print Terraform
 apply stdout or stderr.
+
+If Terraform exits non-zero after the wrapper invokes the saved plan, the
+wrapper writes a redacted local evidence file beside the private plan artifacts:
+
+```text
+.terraform-plans/staging/<approved-plan>.apply-error-evidence.json
+```
+
+The wrapper output includes `errorEvidencePath`, `applyAttempted`, and
+`mutatesAws`. For failed invoked applies, `mutatesAws` is conservatively true
+because AWS may have accepted some operations before Terraform exited. Inspect
+only the redacted evidence file; do not paste raw Terraform stdout/stderr,
+state, private tfvars, account IDs, ARNs, credentials, service URLs, or secret
+values into docs, tickets, or chat.
 
 After the controlled apply window, disable or delete any long-lived access keys
 for `mscqr-staging-apply-operator` and record that evidence before closing the
@@ -218,6 +237,14 @@ The module models:
 - Valkey/Redis group `mscqr-staging-redis-euw2`
 - S3 bucket `mscqr-staging-euw2-artifacts-<account_id>`
 - IAM roles and staging-only security groups
+
+The apply role policy template grants IAM management only for the
+Terraform-managed staging ECS roles `mscqr-staging-ecs-execution-role` and
+`mscqr-staging-ecs-task-role`, and only allows attaching or detaching
+`arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy` on the
+execution role. The permissions boundary allows those exact IAM operations while
+denying IAM role management outside those staging roles and denying unreviewed
+managed-policy attachment.
 
 ECS Exec task-role permissions are limited to the four SSM Messages channel actions required by ECS Exec, decrypt access to the staging ECS Exec KMS key for the managed agent, and CloudWatch Logs write permissions to `/aws/ecs/mscqr-staging/exec`. AWS does not support resource-level ARNs for the SSM Messages channel actions or `logs:DescribeLogGroups`, so those policy statements use `Resource = "*"` with the action lists constrained and `aws:RequestedRegion` pinned to `var.aws_region`.
 
