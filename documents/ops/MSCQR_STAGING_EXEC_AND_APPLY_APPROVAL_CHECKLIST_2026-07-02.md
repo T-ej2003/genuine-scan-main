@@ -23,6 +23,12 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Staging apply role setup is complete using `documents/ops/MSCQR_STAGING_APPLY_ROLE_SETUP_2026-07-08.md`.
 - [ ] The permissions boundary template `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json` is attached to `mscqr-staging-terraform-apply-role`.
 - [ ] The least-privilege apply role policy template `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_ROLE_POLICY_2026-07-08.json` is attached to `mscqr-staging-terraform-apply-role`; do not rely on `PowerUserAccess` alone.
+- [ ] The S3 backend access policy template `documents/ops/iam/MSCQR_STAGING_TERRAFORM_BACKEND_ACCESS_POLICY_2026-07-08.json` is attached to both the staging plan role and `mscqr-staging-terraform-apply-role`.
+- [ ] Backend bucket bootstrap, if not already complete, used only `scripts/bootstrap-staging-terraform-backend.mjs` with `MSCQR_STAGING_TERRAFORM_BACKEND_BOOTSTRAP_ENABLED=true` and `MSCQR_STAGING_TERRAFORM_BACKEND_BOOTSTRAP_CONFIRM=MSCQR_BOOTSTRAP_STAGING_TERRAFORM_BACKEND_ONCE`.
+- [ ] Terraform backend is S3 bucket `mscqr-staging-terraform-state-368992683803`, key `staging-api/terraform.tfstate`, region `eu-west-2`, encrypted, with S3 lockfile locking through `use_lockfile = true`.
+- [ ] DynamoDB locking is not required for the default backend; it is legacy/deprecated compatibility only.
+- [ ] State migration, if not already complete, used only `scripts/migrate-staging-terraform-state-to-s3.mjs` with an explicit final reconciled 39-resource source state backup path and the migration gates.
+- [ ] The local reconciled state backup remains preserved under ignored private storage until the remote state is verified by `terraform init` and a fresh zero-diff plan.
 - [ ] The apply role policy grants IAM management only for `mscqr-staging-ecs-execution-role`, `mscqr-staging-ecs-task-role`, and the reviewed `AmazonECSTaskExecutionRolePolicy` attachment on the execution role.
 - [ ] No `AdministratorAccess`, general IAM administrator policy, production-looking role ARN, or IAM `Resource="*"` write permission is attached to the apply role.
 - [ ] The staging plan role remains read/plan only and will not be used for apply.
@@ -51,6 +57,7 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] AWS caller identity was recorded and is not the account root user.
 - [ ] The caller assumed a least-privilege staging provisioning role explicitly.
 - [ ] The state/backend decision is documented, including where state is stored and who can read or write it.
+- [ ] Remote-state migration evidence is stored only as redacted JSON under `.terraform-plans/staging/`, not committed to git.
 - [ ] Every planned resource name is staging or stg scoped.
 - [ ] No planned resource name looks production-scoped; any prod/production-looking resource name blocks apply.
 - [ ] No production DB, Redis, S3 bucket, ECS cluster, ALB, subnet, security group, or Secrets Manager ARN is referenced.
@@ -87,6 +94,7 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Terraform output review confirms staging RDS endpoint/address/port and staging Redis primary endpoint/address/port exist.
 - [ ] Terraform output review confirms no password, token, or full connection URL was emitted.
 - [ ] Terraform state location remains private and access controlled.
+- [ ] Terraform remote state is versioned in the staging S3 backend and protected by S3 lockfile locking.
 - [ ] Terraform state does not contain the final `DATABASE_URL` or final `REDIS_URL` written by the post-apply sync script.
 - [ ] `node scripts/sync-staging-runtime-secrets.mjs --dry-run` passed with `AWS_PROFILE="<staging-provisioning-profile>"` and `AWS_REGION="eu-west-2"`.
 - [ ] Dry-run evidence printed only redacted URL previews and did not print passwords, tokens, full secret values, private tfvars, Terraform state, or plan artifacts.

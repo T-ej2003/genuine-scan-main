@@ -24,6 +24,14 @@ wrapper.
   attached before the real apply window. Do not rely on `PowerUserAccess`
   alone; it does not grant IAM management, and the boundary still controls the
   maximum permissions.
+- Both the plan role and apply role must have the S3 backend access policy
+  template
+  `documents/ops/iam/MSCQR_STAGING_TERRAFORM_BACKEND_ACCESS_POLICY_2026-07-08.json`
+  before using the remote backend. It grants only the staging state object and
+  S3 lockfile permissions.
+- Backend bucket creation/configuration is separate from normal plan/apply
+  access. If a dedicated bootstrap role is used, scope it to
+  `documents/ops/iam/MSCQR_STAGING_TERRAFORM_BACKEND_BOOTSTRAP_POLICY_2026-07-08.json`.
 - The apply role is for staging Terraform apply only. Do not use it for plan
   generation, production resources, production DB work, deployment, RLS
   enablement, or routine inspection.
@@ -64,11 +72,18 @@ checker, and only then rerun the failed bootstrap step.
    the reviewed `AmazonECSTaskExecutionRolePolicy` attachment on the execution
    role. Do not attach AdministratorAccess or a general IAM administrator
    policy.
-8. Confirm `npm run check:staging-iam-policies` passes after the apply operator
+8. Attach
+   `documents/ops/iam/MSCQR_STAGING_TERRAFORM_BACKEND_ACCESS_POLICY_2026-07-08.json`
+   to the staging plan role and to `mscqr-staging-terraform-apply-role`. This
+   grants backend state access only to
+   `arn:aws:s3:::mscqr-staging-terraform-state-368992683803`,
+   `staging-api/terraform.tfstate`, and
+   `staging-api/terraform.tfstate.tflock`.
+9. Confirm `npm run check:staging-iam-policies` passes after the apply operator
    policy and boundary template are reviewed.
-9. Configure a local AWS profile named with staging and apply markers, for
+10. Configure a local AWS profile named with staging and apply markers, for
    example `<staging-apply-profile>`.
-10. Verify the identity:
+11. Verify the identity:
 
 ```sh
 AWS_PROFILE="<staging-apply-profile>" \
@@ -78,6 +93,18 @@ npm run check:staging-aws-apply-identity
 
 The checker must return `allowed: true`, `arnType: "assumed-role"`, and
 `classification: "staging-apply-role"` before the apply wrapper can proceed.
+
+## Backend Bootstrap and State Migration
+
+Remote backend setup is documented separately in
+`documents/ops/MSCQR_STAGING_TERRAFORM_REMOTE_STATE_RUNBOOK_2026-07-08.md`.
+Bootstrap creates/configures only
+`mscqr-staging-terraform-state-368992683803`; it must not be run from root,
+production-looking profiles, or broad administrator identities. State migration
+must use the explicit final reconciled 39-resource backup path and must be
+followed by a fresh plan that returns `add=0`, `change=0`, and `destroy=0`.
+DynamoDB locking is legacy compatibility only; the new backend uses
+`use_lockfile = true` with the S3 `.tflock` object.
 
 ## Apply Failure Evidence
 

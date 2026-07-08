@@ -16,6 +16,13 @@ const applyRolePolicyRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_
 const applyRolePolicyPath = resolvePolicyPath(applyRolePolicyRelPath, process.env.MSCQR_STAGING_IAM_APPLY_ROLE_POLICY_PATH);
 const applyBoundaryRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json";
 const applyBoundaryPath = resolvePolicyPath(applyBoundaryRelPath, process.env.MSCQR_STAGING_IAM_APPLY_BOUNDARY_PATH);
+const backendAccessPolicyRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_BACKEND_ACCESS_POLICY_2026-07-08.json";
+const backendAccessPolicyPath = resolvePolicyPath(backendAccessPolicyRelPath, process.env.MSCQR_STAGING_IAM_BACKEND_ACCESS_POLICY_PATH);
+const backendBootstrapPolicyRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_BACKEND_BOOTSTRAP_POLICY_2026-07-08.json";
+const backendBootstrapPolicyPath = resolvePolicyPath(
+  backendBootstrapPolicyRelPath,
+  process.env.MSCQR_STAGING_IAM_BACKEND_BOOTSTRAP_POLICY_PATH,
+);
 
 const allowedWildcardResourceActions = new Set([]);
 const allowedActions = new Set([
@@ -50,6 +57,9 @@ const stagingTerraformManagedRoleArns = new Set([
 const stagingTerraformExecutionRoleArn = "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role";
 const stagingTerraformTaskRoleArn = "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role";
 const reviewedEcsExecutionManagedPolicyArn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy";
+const backendStateBucketArn = "arn:aws:s3:::mscqr-staging-terraform-state-368992683803";
+const backendStateObjectArn = `${backendStateBucketArn}/staging-api/terraform.tfstate`;
+const backendStateLockObjectArn = `${backendStateObjectArn}.tflock`;
 const requiredStagingTerraformIamActions = new Set([
   "iam:CreateRole",
   "iam:DeleteRole",
@@ -125,30 +135,48 @@ const readPolicy = (relPath, absPath) => {
   }
 };
 
-const { source, json: policy } = readPolicy(policyRelPath, policyPath) || {};
-
-if (source) {
+const validateNoProductionFragments = (relPath, source) => {
+  if (!source) return;
   const normalized = source.toLowerCase();
   for (const fragment of forbiddenProductionFragments) {
     if (normalized.includes(fragment)) {
-      addFailure(`${policyRelPath}: contains forbidden production fragment "${fragment}".`);
+      addFailure(`${relPath}: contains forbidden production fragment "${fragment}".`);
     }
   }
-}
+};
+
+const validateNoBroadS3Access = (relPath, policy) => {
+  if (!policy) return;
+  for (const [index, statement] of (policy.Statement || []).entries()) {
+    const sid = statement.Sid || `Statement${index}`;
+    const actions = asArray(statement.Action);
+    const resources = asArray(statement.Resource);
+    for (const action of actions) {
+      if (action === "s3:*" || action === "*") {
+        addFailure(`${relPath}:${sid}: broad S3 action is forbidden: ${action}.`);
+      }
+    }
+    for (const resource of resources) {
+      if (resource === "*") {
+        addFailure(`${relPath}:${sid}: Resource "*" is forbidden for staging Terraform backend access.`);
+      }
+      if (/(^|[-_/])(prod|production)([-_/]|$)|mscqr-prod/i.test(resource)) {
+        addFailure(`${relPath}:${sid}: production-looking S3 resource is forbidden: ${resource}.`);
+      }
+    }
+  }
+};
+
+const { source, json: policy } = readPolicy(policyRelPath, policyPath) || {};
+
+validateNoProductionFragments(policyRelPath, source);
 
 const validateApplyOperatorPolicy = () => {
   const result = readPolicy(applyPolicyRelPath, applyPolicyPath);
   if (!result) return;
 
   const { source: applySource, json: applyPolicy } = result;
-  if (applySource) {
-    const normalized = applySource.toLowerCase();
-    for (const fragment of forbiddenProductionFragments) {
-      if (normalized.includes(fragment)) {
-        addFailure(`${applyPolicyRelPath}: contains forbidden production fragment "${fragment}".`);
-      }
-    }
-  }
+  validateNoProductionFragments(applyPolicyRelPath, applySource);
 
   if (!applyPolicy) return;
 
@@ -191,13 +219,8 @@ const validateApplyRolePolicy = () => {
   if (!result) return;
 
   const { source: applyRoleSource, json: applyRolePolicy } = result;
+  validateNoProductionFragments(applyRolePolicyRelPath, applyRoleSource);
   if (applyRoleSource) {
-    const normalized = applyRoleSource.toLowerCase();
-    for (const fragment of forbiddenProductionFragments) {
-      if (normalized.includes(fragment)) {
-        addFailure(`${applyRolePolicyRelPath}: contains forbidden production fragment "${fragment}".`);
-      }
-    }
     if (/AdministratorAccess/i.test(applyRoleSource)) {
       addFailure(`${applyRolePolicyRelPath}: AdministratorAccess is forbidden.`);
     }
@@ -277,6 +300,145 @@ const validateApplyRolePolicy = () => {
 };
 
 validateApplyRolePolicy();
+
+const validateBackendAccessPolicy = () => {
+  const result = readPolicy(backendAccessPolicyRelPath, backendAccessPolicyPath);
+  if (!result) return;
+
+  const { source: backendSource, json: backendPolicy } = result;
+  validateNoProductionFragments(backendAccessPolicyRelPath, backendSource);
+  validateNoBroadS3Access(backendAccessPolicyRelPath, backendPolicy);
+  if (/dynamodb/i.test(backendSource || "")) {
+    addFailure(`${backendAccessPolicyRelPath}: DynamoDB locking is not required for the default S3 lockfile backend.`);
+  }
+
+  if (!backendPolicy) return;
+  if (backendPolicy.Version !== "2012-10-17") {
+    addFailure(`${backendAccessPolicyRelPath}: Version must be 2012-10-17.`);
+  }
+  if (!Array.isArray(backendPolicy.Statement) || backendPolicy.Statement.length !== 3) {
+    addFailure(`${backendAccessPolicyRelPath}: Statement must contain exactly the list, state object, and lockfile statements.`);
+    return;
+  }
+
+  const bySid = new Map(backendPolicy.Statement.map((statement) => [statement.Sid, statement]));
+  const listStatement = bySid.get("ListStagingTerraformStatePrefix");
+  const stateStatement = bySid.get("ReadWriteStagingTerraformStateObject");
+  const lockStatement = bySid.get("ReadWriteDeleteStagingTerraformStateLockfile");
+
+  if (!listStatement) addFailure(`${backendAccessPolicyRelPath}: missing ListStagingTerraformStatePrefix statement.`);
+  if (!stateStatement) addFailure(`${backendAccessPolicyRelPath}: missing ReadWriteStagingTerraformStateObject statement.`);
+  if (!lockStatement) addFailure(`${backendAccessPolicyRelPath}: missing ReadWriteDeleteStagingTerraformStateLockfile statement.`);
+
+  if (listStatement) {
+    const actions = asArray(listStatement.Action);
+    const resources = asArray(listStatement.Resource);
+    const prefix = listStatement.Condition?.StringLike?.["s3:prefix"];
+    if (listStatement.Effect !== "Allow") addFailure(`${backendAccessPolicyRelPath}: list statement must Allow.`);
+    if (actions.length !== 1 || actions[0] !== "s3:ListBucket") {
+      addFailure(`${backendAccessPolicyRelPath}: list statement must allow only s3:ListBucket.`);
+    }
+    if (resources.length !== 1 || resources[0] !== backendStateBucketArn) {
+      addFailure(`${backendAccessPolicyRelPath}: list statement resource must be ${backendStateBucketArn}.`);
+    }
+    if (prefix !== "staging-api/terraform.tfstate*") {
+      addFailure(`${backendAccessPolicyRelPath}: list statement must be limited to s3:prefix staging-api/terraform.tfstate*.`);
+    }
+  }
+
+  if (stateStatement) {
+    const actions = asArray(stateStatement.Action).sort();
+    const resources = asArray(stateStatement.Resource);
+    if (stateStatement.Effect !== "Allow") addFailure(`${backendAccessPolicyRelPath}: state object statement must Allow.`);
+    if (JSON.stringify(actions) !== JSON.stringify(["s3:GetObject", "s3:PutObject"])) {
+      addFailure(`${backendAccessPolicyRelPath}: state object statement must allow only s3:GetObject and s3:PutObject.`);
+    }
+    if (resources.length !== 1 || resources[0] !== backendStateObjectArn) {
+      addFailure(`${backendAccessPolicyRelPath}: state object resource must be ${backendStateObjectArn}.`);
+    }
+  }
+
+  if (lockStatement) {
+    const actions = asArray(lockStatement.Action).sort();
+    const resources = asArray(lockStatement.Resource);
+    if (lockStatement.Effect !== "Allow") addFailure(`${backendAccessPolicyRelPath}: lockfile statement must Allow.`);
+    if (JSON.stringify(actions) !== JSON.stringify(["s3:DeleteObject", "s3:GetObject", "s3:PutObject"])) {
+      addFailure(`${backendAccessPolicyRelPath}: lockfile statement must allow GetObject, PutObject, and DeleteObject.`);
+    }
+    if (resources.length !== 1 || resources[0] !== backendStateLockObjectArn) {
+      addFailure(`${backendAccessPolicyRelPath}: lockfile resource must be ${backendStateLockObjectArn}.`);
+    }
+  }
+};
+
+validateBackendAccessPolicy();
+
+const validateBackendBootstrapPolicy = () => {
+  const result = readPolicy(backendBootstrapPolicyRelPath, backendBootstrapPolicyPath);
+  if (!result) return;
+
+  const { source: bootstrapSource, json: bootstrapPolicy } = result;
+  validateNoProductionFragments(backendBootstrapPolicyRelPath, bootstrapSource);
+  validateNoBroadS3Access(backendBootstrapPolicyRelPath, bootstrapPolicy);
+  if (!bootstrapPolicy) return;
+
+  if (bootstrapPolicy.Version !== "2012-10-17") {
+    addFailure(`${backendBootstrapPolicyRelPath}: Version must be 2012-10-17.`);
+  }
+  if (!Array.isArray(bootstrapPolicy.Statement) || bootstrapPolicy.Statement.length !== 2) {
+    addFailure(`${backendBootstrapPolicyRelPath}: Statement must contain exactly create and configure statements.`);
+    return;
+  }
+
+  const allowedBootstrapActions = new Set([
+    "s3:CreateBucket",
+    "s3:GetBucketLocation",
+    "s3:GetBucketPolicy",
+    "s3:GetBucketPublicAccessBlock",
+    "s3:GetBucketVersioning",
+    "s3:GetEncryptionConfiguration",
+    "s3:GetLifecycleConfiguration",
+    "s3:GetBucketOwnershipControls",
+    "s3:ListBucket",
+    "s3:PutBucketPolicy",
+    "s3:PutBucketPublicAccessBlock",
+    "s3:PutBucketVersioning",
+    "s3:PutEncryptionConfiguration",
+    "s3:PutLifecycleConfiguration",
+    "s3:PutBucketOwnershipControls",
+  ]);
+
+  let hasCreate = false;
+  let hasConfigure = false;
+  for (const [index, statement] of bootstrapPolicy.Statement.entries()) {
+    const sid = statement.Sid || `BackendBootstrapStatement${index}`;
+    const actions = asArray(statement.Action);
+    const resources = asArray(statement.Resource);
+    if (statement.Effect !== "Allow") {
+      addFailure(`${backendBootstrapPolicyRelPath}:${sid}: bootstrap policy must use explicit Allow statements only.`);
+    }
+    if (resources.length !== 1 || resources[0] !== backendStateBucketArn) {
+      addFailure(`${backendBootstrapPolicyRelPath}:${sid}: resource must be exactly ${backendStateBucketArn}.`);
+    }
+    for (const action of actions) {
+      if (!allowedBootstrapActions.has(action)) {
+        addFailure(`${backendBootstrapPolicyRelPath}:${sid}: action is not approved for backend bootstrap: ${action}.`);
+      }
+    }
+    if (actions.includes("s3:CreateBucket")) {
+      hasCreate = true;
+      if (statement.Condition?.StringEquals?.["aws:RequestedRegion"] !== "eu-west-2") {
+        addFailure(`${backendBootstrapPolicyRelPath}:${sid}: CreateBucket must require aws:RequestedRegion eu-west-2.`);
+      }
+    } else {
+      hasConfigure = true;
+    }
+  }
+  if (!hasCreate) addFailure(`${backendBootstrapPolicyRelPath}: missing s3:CreateBucket statement.`);
+  if (!hasConfigure) addFailure(`${backendBootstrapPolicyRelPath}: missing bucket controls configuration statement.`);
+};
+
+validateBackendBootstrapPolicy();
 
 const validateApplyPermissionsBoundary = () => {
   const result = readPolicy(applyBoundaryRelPath, applyBoundaryPath);
@@ -553,6 +715,9 @@ console.log(`Validated policy: ${policyRelPath}`);
 console.log(`Validated policy: ${applyPolicyRelPath}`);
 console.log(`Validated policy: ${applyRolePolicyRelPath}`);
 console.log(`Validated policy: ${applyBoundaryRelPath}`);
+console.log(`Validated policy: ${backendAccessPolicyRelPath}`);
+console.log(`Validated policy: ${backendBootstrapPolicyRelPath}`);
 console.log("ECS Exec and apply operator Resource=\"*\" exceptions: none.");
 console.log("Apply role policy is scoped to Terraform-managed staging ECS IAM roles only.");
 console.log("Apply permissions boundary intentionally uses wildcard maximum and targeted deny statements.");
+console.log("Terraform backend S3 access is scoped to the staging state object and S3 lockfile only.");
