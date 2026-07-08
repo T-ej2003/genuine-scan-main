@@ -4,12 +4,16 @@ import path from "node:path";
 import process from "node:process";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
+const resolvePolicyPath = (defaultRelPath, overridePath) => {
+  if (!overridePath) return path.join(repoRoot, defaultRelPath);
+  return path.isAbsolute(overridePath) ? overridePath : path.resolve(repoRoot, overridePath);
+};
 const policyRelPath = "documents/ops/iam/MSCQR_STAGING_ECS_EXEC_OPERATOR_POLICY_2026-07-02.json";
-const policyPath = path.join(repoRoot, policyRelPath);
+const policyPath = resolvePolicyPath(policyRelPath, process.env.MSCQR_STAGING_IAM_ECS_EXEC_OPERATOR_POLICY_PATH);
 const applyPolicyRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_OPERATOR_POLICY_2026-07-08.json";
-const applyPolicyPath = path.join(repoRoot, applyPolicyRelPath);
+const applyPolicyPath = resolvePolicyPath(applyPolicyRelPath, process.env.MSCQR_STAGING_IAM_APPLY_OPERATOR_POLICY_PATH);
 const applyBoundaryRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json";
-const applyBoundaryPath = path.join(repoRoot, applyBoundaryRelPath);
+const applyBoundaryPath = resolvePolicyPath(applyBoundaryRelPath, process.env.MSCQR_STAGING_IAM_APPLY_BOUNDARY_PATH);
 
 const allowedWildcardResourceActions = new Set([]);
 const allowedActions = new Set([
@@ -32,7 +36,6 @@ const forbiddenProductionFragments = [
 const forbiddenActions = new Set([
   "secretsmanager:GetSecretValue",
   "iam:*",
-  "AdministratorAccess",
 ]);
 const explicitlyAllowedWriteActions = new Set([
   "ecs:ExecuteCommand",
@@ -50,6 +53,15 @@ const asArray = (value) => {
 const addFailure = (message) => failures.push(message);
 
 const hasWildcard = (value) => value === "*" || value.endsWith(":*");
+const invalidArnServiceWildcardReason = (resource) => {
+  if (typeof resource !== "string" || !resource.startsWith("arn:")) return null;
+  const [, partition, service] = resource.split(":", 4);
+  if (!partition || !service) return null;
+  if (/[*?]/.test(service)) {
+    return "Resource ARN service segment must be fully qualified for AWS IAM";
+  }
+  return null;
+};
 const isWriteLikeAction = (action) =>
   /:(Create|Delete|Put|Update|Attach|Detach|Pass|Assume|Start|Stop|Run|Terminate|Write|Execute|Generate)/i.test(action);
 
@@ -145,7 +157,6 @@ const validateApplyPermissionsBoundary = () => {
   let hasMaximumAllow = false;
   let hasRegionDeny = false;
   let hasProductionTagDeny = false;
-  let hasProductionNameDeny = false;
   let hasBoundaryEscalationDeny = false;
 
   for (const [index, statement] of boundary.Statement.entries()) {
@@ -174,7 +185,13 @@ const validateApplyPermissionsBoundary = () => {
       hasMaximumAllow = true;
     }
 
-    const statementText = JSON.stringify(statement);
+    for (const resource of resources) {
+      const invalidReason = invalidArnServiceWildcardReason(resource);
+      if (invalidReason) {
+        addFailure(`${applyBoundaryRelPath}:${sid}: ${invalidReason}: ${resource}.`);
+      }
+    }
+
     if (
       statement.Effect === "Deny" &&
       statement.Condition?.StringNotEquals?.["aws:RequestedRegion"] === "eu-west-2" &&
@@ -189,13 +206,6 @@ const validateApplyPermissionsBoundary = () => {
       statement.Condition?.StringEquals?.["aws:ResourceTag/Environment"]?.includes("production")
     ) {
       hasProductionTagDeny = true;
-    }
-    if (
-      statement.Effect === "Deny" &&
-      statementText.includes("*prod*") &&
-      statementText.includes("*production*")
-    ) {
-      hasProductionNameDeny = true;
     }
     if (
       statement.Effect === "Deny" &&
@@ -216,9 +226,6 @@ const validateApplyPermissionsBoundary = () => {
   }
   if (!hasProductionTagDeny) {
     addFailure(`${applyBoundaryRelPath}: must deny prod/production tagged resources.`);
-  }
-  if (!hasProductionNameDeny) {
-    addFailure(`${applyBoundaryRelPath}: must deny production-looking resource ARNs.`);
   }
   if (!hasBoundaryEscalationDeny) {
     addFailure(`${applyBoundaryRelPath}: must deny boundary removal and inline/attached policy escalation.`);

@@ -31,23 +31,33 @@ Use the AWS console or an approved IAM administrator workflow. Do not commit
 access keys, temporary credentials, CLI profiles, Terraform state, plan
 artifacts, or private tfvars.
 
-1. Create IAM user `mscqr-staging-apply-operator`.
-2. Attach only the operator policy template:
+1. Validate the IAM templates locally before creating or attaching anything:
+
+```sh
+npm run check:staging-iam-policies
+```
+
+The checker must pass before bootstrap. If AWS later rejects the boundary
+template, stop immediately, fix the template in this repository, rerun the local
+checker, and only then rerun the failed bootstrap step.
+
+2. Create IAM user `mscqr-staging-apply-operator`.
+3. Attach only the operator policy template:
    `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_OPERATOR_POLICY_2026-07-08.json`.
-3. Create IAM role `mscqr-staging-terraform-apply-role`.
-4. Configure the role trust policy to allow only
+4. Create IAM role `mscqr-staging-terraform-apply-role`.
+5. Configure the role trust policy to allow only
    `mscqr-staging-apply-operator` to assume it.
-5. Attach the permissions boundary template
+6. Attach the permissions boundary template
    `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json`
    to `mscqr-staging-terraform-apply-role`.
-6. Attach a staging-only Terraform apply permissions policy to the role. Scope
+7. Attach a staging-only Terraform apply permissions policy to the role. Scope
    it to the reviewed staging API resources, `eu-west-2`, and account
-   `368992683803`. Do not attach `AdministratorAccess`.
-7. Confirm `npm run check:staging-iam-policies` passes after the apply operator
+   `368992683803`. Do not attach a broad AWS managed full-access policy.
+8. Confirm `npm run check:staging-iam-policies` passes after the apply operator
    policy and boundary template are reviewed.
-8. Configure a local AWS profile named with staging and apply markers, for
+9. Configure a local AWS profile named with staging and apply markers, for
    example `<staging-apply-profile>`.
-9. Verify the identity:
+10. Verify the identity:
 
 ```sh
 AWS_PROFILE="<staging-apply-profile>" \
@@ -110,8 +120,14 @@ least-privilege staging apply policy. It:
 - denies non-`eu-west-2` requests except global IAM/STS reads required for
   identity and role inspection;
 - denies resources tagged `Environment=prod` or `Environment=production`;
-- denies production-looking resource ARNs;
 - denies permissions-boundary removal and IAM policy escalation actions.
+
+AWS IAM does not accept generic production-name Resource ARNs with wildcarded
+service segments such as `arn:aws:*:*:368992683803:*prod*`. Production-looking
+name and domain blocking is therefore enforced outside the boundary by
+`scripts/apply-staging-terraform.mjs` plan-text checks,
+`scripts/check-staging-aws-apply-identity.mjs` identity checks, and the apply
+approval checklist.
 
 ## CTO Recommendations
 

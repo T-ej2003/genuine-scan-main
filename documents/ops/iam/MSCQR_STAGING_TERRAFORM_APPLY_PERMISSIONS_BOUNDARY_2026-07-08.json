@@ -37,17 +37,6 @@
       }
     },
     {
-      "Sid": "DenyProductionNamedResources",
-      "Effect": "Deny",
-      "Action": "*",
-      "Resource": [
-        "arn:aws:*:*:368992683803:*prod*",
-        "arn:aws:*:*:368992683803:*production*",
-        "arn:aws:iam::368992683803:role/*prod*",
-        "arn:aws:iam::368992683803:role/*production*"
-      ]
-    },
-    {
       "Sid": "DenyBoundaryRemovalAndPolicyEscalation",
       "Effect": "Deny",
       "Action": [
