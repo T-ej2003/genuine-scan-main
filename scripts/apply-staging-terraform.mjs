@@ -403,7 +403,7 @@ export function runApplyWorkflow({
       exitCode: 1,
       payload: {
         status: "apply_failed",
-        reason: error.message || "terraform apply failed; output was not printed.",
+        reason: redactApplyFailureOutput(error.message || "terraform apply failed; output was not printed."),
         identityCheck: redactApplyFailureValue(identityCheck),
         planFilePath: plan.paths.planPathRel,
         counts: plan.counts,

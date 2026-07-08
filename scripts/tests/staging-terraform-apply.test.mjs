@@ -276,6 +276,17 @@ test("staging Terraform apply role policy rejects AdministratorAccess", () => {
   assert.match(combinedOutput(result), /AdministratorAccess is forbidden/);
 });
 
+test("staging Terraform apply role policy rejects managed policy attachment to task role", () => {
+  const result = runIamPolicyCheckWithFixtures({
+    applyRolePolicyMutator: (policy) => {
+      policy.Statement[2].Resource = "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role";
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(combinedOutput(result), /managed policy attach\/detach must target only/);
+});
+
 test("staging Terraform apply role policy rejects global IAM write resources", () => {
   const result = runIamPolicyCheckWithFixtures({
     applyRolePolicyMutator: (policy) => {
@@ -307,6 +318,19 @@ test("staging Terraform apply boundary rejects denies on required staging IAM ro
 
   assert.notEqual(result.status, 0);
   assert.match(combinedOutput(result), /must not deny required staging Terraform IAM action/);
+});
+
+test("staging Terraform apply boundary requires task role managed policy attachment deny", () => {
+  const result = runIamPolicyCheckWithFixtures({
+    boundaryMutator: (boundary) => {
+      boundary.Statement = boundary.Statement.filter(
+        (statement) => statement.Sid !== "DenyManagedPolicyAttachmentsOnStagingTaskRole",
+      );
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(combinedOutput(result), /must deny managed policy attachment to the staging ECS task role/);
 });
 
 test("role markers must be segment-aware", () => {
@@ -514,12 +538,12 @@ test("apply requires exact saved plan under staging plan directory", () => {
 test("terraform apply failure writes redacted local evidence path", () => {
   const fixture = writePlanFixture();
   const writes = new Map();
-  const rawArn = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/staging/database-url";
+  const rawArn = "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role";
   const rawRedisUrl = "redis://staging-cache.internal:6379/0";
   const rawPassword = "stagingPasswordValue";
   const deps = fakeDeps({
     apply: () => {
-      const error = new Error("terraform apply failed; output was not printed.");
+      const error = new Error(`terraform apply failed for ${rawArn}; password = ${rawPassword}`);
       error.applyAttempted = true;
       error.terraformExitStatus = 1;
       error.stdout = `creating ${rawArn} for 368992683803\n`;
@@ -544,6 +568,8 @@ test("terraform apply failure writes redacted local evidence path", () => {
     assert.equal(result.payload.rawSecretValuesPrinted, false);
     assert.match(result.payload.errorEvidencePath, /\.terraform-plans\/staging\/staging-plan\.apply-error-evidence\.json/);
     assert.equal(writes.size, 1);
+    assert.match(result.payload.reason, /<redacted-arn>/);
+    assert.match(result.payload.reason, /<redacted-secret-value>/);
 
     const evidence = [...writes.values()][0];
     assert.doesNotMatch(JSON.stringify(result.payload), /368992683803|arn:aws:|redis:\/\/staging-cache|stagingPasswordValue/);

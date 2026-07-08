@@ -90,6 +90,15 @@
           "iam:PolicyARN": "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
         }
       }
+    },
+    {
+      "Sid": "DenyManagedPolicyAttachmentsOnStagingTaskRole",
+      "Effect": "Deny",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role"
     }
   ]
 }

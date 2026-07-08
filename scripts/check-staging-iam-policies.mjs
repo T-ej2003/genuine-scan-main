@@ -48,6 +48,7 @@ const stagingTerraformManagedRoleArns = new Set([
   "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role",
 ]);
 const stagingTerraformExecutionRoleArn = "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role";
+const stagingTerraformTaskRoleArn = "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role";
 const reviewedEcsExecutionManagedPolicyArn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy";
 const requiredStagingTerraformIamActions = new Set([
   "iam:CreateRole",
@@ -65,6 +66,12 @@ const requiredStagingTerraformIamActions = new Set([
   "iam:AttachRolePolicy",
   "iam:DetachRolePolicy",
 ]);
+const requiredActionAllowedRoleArns = (action) => {
+  if (action === "iam:AttachRolePolicy" || action === "iam:DetachRolePolicy") {
+    return [stagingTerraformExecutionRoleArn];
+  }
+  return [...stagingTerraformManagedRoleArns];
+};
 
 const failures = [];
 
@@ -290,6 +297,7 @@ const validateApplyPermissionsBoundary = () => {
   let hasBoundaryTamperingDeny = false;
   let hasOutsideStagingRoleDeny = false;
   let hasUnreviewedManagedPolicyAttachmentDeny = false;
+  let hasTaskRoleManagedPolicyAttachmentDeny = false;
   const requiredDenyConflicts = [];
 
   for (const [index, statement] of boundary.Statement.entries()) {
@@ -374,12 +382,21 @@ const validateApplyPermissionsBoundary = () => {
     ) {
       hasUnreviewedManagedPolicyAttachmentDeny = true;
     }
+    if (
+      statement.Effect === "Deny" &&
+      actions.includes("iam:AttachRolePolicy") &&
+      actions.includes("iam:DetachRolePolicy") &&
+      resources.length === 1 &&
+      resources[0] === stagingTerraformTaskRoleArn
+    ) {
+      hasTaskRoleManagedPolicyAttachmentDeny = true;
+    }
 
     if (statement.Effect === "Deny") {
       for (const requiredAction of requiredStagingTerraformIamActions) {
         if (!statementDeniesAction(statement, requiredAction)) continue;
 
-        for (const roleArn of stagingTerraformManagedRoleArns) {
+        for (const roleArn of requiredActionAllowedRoleArns(requiredAction)) {
           const resourceDenied =
             resources.includes("*") ||
             resources.includes(roleArn) ||
@@ -417,6 +434,9 @@ const validateApplyPermissionsBoundary = () => {
   }
   if (!hasUnreviewedManagedPolicyAttachmentDeny) {
     addFailure(`${applyBoundaryRelPath}: must deny unreviewed managed policy attachment to the staging ECS execution role.`);
+  }
+  if (!hasTaskRoleManagedPolicyAttachmentDeny) {
+    addFailure(`${applyBoundaryRelPath}: must deny managed policy attachment to the staging ECS task role.`);
   }
   if (requiredDenyConflicts.length > 0) {
     for (const conflict of requiredDenyConflicts) {

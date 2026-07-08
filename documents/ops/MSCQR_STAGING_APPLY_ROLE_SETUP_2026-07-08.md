@@ -154,7 +154,8 @@ least-privilege staging apply policy. It:
 - denies IAM role management outside `mscqr-staging-ecs-execution-role` and
   `mscqr-staging-ecs-task-role`;
 - denies unreviewed managed-policy attachment to the staging ECS execution
-  role.
+  role;
+- denies all managed-policy attachment to the staging ECS task role.
 
 AWS IAM does not accept generic production-name Resource ARNs with wildcarded
 service segments such as `arn:aws:*:*:368992683803:*prod*`. Production-looking

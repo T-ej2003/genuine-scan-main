@@ -244,7 +244,9 @@ Terraform-managed staging ECS roles `mscqr-staging-ecs-execution-role` and
 `arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy` on the
 execution role. The permissions boundary allows those exact IAM operations while
 denying IAM role management outside those staging roles and denying unreviewed
-managed-policy attachment.
+managed-policy attachment. The staging ECS task role does not receive managed
+policy attachments; its Terraform-managed permissions must remain inline and
+reviewed in this module.
 
 ECS Exec task-role permissions are limited to the four SSM Messages channel actions required by ECS Exec, decrypt access to the staging ECS Exec KMS key for the managed agent, and CloudWatch Logs write permissions to `/aws/ecs/mscqr-staging/exec`. AWS does not support resource-level ARNs for the SSM Messages channel actions or `logs:DescribeLogGroups`, so those policy statements use `Resource = "*"` with the action lists constrained and `aws:RequestedRegion` pinned to `var.aws_region`.
 
