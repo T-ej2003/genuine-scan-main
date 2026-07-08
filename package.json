@@ -27,6 +27,7 @@
     "check:staging-aws-apply-identity": "node scripts/check-staging-aws-apply-identity.mjs",
     "check:staging-private-inputs": "node scripts/check-staging-private-inputs.mjs",
     "check:staging-runtime-secret-sync": "node scripts/check-staging-runtime-secret-sync.mjs",
+    "check:staging-hardening-posture": "node scripts/check-staging-hardening-posture.mjs",
     "plan:staging-terraform": "node scripts/plan-staging-terraform.mjs",
     "apply:staging-terraform": "node scripts/apply-staging-terraform.mjs",
     "check:aws-dr-safety": "node scripts/check-aws-dr-safety.mjs",
