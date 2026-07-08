@@ -77,7 +77,10 @@ group on 4000.
 PR #102 adds the controlled apply path but does not authorize an apply. After a
 separate human apply approval exists, use a dedicated staging apply role created
 from `documents/ops/MSCQR_STAGING_APPLY_ROLE_SETUP_2026-07-08.md`. The plan role
-must not be reused for apply.
+must not be reused for apply. The apply role must have the permissions boundary
+template
+`documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json`
+attached before the real apply window.
 
 Validate the apply identity before the approved apply window:
 
@@ -107,6 +110,10 @@ plan evidence, destroy actions, unexpected change counts, world-open ingress,
 secret URL patterns, production-looking plan text, raw apply options, and
 `TF_CLI_ARGS*` overrides. It prints safe JSON only and does not print Terraform
 apply stdout or stderr.
+
+After the controlled apply window, disable or delete any long-lived access keys
+for `mscqr-staging-apply-operator` and record that evidence before closing the
+approval ticket.
 
 ## Post-Apply Runtime Secret Sync
 

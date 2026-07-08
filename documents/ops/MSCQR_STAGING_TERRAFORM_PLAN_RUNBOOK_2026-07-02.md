@@ -120,7 +120,9 @@ group evidence, private-input guard evidence, identity guard evidence, cost
 evidence, rollback notes, and the exact commit.
 
 C. Select the separate staging apply role, not the plan role. Verify it before
-the approved apply window:
+the approved apply window. The role must have the permissions boundary template
+`documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json`
+attached before this step:
 
 ```sh
 set +x
@@ -192,6 +194,10 @@ F. Run the staging health check against the reviewed staging ALB URL. Do not use
 `mscqr.com`, production CloudFront, production ALB, production RDS, production
 Redis, or production Secrets Manager values as staging evidence.
 
+G. Disable or delete any long-lived access keys for
+`mscqr-staging-apply-operator` after the controlled apply window and record the
+key shutdown evidence.
+
 Terraform outputs and state may contain staging endpoint hostnames, ports,
 resource identifiers, database name, and database username. They must not
 contain the DB password, the final `DATABASE_URL`, the final `REDIS_URL`, Redis
@@ -223,6 +229,7 @@ Before any future apply approval is considered, a reviewer must confirm:
   S3.
 - The apply role setup runbook is complete and the plan role is not used for
   apply.
+- The apply permissions boundary template is attached to the apply role.
 - `npm run check:staging-aws-apply-identity` passed for the selected apply
   profile.
 - The apply command uses `npm run apply:staging-terraform` with the exact saved

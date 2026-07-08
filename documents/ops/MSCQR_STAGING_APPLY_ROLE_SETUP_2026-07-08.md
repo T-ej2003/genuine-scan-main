@@ -15,6 +15,9 @@ wrapper.
 - Apply role: `mscqr-staging-terraform-apply-role`.
 - The apply user can only call `sts:AssumeRole` for the apply role by using
   `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_OPERATOR_POLICY_2026-07-08.json`.
+- The apply role must have the permissions boundary template
+  `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json`
+  attached before the real apply window.
 - The apply role is for staging Terraform apply only. Do not use it for plan
   generation, production resources, production DB work, deployment, RLS
   enablement, or routine inspection.
@@ -34,12 +37,17 @@ artifacts, or private tfvars.
 3. Create IAM role `mscqr-staging-terraform-apply-role`.
 4. Configure the role trust policy to allow only
    `mscqr-staging-apply-operator` to assume it.
-5. Attach a staging-only Terraform apply permissions policy to the role. Scope
+5. Attach the permissions boundary template
+   `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json`
+   to `mscqr-staging-terraform-apply-role`.
+6. Attach a staging-only Terraform apply permissions policy to the role. Scope
    it to the reviewed staging API resources, `eu-west-2`, and account
    `368992683803`. Do not attach `AdministratorAccess`.
-6. Configure a local AWS profile named with staging and apply markers, for
+7. Confirm `npm run check:staging-iam-policies` passes after the apply operator
+   policy and boundary template are reviewed.
+8. Configure a local AWS profile named with staging and apply markers, for
    example `<staging-apply-profile>`.
-7. Verify the identity:
+9. Verify the identity:
 
 ```sh
 AWS_PROFILE="<staging-apply-profile>" \
@@ -88,13 +96,26 @@ npm run apply:staging-terraform -- ".terraform-plans/staging/<approved-plan>.tfp
 
 After apply, switch back to the plan role for inspection, run the post-apply
 runtime secret sync workflow, then force the staging ECS redeploy only through
-its own explicit gate.
+its own explicit gate. After the first controlled apply window closes, disable
+or delete any long-lived access keys for `mscqr-staging-apply-operator` and
+record the key shutdown evidence before marking the apply ticket complete.
+
+## Permissions Boundary Contract
+
+The boundary template is not the apply role permissions policy. It is a maximum
+permissions guardrail that must be attached to the role in addition to the
+least-privilege staging apply policy. It:
+
+- allows the role policy to define the actual staging permissions;
+- denies non-`eu-west-2` requests except global IAM/STS reads required for
+  identity and role inspection;
+- denies resources tagged `Environment=prod` or `Environment=production`;
+- denies production-looking resource ARNs;
+- denies permissions-boundary removal and IAM policy escalation actions.
 
 ## CTO Recommendations
 
-- Keep the apply role short-lived operationally. Disable or remove its access
-  keys when the first controlled staging apply window is complete.
-- Add a permissions boundary for `mscqr-staging-terraform-apply-role` before
-  future applies so even policy drift cannot reach production-like resources.
 - Move toward OIDC-based role assumption from a protected GitHub environment
   once the manual first-apply path is proven.
+- Replace long-lived apply-operator access keys with short-lived federation as
+  soon as the first controlled apply flow is proven.

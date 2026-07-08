@@ -5,7 +5,7 @@ import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-import { runAwsApplyCallerIdentity } from "./check-staging-aws-apply-identity.mjs";
+import { hasNameMarker, runAwsApplyCallerIdentity } from "./check-staging-aws-apply-identity.mjs";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const terraformRoot = "infra/terraform/staging-api";
@@ -80,14 +80,14 @@ export function validateApplyProfile(env = process.env) {
   const profile = String(env.AWS_PROFILE || "").toLowerCase();
   const failures = [];
   if (!profile) failures.push("AWS_PROFILE is required for staging apply.");
-  if (profile && !(profile.includes("staging") || profile.includes("stg"))) {
+  if (profile && !hasNameMarker(profile, ["staging", "stg"])) {
     failures.push("AWS_PROFILE must contain staging/stg.");
   }
-  if (profile && !profile.includes("apply")) failures.push("AWS_PROFILE must contain apply.");
-  if (profile && (profile.includes("prod") || profile.includes("production"))) {
+  if (profile && !hasNameMarker(profile, ["apply"])) failures.push("AWS_PROFILE must contain apply.");
+  if (profile && hasNameMarker(profile, ["prod", "production"])) {
     failures.push("AWS_PROFILE must not be production-looking.");
   }
-  if (profile && (profile.includes("plan") || profile.includes("read"))) {
+  if (profile && hasNameMarker(profile, ["plan", "read"])) {
     failures.push("AWS_PROFILE must not be the plan/read-only profile.");
   }
   return failures;
@@ -148,12 +148,36 @@ function readPlanText(filePath) {
   }
 }
 
+const worldOpenCidrPattern = /(?:"0\.0\.0\.0\/0"|"::\/0"|\b0\.0\.0\.0\/0\b|\b::\/0\b)/;
+const securityGroupIngressResourcePattern = /resource\s+"aws_(?:vpc_)?security_group_ingress_rule"\s+"/;
+const securityGroupResourcePattern = /resource\s+"aws_security_group"\s+"/;
+const ingressStartPattern = /^\s*[+~]?\s*ingress\s*(?:=|\{)/;
+const egressStartPattern = /^\s*[+~]?\s*egress\s*(?:=|\{)/;
+
 function countWorldOpenIngress(planText) {
   const blocks = planText.split(/\n\s*# /g);
-  return blocks.filter((block) =>
-    /aws_(?:vpc_)?security_group_ingress_rule|ingress\s*\{/.test(block) &&
-    /(?:cidr_ipv4|cidr_ipv6|cidr_blocks|ipv6_cidr_blocks)\s+=\s+(?:"0\.0\.0\.0\/0"|"::\/0"|\[[^\]]*(?:"0\.0\.0\.0\/0"|"::\/0")[^\]]*\])/.test(block)
-  ).length;
+  let count = 0;
+
+  for (const block of blocks) {
+    if (securityGroupIngressResourcePattern.test(block) && worldOpenCidrPattern.test(block)) {
+      count += 1;
+      continue;
+    }
+
+    if (!securityGroupResourcePattern.test(block)) continue;
+
+    let inIngress = false;
+    for (const line of block.split("\n")) {
+      if (egressStartPattern.test(line)) inIngress = false;
+      if (ingressStartPattern.test(line)) inIngress = true;
+      if (inIngress && worldOpenCidrPattern.test(line)) {
+        count += 1;
+        break;
+      }
+    }
+  }
+
+  return count;
 }
 
 export function inspectPlanText(planText) {

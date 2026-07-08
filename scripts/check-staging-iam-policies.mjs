@@ -8,6 +8,8 @@ const policyRelPath = "documents/ops/iam/MSCQR_STAGING_ECS_EXEC_OPERATOR_POLICY_
 const policyPath = path.join(repoRoot, policyRelPath);
 const applyPolicyRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_OPERATOR_POLICY_2026-07-08.json";
 const applyPolicyPath = path.join(repoRoot, applyPolicyRelPath);
+const applyBoundaryRelPath = "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json";
+const applyBoundaryPath = path.join(repoRoot, applyBoundaryRelPath);
 
 const allowedWildcardResourceActions = new Set([]);
 const allowedActions = new Set([
@@ -127,6 +129,104 @@ const validateApplyOperatorPolicy = () => {
 
 validateApplyOperatorPolicy();
 
+const validateApplyPermissionsBoundary = () => {
+  const result = readPolicy(applyBoundaryRelPath, applyBoundaryPath);
+  if (!result?.json) return;
+
+  const boundary = result.json;
+  if (boundary.Version !== "2012-10-17") {
+    addFailure(`${applyBoundaryRelPath}: Version must be 2012-10-17.`);
+  }
+  if (!Array.isArray(boundary.Statement) || boundary.Statement.length === 0) {
+    addFailure(`${applyBoundaryRelPath}: Statement must be a non-empty array.`);
+    return;
+  }
+
+  let hasMaximumAllow = false;
+  let hasRegionDeny = false;
+  let hasProductionTagDeny = false;
+  let hasProductionNameDeny = false;
+  let hasBoundaryEscalationDeny = false;
+
+  for (const [index, statement] of boundary.Statement.entries()) {
+    const sid = statement.Sid || `BoundaryStatement${index}`;
+    const actions = asArray(statement.Action);
+    const notActions = asArray(statement.NotAction);
+    const resources = asArray(statement.Resource);
+
+    if (!["Allow", "Deny"].includes(statement.Effect)) {
+      addFailure(`${applyBoundaryRelPath}:${sid}: Effect must be Allow or Deny.`);
+    }
+    if (actions.length > 0 && notActions.length > 0) {
+      addFailure(`${applyBoundaryRelPath}:${sid}: use Action or NotAction, not both.`);
+    }
+    if (resources.length === 0) {
+      addFailure(`${applyBoundaryRelPath}:${sid}: Resource must be present.`);
+    }
+
+    if (
+      statement.Effect === "Allow" &&
+      actions.length === 1 &&
+      actions[0] === "*" &&
+      resources.length === 1 &&
+      resources[0] === "*"
+    ) {
+      hasMaximumAllow = true;
+    }
+
+    const statementText = JSON.stringify(statement);
+    if (
+      statement.Effect === "Deny" &&
+      statement.Condition?.StringNotEquals?.["aws:RequestedRegion"] === "eu-west-2" &&
+      resources.length === 1 &&
+      resources[0] === "*"
+    ) {
+      hasRegionDeny = true;
+    }
+    if (
+      statement.Effect === "Deny" &&
+      statement.Condition?.StringEquals?.["aws:ResourceTag/Environment"]?.includes("prod") &&
+      statement.Condition?.StringEquals?.["aws:ResourceTag/Environment"]?.includes("production")
+    ) {
+      hasProductionTagDeny = true;
+    }
+    if (
+      statement.Effect === "Deny" &&
+      statementText.includes("*prod*") &&
+      statementText.includes("*production*")
+    ) {
+      hasProductionNameDeny = true;
+    }
+    if (
+      statement.Effect === "Deny" &&
+      actions.includes("iam:DeleteRolePermissionsBoundary") &&
+      actions.includes("iam:PutRolePermissionsBoundary") &&
+      actions.includes("iam:AttachRolePolicy") &&
+      actions.includes("iam:PutRolePolicy")
+    ) {
+      hasBoundaryEscalationDeny = true;
+    }
+  }
+
+  if (!hasMaximumAllow) {
+    addFailure(`${applyBoundaryRelPath}: must include an Allow * / Resource * maximum permissions statement.`);
+  }
+  if (!hasRegionDeny) {
+    addFailure(`${applyBoundaryRelPath}: must deny non-eu-west-2 requests.`);
+  }
+  if (!hasProductionTagDeny) {
+    addFailure(`${applyBoundaryRelPath}: must deny prod/production tagged resources.`);
+  }
+  if (!hasProductionNameDeny) {
+    addFailure(`${applyBoundaryRelPath}: must deny production-looking resource ARNs.`);
+  }
+  if (!hasBoundaryEscalationDeny) {
+    addFailure(`${applyBoundaryRelPath}: must deny boundary removal and inline/attached policy escalation.`);
+  }
+};
+
+validateApplyPermissionsBoundary();
+
 if (policy) {
   if (policy.Version !== "2012-10-17") {
     addFailure(`${policyRelPath}: Version must be 2012-10-17.`);
@@ -231,4 +331,6 @@ if (failures.length > 0) {
 console.log("Staging IAM policy lint passed.");
 console.log(`Validated policy: ${policyRelPath}`);
 console.log(`Validated policy: ${applyPolicyRelPath}`);
-console.log("Allowed Resource=\"*\" exceptions: none.");
+console.log(`Validated policy: ${applyBoundaryRelPath}`);
+console.log("ECS Exec and apply operator Resource=\"*\" exceptions: none.");
+console.log("Apply permissions boundary intentionally uses wildcard maximum and deny statements.");

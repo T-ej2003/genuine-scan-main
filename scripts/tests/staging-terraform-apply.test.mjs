@@ -80,6 +80,18 @@ test("apply identity guard allows only assumed staging apply role", () => {
   assert.equal(result.classification, "staging-apply-role");
 });
 
+test("apply identity guard allows stg abbreviation role marker", () => {
+  const result = evaluateStagingAwsApplyIdentity({
+    env: { AWS_REGION: "eu-west-2" },
+    identity: {
+      Account: "368992683803",
+      Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-stg-terraform-apply-role/session",
+    },
+  });
+
+  assert.equal(result.allowed, true);
+});
+
 test("root identity blocks", () => {
   const result = evaluateStagingAwsApplyIdentity({
     env: { AWS_REGION: "eu-west-2" },
@@ -93,6 +105,32 @@ test("root identity blocks", () => {
   assert.equal(result.classification, "root");
 });
 
+test("iam user identity blocks", () => {
+  const result = evaluateStagingAwsApplyIdentity({
+    env: { AWS_REGION: "eu-west-2" },
+    identity: {
+      Account: "368992683803",
+      Arn: "arn:aws:iam::368992683803:user/mscqr-staging-apply-operator",
+    },
+  });
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.classification, "user");
+});
+
+test("wrong account blocks", () => {
+  const result = evaluateStagingAwsApplyIdentity({
+    env: { AWS_REGION: "eu-west-2" },
+    identity: {
+      Account: "111111111111",
+      Arn: "arn:aws:sts::111111111111:assumed-role/mscqr-staging-terraform-apply-role/session",
+    },
+  });
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.classification, "wrong-account");
+});
+
 test("plan role blocks", () => {
   const result = evaluateStagingAwsApplyIdentity({
     env: { AWS_REGION: "eu-west-2" },
@@ -104,6 +142,32 @@ test("plan role blocks", () => {
 
   assert.equal(result.allowed, false);
   assert.equal(result.classification, "plan-role");
+});
+
+test("production-looking role blocks", () => {
+  const result = evaluateStagingAwsApplyIdentity({
+    env: { AWS_REGION: "eu-west-2" },
+    identity: {
+      Account: "368992683803",
+      Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-terraform-apply-role/session",
+    },
+  });
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.classification, "production-looking-role");
+});
+
+test("role markers must be segment-aware", () => {
+  const result = evaluateStagingAwsApplyIdentity({
+    env: { AWS_REGION: "eu-west-2" },
+    identity: {
+      Account: "368992683803",
+      Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-notstg-terraform-apply-role/session",
+    },
+  });
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.classification, "unmarked-apply-role");
 });
 
 test("wrong region blocks", () => {
@@ -128,6 +192,8 @@ test("missing gates block apply", () => {
 
 test("apply profile must be staging apply profile", () => {
   assert.deepEqual(validateApplyProfile({ AWS_PROFILE: "mscqr-staging-apply" }), []);
+  assert.deepEqual(validateApplyProfile({ AWS_PROFILE: "mscqr-stg-apply" }), []);
+  assert(validateApplyProfile({ AWS_PROFILE: "mscqr-notstg-apply" }).includes("AWS_PROFILE must contain staging/stg."));
   assert(validateApplyProfile({ AWS_PROFILE: "mscqr-staging-plan" }).includes("AWS_PROFILE must contain apply."));
   assert(validateApplyProfile({ AWS_PROFILE: "mscqr-production-apply" }).includes("AWS_PROFILE must not be production-looking."));
 });
@@ -171,6 +237,55 @@ test("world-open ingress blocks", () => {
   try {
     const evaluated = evaluateSavedPlan({ planArg: fixture.planPath, env: baseEnv(), root: fixture.root });
     assert(evaluated.blockers.includes("world_open_ingress"));
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("inline aws_security_group world-open ingress blocks", () => {
+  const fixture = writePlanFixture({
+    planText: [
+      "# aws_security_group.bad will be created",
+      "+ resource \"aws_security_group\" \"bad\" {",
+      "  + ingress = [",
+      "      + {",
+      "          + cidr_blocks = [",
+      "              + \"0.0.0.0/0\",",
+      "            ]",
+      "          + from_port   = 443",
+      "          + to_port     = 443",
+      "        },",
+      "    ]",
+      "}",
+    ].join("\n"),
+  });
+  try {
+    const evaluated = evaluateSavedPlan({ planArg: fixture.planPath, env: baseEnv(), root: fixture.root });
+    assert(evaluated.blockers.includes("world_open_ingress"));
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("inline aws_security_group world-open egress does not count as ingress", () => {
+  const fixture = writePlanFixture({
+    planText: [
+      "# aws_security_group.ok will be created",
+      "+ resource \"aws_security_group\" \"ok\" {",
+      "  + egress = [",
+      "      + {",
+      "          + cidr_blocks = [",
+      "              + \"0.0.0.0/0\",",
+      "            ]",
+      "        },",
+      "    ]",
+      "}",
+    ].join("\n"),
+  });
+  try {
+    const evaluated = evaluateSavedPlan({ planArg: fixture.planPath, env: baseEnv(), root: fixture.root });
+    assert.equal(evaluated.textInspection.worldOpenIngressCount, 0);
+    assert(!evaluated.blockers.includes("world_open_ingress"));
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

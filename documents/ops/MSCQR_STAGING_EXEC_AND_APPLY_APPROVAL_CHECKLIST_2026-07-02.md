@@ -21,6 +21,7 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Required status check is enabled and verified: `Staging Infra Validation/Staging IAM policy lint`.
 - [ ] First staging plan was generated through `npm run plan:staging-terraform`; raw first-plan commands are not accepted. See `documents/ops/MSCQR_STAGING_TERRAFORM_PLAN_RUNBOOK_2026-07-02.md`.
 - [ ] Staging apply role setup is complete using `documents/ops/MSCQR_STAGING_APPLY_ROLE_SETUP_2026-07-08.md`.
+- [ ] The permissions boundary template `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json` is attached to `mscqr-staging-terraform-apply-role`.
 - [ ] The staging plan role remains read/plan only and will not be used for apply.
 - [ ] The selected apply profile is the staging apply profile, not a plan/read profile and not production-looking.
 - [ ] `npm run check:staging-aws-apply-identity` passed with `AWS_PROFILE="<staging-apply-profile>"` and `AWS_REGION="eu-west-2"`.
@@ -77,6 +78,7 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Apply was run only after separate human approval; this checklist entry records the result and does not authorize apply by itself.
 - [ ] Apply evidence was produced by `scripts/apply-staging-terraform.mjs` and did not include Terraform stdout/stderr, secrets, private tfvars, state, or plan artifact contents.
 - [ ] After apply, the operator switched back to the staging plan role for inspection.
+- [ ] Any long-lived access keys for `mscqr-staging-apply-operator` were disabled or deleted after the controlled apply window and key shutdown evidence is recorded.
 - [ ] Terraform output review confirms staging RDS endpoint/address/port and staging Redis primary endpoint/address/port exist.
 - [ ] Terraform output review confirms no password, token, or full connection URL was emitted.
 - [ ] Terraform state location remains private and access controlled.

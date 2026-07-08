@@ -9,6 +9,18 @@ const DEFAULT_REGION = "eu-west-2";
 const DEFAULT_ACCOUNT_ID = "368992683803";
 const PRODUCTION_ROLE_MARKERS = ["prod", "production"];
 
+export function nameSegments(value) {
+  return String(value || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+export function hasNameMarker(value, markers) {
+  const segments = new Set(nameSegments(value));
+  return markers.some((marker) => segments.has(marker));
+}
+
 export function usage() {
   return `Usage: node scripts/check-staging-aws-apply-identity.mjs
 
@@ -34,11 +46,11 @@ export function evaluateStagingAwsApplyIdentity({ identity, env = process.env } 
   const account = identity?.Account || null;
   const parsed = parseAwsArn(identity?.Arn);
   const name = parsed.identityName.toLowerCase();
-  const hasStagingMarker = name.includes("staging") || name.includes("stg");
-  const hasApplyMarker = name.includes("apply");
-  const hasTerraformMarker = name.includes("terraform") || name.includes("provision");
-  const hasProductionMarker = PRODUCTION_ROLE_MARKERS.some((marker) => name.includes(marker));
-  const hasPlanMarker = name.includes("plan") || name.includes("read");
+  const hasStagingMarker = hasNameMarker(name, ["staging", "stg"]);
+  const hasApplyMarker = hasNameMarker(name, ["apply"]);
+  const hasTerraformMarker = hasNameMarker(name, ["terraform", "provision"]);
+  const hasProductionMarker = hasNameMarker(name, PRODUCTION_ROLE_MARKERS);
+  const hasPlanMarker = hasNameMarker(name, ["plan", "read"]);
 
   let refusalReason = null;
   let classification = "staging-apply-role";
@@ -64,7 +76,7 @@ export function evaluateStagingAwsApplyIdentity({ identity, env = process.env } 
   } else if (hasProductionMarker) {
     refusalReason = "Production-looking role names are refused for staging Terraform apply.";
     classification = "production-looking-role";
-  } else if (name.includes("root")) {
+  } else if (hasNameMarker(name, ["root"])) {
     refusalReason = "Root-looking role names are refused for staging Terraform apply.";
     classification = "root-looking-role";
   } else if (hasPlanMarker) {
