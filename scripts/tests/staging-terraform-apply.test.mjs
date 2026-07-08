@@ -292,7 +292,8 @@ test("inline aws_security_group world-open egress does not count as ingress", ()
 });
 
 test("secret URL patterns block", () => {
-  const fixture = writePlanFixture({ planText: "postgresql://user:pass@staging-db.internal/mscqr\n" });
+  // Keep this marker URL-shaped but non-credentialed so repository fixture scans stay secret-safe.
+  const fixture = writePlanFixture({ planText: "postgresql://<redacted-service-url>\n" });
   try {
     const evaluated = evaluateSavedPlan({ planArg: fixture.planPath, env: baseEnv(), root: fixture.root });
     assert(evaluated.blockers.includes("secret_url_pattern_in_plan_text"));
