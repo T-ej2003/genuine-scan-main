@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -65,6 +66,36 @@ function fakeDeps(overrides = {}) {
     writeFile: () => calls.push("writeFile"),
     ...overrides,
   };
+}
+
+function runIamPolicyCheckWithBoundaryResource(resource) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-boundary-test-"));
+  const boundarySourcePath = path.join(
+    process.cwd(),
+    "documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json",
+  );
+  const boundary = JSON.parse(fs.readFileSync(boundarySourcePath, "utf8"));
+  boundary.Statement.push({
+    Sid: "DenyInvalidFixtureResource",
+    Effect: "Deny",
+    Action: "*",
+    Resource: resource,
+  });
+
+  const fixturePath = path.join(root, "boundary.json");
+  fs.writeFileSync(fixturePath, JSON.stringify(boundary, null, 2), "utf8");
+
+  const result = spawnSync("node", ["scripts/check-staging-iam-policies.mjs"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      MSCQR_STAGING_IAM_APPLY_BOUNDARY_PATH: fixturePath,
+    },
+    encoding: "utf8",
+  });
+
+  fs.rmSync(root, { recursive: true, force: true });
+  return result;
 }
 
 test("apply identity guard allows only assumed staging apply role", () => {
@@ -155,6 +186,24 @@ test("production-looking role blocks", () => {
 
   assert.equal(result.allowed, false);
   assert.equal(result.classification, "production-looking-role");
+});
+
+test("staging IAM policy lint rejects boundary Resource ARN service wildcard patterns", async (t) => {
+  const invalidResources = [
+    "arn:aws:*:*:368992683803:*prod*",
+    "arn:aws:*:*:368992683803:*production*",
+  ];
+
+  for (const resource of invalidResources) {
+    await t.test(resource, () => {
+      const result = runIamPolicyCheckWithBoundaryResource(resource);
+      const combinedOutput = `${result.stdout}\n${result.stderr}`;
+
+      assert.notEqual(result.status, 0);
+      assert.match(combinedOutput, /Resource ARN service segment must be fully qualified/);
+      assert.match(combinedOutput, new RegExp(resource.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    });
+  }
 });
 
 test("role markers must be segment-aware", () => {
