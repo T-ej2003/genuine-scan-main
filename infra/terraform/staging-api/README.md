@@ -9,7 +9,9 @@ Hard rules:
 - Do not put secret values in `terraform.tfvars` or committed files.
 - Keep resource names containing `staging` or `stg`; production names are forbidden.
 - The provider pins `allowed_account_ids = [var.account_id]`; wrong active AWS credentials should fail provider initialization or plan.
-- Account `368992683803` may be used for staging only through a least-privilege staging provisioning role. Root credentials must not be used for apply.
+- Account `368992683803` may be used for staging only through least-privilege staging roles. Root credentials must not be used for plan or apply.
+- The staging plan role and staging apply role must remain separate. The plan role is read/plan only; the apply role is selected only after a separate human apply approval.
+- Staging apply must use `npm run apply:staging-terraform -- ".terraform-plans/staging/<approved-plan>.tfplan"` with explicit gates and a saved plan file. Raw `terraform apply` is not an accepted operator path.
 - `allowed_operator_cidrs` must stay narrow. Broad public ingress such as `0.0.0.0/0`, `::/0`, and broad IPv4 masks are rejected by variable validation.
 - Any planned `0.0.0.0/0` ingress, `::/0` ingress, destroy action, or production-looking resource name is an apply blocker.
 - ALB ingress must remain restricted to reviewed operator CIDRs only. ALB egress must remain restricted to the staging ECS security group on backend port 4000.
@@ -69,6 +71,49 @@ outside the reviewed operator CIDRs, DB ingress outside the ECS security group
 on 5432, Redis ingress outside the ECS security group on 6379, ECS ingress
 outside the ALB security group on 4000, or ALB egress outside the ECS security
 group on 4000.
+
+## Controlled Staging Apply Wrapper
+
+PR #102 adds the controlled apply path but does not authorize an apply. After a
+separate human apply approval exists, use a dedicated staging apply role created
+from `documents/ops/MSCQR_STAGING_APPLY_ROLE_SETUP_2026-07-08.md`. The plan role
+must not be reused for apply. The apply role must have the permissions boundary
+template
+`documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json`
+attached before the real apply window.
+
+Validate the apply identity before the approved apply window:
+
+```sh
+set +x
+AWS_PROFILE="<staging-apply-profile>" \
+AWS_REGION="eu-west-2" \
+npm run check:staging-aws-apply-identity
+```
+
+Apply only the exact reviewed saved plan:
+
+```sh
+set +x
+AWS_PROFILE="<staging-apply-profile>" \
+AWS_REGION="eu-west-2" \
+MSCQR_STAGING_TERRAFORM_APPLY_ENABLED=true \
+MSCQR_STAGING_TERRAFORM_APPLY_CONFIRM=MSCQR_APPLY_STAGING_TERRAFORM_ONCE \
+MSCQR_STAGING_TERRAFORM_APPLY_EXPECTED_ADD_COUNT=38 \
+MSCQR_STAGING_TERRAFORM_APPLY_EXPECTED_CHANGE_COUNT=0 \
+npm run apply:staging-terraform -- ".terraform-plans/staging/<approved-plan>.tfplan"
+```
+
+The wrapper refuses root, non-`eu-west-2`, non-assumed-role identity, plan/read
+roles, production-looking role or profile names, missing gates, missing saved
+plan evidence, destroy actions, unexpected change counts, world-open ingress,
+secret URL patterns, production-looking plan text, raw apply options, and
+`TF_CLI_ARGS*` overrides. It prints safe JSON only and does not print Terraform
+apply stdout or stderr.
+
+After the controlled apply window, disable or delete any long-lived access keys
+for `mscqr-staging-apply-operator` and record that evidence before closing the
+approval ticket.
 
 ## Post-Apply Runtime Secret Sync
 
@@ -176,6 +221,13 @@ The module models:
 
 ECS Exec task-role permissions are limited to the four SSM Messages channel actions required by ECS Exec, decrypt access to the staging ECS Exec KMS key for the managed agent, and CloudWatch Logs write permissions to `/aws/ecs/mscqr-staging/exec`. AWS does not support resource-level ARNs for the SSM Messages channel actions or `logs:DescribeLogGroups`, so those policy statements use `Resource = "*"` with the action lists constrained and `aws:RequestedRegion` pinned to `var.aws_region`.
 
-Before any `terraform apply`, assume the reviewed least-privilege staging provisioning role and complete `documents/ops/MSCQR_STAGING_EXEC_AND_APPLY_APPROVAL_CHECKLIST_2026-07-02.md`, including reviewed plan evidence. Before any `ecs execute-command`, review the staging-only operator policy template at `documents/ops/iam/MSCQR_STAGING_ECS_EXEC_OPERATOR_POLICY_2026-07-02.json` and record the approval/evidence ID.
+Before any staging apply, assume the separate staging apply role, run
+`npm run check:staging-aws-apply-identity`, and complete
+`documents/ops/MSCQR_STAGING_EXEC_AND_APPLY_APPROVAL_CHECKLIST_2026-07-02.md`,
+including reviewed plan evidence. After apply, switch back to the plan role for
+inspection. Before any `ecs execute-command`, review the staging-only operator
+policy template at
+`documents/ops/iam/MSCQR_STAGING_ECS_EXEC_OPERATOR_POLICY_2026-07-02.json` and
+record the approval/evidence ID.
 
 GitHub environment variables are intentionally documented outside this Terraform root and are not managed here.

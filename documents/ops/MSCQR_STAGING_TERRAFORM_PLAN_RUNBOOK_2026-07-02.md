@@ -17,8 +17,8 @@ under `.terraform-plans/staging/` and prints only a safe summary.
 
 - PR #96 required GitHub checks are configured and verified for `main` or for a
   path-scoped ruleset.
-- The operator has assumed a least-privilege staging Terraform provisioning
-  role.
+- The operator has assumed the least-privilege staging Terraform plan role for
+  plan generation only.
 - AWS caller identity is verified with `npm run check:staging-aws-identity`.
 - Root identity is not active.
 - The AWS account ID is the approved staging account, default `368992683803`,
@@ -96,8 +96,10 @@ Do not commit:
 ## No-Apply Policy
 
 This runbook stops at plan generation. `terraform apply` is forbidden here even
-if the plan is clean. Apply approval requires a future apply-specific approval
-record, checklist, evidence review, and explicit human approval.
+if the plan is clean. Apply approval requires an apply-specific approval record,
+checklist, evidence review, explicit human approval, and the separate staging
+apply role described in
+`documents/ops/MSCQR_STAGING_APPLY_ROLE_SETUP_2026-07-08.md`.
 
 Cost evidence must be created after the first real plan and before any future
 apply approval. Use
@@ -117,8 +119,37 @@ B. Record separate human apply approval with reviewed plan counts, security
 group evidence, private-input guard evidence, identity guard evidence, cost
 evidence, rollback notes, and the exact commit.
 
-C. Run `terraform apply` only from the approved operator context and only after
-the apply approval is signed. This runbook does not authorize that command.
+C. Select the separate staging apply role, not the plan role. Verify it before
+the approved apply window. The role must have the permissions boundary template
+`documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json`
+attached before this step:
+
+```sh
+set +x
+AWS_PROFILE="<staging-apply-profile>" \
+AWS_REGION="eu-west-2" \
+npm run check:staging-aws-apply-identity
+```
+
+Then apply only the exact reviewed saved plan through the wrapper:
+
+```sh
+set +x
+AWS_PROFILE="<staging-apply-profile>" \
+AWS_REGION="eu-west-2" \
+MSCQR_STAGING_TERRAFORM_APPLY_ENABLED=true \
+MSCQR_STAGING_TERRAFORM_APPLY_CONFIRM=MSCQR_APPLY_STAGING_TERRAFORM_ONCE \
+MSCQR_STAGING_TERRAFORM_APPLY_EXPECTED_ADD_COUNT=38 \
+MSCQR_STAGING_TERRAFORM_APPLY_EXPECTED_CHANGE_COUNT=0 \
+npm run apply:staging-terraform -- ".terraform-plans/staging/<approved-plan>.tfplan"
+```
+
+Do not run raw `terraform apply`. The wrapper refuses missing gates, root,
+non-`eu-west-2`, non-assumed-role identity, plan/read roles, production-looking
+role/profile names, missing saved plan evidence, destroy actions, unexpected
+change counts, world-open ingress, secret URL patterns, production-looking plan
+text, raw apply options, and `TF_CLI_ARGS*` overrides. This runbook records the
+approved sequence; this PR does not authorize execution of that command.
 
 D. Sync the staging runtime endpoint secrets with the post-apply script. First
 run the dry-run:
@@ -163,6 +194,10 @@ F. Run the staging health check against the reviewed staging ALB URL. Do not use
 `mscqr.com`, production CloudFront, production ALB, production RDS, production
 Redis, or production Secrets Manager values as staging evidence.
 
+G. Disable or delete any long-lived access keys for
+`mscqr-staging-apply-operator` after the controlled apply window and record the
+key shutdown evidence.
+
 Terraform outputs and state may contain staging endpoint hostnames, ports,
 resource identifiers, database name, and database username. They must not
 contain the DB password, the final `DATABASE_URL`, the final `REDIS_URL`, Redis
@@ -192,6 +227,17 @@ Before any future apply approval is considered, a reviewer must confirm:
 - KMS key and rotation settings are present.
 - Cost estimate is accepted for ALB, ECS, RDS, Redis, CloudWatch Logs, KMS, and
   S3.
+- The apply role setup runbook is complete and the plan role is not used for
+  apply.
+- The apply permissions boundary template is attached to the apply role.
+- `npm run check:staging-aws-apply-identity` passed for the selected apply
+  profile.
+- The apply command uses `npm run apply:staging-terraform` with the exact saved
+  `.tfplan` path and explicit gates.
+- The saved plan summary has `applyAllowed=false`, `destroy=0`, and the reviewed
+  add/change counts.
+- Plan text does not contain `DATABASE_URL`, `REDIS_URL`, `postgres://`,
+  `postgresql://`, or `redis://`.
 
 ## Blocked Plan Handling
 
