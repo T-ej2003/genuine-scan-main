@@ -117,13 +117,20 @@ const resolveScope = async (req: AuthRequest) => ({
   licenseeIds: isManufacturerRole(req.user?.role) ? await resolveAccessibleLicenseeIdsForUser(req.user!) : null,
 });
 
+const resolveReadScope = (req: AuthRequest) => ({
+  userId: req.user!.userId,
+  orgId: req.user?.orgId || null,
+  licenseeId: getEffectiveLicenseeId(req),
+  licenseeIds: null,
+});
+
 export const listPrinters = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || !isOpsRole(req.user.role)) {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const scope = await resolveScope(req);
+    const scope = resolveReadScope(req);
     const includeInactive = String(req.query.includeInactive || "").trim().toLowerCase() === "true";
     const rows = await listScopedManufacturerPrintersReadPayload({
       user: req.user,

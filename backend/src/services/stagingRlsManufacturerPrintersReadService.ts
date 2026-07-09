@@ -12,6 +12,7 @@ import {
   classifyStagingRlsManufacturerPrintersReadContext,
   recordStagingRlsManufacturerPrintersReadProof,
 } from "../observability/stagingRlsManufacturerPrintersReadProof";
+import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "./manufacturerScopeService";
 
 type ListScopedManufacturerPrintersReadParams = {
   user: AuthenticatedSessionClaims;
@@ -22,18 +23,30 @@ type ListScopedManufacturerPrintersReadParams = {
   includeInactive?: boolean;
 };
 
-const loadScopedManufacturerPrintersReadPayload = (
+const resolveLicenseeIdsForPrinterRead = async (
   params: ListScopedManufacturerPrintersReadParams,
   db?: Prisma.TransactionClient
-) =>
-  listRegisteredPrintersForManufacturer({
+) => {
+  if (Array.isArray(params.licenseeIds)) return params.licenseeIds;
+  if (!isManufacturerRole(params.user.role)) return params.licenseeIds ?? null;
+  return resolveAccessibleLicenseeIdsForUser(params.user, db || prisma);
+};
+
+const loadScopedManufacturerPrintersReadPayload = async (
+  params: ListScopedManufacturerPrintersReadParams,
+  db?: Prisma.TransactionClient
+) => {
+  const licenseeIds = await resolveLicenseeIdsForPrinterRead(params, db);
+
+  return listRegisteredPrintersForManufacturer({
     userId: params.userId,
     orgId: params.orgId,
     licenseeId: params.licenseeId,
-    licenseeIds: params.licenseeIds,
+    licenseeIds,
     includeInactive: params.includeInactive,
     db,
   });
+};
 
 export const listScopedManufacturerPrintersReadPayload = async (
   params: ListScopedManufacturerPrintersReadParams

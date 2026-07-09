@@ -189,17 +189,18 @@ Expected behaviour:
 - Local-agent printers are visible when assignedUserId matches current user.
 - Local-agent printers are visible when printerRegistration.userId matches current user.
 - Network printers are visible when scoped licensee or organization access matches.
+- Manufacturers with an explicitly empty linked-licensee set fail closed for network-printer rows instead of falling through to all active network printers.
 - Inactive printers are excluded unless includeInactive=true.
 
 Read path discovered:
-- ManufacturerLicenseeLink.findMany can be used before the staged wrapper when a manufacturer session does not already carry linked licensee IDs.
+- ManufacturerLicenseeLink.findMany is now owned by the staged read service when manufacturer linked licensee IDs are not already supplied.
 - Printer.findMany
 - include PrinterRegistration
 - PrinterProfile lookup per printer
 - PrinterProfileSnapshot lookup through profile snapshots
 - getPrinterConnectionStatusForUser for local-agent printer status
 - latest local-agent status/session/attestation data used to build registry status
-- Note: getPrinterConnectionStatusForUser currently reads through the global Prisma client instead of the staged transaction client.
+- Note: getPrinterConnectionStatusForUser now accepts the staged transaction client and uses it for PrinterRegistration, PrinterAttestation, and PrinterAgentSession reads.
 
 Tables requiring validation coverage:
 - Printer
@@ -214,8 +215,8 @@ Tables requiring validation coverage:
 Validation objective:
 RLS-enabled printer list results must match current app-layer scoped results for local-agent and network printer cases.
 
-Pre-template blocker:
-Before applying any printer local-agent RLS policy in staging, the route must either thread the staged transaction client through manufacturer scope resolution and getPrinterConnectionStatusForUser, or the manual SQL template must explicitly leave those tables out of the applied set. Applying RLS to PrinterRegistration, PrinterAttestation, or PrinterAgentSession while those reads are outside the transaction-local context risks false 500s or incorrect local-agent status.
+Pre-template status:
+The staged printer read path now owns the local-agent status/profile read graph under `MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED=true`. Manual SQL templates can include PrinterRegistration, PrinterAttestation, PrinterAgentSession, PrinterProfile, and PrinterProfileSnapshot, provided the templates keep non-recursive helper policies and retain rollback coverage.
 
 ## Required Actor Test Matrix
 
