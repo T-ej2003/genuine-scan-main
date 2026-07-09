@@ -255,7 +255,7 @@ Resolved by read-graph hardening:
 
 - `getPrinterConnectionStatusForUser` and its registration loaders accept an optional Prisma client and use the staged transaction client for `PrinterRegistration`, `PrinterAttestation`, and `PrinterAgentSession`.
 - `listPrinters` no longer performs manufacturer linked-licensee resolution before the staged wrapper for the read route.
-- `stagingRlsManufacturerPrintersReadService` resolves missing manufacturer linked-licensee IDs inside the transaction context.
+- `stagingRlsManufacturerPrintersReadService` owns the read-route context derivation and resolves missing manufacturer linked-licensee IDs inside the transaction context.
 - `rlsManufacturerPrintersReadRuntimeP2.test.js` now seeds and validates local-agent registration, latest attestation, connected agent session, printer profile, and profile snapshot data.
 
 Remaining gaps before manual SQL templates:

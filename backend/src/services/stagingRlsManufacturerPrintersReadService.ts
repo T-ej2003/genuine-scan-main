@@ -16,12 +16,18 @@ import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "./manuf
 
 type ListScopedManufacturerPrintersReadParams = {
   user: AuthenticatedSessionClaims;
-  userId: string;
+  userId?: string;
   orgId?: string | null;
   licenseeId?: string | null;
   licenseeIds?: string[] | null;
   includeInactive?: boolean;
 };
+
+const resolvePrinterReadContext = (params: ListScopedManufacturerPrintersReadParams) => ({
+  userId: params.userId || params.user.userId,
+  orgId: params.orgId === undefined ? params.user.orgId || null : params.orgId,
+  licenseeId: params.licenseeId ?? null,
+});
 
 const resolveLicenseeIdsForPrinterRead = async (
   params: ListScopedManufacturerPrintersReadParams,
@@ -36,12 +42,13 @@ const loadScopedManufacturerPrintersReadPayload = async (
   params: ListScopedManufacturerPrintersReadParams,
   db?: Prisma.TransactionClient
 ) => {
+  const readContext = resolvePrinterReadContext(params);
   const licenseeIds = await resolveLicenseeIdsForPrinterRead(params, db);
 
   return listRegisteredPrintersForManufacturer({
-    userId: params.userId,
-    orgId: params.orgId,
-    licenseeId: params.licenseeId,
+    userId: readContext.userId,
+    orgId: readContext.orgId,
+    licenseeId: readContext.licenseeId,
     licenseeIds,
     includeInactive: params.includeInactive,
     db,
