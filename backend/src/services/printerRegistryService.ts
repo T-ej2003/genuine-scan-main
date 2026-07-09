@@ -263,7 +263,7 @@ const buildGatewayPrinterStatus = (printer: RegisteredPrinterRecord): PrinterReg
 
 export const buildPrinterRegistryStatus = async (
   printer: RegisteredPrinterRecord,
-  userContext?: { userId: string }
+  userContext?: { userId: string; db?: Prisma.TransactionClient }
 ): Promise<PrinterRegistryStatus> => {
   if (printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
     if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
@@ -348,7 +348,7 @@ export const buildPrinterRegistryStatus = async (
     };
   }
 
-  const connectionStatus = await getPrinterConnectionStatusForUser(userContext.userId);
+  const connectionStatus = await getPrinterConnectionStatusForUser(userContext.userId, userContext.db || prisma);
   return buildLocalPrinterStatus(printer, connectionStatus);
 };
 
@@ -486,14 +486,17 @@ const printerListWhere = (params: {
   userId: string;
   includeInactive?: boolean;
 }): Prisma.PrinterWhereInput => {
+  const hasExplicitLicenseeIds = Array.isArray(params.licenseeIds);
   const normalizedLicenseeIds = Array.from(new Set((params.licenseeIds || []).filter(Boolean)));
   const networkScope = params.licenseeId
     ? { licenseeId: params.licenseeId }
     : normalizedLicenseeIds.length > 0
       ? { licenseeId: normalizedLicenseeIds.length === 1 ? normalizedLicenseeIds[0] : { in: normalizedLicenseeIds } }
-      : params.orgId
-        ? { orgId: params.orgId }
-        : {};
+      : hasExplicitLicenseeIds
+        ? { licenseeId: { in: [] } }
+        : params.orgId
+          ? { orgId: params.orgId }
+          : {};
   return ({
   ...(params.includeInactive ? {} : { isActive: true }),
   OR: [
@@ -546,7 +549,7 @@ export const listRegisteredPrintersForManufacturer = async (params: {
   })) as RegisteredPrinterRecord[];
 
   const localStatus = printers.some((printer) => printer.connectionType === PrinterConnectionType.LOCAL_AGENT)
-    ? await getPrinterConnectionStatusForUser(params.userId)
+    ? await getPrinterConnectionStatusForUser(params.userId, db)
     : null;
 
   const rows = await Promise.all(
@@ -563,7 +566,7 @@ export const listRegisteredPrintersForManufacturer = async (params: {
         registryStatus:
           printer.connectionType === PrinterConnectionType.LOCAL_AGENT && localStatus
             ? buildLocalPrinterStatus(printer, localStatus)
-            : await buildPrinterRegistryStatus(printer, { userId: params.userId }),
+            : await buildPrinterRegistryStatus(printer, { userId: params.userId, db }),
         printerProfile: serializePrinterProfileForClient(profile),
         latestDiscoverySnapshot: latestDiscoverySnapshot
           ? {

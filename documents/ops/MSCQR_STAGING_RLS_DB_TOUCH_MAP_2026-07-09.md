@@ -178,11 +178,12 @@ Touched tables/models:
 - `User`
 
 Important behavior:
-- Current app scoping protects network printers by `licenseeId`, `licenseeIds`, or `orgId`.
+- Current app scoping protects network printers by `licenseeId`, non-empty `licenseeIds`, or `orgId`; an explicitly empty linked-licensee set now fails closed instead of falling through to all network printers.
 - Current app scoping protects local-agent printers by `Printer.assignedUserId` or `Printer.printerRegistration.userId`.
-- `getPrinterConnectionStatusForUser` currently uses the global Prisma client and does not accept the staged transaction client.
-- If RLS is applied to `PrinterRegistration`, `PrinterAttestation`, or `PrinterAgentSession` before that helper is transaction-aware, local-agent status can fail or degrade incorrectly under the staged flag.
-- Existing `rlsManufacturerPrintersReadRuntimeP2.test.js` validates network-printer RLS behavior and telemetry, but does not seed a local-agent printer with registration/session/attestation/profile coverage.
+- Under the staged printer flag, manufacturer linked-licensee resolution now runs inside the transaction-local RLS context when linked IDs are not supplied.
+- `getPrinterConnectionStatusForUser` now accepts a Prisma client and uses the staged transaction client for `PrinterRegistration`, `PrinterAttestation`, and `PrinterAgentSession` reads.
+- `getPrinterProfileForPrinter` already accepts the staged transaction client, and the printer list path passes it through.
+- `rlsManufacturerPrintersReadRuntimeP2.test.js` now validates network printers plus local-agent assigned-user, registration, latest attestation, connected agent session, printer profile, and profile snapshot coverage.
 
 ## Table Policy Shape
 
@@ -191,14 +192,14 @@ Important behavior:
 | `Batch` | `licenseeId`, `manufacturerId`, `parentBatchId`, `rootBatchId` | Batch belongs to a licensee and may be assigned to a manufacturer user. | `buildScopedWhere`; allocation-map first uses `findScopedBatch`. | Direct `licenseeId`; direct `manufacturerId`; optionally linked-licensee access through `ManufacturerLicenseeLink` for lineage reads. | Required. | Direct for assigned child batches; linked-licensee access is needed for allocation-map lineage. | A manufacturer-only policy can hide parent/root rows; a broad linked-licensee policy is less strict than batch-list app filtering and relies on app-layer scope. |
 | `Licensee` | `id`, `orgId` | Owns batches, QR codes, printers, users, and links. | Included only after scoped batch selection in these routes. | Direct `id = app.licensee_id` or linked through `ManufacturerLicenseeLink`; org fallback only if needed. | Required. | Through `ManufacturerLicenseeLink`. | If hidden, batch includes can lose licensee metadata. |
 | `User` | `id`, `licenseeId`, `orgId`, `role` | Manufacturer is a `User`; user also owns local-agent registrations. | Included as batch manufacturer after scoped batch selection. | Direct self, direct tenant/org, or `EXISTS Batch WHERE Batch.manufacturerId = User.id AND visible Batch`. | Required. | Direct self for manufacturer actor; relation-based for licensee seeing assigned manufacturers. | Existing prototype user policy may not expose external manufacturer rows for licensee batch includes unless relation-based access is added. |
-| `ManufacturerLicenseeLink` | `manufacturerId`, `licenseeId` | Defines manufacturer-to-licensee access. | Used by `resolveAccessibleLicenseeIdsForUser` when claims lack links. | Direct current manufacturer, direct current licensee, or platform admin. Avoid recursive `can_access_licensee` calls inside this table's own policy. | Required. | Direct `manufacturerId = app.manufacturer_id`. | Printer route can read this before the staged transaction; policy apply is unsafe until scope resolution is moved inside context or claims are guaranteed complete. |
+| `ManufacturerLicenseeLink` | `manufacturerId`, `licenseeId` | Defines manufacturer-to-licensee access. | Used by `resolveAccessibleLicenseeIdsForUser` when claims lack links. | Direct current manufacturer, direct current licensee, or platform admin. Avoid recursive `can_access_licensee` calls inside this table's own policy. | Required. | Direct `manufacturerId = app.manufacturer_id`. | The staged printer read wrapper now resolves missing linked-licensee IDs inside the transaction context; manual SQL still must avoid recursive helper policies. |
 | `InventoryStatusRollup` | `batchId`, `licenseeId`, `manufacturerId` | Rollup for batch inventory counts. | Queried only for already selected batch IDs. | Direct `licenseeId`; direct `manufacturerId`; or `EXISTS Batch WHERE Batch.id = InventoryStatusRollup.batchId AND visible Batch`. | Required. | Direct and relation-based. | Must align with `QRCode` policy or rollup-vs-fallback counts can mismatch. |
 | `QRCode` | `licenseeId`, `batchId`, `printJobId` | QR code belongs to licensee and usually a batch. | Queried only for scoped batch IDs in these endpoints. | Direct `licenseeId` or `EXISTS Batch WHERE Batch.id = QRCode.batchId AND visible Batch`. | Required. | Through `Batch` and linked licensee. | GroupBy and raw SQL summaries depend on this being the base visible table. |
 | `PrintItem` | `printSessionId`, `qrCodeId` | No direct tenant column; belongs to QR and print session. | Only touched through raw SQL joins from scoped QR batches. | `EXISTS QRCode WHERE QRCode.id = PrintItem.qrCodeId AND visible QRCode`, plus optional session relation. | Required. | Through QR/batch/session relation. | If hidden in left joins, QR rows can be overcounted as reservable. |
 | `PrintSession` | `batchId`, `manufacturerId`, `printerRegistrationId`, `printerId` | Session belongs to a batch and manufacturer. | Only touched through raw SQL joins from scoped QR batches. | Direct `manufacturerId` or `EXISTS Batch WHERE Batch.id = PrintSession.batchId AND visible Batch`. | Required. | Direct and through batch relation. | Must be visible enough for reusable-print SQL predicates. |
 | `PrintJob` | `batchId`, `manufacturerId`, `printerId` | Print job belongs to batch and manufacturer. | Only touched through raw SQL joins from scoped QR batches. | Direct `manufacturerId` or `EXISTS Batch WHERE Batch.id = PrintJob.batchId AND visible Batch`. | Required. | Direct and through batch relation. | Hidden job rows can alter raw SQL recovery and reservable summaries. |
 | `Printer` | `licenseeId`, `orgId`, `assignedUserId`, `createdByUserId`, `printerRegistrationId` | Network printers are licensee/org scoped; local printers are user/registration scoped. | `printerListWhere`. | Direct licensee/org, direct assigned/created user, or `EXISTS PrinterRegistration WHERE id = printerRegistrationId AND userId = app.user_id`. | Required. | Through linked licensee for network printers; direct user/registration for local-agent printers. | Current test policy covers `Printer` only; local-agent status tables still need coverage. |
-| `PrinterRegistration` | `userId`, `licenseeId`, `orgId` | Owns local-agent trust, attestations, sessions, and local printers. | `getPrinterConnectionStatusForUser(userId)` and printer include. | Direct `userId = app.user_id`, direct licensee/org, or `EXISTS Printer WHERE Printer.printerRegistrationId = PrinterRegistration.id AND visible Printer`. | Required. | Usually direct current user for local-agent; licensee/org for admin review only if intended. | Current status helper is outside the staged transaction, so applying this policy first is unsafe. |
+| `PrinterRegistration` | `userId`, `licenseeId`, `orgId` | Owns local-agent trust, attestations, sessions, and local printers. | `getPrinterConnectionStatusForUser(userId)` and printer include. | Direct `userId = app.user_id`, direct licensee/org, or `EXISTS Printer WHERE Printer.printerRegistrationId = PrinterRegistration.id AND visible Printer`. | Required. | Usually direct current user for local-agent; licensee/org for admin review only if intended. | Status reads are now transaction-aware under the staged printer wrapper; manual SQL should still test missing-context fail-closed behavior. |
 | `PrinterAttestation` | `printerRegistrationId` | Trust heartbeat history for a registration. | Latest attestation is included under the current user's registration. | `EXISTS PrinterRegistration WHERE id = printerRegistrationId AND visible PrinterRegistration`. | Required. | Through registration. | Missing attestation can mark local agent stale or untrusted. |
 | `PrinterAgentSession` | `registrationId`, `activePrintJobId` | Persistent local-agent session for a registration. | Connected session is included under the current user's registration. | `EXISTS PrinterRegistration WHERE id = registrationId AND visible PrinterRegistration`. | Required. | Through registration. | Missing session can mark persistent session disconnected. |
 | `PrinterProfile` | `printerId` | Profile for a visible printer. | Looked up per printer returned by `Printer.findMany`. | `EXISTS Printer WHERE Printer.id = printerId AND visible Printer`. | Required. | Through visible printer. | If hidden, capability fields disappear from printer rows. |
@@ -250,12 +251,17 @@ The blocked runtime context classes are:
 
 Proof logging exists for all three candidate endpoints and only records coarse route, flag, context class, duration, result shape or row count, success, and failure category.
 
-Current gaps:
+Resolved by read-graph hardening:
 
-- `getPrinterConnectionStatusForUser` reads `PrinterRegistration`, `PrinterAttestation`, and `PrinterAgentSession` through the global Prisma client, not the staged transaction client.
-- `listPrinters` resolves manufacturer linked licensees before the staged service wrapper, so `ManufacturerLicenseeLink` can be read outside transaction-local context.
-- `rlsManufacturerPrintersReadRuntimeP2.test.js` does not seed local-agent registration, attestation, agent session, printer profile, and profile snapshot data.
+- `getPrinterConnectionStatusForUser` and its registration loaders accept an optional Prisma client and use the staged transaction client for `PrinterRegistration`, `PrinterAttestation`, and `PrinterAgentSession`.
+- `listPrinters` no longer performs manufacturer linked-licensee resolution before the staged wrapper for the read route.
+- `stagingRlsManufacturerPrintersReadService` owns the read-route context derivation and resolves missing manufacturer linked-licensee IDs inside the transaction context.
+- `rlsManufacturerPrintersReadRuntimeP2.test.js` now seeds and validates local-agent registration, latest attestation, connected agent session, printer profile, and profile snapshot data.
+
+Remaining gaps before manual SQL templates:
+
 - `documents/security/mscqr_staging_rls_prototype.sql` does not define policies for every discovered candidate table. Missing for these routes: `ManufacturerLicenseeLink`, `InventoryStatusRollup`, `PrintSession`, `PrinterRegistration`, `PrinterAttestation`, `PrinterAgentSession`, `PrinterProfile`, and `PrinterProfileSnapshot`.
+- Manual templates still need non-recursive helper design for `ManufacturerLicenseeLink`, `PrinterRegistration`, `PrinterProfile`, and `PrinterProfileSnapshot`.
 
 ## Risk Notes
 
@@ -263,20 +269,19 @@ Current gaps:
 - `QRCode.groupBy` and `InventoryStatusRollup.findMany` must have equivalent scoping or visible count summaries can diverge.
 - `Batch._count.qrCodes` runs as a relation count and must be validated against direct `QRCode` policy behavior.
 - Batch allocation-map reads related lineage rows after the focus batch is authorized. Strict `manufacturerId`-only batch policy can hide parent/root/source rows for manufacturer users.
-- Printer local-agent status must be transaction-aware before applying policies to status/session/attestation tables.
-- Manufacturer linked-licensee lookup must be transaction-aware, claim-complete, or left out of manual policy application until fixed.
+- Printer local-agent status is now transaction-aware under the staged printer route; manual policies still need missing-context fail-closed tests.
+- Manufacturer linked-licensee lookup is now transaction-aware under the staged printer route; manual policies still need non-recursive link-table access.
 - Platform admin bypass must be explicit and tested for every table; otherwise admin baselines can falsely fail.
 - Sibling printer routes and QR child routes must remain outside the staged telemetry classification.
 
 ## Recommended Validation Order
 
 1. Do not apply policies yet. First create manual, non-migration SQL templates and rollback templates that cover the full discovered table set.
-2. In the same Part 2 work, mark printer local-agent status policies as blocked until `getPrinterConnectionStatusForUser` and manufacturer scope resolution are transaction-aware for the staged route.
-3. Validate batch-list templates first on a disposable/staging clone because they exercise the broadest batch summary surface.
-4. Validate allocation-map templates second, with parent/root/source and manufacturer-child lineage fixtures.
-5. Validate printer network rows third with existing `Printer` policy shape.
-6. Validate printer local-agent rows fourth only after the transaction-client gap is closed or the template explicitly excludes local-agent status tables.
-7. Only after per-route success, run combined flag checks in staging.
+2. Validate batch-list templates first on a disposable/staging clone because they exercise the broadest batch summary surface.
+3. Validate allocation-map templates second, with parent/root/source and manufacturer-child lineage fixtures.
+4. Validate printer network rows third with the full `Printer` plus `ManufacturerLicenseeLink` policy shape.
+5. Validate printer local-agent rows fourth with `PrinterRegistration`, `PrinterAttestation`, `PrinterAgentSession`, `PrinterProfile`, and `PrinterProfileSnapshot` policies enabled together.
+6. Only after per-route success, run combined flag checks in staging.
 
 ## Manual Review Checklist
 
@@ -285,7 +290,7 @@ Current gaps:
 - Confirm manual SQL templates are not placed under `backend/prisma/migrations`.
 - Confirm rollback SQL drops every policy/function introduced by the manual template.
 - Confirm `ManufacturerLicenseeLink` policy is non-recursive.
-- Confirm `PrinterRegistration`, `PrinterAttestation`, and `PrinterAgentSession` are not applied until printer status reads are transaction-aware.
+- Confirm `PrinterRegistration`, `PrinterAttestation`, and `PrinterAgentSession` policies are applied only with the staged transaction-aware printer read path.
 - Confirm local-agent fixtures include registration, latest attestation, connected agent session, local printer row, printer profile, and profile snapshots.
 - Confirm batch fixtures include parent/root/child lineage, rollup rows, QR codes, print items, print sessions, and print jobs.
 - Confirm raw SQL count outputs match baseline IDs and counts, not only HTTP 200.
@@ -295,6 +300,6 @@ Current gaps:
 
 ## Part 2 Recommendation
 
-Create `documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql` and a paired rollback file as non-applied, manually reviewed artifacts. Split the template into route-labeled sections and include comments that block applying printer local-agent status policies until the transaction-client gap is resolved.
+Create `documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql` and a paired rollback file as non-applied, manually reviewed artifacts. Split the template into route-labeled sections and include the full printer local-agent status/profile table set now that the staged route owns those reads.
 
-Senior engineering recommendation: treat this as a scale-hardening milestone, not only a compliance task. The best next feature is a small staging RLS dashboard that shows route, flag state, context class, success/failure category, row-count deltas, and p95 duration from proof events. The best security fix is to make every staged RLS wrapper own its full read graph, including pre-scope helpers and nested status helpers, before any real table policy is applied.
+Senior engineering recommendation: treat this as a scale-hardening milestone, not only a compliance task. The best next feature is a small staging RLS dashboard that shows route, flag state, context class, success/failure category, row-count deltas, and p95 duration from proof events. The best security fix remaining is a reusable test helper that applies candidate table policies in disposable databases so every future staged route proves its full read graph before manual SQL templates are reviewed.

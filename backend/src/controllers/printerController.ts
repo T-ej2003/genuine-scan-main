@@ -123,14 +123,10 @@ export const listPrinters = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const scope = await resolveScope(req);
     const includeInactive = String(req.query.includeInactive || "").trim().toLowerCase() === "true";
     const rows = await listScopedManufacturerPrintersReadPayload({
       user: req.user,
-      userId: scope.userId,
-      orgId: scope.orgId,
-      licenseeId: scope.licenseeId,
-      licenseeIds: scope.licenseeIds,
+      licenseeId: getEffectiveLicenseeId(req),
       includeInactive,
     });
 

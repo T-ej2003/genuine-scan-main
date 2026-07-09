@@ -7,6 +7,11 @@ const {
   PrinterCommandLanguage,
   PrinterConnectionType,
   PrinterDeliveryMode,
+  PrinterLanguageKind,
+  PrinterProfileSnapshotType,
+  PrinterProfileStatus,
+  PrinterTransportKind,
+  PrinterTrustStatus,
   UserRole,
 } = require("@prisma/client");
 
@@ -28,9 +33,20 @@ if (!isTruthy(process.env.MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_TEST)) {
   process.exit(0);
 }
 
+const noLinkedManufacturerId = "00000000-0000-4202-8200-000000000099";
+
 const printerIds = {
   printerA: "00000000-0000-4202-9400-000000000001",
   printerB: "00000000-0000-4202-9400-000000000002",
+  localAssignedA: "00000000-0000-4202-9400-000000000003",
+  localRegisteredA: "00000000-0000-4202-9400-000000000004",
+  registrationA: "00000000-0000-4202-9410-000000000001",
+  attestationA: "00000000-0000-4202-9420-000000000001",
+  sessionA: "00000000-0000-4202-9430-000000000001",
+  profileAssignedA: "00000000-0000-4202-9440-000000000001",
+  profileRegisteredA: "00000000-0000-4202-9440-000000000002",
+  snapshotAssignedA: "00000000-0000-4202-9450-000000000001",
+  snapshotRegisteredA: "00000000-0000-4202-9450-000000000002",
 };
 
 const authHeader = (token) => ({ authorization: `Bearer ${token}` });
@@ -105,10 +121,36 @@ const clearDistRequireCache = () => {
 
 const applyManufacturerPrintersRouteRls = (databaseUrl) => {
   applySql(databaseUrl, `
+    DROP POLICY IF EXISTS test_rls_manufacturer_printer_profile_snapshot_select ON "PrinterProfileSnapshot";
+    DROP POLICY IF EXISTS test_rls_manufacturer_printer_profile_select ON "PrinterProfile";
+    DROP POLICY IF EXISTS test_rls_manufacturer_printer_agent_session_select ON "PrinterAgentSession";
+    DROP POLICY IF EXISTS test_rls_manufacturer_printer_attestation_select ON "PrinterAttestation";
+    DROP POLICY IF EXISTS test_rls_manufacturer_printer_registration_select ON "PrinterRegistration";
     DROP POLICY IF EXISTS test_rls_manufacturer_printer_select ON "Printer";
+    DROP POLICY IF EXISTS test_rls_manufacturer_licensee_link_select ON "ManufacturerLicenseeLink";
 
+    ALTER TABLE "ManufacturerLicenseeLink" ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE "ManufacturerLicenseeLink" FORCE ROW LEVEL SECURITY;
     ALTER TABLE "Printer" ENABLE ROW LEVEL SECURITY;
     ALTER TABLE "Printer" FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterRegistration" ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterRegistration" FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterAttestation" ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterAttestation" FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterAgentSession" ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterAgentSession" FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterProfile" ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterProfile" FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterProfileSnapshot" ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterProfileSnapshot" FORCE ROW LEVEL SECURITY;
+
+    CREATE POLICY test_rls_manufacturer_licensee_link_select ON "ManufacturerLicenseeLink"
+      FOR SELECT
+      USING (
+        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
+        OR "manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
+        OR "licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
+      );
 
     CREATE POLICY test_rls_manufacturer_printer_select ON "Printer"
       FOR SELECT
@@ -120,9 +162,133 @@ const applyManufacturerPrintersRouteRls = (databaseUrl) => {
         OR "createdByUserId" = NULLIF(current_setting('app.user_id', true), '')
         OR EXISTS (
           SELECT 1
+          FROM "ManufacturerLicenseeLink" mll
+          WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
+            AND mll."licenseeId" = "Printer"."licenseeId"
+        )
+        OR EXISTS (
+          SELECT 1
           FROM "PrinterRegistration" pr
           WHERE pr."id" = "Printer"."printerRegistrationId"
             AND pr."userId" = NULLIF(current_setting('app.user_id', true), '')
+        )
+      );
+
+    CREATE POLICY test_rls_manufacturer_printer_registration_select ON "PrinterRegistration"
+      FOR SELECT
+      USING (
+        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
+        OR "userId" = NULLIF(current_setting('app.user_id', true), '')
+        OR "licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
+        OR "orgId" = NULLIF(current_setting('app.organization_id', true), '')
+        OR EXISTS (
+          SELECT 1
+          FROM "ManufacturerLicenseeLink" mll
+          WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
+            AND mll."licenseeId" = "PrinterRegistration"."licenseeId"
+        )
+      );
+
+    CREATE POLICY test_rls_manufacturer_printer_attestation_select ON "PrinterAttestation"
+      FOR SELECT
+      USING (
+        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
+        OR EXISTS (
+          SELECT 1
+          FROM "PrinterRegistration" pr
+          WHERE pr."id" = "PrinterAttestation"."printerRegistrationId"
+            AND (
+              pr."userId" = NULLIF(current_setting('app.user_id', true), '')
+              OR pr."licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
+              OR pr."orgId" = NULLIF(current_setting('app.organization_id', true), '')
+              OR EXISTS (
+                SELECT 1
+                FROM "ManufacturerLicenseeLink" mll
+                WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
+                  AND mll."licenseeId" = pr."licenseeId"
+              )
+            )
+        )
+      );
+
+    CREATE POLICY test_rls_manufacturer_printer_agent_session_select ON "PrinterAgentSession"
+      FOR SELECT
+      USING (
+        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
+        OR EXISTS (
+          SELECT 1
+          FROM "PrinterRegistration" pr
+          WHERE pr."id" = "PrinterAgentSession"."registrationId"
+            AND (
+              pr."userId" = NULLIF(current_setting('app.user_id', true), '')
+              OR pr."licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
+              OR pr."orgId" = NULLIF(current_setting('app.organization_id', true), '')
+              OR EXISTS (
+                SELECT 1
+                FROM "ManufacturerLicenseeLink" mll
+                WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
+                  AND mll."licenseeId" = pr."licenseeId"
+              )
+            )
+        )
+      );
+
+    CREATE POLICY test_rls_manufacturer_printer_profile_select ON "PrinterProfile"
+      FOR SELECT
+      USING (
+        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
+        OR EXISTS (
+          SELECT 1
+          FROM "Printer" p
+          WHERE p."id" = "PrinterProfile"."printerId"
+            AND (
+              p."licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
+              OR p."orgId" = NULLIF(current_setting('app.organization_id', true), '')
+              OR p."assignedUserId" = NULLIF(current_setting('app.user_id', true), '')
+              OR p."createdByUserId" = NULLIF(current_setting('app.user_id', true), '')
+              OR EXISTS (
+                SELECT 1
+                FROM "ManufacturerLicenseeLink" mll
+                WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
+                  AND mll."licenseeId" = p."licenseeId"
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM "PrinterRegistration" pr
+                WHERE pr."id" = p."printerRegistrationId"
+                  AND pr."userId" = NULLIF(current_setting('app.user_id', true), '')
+              )
+            )
+        )
+      );
+
+    CREATE POLICY test_rls_manufacturer_printer_profile_snapshot_select ON "PrinterProfileSnapshot"
+      FOR SELECT
+      USING (
+        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
+        OR EXISTS (
+          SELECT 1
+          FROM "PrinterProfile" pp
+          JOIN "Printer" p ON p."id" = pp."printerId"
+          WHERE pp."id" = "PrinterProfileSnapshot"."printerProfileId"
+            AND (
+              p."licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
+              OR p."orgId" = NULLIF(current_setting('app.organization_id', true), '')
+              OR p."assignedUserId" = NULLIF(current_setting('app.user_id', true), '')
+              OR p."createdByUserId" = NULLIF(current_setting('app.user_id', true), '')
+              OR EXISTS (
+                SELECT 1
+                FROM "ManufacturerLicenseeLink" mll
+                WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
+                  AND mll."licenseeId" = p."licenseeId"
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM "PrinterRegistration" pr
+                WHERE pr."id" = p."printerRegistrationId"
+                  AND pr."userId" = NULLIF(current_setting('app.user_id', true), '')
+              )
+            )
         )
       );
   `);
@@ -130,9 +296,27 @@ const applyManufacturerPrintersRouteRls = (databaseUrl) => {
 
 const rollbackManufacturerPrintersRouteRls = (databaseUrl) => {
   applySql(databaseUrl, `
+    DROP POLICY IF EXISTS test_rls_manufacturer_printer_profile_snapshot_select ON "PrinterProfileSnapshot";
+    DROP POLICY IF EXISTS test_rls_manufacturer_printer_profile_select ON "PrinterProfile";
+    DROP POLICY IF EXISTS test_rls_manufacturer_printer_agent_session_select ON "PrinterAgentSession";
+    DROP POLICY IF EXISTS test_rls_manufacturer_printer_attestation_select ON "PrinterAttestation";
+    DROP POLICY IF EXISTS test_rls_manufacturer_printer_registration_select ON "PrinterRegistration";
     DROP POLICY IF EXISTS test_rls_manufacturer_printer_select ON "Printer";
+    DROP POLICY IF EXISTS test_rls_manufacturer_licensee_link_select ON "ManufacturerLicenseeLink";
+    ALTER TABLE "PrinterProfileSnapshot" NO FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterProfileSnapshot" DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterProfile" NO FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterProfile" DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterAgentSession" NO FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterAgentSession" DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterAttestation" NO FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterAttestation" DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterRegistration" NO FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "PrinterRegistration" DISABLE ROW LEVEL SECURITY;
     ALTER TABLE "Printer" NO FORCE ROW LEVEL SECURITY;
     ALTER TABLE "Printer" DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE "ManufacturerLicenseeLink" NO FORCE ROW LEVEL SECURITY;
+    ALTER TABLE "ManufacturerLicenseeLink" DISABLE ROW LEVEL SECURITY;
   `);
 };
 
@@ -179,7 +363,112 @@ const readContext = async (client) => {
 };
 
 const createPrinterFixtures = async (prisma) => {
+  const now = new Date();
+  const future = new Date(Date.now() + 10 * 60_000);
+  await prisma.printerProfileSnapshot.deleteMany({
+    where: { id: { in: [printerIds.snapshotAssignedA, printerIds.snapshotRegisteredA] } },
+  });
+  await prisma.printerProfile.deleteMany({
+    where: { id: { in: [printerIds.profileAssignedA, printerIds.profileRegisteredA] } },
+  });
   await prisma.printer.deleteMany({ where: { id: { in: Object.values(printerIds) } } });
+  await prisma.printerAgentSession.deleteMany({ where: { id: printerIds.sessionA } });
+  await prisma.printerAttestation.deleteMany({ where: { id: printerIds.attestationA } });
+  await prisma.printerRegistration.deleteMany({ where: { id: printerIds.registrationA } });
+
+  await prisma.printerRegistration.create({
+    data: {
+      id: printerIds.registrationA,
+      userId: ids.manufacturerA,
+      orgId: ids.orgA,
+      licenseeId: ids.licenseeA,
+      deviceFingerprint: "p2-local-device-a",
+      agentId: "p2-local-agent-a",
+      publicKeyPem: "compat:p2-local-agent-public-key",
+      trustStatus: PrinterTrustStatus.TRUSTED,
+      approvedAt: now,
+      lastSeenAt: now,
+    },
+  });
+  await prisma.printerAttestation.create({
+    data: {
+      id: printerIds.attestationA,
+      printerRegistrationId: printerIds.registrationA,
+      signedPayloadHash: "p2-local-attestation-hash",
+      heartbeatNonce: "p2-local-attestation-nonce",
+      attestedAt: now,
+      expiresAt: future,
+      signatureValid: true,
+      trustValid: true,
+      metadata: {
+        connected: true,
+        printerName: "P2 Local Registered A",
+        printerId: "p2-native-registered-a",
+        selectedPrinterId: "p2-native-registered-a",
+        selectedPrinterName: "P2 Local Registered A",
+        deviceName: "P2 Workstation A",
+        agentVersion: "9999.1.1",
+        protocolVersion: "local-agent-direct-v2",
+        buildVersion: "9999.1.1",
+        transportDiagnosticsVersion: "transport-diagnostics-v1",
+        capabilities: {
+          supportsPrinterQueueSnapshot: true,
+          supportsWindowsTcpPortInspection: true,
+          supportsRawTcpConnectTest: true,
+          supportsRawTcpZplSend: true,
+          supportsUsbRawSpooler: true,
+          supportsSpoolJobCancel: true,
+          supportsSpoolJobStatus: true,
+          supportsTransportDiagnostics: true,
+          supportsTestLabel: true,
+          supportsPersistentPrintSession: true,
+          supportsOfficialMscqrZplWordmark: true,
+        },
+        printers: [
+          {
+            printerId: "p2-native-registered-a",
+            printerName: "P2 Local Registered A",
+            online: true,
+            languages: ["ZPL"],
+            mediaSizes: ["4x6"],
+            dpi: 203,
+          },
+        ],
+        capabilitySummary: {
+          languages: ["ZPL"],
+          mediaSizes: ["4x6"],
+          dpi: 203,
+        },
+      },
+    },
+  });
+  await prisma.printerAgentSession.create({
+    data: {
+      id: printerIds.sessionA,
+      connectionId: "p2-local-session-a",
+      registrationId: printerIds.registrationA,
+      agentId: "p2-local-agent-a",
+      deviceFingerprint: "p2-local-device-a",
+      publicKeyFingerprint: "p2-local-public-key-fingerprint",
+      selectedPrinterId: "p2-native-registered-a",
+      selectedPrinterName: "P2 Local Registered A",
+      connectionState: "CONNECTED",
+      trustMode: "SIGNED_ATTESTATION",
+      connectorVersion: "9999.1.1",
+      printerHealth: {
+        connected: true,
+        printerId: "p2-native-registered-a",
+        printerName: "P2 Local Registered A",
+        selectedPrinterId: "p2-native-registered-a",
+        selectedPrinterName: "P2 Local Registered A",
+        buildVersion: "9999.1.1",
+        languages: ["ZPL"],
+      },
+      lastSeenAt: now,
+      lastSignedHeartbeatAt: now,
+      expiresAt: future,
+    },
+  });
   await prisma.printer.createMany({
     data: [
       {
@@ -217,6 +506,107 @@ const createPrinterFixtures = async (prisma) => {
         isDefault: true,
         lastValidationStatus: "READY",
         lastValidationMessage: "P2 printer B ready",
+      },
+      {
+        id: printerIds.localAssignedA,
+        name: "P2 Local Assigned A",
+        vendor: "Zebra",
+        model: "ZD621",
+        connectionType: PrinterConnectionType.LOCAL_AGENT,
+        commandLanguage: PrinterCommandLanguage.ZPL,
+        nativePrinterId: "p2-native-assigned-a",
+        agentId: "p2-local-agent-a",
+        deviceFingerprint: "p2-local-device-a",
+        orgId: ids.orgA,
+        licenseeId: ids.licenseeA,
+        assignedUserId: ids.manufacturerA,
+        createdByUserId: ids.manufacturerA,
+        isActive: true,
+        isDefault: false,
+        lastSeenAt: now,
+        lastValidatedAt: now,
+        lastValidationStatus: "READY",
+        lastValidationMessage: "P2 local assigned printer ready",
+      },
+      {
+        id: printerIds.localRegisteredA,
+        name: "P2 Local Registered A",
+        vendor: "Zebra",
+        model: "ZD621",
+        connectionType: PrinterConnectionType.LOCAL_AGENT,
+        commandLanguage: PrinterCommandLanguage.ZPL,
+        nativePrinterId: "p2-native-registered-a",
+        agentId: "p2-local-agent-a",
+        deviceFingerprint: "p2-local-device-a",
+        printerRegistrationId: printerIds.registrationA,
+        orgId: ids.orgA,
+        licenseeId: ids.licenseeA,
+        isActive: true,
+        isDefault: true,
+        lastSeenAt: now,
+        lastValidatedAt: now,
+        lastValidationStatus: "READY",
+        lastValidationMessage: "P2 local registered printer ready",
+      },
+    ],
+  });
+  await prisma.printerProfile.createMany({
+    data: [
+      {
+        id: printerIds.profileAssignedA,
+        printerId: printerIds.localAssignedA,
+        status: PrinterProfileStatus.NEEDS_REVIEW,
+        transportKind: PrinterTransportKind.DRIVER_QUEUE,
+        activeLanguage: PrinterLanguageKind.ZPL,
+        nativeLanguage: "ZPL",
+        supportedLanguages: ["ZPL"],
+        jobMode: "driver_queue",
+        spoolFormat: "zpl",
+        preferredTransport: "USB",
+        connectionTypes: ["USB"],
+        brand: "Zebra",
+        modelName: "ZD621",
+        dpi: 203,
+        latestSeenCapabilities: { languages: ["ZPL"], mediaSizes: ["4x6"] },
+      },
+      {
+        id: printerIds.profileRegisteredA,
+        printerId: printerIds.localRegisteredA,
+        status: PrinterProfileStatus.NEEDS_REVIEW,
+        transportKind: PrinterTransportKind.DRIVER_QUEUE,
+        activeLanguage: PrinterLanguageKind.ZPL,
+        nativeLanguage: "ZPL",
+        supportedLanguages: ["ZPL"],
+        jobMode: "driver_queue",
+        spoolFormat: "zpl",
+        preferredTransport: "USB",
+        connectionTypes: ["USB"],
+        brand: "Zebra",
+        modelName: "ZD621",
+        dpi: 203,
+        latestSeenCapabilities: { languages: ["ZPL"], mediaSizes: ["4x6"] },
+      },
+    ],
+  });
+  await prisma.printerProfileSnapshot.createMany({
+    data: [
+      {
+        id: printerIds.snapshotAssignedA,
+        printerProfileId: printerIds.profileAssignedA,
+        snapshotType: PrinterProfileSnapshotType.LIVE_DISCOVERY,
+        summary: "P2 assigned local profile snapshot",
+        warnings: [],
+        data: { source: "p2-assigned-local" },
+        capturedAt: now,
+      },
+      {
+        id: printerIds.snapshotRegisteredA,
+        printerProfileId: printerIds.profileRegisteredA,
+        snapshotType: PrinterProfileSnapshotType.LIVE_DISCOVERY,
+        summary: "P2 registered local profile snapshot",
+        warnings: [],
+        data: { source: "p2-registered-local" },
+        capturedAt: now,
       },
     ],
   });
@@ -261,6 +651,59 @@ const assertPrinterList = (response, expectedName, forbiddenName, label) => {
   assert.doesNotMatch(response.text, new RegExp(forbiddenName, "i"), `${label}: leaked ${forbiddenName}`);
 };
 
+const namesFor = (rows) => rows.map((row) => row.name).sort();
+
+const assertManufacturerAPrinterRows = (rows, label) => {
+  assert.deepEqual(
+    namesFor(rows),
+    ["P2 Local Assigned A", "P2 Local Registered A", "P2 Printer A"],
+    `${label}: expected network, assigned local-agent, and registered local-agent printers`
+  );
+
+  const assignedLocal = rows.find((row) => row.name === "P2 Local Assigned A");
+  assert(assignedLocal, `${label}: assigned local-agent printer missing`);
+  assert.equal(assignedLocal.connectionType, PrinterConnectionType.LOCAL_AGENT, `${label}: assigned local connection type`);
+  assert.equal(assignedLocal.assignedUserId, ids.manufacturerA, `${label}: assigned local current-user scope`);
+  assert.equal(assignedLocal.printerRegistrationId, null, `${label}: assigned local should not depend on registration`);
+  assert.equal(assignedLocal.printerProfile?.id, printerIds.profileAssignedA, `${label}: assigned local profile visible`);
+  assert.equal(
+    assignedLocal.latestDiscoverySnapshot?.id,
+    printerIds.snapshotAssignedA,
+    `${label}: assigned local profile snapshot visible`
+  );
+
+  const registeredLocal = rows.find((row) => row.name === "P2 Local Registered A");
+  assert(registeredLocal, `${label}: registered local-agent printer missing`);
+  assert.equal(registeredLocal.connectionType, PrinterConnectionType.LOCAL_AGENT, `${label}: registered local connection type`);
+  assert.equal(
+    registeredLocal.printerRegistration?.userId,
+    ids.manufacturerA,
+    `${label}: registered local current-user registration scope`
+  );
+  assert.equal(registeredLocal.registryStatus?.state, "READY", `${label}: registered local status should be ready`);
+  assert.equal(
+    registeredLocal.registryStatus?.connectionStatus?.registrationId,
+    printerIds.registrationA,
+    `${label}: local status registration should be loaded`
+  );
+  assert.equal(
+    registeredLocal.registryStatus?.connectionStatus?.signedAttestation?.signatureValid,
+    true,
+    `${label}: latest attestation should be loaded`
+  );
+  assert.equal(
+    registeredLocal.registryStatus?.connectionStatus?.persistentSessionDisconnected,
+    false,
+    `${label}: connected PrinterAgentSession should be loaded`
+  );
+  assert.equal(registeredLocal.printerProfile?.id, printerIds.profileRegisteredA, `${label}: registered local profile visible`);
+  assert.equal(
+    registeredLocal.latestDiscoverySnapshot?.id,
+    printerIds.snapshotRegisteredA,
+    `${label}: registered local profile snapshot visible`
+  );
+};
+
 const assertSafeProofEvent = (event) => {
   assert.deepEqual(Object.keys(event).sort(), safeProofEventKeys, "proof event must contain only safe telemetry fields");
   assert.strictEqual(event.metric, "staging_rls_manufacturer_printers_read");
@@ -285,8 +728,13 @@ const assertSafeProofEvent = (event) => {
     ids.orgB,
     printerIds.printerA,
     printerIds.printerB,
+    printerIds.localAssignedA,
+    printerIds.localRegisteredA,
+    printerIds.registrationA,
     "P2 Printer A",
     "P2 Printer B",
+    "P2 Local Assigned A",
+    "P2 Local Registered A",
     "10.10.10.10",
     "10.20.20.20",
     "p2-licensee-a@mscqr.test",
@@ -326,11 +774,41 @@ const runFlagOffRouteAssertions = async () => {
         headers: authHeader(tokens.manufacturerA),
       });
       assertPrinterList(manufacturer, "P2 Printer A", "P2 Printer B", "flag off manufacturer printer list");
+      assertManufacturerAPrinterRows(manufacturer.payload.data, "flag off manufacturer printer list");
 
       const wrongManufacturer = await request("GET", "/api/manufacturer/printers", null, {
         headers: authHeader(tokens.manufacturerB),
       });
       assertPrinterList(wrongManufacturer, "P2 Printer B", "P2 Printer A", "flag off wrong manufacturer filtered list");
+      assert.doesNotMatch(
+        wrongManufacturer.text,
+        /P2 Local (Assigned|Registered) A/i,
+        "flag off wrong manufacturer must not see tenant A local-agent printers"
+      );
+
+      const { listScopedManufacturerPrintersReadPayload } = require("../dist/services/stagingRlsManufacturerPrintersReadService");
+      const noLinkedRows = await listScopedManufacturerPrintersReadPayload({
+        user: {
+          userId: noLinkedManufacturerId,
+          email: "p2-no-linked-manufacturer@mscqr.test",
+          role: UserRole.MANUFACTURER,
+          licenseeId: null,
+          linkedLicenseeIds: [],
+          orgId: null,
+          sessionStage: "ACTIVE",
+          authAssurance: "ADMIN_MFA",
+        },
+        userId: noLinkedManufacturerId,
+        orgId: null,
+        licenseeId: null,
+        licenseeIds: null,
+        includeInactive: false,
+      });
+      assert.deepEqual(
+        noLinkedRows,
+        [],
+        "flag off no-linked manufacturer must not fall through to all active network printers"
+      );
     });
   });
   assert.deepEqual(getProofLogs(logs), [], "flag-off path must not emit manufacturer printer RLS proof events");
@@ -387,11 +865,20 @@ const runFlagOnRouteAssertions = async () => {
         tx.printer.findMany({ where: { id: { in: Object.values(printerIds) } }, orderBy: [{ id: "asc" }] })
       );
       assert.deepEqual(plainRows, [], "Printer RLS must fail closed without transaction-local app context");
+      const plainRegistrations = await appPrisma.$transaction((tx) =>
+        tx.printerRegistration.findMany({ where: { id: printerIds.registrationA } })
+      );
+      assert.deepEqual(
+        plainRegistrations,
+        [],
+        "PrinterRegistration RLS must fail closed without transaction-local app context"
+      );
 
       const manufacturer = await routeRequest("GET", "/api/manufacturer/printers", null, {
         headers: authHeader(tokens.manufacturerA),
       });
       assertPrinterList(manufacturer, "P2 Printer A", "P2 Printer B", "flag on manufacturer printer list");
+      assertManufacturerAPrinterRows(manufacturer.payload.data, "flag on manufacturer printer list");
 
       const manufacturerTrailingSlash = await routeRequest("GET", "/api/manufacturer/printers/", null, {
         headers: authHeader(tokens.manufacturerA),
@@ -402,11 +889,17 @@ const runFlagOnRouteAssertions = async () => {
         "P2 Printer B",
         "flag on trailing-slash manufacturer printer list"
       );
+      assertManufacturerAPrinterRows(manufacturerTrailingSlash.payload.data, "flag on trailing-slash manufacturer printer list");
 
       const wrongManufacturer = await routeRequest("GET", "/api/manufacturer/printers", null, {
         headers: authHeader(tokens.manufacturerB),
       });
       assertPrinterList(wrongManufacturer, "P2 Printer B", "P2 Printer A", "flag on wrong manufacturer filtered list");
+      assert.doesNotMatch(
+        wrongManufacturer.text,
+        /P2 Local (Assigned|Registered) A/i,
+        "flag on wrong manufacturer must not see tenant A local-agent printers"
+      );
 
       const platformAdmin = await routeRequest("GET", "/api/manufacturer/printers", null, {
         headers: authHeader(tokens.superAdmin),
@@ -415,6 +908,26 @@ const runFlagOnRouteAssertions = async () => {
       assert.match(platformAdmin.text, /P2 Printer A/i, "platform admin should explicitly retain printer A visibility");
       assert.match(platformAdmin.text, /P2 Printer B/i, "platform admin should explicitly retain printer B visibility");
 
+      const { listScopedManufacturerPrintersReadPayload } = require("../dist/services/stagingRlsManufacturerPrintersReadService");
+      const noClaimRows = await listScopedManufacturerPrintersReadPayload({
+        user: {
+          userId: ids.manufacturerA,
+          email: "manufacturer-a-no-link-claims@mscqr.test",
+          role: UserRole.MANUFACTURER,
+          licenseeId: null,
+          linkedLicenseeIds: [],
+          orgId: null,
+          sessionStage: "ACTIVE",
+          authAssurance: "ADMIN_MFA",
+        },
+        userId: ids.manufacturerA,
+        orgId: null,
+        licenseeId: null,
+        licenseeIds: null,
+        includeInactive: false,
+      });
+      assertManufacturerAPrinterRows(noClaimRows, "flag on manufacturer service without linked-licensee claims");
+
       const siblingRoutePath = `/api/manufacturer/printers/${printerIds.printerA}/test`;
       const siblingRoute = await routeRequest("POST", siblingRoutePath, {}, {
         headers: authHeader(tokens.licenseeAdminA),
@@ -422,15 +935,15 @@ const runFlagOnRouteAssertions = async () => {
       assert.notEqual(siblingRoute.status, 401, `sibling printer test route should pass auth before telemetry assertion: ${siblingRoute.text}`);
 
       const successProofs = proofLogs.filter((entry) => entry.event.success);
-      assert.equal(successProofs.length, 4, "flag-on manufacturer printer reads must emit proof events");
+      assert.equal(successProofs.length, 5, "flag-on manufacturer printer reads must emit proof events");
       assert.deepEqual(
         successProofs.map((entry) => entry.event.contextClass).sort(),
-        ["manufacturer", "manufacturer", "manufacturer", "platform_admin"],
+        ["manufacturer", "manufacturer", "manufacturer", "manufacturer", "platform_admin"],
         "proof events must expose context class only"
       );
       assert.deepEqual(
         successProofs.map((entry) => entry.event.rowCount).sort((a, b) => a - b),
-        [1, 1, 1, 2],
+        [1, 2, 3, 3, 3],
         "proof row counts should be coarse and scoped"
       );
       for (const entry of successProofs) {
@@ -477,7 +990,6 @@ const runFlagOnRouteAssertions = async () => {
       assert.notEqual(context.organization_id, ids.orgA, "app.organization_id leaked after route transaction");
       assert.notEqual(context.is_platform_admin, "true", "app.is_platform_admin leaked after route transaction");
 
-      const { listScopedManufacturerPrintersReadPayload } = require("../dist/services/stagingRlsManufacturerPrintersReadService");
       await assert.rejects(
         () =>
           listScopedManufacturerPrintersReadPayload({

@@ -25,6 +25,8 @@ import { bumpCacheNamespaceVersion } from "./versionedCacheService";
 
 export type { PrinterCapabilitySummary, PrinterConnectionStatus, PrinterInventoryDevice };
 
+type DbClient = typeof prisma | Prisma.TransactionClient;
+
 type PrinterRegistrationWithLatest = {
   id: string;
   userId: string;
@@ -621,8 +623,11 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
   };
 };
 
-const loadLatestRegistrationForUser = async (userId: string): Promise<PrinterRegistrationWithLatest | null> => {
-  return prisma.printerRegistration.findFirst({
+const loadLatestRegistrationForUser = async (
+  userId: string,
+  db: DbClient = prisma
+): Promise<PrinterRegistrationWithLatest | null> => {
+  return db.printerRegistration.findFirst({
     where: { userId, revokedAt: null, trustStatus: { not: PrinterTrustStatus.REVOKED } },
     orderBy: [{ approvedAt: "desc" }, { lastSeenAt: "desc" }, { updatedAt: "desc" }],
     include: {
@@ -639,8 +644,11 @@ const loadLatestRegistrationForUser = async (userId: string): Promise<PrinterReg
   }) as Promise<PrinterRegistrationWithLatest | null>;
 };
 
-const loadRegistrationById = async (registrationId: string): Promise<PrinterRegistrationWithLatest | null> => {
-  return prisma.printerRegistration.findFirst({
+const loadRegistrationById = async (
+  registrationId: string,
+  db: DbClient = prisma
+): Promise<PrinterRegistrationWithLatest | null> => {
+  return db.printerRegistration.findFirst({
     where: { id: registrationId, revokedAt: null, trustStatus: { not: PrinterTrustStatus.REVOKED } },
     include: {
       attestations: {
@@ -707,8 +715,11 @@ export const onPrinterConnectionEvent = (listener: (event: PrinterConnectionReal
   return () => listeners.delete(listener);
 };
 
-export const getPrinterConnectionStatusForUser = async (userId: string): Promise<PrinterConnectionStatus> => {
-  const registration = await loadLatestRegistrationForUser(userId);
+export const getPrinterConnectionStatusForUser = async (
+  userId: string,
+  db: DbClient = prisma
+): Promise<PrinterConnectionStatus> => {
+  const registration = await loadLatestRegistrationForUser(userId, db);
   return buildStatus(registration);
 };
 
@@ -723,8 +734,11 @@ export const publishPrinterConnectionStatusForUser = async (userId: string) => {
   return status;
 };
 
-export const getPrinterConnectionStatusForRegistration = async (registrationId: string): Promise<PrinterConnectionStatus> => {
-  const registration = await loadRegistrationById(registrationId);
+export const getPrinterConnectionStatusForRegistration = async (
+  registrationId: string,
+  db: DbClient = prisma
+): Promise<PrinterConnectionStatus> => {
+  const registration = await loadRegistrationById(registrationId, db);
   return buildStatus(registration);
 };
 
