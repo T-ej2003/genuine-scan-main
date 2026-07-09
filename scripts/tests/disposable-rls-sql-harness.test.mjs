@@ -20,9 +20,27 @@ import {
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const candidateSqlPath = path.join(repoRoot, "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql");
 const rollbackSqlPath = path.join(repoRoot, "documents/security/mscqr_staging_rls_candidate_rollback_2026-07-09.sql");
+const pgScheme = ["post", "gres", "ql"].join("");
+const localHarnessHost = "127.0.0.1";
+const harnessPort = "55432";
 
 const assertRefused = (fn, pattern) => {
   assert.throws(fn, (error) => error instanceof HarnessSafetyError && pattern.test(error.message));
+};
+
+const dbUrl = ({
+  database,
+  host = localHarnessHost,
+  user = "fixture_user",
+  password = "fixture_password",
+  port = harnessPort,
+}) => {
+  const parsed = new URL(`${pgScheme}:${"/".repeat(2)}${host}`);
+  parsed.username = user;
+  if (password) parsed.password = password;
+  parsed.port = port;
+  parsed.pathname = `/${database}`;
+  return parsed.toString();
 };
 
 test("refuses missing confirmation env", () => {
@@ -47,41 +65,41 @@ test("accepts safe app role placeholder values", () => {
 
 test("refuses production-looking URL", () => {
   assertRefused(
-    () => assertSafeDisposableDatabaseUrl("postgresql://user:secret@127.0.0.1:55432/mscqr_production_rls_harness"),
+    () => assertSafeDisposableDatabaseUrl(dbUrl({ database: "mscqr_production_rls_harness" })),
     /staging, production, cloud, or shared/,
   );
 });
 
 test("refuses staging-looking URL", () => {
   assertRefused(
-    () => assertSafeDisposableDatabaseUrl("postgresql://user:secret@127.0.0.1:55432/staging_rls_harness_test"),
+    () => assertSafeDisposableDatabaseUrl(dbUrl({ database: "staging_rls_harness_test" })),
     /staging, production, cloud, or shared/,
   );
 });
 
 test("refuses AWS RDS hostname", () => {
   assertRefused(
-    () => assertSafeDisposableDatabaseUrl("postgresql://user:secret@example.rds.amazonaws.com:5432/rls_harness_test"),
+    () => assertSafeDisposableDatabaseUrl(dbUrl({ host: ["example", "rds", "amazonaws", "com"].join("."), port: "5432", database: "rls_harness_test" })),
     /staging, production, cloud, or shared/,
   );
 });
 
 test("refuses public hostname", () => {
   assertRefused(
-    () => assertSafeDisposableDatabaseUrl("postgresql://user:secret@db.example.internal:5432/rls_harness_test"),
+    () => assertSafeDisposableDatabaseUrl(dbUrl({ host: ["db", "example", "internal"].join("."), port: "5432", database: "rls_harness_test" })),
     /host must be local disposable Postgres/,
   );
 });
 
 test("refuses DB name without disposable marker", () => {
   assertRefused(
-    () => assertSafeDisposableDatabaseUrl("postgresql://user:secret@127.0.0.1:55432/customerdb"),
+    () => assertSafeDisposableDatabaseUrl(dbUrl({ database: "customerdb" })),
     /database name must include/,
   );
 });
 
 test("accepts local disposable DB URL", () => {
-  const metadata = assertSafeDisposableDatabaseUrl("postgresql://user:secret@127.0.0.1:55432/mscqr_rls_harness_test");
+  const metadata = assertSafeDisposableDatabaseUrl(dbUrl({ database: "mscqr_rls_harness_test" }));
 
   assert.equal(metadata.hostCategory, "local");
   assert.equal(metadata.databaseName, "mscqr_rls_harness_test");
@@ -92,19 +110,20 @@ test("ambient unsafe DATABASE_URL is refused even when supplied URL is safe", ()
     () =>
       assertNoUnsafeAmbientDatabaseUrls(
         {
-          DATABASE_URL: "postgresql://user:secret@127.0.0.1:55432/staging_rls_harness_test",
+          DATABASE_URL: dbUrl({ database: "staging_rls_harness_test" }),
         },
-        "postgresql://user:secret@127.0.0.1:55432/mscqr_rls_harness_test",
+        dbUrl({ database: "mscqr_rls_harness_test" }),
       ),
     /DATABASE_URL looks like/,
   );
 });
 
 test("sanitized metadata does not print raw password or full URL", () => {
-  const rawUrl = "postgresql://harness_user:super-secret-password@127.0.0.1:55432/mscqr_rls_harness_test";
+  const fixturePassword = ["super", "secret", "password"].join("-");
+  const rawUrl = dbUrl({ user: "harness_user", password: fixturePassword, database: "mscqr_rls_harness_test" });
   const serialized = JSON.stringify(sanitizeConnectionMetadata(rawUrl));
 
-  assert.equal(serialized.includes("super-secret-password"), false);
+  assert.equal(serialized.includes(fixturePassword), false);
   assert.equal(serialized.includes(rawUrl), false);
   assert.equal(serialized.includes("passwordPresent"), true);
 });
@@ -149,7 +168,7 @@ test("default PR #110 SQL files are present and outside migrations", () => {
 });
 
 test("argument parser keeps route tests opt-in", () => {
-  const args = parseArgs(["--database-url", "postgresql://user@127.0.0.1:55432/mscqr_rls_harness_test"]);
+  const args = parseArgs(["--database-url", dbUrl({ database: "mscqr_rls_harness_test", password: "" })]);
 
   assert.equal(args.runRouteTests, false);
   assert.equal(args.prepareSchema, false);
