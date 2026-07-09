@@ -189,13 +189,16 @@ Read path discovered:
 - include PrinterRegistration
 - PrinterProfile lookup per printer
 - PrinterProfileSnapshot lookup through profile snapshots
-- local connector status lookup outside DB path
+- getPrinterConnectionStatusForUser for local-agent printer status
+- latest local-agent status/session/attestation data used to build registry status
 
 Tables requiring validation coverage:
 - Printer
 - PrinterRegistration
 - PrinterProfile
 - PrinterProfileSnapshot
+- PrinterAgentSession
+- PrinterAttestation
 - Organization
 - Licensee
 - User
@@ -228,6 +231,8 @@ The staging validation should include:
 - Batch with print item, session, and job history
 - Local-agent printer assigned to user
 - Local-agent printer registered by user
+- Local-agent printer with active agent session/status
+- Local-agent printer with attestation history
 - Network printer under scoped licensee
 - Network printer under different licensee
 - Inactive printer includeInactive path
@@ -319,9 +324,10 @@ Do not:
 
 1. Document this validation plan.
 2. Create a read-only staging RLS baseline capture script.
-3. Capture baseline outputs for the three candidate endpoints.
-4. Prepare staging-only migration and policy review for required tables.
-5. Enable one RLS flag at a time.
+3. Analyse and standardise printer rows/status data before baseline capture.
+4. Capture baseline outputs for the three candidate endpoints.
+5. Prepare staging-only migration and policy review for required tables.
+6. Enable one RLS flag at a time.
 6. Compare outputs and proof events.
 7. Document evidence.
 8. Draft production rollout plan only after staging passes.
