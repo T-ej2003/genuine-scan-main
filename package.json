@@ -50,6 +50,7 @@
     "check:security-guardrails": "node scripts/check-security-guardrails.mjs",
     "check:prisma-scope-guardrails": "node scripts/check-prisma-scope-guardrails.mjs",
     "check:rls-prototype-boundaries": "node scripts/check-rls-prototype-boundaries.mjs",
+    "check:rls:disposable-sql-harness": "node --test scripts/tests/disposable-rls-sql-harness.test.mjs",
     "lint:security-scope": "node scripts/lint-security-scope.mjs",
     "check:trust-alert-bindings": "node scripts/check-trust-alert-bindings.mjs",
     "check:trust-observability": "node scripts/check-trust-observability.mjs",
