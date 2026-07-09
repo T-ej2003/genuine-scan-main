@@ -11,8 +11,17 @@
 --   RLS for the candidate table set.
 --
 -- Operator note:
---   If manual review changed PUBLIC grants to a dedicated staging app role,
---   update the REVOKE statements below to match before running rollback.
+--   Run with the same reviewed staging application database role used for the
+--   candidate template:
+--     -v mscqr_staging_app_role=<reviewed_staging_app_db_role>
+--
+--   Do not use PUBLIC.
+
+\if :{?mscqr_staging_app_role}
+\else
+\echo 'Missing required psql variable: -v mscqr_staging_app_role=<reviewed_staging_app_db_role>'
+\quit 3
+\endif
 
 BEGIN;
 
@@ -78,8 +87,25 @@ ALTER TABLE "Organization" DISABLE ROW LEVEL SECURITY;
 -- Revoke candidate helper grants and drop helpers
 -- ---------------------------------------------------------------------------
 
-REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA app_rls FROM PUBLIC;
-REVOKE USAGE ON SCHEMA app_rls FROM PUBLIC;
+-- Exact reversals for the candidate helper signatures only. Do not use blanket
+-- function revokes: staging may have unrelated app_rls helpers.
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer_profile(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_item(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_session(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_job(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_qr(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer_registration(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_batch(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_organization(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_licensee(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.is_platform_admin() FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_organization_id() FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_manufacturer_id() FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_licensee_id() FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_role() FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_user_id() FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.setting(text) FROM :"mscqr_staging_app_role";
 
 DROP FUNCTION IF EXISTS app_rls.can_access_printer_profile(text);
 DROP FUNCTION IF EXISTS app_rls.can_access_print_item(text);
@@ -101,7 +127,11 @@ DROP FUNCTION IF EXISTS app_rls.setting(text);
 
 -- Drop app_rls only if this rollback leaves it empty. If a reviewer has added
 -- other staging-reviewed objects to the schema, leave the schema in place.
+SELECT set_config('app_rls.rollback_target_role', :'mscqr_staging_app_role', false);
+
 DO $$
+DECLARE
+  target_role text := current_setting('app_rls.rollback_target_role', true);
 BEGIN
   IF EXISTS (
     SELECT 1
@@ -114,9 +144,12 @@ BEGIN
     WHERE n.nspname = 'app_rls'
       AND d.deptype = 'n'
   ) THEN
+    EXECUTE format('REVOKE USAGE ON SCHEMA app_rls FROM %I', target_role);
     DROP SCHEMA app_rls;
   END IF;
 END
 $$;
+
+SELECT set_config('app_rls.rollback_target_role', '', false);
 
 COMMIT;

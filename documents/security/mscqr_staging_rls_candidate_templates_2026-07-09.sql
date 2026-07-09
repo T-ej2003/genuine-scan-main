@@ -15,6 +15,18 @@
 --   This template enables and forces RLS on the listed tables. It is intended
 --   only for a deliberate staging validation window after baseline capture,
 --   review, snapshot/backup confirmation, and rollback readiness.
+--
+-- Required psql variable:
+--   -v mscqr_staging_app_role=<reviewed_staging_app_db_role>
+--
+-- The role must be the exact staging application database role reviewed for
+-- this validation window. Do not use PUBLIC.
+
+\if :{?mscqr_staging_app_role}
+\else
+\echo 'Missing required psql variable: -v mscqr_staging_app_role=<reviewed_staging_app_db_role>'
+\quit 3
+\endif
 
 BEGIN;
 
@@ -74,12 +86,9 @@ AS $$
   SELECT lower(COALESCE(app_rls.setting('app.is_platform_admin'), 'false')) = 'true'
 $$;
 
--- These grants are limited to executing helper functions used by policies.
--- Review the target staging application role before running. If staging uses a
--- dedicated app role, replace PUBLIC with that role in both this file and the
--- rollback file during manual review.
-GRANT USAGE ON SCHEMA app_rls TO PUBLIC;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app_rls TO PUBLIC;
+-- Schema usage is granted only to the explicitly reviewed staging application
+-- role supplied by psql. Helper execution grants below are exact signatures.
+GRANT USAGE ON SCHEMA app_rls TO :"mscqr_staging_app_role";
 
 -- ---------------------------------------------------------------------------
 -- Non-recursive access helpers
@@ -275,8 +284,25 @@ AS $$
     )
 $$;
 
--- Make grants deterministic after CREATE OR REPLACE FUNCTION added helpers.
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app_rls TO PUBLIC;
+-- Exact helper execution grants. Do not use blanket function grants: staging
+-- may already have unrelated helpers in app_rls.
+GRANT EXECUTE ON FUNCTION app_rls.setting(text) TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.current_user_id() TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.current_role() TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.current_licensee_id() TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.current_manufacturer_id() TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.current_organization_id() TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.is_platform_admin() TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_licensee(text) TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_organization(text) TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_batch(text) TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_qr(text) TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_printer_registration(text) TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_printer(text) TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_print_job(text) TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_print_session(text) TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_print_item(text) TO :"mscqr_staging_app_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_printer_profile(text) TO :"mscqr_staging_app_role";
 
 -- ---------------------------------------------------------------------------
 -- Idempotent policy reset for this candidate template only

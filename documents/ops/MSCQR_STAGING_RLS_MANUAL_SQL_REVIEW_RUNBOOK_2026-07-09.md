@@ -31,7 +31,8 @@ Source documents:
   - `MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED`
 - Confirm the SQL files are outside `backend/prisma/migrations`.
 - Confirm no hardcoded user IDs, licensee IDs, org IDs, batch IDs, printer IDs, emails, tokens, hostnames, secrets, or production references were added.
-- Confirm reviewer approval for helper grants. The template uses `PUBLIC` for helper execution so unknown staging app roles can execute policy helpers; a reviewer may replace it with the exact staging app role in both template and rollback.
+- Confirm reviewer approval for `mscqr_staging_app_role`. The candidate and rollback templates require `-v mscqr_staging_app_role=<reviewed_staging_app_db_role>`.
+- Confirm `PUBLIC` is not used as the helper grant target. `PUBLIC` is forbidden for this validation because staging may already have unrelated `app_rls` helpers.
 - Confirm staging backend is healthy before any SQL apply window.
 - Confirm rollback SQL has been reviewed in the same review session as the candidate SQL.
 
@@ -60,6 +61,38 @@ Source documents:
 - Confirm `PrintItem`, `PrintSession`, and `PrintJob` visibility preserves QR reservable-summary left-join count correctness.
 - Confirm no write policy is added. These templates cover read-only candidate endpoints.
 
+## Disposable Harness Gate
+
+Before manual staging apply, the disposable SQL harness must pass against a local disposable database.
+
+Non-mutating guard/unit check:
+
+```bash
+npm run check:rls:disposable-sql-harness
+```
+
+Full disposable apply/rollback proof placeholder:
+
+```bash
+MSCQR_DISPOSABLE_RLS_HARNESS_CONFIRM=MSCQR_RUN_DISPOSABLE_RLS_HARNESS \
+MSCQR_DISPOSABLE_RLS_DATABASE_URL="$LOCAL_DISPOSABLE_RLS_HARNESS_DATABASE_URL" \
+MSCQR_DISPOSABLE_RLS_APP_ROLE="$LOCAL_DISPOSABLE_APP_DB_ROLE" \
+node scripts/run-disposable-rls-sql-harness.mjs --prepare-schema --run-route-tests
+```
+
+The disposable database URL must be local-only and the database name must include `rls_harness`, `disposable`, `test`, or `ci`. The harness refuses staging, production, RDS, AWS, Supabase, Neon, Render, Railway, public-host, and non-local/shared-looking database URLs. It also refuses `PUBLIC` as the app role and prints sanitized connection metadata only, never a full database URL or password.
+
+The harness proves:
+- candidate SQL applies cleanly to the disposable schema
+- expected `app_rls` helpers exist after apply
+- expected candidate SELECT policies exist after apply
+- candidate tables have RLS and FORCE RLS enabled after apply
+- optional route-specific runtime tests pass in disposable P2 databases when `--run-route-tests` is used
+- rollback SQL runs cleanly
+- expected candidate policies, helpers, schema objects, and table RLS settings are removed after rollback
+
+The harness does not replace manual SQL review, baseline capture, staging snapshot approval, or CloudWatch proof-event validation.
+
 ## Manual psql Command Placeholders
 
 Use placeholders only. Do not write real secrets or hostnames into repository files or PR comments.
@@ -69,6 +102,7 @@ Review-only parse in a safe disposable environment:
 ```bash
 psql "$STAGING_REVIEW_DATABASE_URL" \
   -v ON_ERROR_STOP=1 \
+  -v mscqr_staging_app_role="$REVIEWED_STAGING_APP_DB_ROLE" \
   -f documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql
 ```
 
@@ -77,10 +111,12 @@ Rollback in the same staging validation window if needed:
 ```bash
 psql "$STAGING_REVIEW_DATABASE_URL" \
   -v ON_ERROR_STOP=1 \
+  -v mscqr_staging_app_role="$REVIEWED_STAGING_APP_DB_ROLE" \
   -f documents/security/mscqr_staging_rls_candidate_rollback_2026-07-09.sql
 ```
 
 The placeholder `STAGING_REVIEW_DATABASE_URL` must be resolved from private operator tooling, not committed or printed.
+The placeholder `REVIEWED_STAGING_APP_DB_ROLE` must be the exact reviewed staging app DB role and must not be `PUBLIC`.
 
 ## Apply Order
 
@@ -187,7 +223,7 @@ If disabling the flag is insufficient, run the rollback SQL. If rollback is insu
 
 - Enabling table RLS affects staging table access globally, even though the route flags control only the staged application read paths.
 - The template intentionally adds SELECT policies only. Staging writes to these tables may fail during the validation window unless the active app role bypasses RLS or the test window avoids those writes.
-- The `PUBLIC` helper grants are convenient for review but should be narrowed to the exact staging app role if the role is known before apply.
+- Helper grants are scoped to the reviewed `mscqr_staging_app_role` only. Rollback revokes candidate helper function signatures from that role and revokes schema usage only when rollback removes the candidate-created `app_rls` schema, so unrelated helpers are not disrupted.
 - Raw SQL summaries are sensitive to left-join visibility. Validate IDs and counts, not only HTTP 200.
 - Batch allocation-map lineage relies on linked-licensee access to preserve parent/root/source visibility for authorized focus batches.
 - Printer local-agent policies depend on the PR #109 transaction-aware read graph; do not validate these SQL templates against older backend revisions.
