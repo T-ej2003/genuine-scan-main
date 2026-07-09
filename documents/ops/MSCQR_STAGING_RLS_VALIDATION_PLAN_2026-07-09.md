@@ -27,7 +27,10 @@ Not started:
 - Staging hardening PR
 - Production RLS rollout plan
 
-PR 106 must remain draft and must not be merged as part of this RLS validation step.
+PR 108 must remain draft and must not be merged as part of this RLS validation step.
+
+Discovery companion:
+- `documents/ops/MSCQR_STAGING_RLS_DB_TOUCH_MAP_2026-07-09.md`
 
 ## Candidate Endpoints
 
@@ -90,6 +93,7 @@ Expected behaviour:
 - Manufacturer users are restricted by manufacturerId and accessible licensee IDs.
 
 Read path discovered:
+- ManufacturerLicenseeLink.findMany can be used by manufacturer scope resolution when linked licensee IDs are not already present in the authenticated session.
 - Batch.findMany
 - Batch.count
 - Batch includes Licensee
@@ -111,6 +115,7 @@ Tables requiring validation coverage:
 - Batch
 - Licensee
 - User
+- ManufacturerLicenseeLink
 - InventoryStatusRollup
 - QRCode
 - PrintItem
@@ -141,6 +146,7 @@ Expected behaviour:
 - Related lineage batches stay inside the same licensee.
 
 Read path discovered:
+- ManufacturerLicenseeLink.findMany can be used by manufacturer scope resolution when linked licensee IDs are not already present in the authenticated session.
 - Batch.findFirst
 - Batch.findMany related lineage
 - Batch includes Licensee
@@ -155,6 +161,7 @@ Tables requiring validation coverage:
 - Batch
 - Licensee
 - User
+- ManufacturerLicenseeLink
 - InventoryStatusRollup
 - QRCode
 - PrintItem
@@ -185,12 +192,14 @@ Expected behaviour:
 - Inactive printers are excluded unless includeInactive=true.
 
 Read path discovered:
+- ManufacturerLicenseeLink.findMany can be used before the staged wrapper when a manufacturer session does not already carry linked licensee IDs.
 - Printer.findMany
 - include PrinterRegistration
 - PrinterProfile lookup per printer
 - PrinterProfileSnapshot lookup through profile snapshots
 - getPrinterConnectionStatusForUser for local-agent printer status
 - latest local-agent status/session/attestation data used to build registry status
+- Note: getPrinterConnectionStatusForUser currently reads through the global Prisma client instead of the staged transaction client.
 
 Tables requiring validation coverage:
 - Printer
@@ -199,13 +208,14 @@ Tables requiring validation coverage:
 - PrinterProfileSnapshot
 - PrinterAgentSession
 - PrinterAttestation
-- Organization
-- Licensee
 - User
 - ManufacturerLicenseeLink
 
 Validation objective:
 RLS-enabled printer list results must match current app-layer scoped results for local-agent and network printer cases.
+
+Pre-template blocker:
+Before applying any printer local-agent RLS policy in staging, the route must either thread the staged transaction client through manufacturer scope resolution and getPrinterConnectionStatusForUser, or the manual SQL template must explicitly leave those tables out of the applied set. Applying RLS to PrinterRegistration, PrinterAttestation, or PrinterAgentSession while those reads are outside the transaction-local context risks false 500s or incorrect local-agent status.
 
 ## Required Actor Test Matrix
 
@@ -231,8 +241,9 @@ The staging validation should include:
 - Batch with print item, session, and job history
 - Local-agent printer assigned to user
 - Local-agent printer registered by user
-- Local-agent printer with active agent session/status
-- Local-agent printer with attestation history
+- Local-agent printer with active PrinterAgentSession status
+- Local-agent printer with PrinterAttestation history
+- Local-agent printer with PrinterProfile and PrinterProfileSnapshot history
 - Network printer under scoped licensee
 - Network printer under different licensee
 - Inactive printer includeInactive path
@@ -328,9 +339,9 @@ Do not:
 4. Capture baseline outputs for the three candidate endpoints.
 5. Prepare staging-only migration and policy review for required tables.
 6. Enable one RLS flag at a time.
-6. Compare outputs and proof events.
-7. Document evidence.
-8. Draft production rollout plan only after staging passes.
+7. Compare outputs and proof events.
+8. Document evidence.
+9. Draft production rollout plan only after staging passes.
 
 ## Current Status
 
