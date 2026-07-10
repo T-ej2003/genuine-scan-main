@@ -52,8 +52,9 @@ const makeFactory = (options = {}) => {
     async $disconnect() {
       state.disconnected += 1;
     },
-    async $queryRawUnsafe(query) {
-      if (query === "SELECT 1") {
+    async $queryRaw(strings) {
+      const query = Array.isArray(strings) ? strings.join("") : String(strings);
+      if (query.trim() === "SELECT 1") {
         state.healthQueries += 1;
         return [{ "?column?": 1 }];
       }

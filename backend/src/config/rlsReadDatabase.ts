@@ -28,7 +28,7 @@ export type RlsReadTransactionRunner = {
 
 type ManagedRlsReadPrisma = Pick<
   PrismaClient,
-  "$connect" | "$disconnect" | "$queryRawUnsafe" | "$transaction"
+  "$connect" | "$disconnect" | "$queryRaw" | "$transaction"
 >;
 
 type RlsReadPrismaFactory = (databaseUrl: string) => ManagedRlsReadPrisma;
@@ -189,7 +189,7 @@ export const getRlsReadPrisma = (env = process.env): RlsReadTransactionRunner =>
 };
 
 const loadRuntimePosture = async (client: ManagedRlsReadPrisma) => {
-  const rows = await client.$queryRawUnsafe<RlsRuntimePosture[]>(`
+  const rows = await client.$queryRaw<RlsRuntimePosture[]>`
     WITH target_tables(name) AS (
       VALUES
         ('Organization'), ('Licensee'), ('User'), ('ManufacturerLicenseeLink'),
@@ -260,7 +260,7 @@ const loadRuntimePosture = async (client: ManagedRlsReadPrisma) => {
         AS all_helpers_executable
     FROM pg_roles r
     WHERE r.rolname = current_user
-  `);
+  `;
   return rows[0] || null;
 };
 
@@ -321,7 +321,7 @@ export const getRlsReadDatabaseHealth = async (env = process.env) => {
   try {
     const client = await initializeRlsReadPrismaClient(env);
     if (!client) throw new RlsReadInitializationError();
-    await client.$queryRawUnsafe("SELECT 1");
+    await client.$queryRaw`SELECT 1`;
     return { configured: true, required: true, ready: true };
   } catch (error) {
     const code =
