@@ -1,12 +1,23 @@
-import { Prisma, PrismaClient, UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 
+import {
+  getRlsReadPrisma,
+  initializeRlsReadPrisma,
+  isStagedRlsReadFlagEnabled,
+  RlsReadTransactionClient,
+  RlsReadTransactionRunner,
+  STAGING_RLS_BATCHES_READ_FLAG,
+  STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG,
+  STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG,
+} from "../config/rlsReadDatabase";
 import { AuthenticatedSessionClaims } from "../types";
 import { isManufacturerRole, isPlatformRole } from "../services/manufacturerScopeService";
 
-export const STAGING_RLS_BATCHES_READ_FLAG = "MSCQR_STAGING_RLS_BATCHES_READ_ENABLED";
-export const STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG = "MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED";
-export const STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG =
-  "MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED";
+export {
+  STAGING_RLS_BATCHES_READ_FLAG,
+  STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG,
+  STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG,
+};
 
 export type StagingRlsBatchReadContext = {
   userId: string;
@@ -17,26 +28,35 @@ export type StagingRlsBatchReadContext = {
   isPlatformAdmin: boolean;
 };
 
-type PrismaTransactionRunner = Pick<PrismaClient, "$transaction">;
-
 const forbiddenRuntimeRoles = new Set(["public_verification", "printer_agent", "background_worker", "system_worker"]);
 const emptyIfMissing = (value?: string | null) => value ?? "";
 
-const parseBooleanEnv = (name: string, fallback = false) => {
-  const normalized = String(process.env[name] || "").trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return fallback;
-};
+// These are deliberately narrower than the compatibility enum. A staged RLS
+// route must fail closed for a dormant role until that role has an explicit,
+// separately reviewed phase-one activation decision.
+export const PHASE_ONE_RLS_ACTIVE_ROLES = [
+  UserRole.SUPER_ADMIN,
+  UserRole.PLATFORM_SUPER_ADMIN,
+  UserRole.LICENSEE_ADMIN,
+  UserRole.MANUFACTURER,
+] as const;
+
+export const PHASE_ONE_RLS_DORMANT_ROLES = [
+  UserRole.ORG_ADMIN,
+  UserRole.MANUFACTURER_ADMIN,
+  UserRole.MANUFACTURER_USER,
+] as const;
+
+const phaseOneRlsActiveRoleSet = new Set<UserRole>(PHASE_ONE_RLS_ACTIVE_ROLES);
 
 export const isStagingRlsBatchesReadEnabled = () =>
-  parseBooleanEnv(STAGING_RLS_BATCHES_READ_FLAG, false);
+  isStagedRlsReadFlagEnabled(STAGING_RLS_BATCHES_READ_FLAG);
 
 export const isStagingRlsBatchAllocationMapEnabled = () =>
-  parseBooleanEnv(STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG, false);
+  isStagedRlsReadFlagEnabled(STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG);
 
 export const isStagingRlsManufacturerPrintersReadEnabled = () =>
-  parseBooleanEnv(STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG, false);
+  isStagedRlsReadFlagEnabled(STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG);
 
 export const buildStagingRlsBatchReadContext = (
   user: AuthenticatedSessionClaims
@@ -49,6 +69,9 @@ export const buildStagingRlsBatchReadContext = (
   const normalizedRole = role.toLowerCase();
   if (forbiddenRuntimeRoles.has(normalizedRole)) {
     throw new Error(`Staging RLS batch read context does not allow ${normalizedRole}`);
+  }
+  if (!phaseOneRlsActiveRoleSet.has(user.role)) {
+    throw new Error("Staged RLS phase-one access is not enabled for this application role");
   }
 
   const isPlatformAdmin = isPlatformRole(user.role);
@@ -90,7 +113,7 @@ export const buildStagingRlsBatchReadContext = (
 };
 
 export const setStagingRlsBatchReadContext = async (
-  tx: Prisma.TransactionClient,
+  tx: Pick<Prisma.TransactionClient, "$executeRaw">,
   context: StagingRlsBatchReadContext
 ) => {
   await tx.$executeRaw`
@@ -105,12 +128,18 @@ export const setStagingRlsBatchReadContext = async (
 };
 
 export const withStagingRlsBatchReadTransaction = async <T>(
-  prisma: PrismaTransactionRunner,
   user: AuthenticatedSessionClaims,
-  callback: (tx: Prisma.TransactionClient, context: StagingRlsBatchReadContext) => Promise<T>
-) =>
-  prisma.$transaction(async (tx) => {
+  callback: (tx: RlsReadTransactionClient, context: StagingRlsBatchReadContext) => Promise<T>,
+  options: { transactionRunner?: RlsReadTransactionRunner } = {}
+) => {
+  if (options.transactionRunner && process.env.NODE_ENV !== "test") {
+    throw new Error("RLS read transaction runner injection is test-only");
+  }
+  if (!options.transactionRunner) await initializeRlsReadPrisma();
+  const transactionRunner = options.transactionRunner || getRlsReadPrisma();
+  return transactionRunner.$transaction(async (tx) => {
     const context = buildStagingRlsBatchReadContext(user);
     await setStagingRlsBatchReadContext(tx, context);
     return callback(tx, context);
   });
+};

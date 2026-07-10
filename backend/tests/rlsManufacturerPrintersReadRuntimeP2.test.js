@@ -1,5 +1,4 @@
 const assert = require("node:assert/strict");
-const { execFileSync } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
 const {
@@ -22,6 +21,13 @@ const {
   withP2TestApp,
 } = require("./helpers/p2TestDb");
 const { ids, issueBearerTokens, seedP2Fixtures } = require("./helpers/p2SeedFactories");
+const {
+  applyCandidateRls,
+  buildRoleUrl: buildRestrictedRoleUrl,
+  createRestrictedRlsReadRole,
+  dropRestrictedRlsReadRole,
+  rollbackCandidateRls,
+} = require("./helpers/rlsReadRuntimeRole");
 
 const command =
   "MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_TEST=true npm --prefix backend run test:rls:manufacturer-printers-read-runtime";
@@ -52,7 +58,6 @@ const printerIds = {
 const authHeader = (token) => ({ authorization: `Bearer ${token}` });
 const backendRoot = path.resolve(__dirname, "..");
 const distRoot = path.join(backendRoot, "dist");
-const repoRoot = path.resolve(__dirname, "../..");
 
 const mockModule = (relativePath, exportsValue) => {
   const resolved = require.resolve(path.join(distRoot, relativePath));
@@ -64,260 +69,10 @@ const mockModule = (relativePath, exportsValue) => {
   };
 };
 
-const quoteIdent = (value) => {
-  assert.match(value, /^[a-z0-9_]+$/i, "Unsafe PostgreSQL identifier");
-  return `"${value.replace(/"/g, '""')}"`;
-};
-
-const parseDatabaseName = (databaseUrl) => {
-  const parsed = new URL(databaseUrl);
-  return decodeURIComponent(parsed.pathname.replace(/^\//, ""));
-};
-
-const buildRoleUrl = (databaseUrl, roleName) => {
-  const parsed = new URL(databaseUrl);
-  parsed.username = roleName;
-  parsed.password = "";
-  return parsed.toString();
-};
-
-const applySql = (databaseUrl, sql) => {
-  execFileSync("psql", [databaseUrl, "-v", "ON_ERROR_STOP=1", "-c", sql], {
-    cwd: repoRoot,
-    env: { ...process.env },
-    stdio: "inherit",
-  });
-};
-
-const createAppRole = (databaseUrl) => {
-  const roleName = `mscqr_printer_read_rls_app_${process.pid}_${Date.now()}`.toLowerCase();
-  const databaseName = parseDatabaseName(databaseUrl);
-  const role = quoteIdent(roleName);
-  applySql(
-    databaseUrl,
-    `
-      DROP ROLE IF EXISTS ${role};
-      CREATE ROLE ${role} LOGIN;
-      GRANT CONNECT ON DATABASE ${quoteIdent(databaseName)} TO ${role};
-      GRANT USAGE ON SCHEMA public TO ${role};
-      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role};
-      GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO ${role};
-    `
-  );
-  return roleName;
-};
-
-const dropAppRole = (databaseUrl, roleName) => {
-  if (!roleName) return;
-  const role = quoteIdent(roleName);
-  applySql(databaseUrl, `DROP OWNED BY ${role}; DROP ROLE IF EXISTS ${role};`);
-};
-
 const clearDistRequireCache = () => {
   for (const key of Object.keys(require.cache)) {
     if (key.startsWith(distRoot)) delete require.cache[key];
   }
-};
-
-const applyManufacturerPrintersRouteRls = (databaseUrl) => {
-  applySql(databaseUrl, `
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_profile_snapshot_select ON "PrinterProfileSnapshot";
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_profile_select ON "PrinterProfile";
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_agent_session_select ON "PrinterAgentSession";
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_attestation_select ON "PrinterAttestation";
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_registration_select ON "PrinterRegistration";
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_select ON "Printer";
-    DROP POLICY IF EXISTS test_rls_manufacturer_licensee_link_select ON "ManufacturerLicenseeLink";
-
-    ALTER TABLE "ManufacturerLicenseeLink" ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE "ManufacturerLicenseeLink" FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "Printer" ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE "Printer" FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterRegistration" ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterRegistration" FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterAttestation" ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterAttestation" FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterAgentSession" ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterAgentSession" FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterProfile" ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterProfile" FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterProfileSnapshot" ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterProfileSnapshot" FORCE ROW LEVEL SECURITY;
-
-    CREATE POLICY test_rls_manufacturer_licensee_link_select ON "ManufacturerLicenseeLink"
-      FOR SELECT
-      USING (
-        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
-        OR "manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
-        OR "licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
-      );
-
-    CREATE POLICY test_rls_manufacturer_printer_select ON "Printer"
-      FOR SELECT
-      USING (
-        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
-        OR "licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
-        OR "orgId" = NULLIF(current_setting('app.organization_id', true), '')
-        OR "assignedUserId" = NULLIF(current_setting('app.user_id', true), '')
-        OR "createdByUserId" = NULLIF(current_setting('app.user_id', true), '')
-        OR EXISTS (
-          SELECT 1
-          FROM "ManufacturerLicenseeLink" mll
-          WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
-            AND mll."licenseeId" = "Printer"."licenseeId"
-        )
-        OR EXISTS (
-          SELECT 1
-          FROM "PrinterRegistration" pr
-          WHERE pr."id" = "Printer"."printerRegistrationId"
-            AND pr."userId" = NULLIF(current_setting('app.user_id', true), '')
-        )
-      );
-
-    CREATE POLICY test_rls_manufacturer_printer_registration_select ON "PrinterRegistration"
-      FOR SELECT
-      USING (
-        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
-        OR "userId" = NULLIF(current_setting('app.user_id', true), '')
-        OR "licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
-        OR "orgId" = NULLIF(current_setting('app.organization_id', true), '')
-        OR EXISTS (
-          SELECT 1
-          FROM "ManufacturerLicenseeLink" mll
-          WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
-            AND mll."licenseeId" = "PrinterRegistration"."licenseeId"
-        )
-      );
-
-    CREATE POLICY test_rls_manufacturer_printer_attestation_select ON "PrinterAttestation"
-      FOR SELECT
-      USING (
-        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
-        OR EXISTS (
-          SELECT 1
-          FROM "PrinterRegistration" pr
-          WHERE pr."id" = "PrinterAttestation"."printerRegistrationId"
-            AND (
-              pr."userId" = NULLIF(current_setting('app.user_id', true), '')
-              OR pr."licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
-              OR pr."orgId" = NULLIF(current_setting('app.organization_id', true), '')
-              OR EXISTS (
-                SELECT 1
-                FROM "ManufacturerLicenseeLink" mll
-                WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
-                  AND mll."licenseeId" = pr."licenseeId"
-              )
-            )
-        )
-      );
-
-    CREATE POLICY test_rls_manufacturer_printer_agent_session_select ON "PrinterAgentSession"
-      FOR SELECT
-      USING (
-        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
-        OR EXISTS (
-          SELECT 1
-          FROM "PrinterRegistration" pr
-          WHERE pr."id" = "PrinterAgentSession"."registrationId"
-            AND (
-              pr."userId" = NULLIF(current_setting('app.user_id', true), '')
-              OR pr."licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
-              OR pr."orgId" = NULLIF(current_setting('app.organization_id', true), '')
-              OR EXISTS (
-                SELECT 1
-                FROM "ManufacturerLicenseeLink" mll
-                WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
-                  AND mll."licenseeId" = pr."licenseeId"
-              )
-            )
-        )
-      );
-
-    CREATE POLICY test_rls_manufacturer_printer_profile_select ON "PrinterProfile"
-      FOR SELECT
-      USING (
-        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
-        OR EXISTS (
-          SELECT 1
-          FROM "Printer" p
-          WHERE p."id" = "PrinterProfile"."printerId"
-            AND (
-              p."licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
-              OR p."orgId" = NULLIF(current_setting('app.organization_id', true), '')
-              OR p."assignedUserId" = NULLIF(current_setting('app.user_id', true), '')
-              OR p."createdByUserId" = NULLIF(current_setting('app.user_id', true), '')
-              OR EXISTS (
-                SELECT 1
-                FROM "ManufacturerLicenseeLink" mll
-                WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
-                  AND mll."licenseeId" = p."licenseeId"
-              )
-              OR EXISTS (
-                SELECT 1
-                FROM "PrinterRegistration" pr
-                WHERE pr."id" = p."printerRegistrationId"
-                  AND pr."userId" = NULLIF(current_setting('app.user_id', true), '')
-              )
-            )
-        )
-      );
-
-    CREATE POLICY test_rls_manufacturer_printer_profile_snapshot_select ON "PrinterProfileSnapshot"
-      FOR SELECT
-      USING (
-        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
-        OR EXISTS (
-          SELECT 1
-          FROM "PrinterProfile" pp
-          JOIN "Printer" p ON p."id" = pp."printerId"
-          WHERE pp."id" = "PrinterProfileSnapshot"."printerProfileId"
-            AND (
-              p."licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
-              OR p."orgId" = NULLIF(current_setting('app.organization_id', true), '')
-              OR p."assignedUserId" = NULLIF(current_setting('app.user_id', true), '')
-              OR p."createdByUserId" = NULLIF(current_setting('app.user_id', true), '')
-              OR EXISTS (
-                SELECT 1
-                FROM "ManufacturerLicenseeLink" mll
-                WHERE mll."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
-                  AND mll."licenseeId" = p."licenseeId"
-              )
-              OR EXISTS (
-                SELECT 1
-                FROM "PrinterRegistration" pr
-                WHERE pr."id" = p."printerRegistrationId"
-                  AND pr."userId" = NULLIF(current_setting('app.user_id', true), '')
-              )
-            )
-        )
-      );
-  `);
-};
-
-const rollbackManufacturerPrintersRouteRls = (databaseUrl) => {
-  applySql(databaseUrl, `
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_profile_snapshot_select ON "PrinterProfileSnapshot";
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_profile_select ON "PrinterProfile";
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_agent_session_select ON "PrinterAgentSession";
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_attestation_select ON "PrinterAttestation";
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_registration_select ON "PrinterRegistration";
-    DROP POLICY IF EXISTS test_rls_manufacturer_printer_select ON "Printer";
-    DROP POLICY IF EXISTS test_rls_manufacturer_licensee_link_select ON "ManufacturerLicenseeLink";
-    ALTER TABLE "PrinterProfileSnapshot" NO FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterProfileSnapshot" DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterProfile" NO FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterProfile" DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterAgentSession" NO FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterAgentSession" DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterAttestation" NO FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterAttestation" DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterRegistration" NO FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "PrinterRegistration" DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE "Printer" NO FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "Printer" DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE "ManufacturerLicenseeLink" NO FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "ManufacturerLicenseeLink" DISABLE ROW LEVEL SECURITY;
-  `);
 };
 
 const request = async (baseUrl, method, route, body, options = {}) => {
@@ -361,6 +116,8 @@ const readContext = async (client) => {
   `;
   return rows[0] || {};
 };
+
+const readContextFromRunner = (runner) => runner.$transaction((tx) => readContext(tx));
 
 const createPrinterFixtures = async (prisma) => {
   const now = new Date();
@@ -764,6 +521,7 @@ const assertSafeProofEvent = (event) => {
 
 const runFlagOffRouteAssertions = async () => {
   process.env[flagName] = "false";
+  delete process.env.RLS_READ_DATABASE_URL;
   const logs = await withConsoleCapture(async () => {
     await withP2TestApp(async ({ request, prisma }) => {
       await seedP2Fixtures(prisma);
@@ -831,10 +589,10 @@ const runFlagOnRouteAssertions = async () => {
     await seedP2Fixtures(adminPrisma);
     await createPrinterFixtures(adminPrisma);
 
-    appRoleName = createAppRole(databaseInfo.databaseUrl);
-    applyManufacturerPrintersRouteRls(databaseInfo.databaseUrl);
+    appRoleName = createRestrictedRlsReadRole(databaseInfo.databaseUrl, "mscqr_printers_rls_read");
+    applyCandidateRls(databaseInfo.databaseUrl, appRoleName);
 
-    process.env.DATABASE_URL = buildRoleUrl(databaseInfo.databaseUrl, appRoleName);
+    process.env.RLS_READ_DATABASE_URL = buildRestrictedRoleUrl(databaseInfo.databaseUrl, appRoleName);
     clearDistRequireCache();
 
     const proofLogs = [];
@@ -861,11 +619,13 @@ const runFlagOnRouteAssertions = async () => {
     const tokens = await issueBearerTokens();
 
     try {
-      const plainRows = await appPrisma.$transaction((tx) =>
+      const { getRlsReadPrisma } = require("../dist/config/rlsReadDatabase");
+      const rlsReadPrisma = getRlsReadPrisma();
+      const plainRows = await rlsReadPrisma.$transaction((tx) =>
         tx.printer.findMany({ where: { id: { in: Object.values(printerIds) } }, orderBy: [{ id: "asc" }] })
       );
       assert.deepEqual(plainRows, [], "Printer RLS must fail closed without transaction-local app context");
-      const plainRegistrations = await appPrisma.$transaction((tx) =>
+      const plainRegistrations = await rlsReadPrisma.$transaction((tx) =>
         tx.printerRegistration.findMany({ where: { id: printerIds.registrationA } })
       );
       assert.deepEqual(
@@ -928,6 +688,24 @@ const runFlagOnRouteAssertions = async () => {
       });
       assertManufacturerAPrinterRows(noClaimRows, "flag on manufacturer service without linked-licensee claims");
 
+      await assert.rejects(
+        () => listScopedManufacturerPrintersReadPayload({
+          user: {
+            userId: ids.licenseeAdminA,
+            email: "org-admin-a@mscqr.test",
+            role: UserRole.ORG_ADMIN,
+            licenseeId: ids.licenseeA,
+            orgId: ids.orgA,
+            sessionStage: "ACTIVE",
+            authAssurance: "ADMIN_MFA",
+          },
+          licenseeId: ids.licenseeA,
+          includeInactive: false,
+        }),
+        /phase-one access is not enabled/,
+        "dormant organization admin must not gain phase-one printer-read access"
+      );
+
       const siblingRoutePath = `/api/manufacturer/printers/${printerIds.printerA}/test`;
       const siblingRoute = await routeRequest("POST", siblingRoutePath, {}, {
         headers: authHeader(tokens.licenseeAdminA),
@@ -935,7 +713,7 @@ const runFlagOnRouteAssertions = async () => {
       assert.notEqual(siblingRoute.status, 401, `sibling printer test route should pass auth before telemetry assertion: ${siblingRoute.text}`);
 
       const successProofs = proofLogs.filter((entry) => entry.event.success);
-      assert.equal(successProofs.length, 5, "flag-on manufacturer printer reads must emit proof events");
+      assert.equal(successProofs.length, 5, "only active phase-one printer reads may emit success proofs");
       assert.deepEqual(
         successProofs.map((entry) => entry.event.contextClass).sort(),
         ["manufacturer", "manufacturer", "manufacturer", "manufacturer", "platform_admin"],
@@ -982,13 +760,13 @@ const runFlagOnRouteAssertions = async () => {
       assert.strictEqual(siblingRouteLog.event.actorLicenseeId, ids.licenseeA, "sibling route must not redact licensee id");
       assert.strictEqual(siblingRouteLog.event.actorOrgId, ids.orgA, "sibling route must not redact organization id");
 
-      const context = await readContext(appPrisma);
-      assert.notEqual(context.user_id, ids.manufacturerA, "app.user_id leaked after route transaction");
-      assert.notEqual(context.role, UserRole.MANUFACTURER, "app.role leaked after route transaction");
-      assert.notEqual(context.licensee_id, ids.licenseeA, "app.licensee_id leaked after route transaction");
-      assert.notEqual(context.manufacturer_id, ids.manufacturerA, "app.manufacturer_id leaked after route transaction");
-      assert.notEqual(context.organization_id, ids.orgA, "app.organization_id leaked after route transaction");
-      assert.notEqual(context.is_platform_admin, "true", "app.is_platform_admin leaked after route transaction");
+      const context = await readContextFromRunner(rlsReadPrisma);
+      assert.equal(context.user_id || "", "", "app.user_id leaked after route transaction");
+      assert.equal(context.role || "", "", "app.role leaked after route transaction");
+      assert.equal(context.licensee_id || "", "", "app.licensee_id leaked after route transaction");
+      assert.equal(context.manufacturer_id || "", "", "app.manufacturer_id leaked after route transaction");
+      assert.equal(context.organization_id || "", "", "app.organization_id leaked after route transaction");
+      assert.equal(context.is_platform_admin || "", "", "app.is_platform_admin leaked after route transaction");
 
       await assert.rejects(
         () =>
@@ -1012,21 +790,26 @@ const runFlagOnRouteAssertions = async () => {
         "staging RLS printer service must fail closed when tenant context is missing"
       );
 
-      const failureProof = proofLogs.find((entry) => !entry.event.success);
+      const failureProof = proofLogs.find((entry) => !entry.event.success && entry.event.failureCategory === "rls_context_missing");
       assert(failureProof, "flag-on printer read failures must emit a categorized proof event");
       assert.strictEqual(failureProof.level, "warn");
       assertSafeProofEvent(failureProof.event);
       assert.strictEqual(failureProof.event.failureCategory, "rls_context_missing");
       assert(!JSON.stringify(failureProof.event).includes("requires app.licensee_id"), "failure proof must not log error text");
     } finally {
-      rollbackManufacturerPrintersRouteRls(databaseInfo.databaseUrl);
+      rollbackCandidateRls(databaseInfo.databaseUrl, appRoleName);
     }
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
+    const rlsReadModule = require.cache[require.resolve("../dist/config/rlsReadDatabase")]
+      ? require("../dist/config/rlsReadDatabase")
+      : null;
+    if (rlsReadModule) await rlsReadModule.disconnectRlsReadPrisma().catch(() => {});
     if (appPrisma?.$disconnect) await appPrisma.$disconnect().catch(() => {});
     if (adminPrisma?.$disconnect) await adminPrisma.$disconnect().catch(() => {});
-    if (databaseInfo?.databaseUrl && appRoleName) dropAppRole(databaseInfo.databaseUrl, appRoleName);
+    if (databaseInfo?.databaseUrl && appRoleName) dropRestrictedRlsReadRole(databaseInfo.databaseUrl, appRoleName);
     if (databaseInfo?.createdDatabaseName) dropP2TestDatabase(databaseInfo);
+    delete process.env.RLS_READ_DATABASE_URL;
   }
 };
 

@@ -25,7 +25,9 @@ import { bumpCacheNamespaceVersion } from "./versionedCacheService";
 
 export type { PrinterCapabilitySummary, PrinterConnectionStatus, PrinterInventoryDevice };
 
-type DbClient = typeof prisma | Prisma.TransactionClient;
+type PrinterConnectionReadClient = {
+  printerRegistration: Pick<Prisma.TransactionClient["printerRegistration"], "findFirst">;
+};
 
 type PrinterRegistrationWithLatest = {
   id: string;
@@ -625,7 +627,7 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
 
 const loadLatestRegistrationForUser = async (
   userId: string,
-  db: DbClient = prisma
+  db: PrinterConnectionReadClient = prisma
 ): Promise<PrinterRegistrationWithLatest | null> => {
   return db.printerRegistration.findFirst({
     where: { userId, revokedAt: null, trustStatus: { not: PrinterTrustStatus.REVOKED } },
@@ -646,7 +648,7 @@ const loadLatestRegistrationForUser = async (
 
 const loadRegistrationById = async (
   registrationId: string,
-  db: DbClient = prisma
+  db: PrinterConnectionReadClient = prisma
 ): Promise<PrinterRegistrationWithLatest | null> => {
   return db.printerRegistration.findFirst({
     where: { id: registrationId, revokedAt: null, trustStatus: { not: PrinterTrustStatus.REVOKED } },
@@ -717,7 +719,7 @@ export const onPrinterConnectionEvent = (listener: (event: PrinterConnectionReal
 
 export const getPrinterConnectionStatusForUser = async (
   userId: string,
-  db: DbClient = prisma
+  db: PrinterConnectionReadClient = prisma
 ): Promise<PrinterConnectionStatus> => {
   const registration = await loadLatestRegistrationForUser(userId, db);
   return buildStatus(registration);
@@ -736,7 +738,7 @@ export const publishPrinterConnectionStatusForUser = async (userId: string) => {
 
 export const getPrinterConnectionStatusForRegistration = async (
   registrationId: string,
-  db: DbClient = prisma
+  db: PrinterConnectionReadClient = prisma
 ): Promise<PrinterConnectionStatus> => {
   const registration = await loadRegistrationById(registrationId, db);
   return buildStatus(registration);

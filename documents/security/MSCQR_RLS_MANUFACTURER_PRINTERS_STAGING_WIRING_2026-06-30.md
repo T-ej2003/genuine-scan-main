@@ -18,6 +18,8 @@ Request telemetry treats only `GET /api/manufacturer/printers` and the same path
 
 Default: false. When the flag is disabled, the route keeps the existing app-layer authorization and printer list/status read behavior and does not emit manufacturer-printer staging RLS proof events.
 
+When enabled, this flag makes `RLS_READ_DATABASE_URL` mandatory. The value must be a valid PostgreSQL URL with a database name, must differ from `DATABASE_URL`, and must authenticate as the reviewed non-owner, non-bypass, SELECT-only runtime role. It never falls back to the default datasource. Startup and readiness fail closed if the dedicated client cannot connect or its role/table/policy/helper posture is unsafe.
+
 ## Flag Behavior
 
 Flag off:
@@ -30,7 +32,8 @@ Flag on:
 
 - Only `GET /api/manufacturer/printers` uses transaction-local app context through `set_config(..., true)`.
 - The existing authentication, `requireOpsUser`, `enforceTenantIsolation`, and scoped printer-list predicates still run.
-- The printer list service reads the selected printer rows and printer profile metadata through the same transaction client after context is set.
+- The printer list and nested profile/scope services read through the same transaction on the separately cached RLS client after context is set; no nested read may escape to the default client.
+- `DATABASE_URL` remains the unchanged default read/write client for the flag-off path, every printer mutation, and all unrelated routes.
 - Public verification, scans, print dispatch, print jobs, replacement flows, workers, exports, incidents, support, admin global views, printer-agent heartbeat/status/events, test-print, and printer mutation routes are unchanged.
 
 ## Expected Proof Telemetry
@@ -59,13 +62,13 @@ The route is useful for the next route-by-route RLS expansion because it exercis
 
 ## Rollback
 
-Unset `MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED`, or set it to `false`, then restart the affected staging backend process. The route returns to the existing non-RLS runtime read path and stops emitting manufacturer-printer staging RLS proof events.
+Unset `MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED`, or set it to `false`, then restart the affected staging backend process. The dedicated pool is no longer required or initialized, the route returns to the existing default-client read path, and manufacturer-printer staging RLS proof events stop.
 
 ## Validation Checklist
 
 1. Confirm no production RLS enablement or global RLS flag is active.
 2. Confirm no Prisma migration was created for this rollout step.
-3. Set `MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED=true` only in the staging backend environment.
+3. Privately verify that `RLS_READ_DATABASE_URL` is distinct from `DATABASE_URL` and proves the exact restricted runtime identity before setting `MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED=true`.
 4. Sign in as a manufacturer and call `GET /api/manufacturer/printers`; confirm only allowed printer list/status rows are returned.
 5. Sign in as a different manufacturer or tenant and call the route; confirm the response fails closed or matches the existing filtered-list behavior.
 6. Sign in as platform admin, if this route is supported for that role; confirm platform-admin context is explicit and expected.
@@ -74,7 +77,8 @@ Unset `MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED`, or set it to `fals
 9. Confirm proof logs contain only the safe fields listed above and do not contain raw tenant, user, printer, device, IP, QR, token, or secret values.
 10. Confirm transaction-local context does not leak after the route transaction.
 11. Run `npm --prefix backend run test:rls:manufacturer-printers-read-runtime`.
-12. Run the standard RLS and scope guardrail checks before promotion.
+12. Run `npm --prefix backend run test:rls:read-client`.
+13. Run the standard RLS and scope guardrail checks before promotion.
 
 ## Explicit Out Of Scope Printer Routes
 

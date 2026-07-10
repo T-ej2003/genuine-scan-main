@@ -5,6 +5,11 @@ import type { Socket } from "net";
 import packageJson from "../package.json";
 import { createBackendApp } from "./app";
 import prisma from "./config/database";
+import {
+  disconnectRlsReadPrisma,
+  initializeRlsReadPrisma,
+  validateRlsReadDatabaseConfiguration,
+} from "./config/rlsReadDatabase";
 import { logger } from "./utils/logger";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
 import { startAuditLogOutboxWorker, stopAuditLogOutboxWorker } from "./services/auditLogOutboxService";
@@ -68,6 +73,13 @@ if (!hasAnyConfiguredSecret("JWT_SECRET_CURRENT", "JWT_SECRET")) {
 }
 if (missingRequiredEnv.length > 0) {
   logger.error(`Missing required environment variables: ${missingRequiredEnv.join(", ")}`);
+  process.exit(1);
+}
+
+try {
+  validateRlsReadDatabaseConfiguration();
+} catch (error) {
+  logger.error(error instanceof Error ? error.message : "RLS read database configuration is invalid");
   process.exit(1);
 }
 
@@ -347,6 +359,7 @@ const closeHttpServer = async () => {
 };
 
 const startServer = async () => {
+  await initializeRlsReadPrisma();
   const bootstrapResult = await bootstrapConfiguredSuperAdmin();
   if (bootstrapResult.status === "blocked") {
     logger.error("Refusing to start because super admin bootstrap is enabled but not safe to run", {
@@ -451,6 +464,7 @@ const shutdown = async (signal: string) => {
     stopAnalyticsRollupWorker = null;
     await closeHttpServer();
     await closeRedisConnections();
+    await disconnectRlsReadPrisma();
     await prisma.$disconnect();
     await flushBackendMonitoring();
     clearTimeout(forceExit);

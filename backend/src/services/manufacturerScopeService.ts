@@ -3,6 +3,9 @@ import { Prisma, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 
 type DbClient = typeof prisma | Prisma.TransactionClient;
+export type ManufacturerScopeReadClient = {
+  manufacturerLicenseeLink: Pick<Prisma.TransactionClient["manufacturerLicenseeLink"], "findMany">;
+};
 
 export const MANUFACTURER_ROLES: UserRole[] = [
   UserRole.MANUFACTURER,
@@ -30,7 +33,7 @@ const unique = (values: Array<string | null | undefined>) =>
 
 export const listManufacturerLicenseeLinks = async (
   manufacturerId: string,
-  db: DbClient = prisma
+  db: ManufacturerScopeReadClient = prisma
 ) =>
   db.manufacturerLicenseeLink.findMany({
     where: { manufacturerId },
@@ -51,7 +54,7 @@ export const listManufacturerLicenseeLinks = async (
 
 export const listManufacturerLinkedLicenseeIds = async (
   manufacturerId: string,
-  db: DbClient = prisma
+  db: ManufacturerScopeReadClient = prisma
 ) => {
   const rows = await db.manufacturerLicenseeLink.findMany({
     where: { manufacturerId },
@@ -126,7 +129,7 @@ export const resolveAccessibleLicenseeIdsForUser = async (
     licenseeId?: string | null;
     linkedLicenseeIds?: string[] | null;
   },
-  db: DbClient = prisma
+  db: ManufacturerScopeReadClient = prisma
 ) => {
   if (isPlatformRole(user.role)) return [] as string[];
   if (isLicenseeAdminRole(user.role)) {
@@ -151,7 +154,7 @@ export const assertUserCanAccessLicensee = async (
     linkedLicenseeIds?: string[] | null;
   },
   licenseeId: string,
-  db: DbClient = prisma
+  db: ManufacturerScopeReadClient = prisma
 ) => {
   const target = String(licenseeId || "").trim();
   if (!target) return false;
@@ -170,7 +173,7 @@ export const resolveScopedLicenseeAccess = async (
     linkedLicenseeIds?: string[] | null;
   },
   requestedLicenseeId?: string | null,
-  db: DbClient = prisma
+  db: ManufacturerScopeReadClient = prisma
 ) => {
   const requested = String(requestedLicenseeId || "").trim() || null;
 

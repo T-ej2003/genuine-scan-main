@@ -11,15 +11,15 @@
 --   RLS for the candidate table set.
 --
 -- Operator note:
---   Run with the same reviewed staging application database role used for the
+--   Run with the same reviewed non-owner staging runtime database role used for the
 --   candidate template:
---     -v mscqr_staging_app_role=<reviewed_staging_app_db_role>
+--     -v mscqr_runtime_role=<reviewed_non_owner_staging_runtime_db_role>
 --
 --   Do not use PUBLIC.
 
-\if :{?mscqr_staging_app_role}
+\if :{?mscqr_runtime_role}
 \else
-\echo 'Missing required psql variable: -v mscqr_staging_app_role=<reviewed_staging_app_db_role>'
+\echo 'Missing required psql variable: -v mscqr_runtime_role=<reviewed_non_owner_staging_runtime_db_role>'
 \quit 3
 \endif
 
@@ -87,25 +87,32 @@ ALTER TABLE "Organization" DISABLE ROW LEVEL SECURITY;
 -- Revoke candidate helper grants and drop helpers
 -- ---------------------------------------------------------------------------
 
+REVOKE SELECT ON TABLE
+  "Organization", "Licensee", "User", "ManufacturerLicenseeLink",
+  "Batch", "InventoryStatusRollup", "QRCode", "PrintJob", "PrintSession",
+  "PrintItem", "PrinterRegistration", "Printer", "PrinterAttestation",
+  "PrinterAgentSession", "PrinterProfile", "PrinterProfileSnapshot"
+FROM :"mscqr_runtime_role";
+
 -- Exact reversals for the candidate helper signatures only. Do not use blanket
 -- function revokes: staging may have unrelated app_rls helpers.
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer_profile(text) FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_item(text) FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_session(text) FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_job(text) FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_qr(text) FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer(text) FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer_registration(text) FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_batch(text) FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_organization(text) FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_licensee(text) FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.is_platform_admin() FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.current_organization_id() FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.current_manufacturer_id() FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.current_licensee_id() FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.current_role() FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.current_user_id() FROM :"mscqr_staging_app_role";
-REVOKE EXECUTE ON FUNCTION app_rls.setting(text) FROM :"mscqr_staging_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer_profile(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_item(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_session(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_job(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_qr(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer_registration(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_batch(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_organization(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_licensee(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.is_platform_admin() FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_organization_id() FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_manufacturer_id() FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_licensee_id() FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_role() FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_user_id() FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.setting(text) FROM :"mscqr_runtime_role";
 
 DROP FUNCTION IF EXISTS app_rls.can_access_printer_profile(text);
 DROP FUNCTION IF EXISTS app_rls.can_access_print_item(text);
@@ -127,7 +134,7 @@ DROP FUNCTION IF EXISTS app_rls.setting(text);
 
 -- Drop app_rls only if this rollback leaves it empty. If a reviewer has added
 -- other staging-reviewed objects to the schema, leave the schema in place.
-SELECT set_config('app_rls.rollback_target_role', :'mscqr_staging_app_role', false);
+SELECT set_config('app_rls.rollback_target_role', :'mscqr_runtime_role', false);
 
 DO $$
 DECLARE

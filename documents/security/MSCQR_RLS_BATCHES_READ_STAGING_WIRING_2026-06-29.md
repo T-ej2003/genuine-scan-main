@@ -11,6 +11,8 @@ This document records the staging-only runtime RLS wiring for one route:
 Default: false. When unset, empty, or set to a false-like value, the route keeps the existing behavior and uses the
 existing cached batch-list read path.
 
+When enabled, this flag also makes `RLS_READ_DATABASE_URL` mandatory. That URL must be a valid PostgreSQL URL with a database name, must differ from `DATABASE_URL`, and must authenticate as the reviewed non-owner, non-bypass, SELECT-only runtime role. It never falls back to `DATABASE_URL`. The backend validates and probes the dedicated client before serving; startup and readiness fail closed if configuration, connectivity, or runtime posture is unsafe.
+
 ## Exact Route
 
 - HTTP route: `GET /api/qr/batches`
@@ -34,7 +36,7 @@ With `MSCQR_STAGING_RLS_BATCHES_READ_ENABLED` disabled, `GET /api/qr/batches` co
 ## Flag-On Behavior
 
 With `MSCQR_STAGING_RLS_BATCHES_READ_ENABLED=true`, only `GET /api/qr/batches` wraps the route's scoped query
-construction and batch summary reads in a Prisma transaction. The wrapper sets transaction-local PostgreSQL settings
+construction and batch summary reads in a Prisma transaction on the separately cached RLS read client. The wrapper sets transaction-local PostgreSQL settings
 using `set_config(..., true)`:
 
 - `app.user_id`
@@ -51,7 +53,7 @@ are rejected for this route helper.
 The flag-on path intentionally bypasses the existing read cache so the selected route exercises database reads under
 the transaction-local RLS context instead of serving rows computed outside RLS.
 Batch summary reads on this transaction-backed path run sequentially for predictable transaction-client behavior during
-staging proof.
+staging proof. Every nested read receives the same transaction client; using the default Prisma client anywhere in the enabled query graph is a testable failure. `DATABASE_URL` and its default Prisma singleton remain unchanged for this flag's disabled path, all writes, and all unrelated routes.
 
 ## Why Only This Route
 
@@ -66,7 +68,7 @@ Rollback is operationally simple:
 
 1. Unset `MSCQR_STAGING_RLS_BATCHES_READ_ENABLED`, or set it to `false`.
 2. Restart the affected backend process so the deployment environment is known-clean.
-3. Confirm `GET /api/qr/batches` still returns through the existing cached batch-list path.
+3. Confirm readiness reports the RLS read dependency disabled and `GET /api/qr/batches` returns through the existing cached/default-client batch-list path.
 
 This change does not add a Prisma migration and does not apply prototype SQL automatically.
 
@@ -86,6 +88,7 @@ The new gated disposable-DB test command is:
 
 ```bash
 npm --prefix backend run test:rls:batches-read-runtime
+npm --prefix backend run test:rls:read-client
 ```
 
 The test keeps RLS setup local to the P2 disposable database. It applies test-only `Batch` and `QRCode` RLS policies

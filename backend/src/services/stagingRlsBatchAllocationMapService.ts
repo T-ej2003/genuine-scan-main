@@ -1,6 +1,4 @@
-import { Prisma } from "@prisma/client";
-
-import prisma from "../config/database";
+import { RlsReadTransactionClient, RlsReadTransactionRunner } from "../config/rlsReadDatabase";
 import { findScopedBatch } from "./accessControlService";
 import { getBatchAllocationMap } from "./batchAllocationService";
 import {
@@ -27,7 +25,7 @@ export type ScopedBatchAllocationMapPayload =
 
 const loadScopedBatchAllocationMapPayload = async (
   params: LoadScopedBatchAllocationMapParams,
-  db?: Prisma.TransactionClient
+  db?: RlsReadTransactionClient
 ): Promise<ScopedBatchAllocationMapPayload> => {
   const focusBatch = await findScopedBatch(
     params.user,
@@ -52,15 +50,18 @@ const resultShapeForPayload = (payload: ScopedBatchAllocationMapPayload): Stagin
   payload.status === "ok" ? "allocation_map" : "not_found";
 
 export const getScopedBatchAllocationMapPayload = async (
-  params: LoadScopedBatchAllocationMapParams
+  params: LoadScopedBatchAllocationMapParams,
+  dependencies: { transactionRunner?: RlsReadTransactionRunner } = {}
 ): Promise<ScopedBatchAllocationMapPayload> => {
   const flagEnabled = isStagingRlsBatchAllocationMapEnabled();
   if (flagEnabled) {
     const startedAt = process.hrtime.bigint();
     const contextClass = classifyStagingRlsBatchAllocationMapContext(params.user);
     try {
-      const payload = await withStagingRlsBatchReadTransaction(prisma, params.user, (tx) =>
-        loadScopedBatchAllocationMapPayload(params, tx)
+      const payload = await withStagingRlsBatchReadTransaction(
+        params.user,
+        (tx) => loadScopedBatchAllocationMapPayload(params, tx),
+        dependencies
       );
       recordStagingRlsBatchAllocationMapProof({
         flagEnabled,

@@ -17,6 +17,8 @@ Request telemetry treats only `GET /api/qr/batches/<one path segment>/allocation
 
 Default: false. When the flag is disabled, the route keeps the existing app-layer authorization and allocation-map read behavior and does not emit allocation-map staging RLS proof events.
 
+When enabled, this flag makes `RLS_READ_DATABASE_URL` mandatory. The value must be a valid PostgreSQL URL with a database name, must differ from `DATABASE_URL`, and must authenticate as the reviewed non-owner, non-bypass, SELECT-only runtime role. It never falls back to the default datasource. Startup and readiness fail closed if the dedicated client cannot connect or its role/table/policy/helper posture is unsafe.
+
 ## Flag Behavior
 
 Flag off:
@@ -29,7 +31,8 @@ Flag on:
 
 - Only `GET /api/qr/batches/:id/allocation-map` uses transaction-local app context through `set_config(..., true)`.
 - The existing scoped `findScopedBatch` authorization check still runs before the allocation-map payload is returned.
-- The allocation-map service reads `Batch` and `QRCode` data through the same transaction client after context is set.
+- The scoped authorization and allocation-map services read `Batch` and `QRCode` data through the same transaction on the separately cached RLS client after context is set; no nested read may escape to the default client.
+- `DATABASE_URL` remains the unchanged default read/write client for the flag-off path, every mutation, and all unrelated routes.
 - Public verification, scans, printing, workers, exports, incidents, support, admin global views, and sibling batch routes are unchanged.
 
 ## Expected Proof Telemetry
@@ -58,13 +61,13 @@ The allocation-map path is small enough to validate route-by-route without touch
 
 ## Rollback
 
-Unset `MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED`, or set it to `false`, then restart the affected staging backend process. The route returns to the existing non-RLS runtime read path and stops emitting allocation-map staging RLS proof events.
+Unset `MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED`, or set it to `false`, then restart the affected staging backend process. The dedicated pool is no longer required or initialized, the route returns to the existing default-client read path, and allocation-map staging RLS proof events stop.
 
 ## Validation Checklist
 
 1. Confirm no production RLS enablement or global RLS flag is active.
 2. Confirm no Prisma migration was created for this rollout step.
-3. Set `MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED=true` only in the staging backend environment.
+3. Privately verify that `RLS_READ_DATABASE_URL` is distinct from `DATABASE_URL` and proves the exact restricted runtime identity before setting `MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED=true`.
 4. Sign in as a licensee admin and call `GET /api/qr/batches/:id/allocation-map` for an owned batch; confirm the allocation map is returned.
 5. Sign in as a manufacturer linked to the licensee and call the same route; confirm existing manufacturer access still works.
 6. Sign in as a different tenant and call the route for the first tenant's batch; confirm the response fails closed with the existing not-found/forbidden behavior.
@@ -73,7 +76,8 @@ Unset `MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED`, or set it to `false`, th
 9. Confirm proof logs contain only the safe fields listed above and do not contain raw tenant, user, batch, QR, customer, token, or secret values.
 10. Confirm transaction-local context does not leak after the route transaction.
 11. Run `npm --prefix backend run test:rls:batch-allocation-map-runtime`.
-12. Run the standard RLS and scope guardrail checks before promotion.
+12. Run `npm --prefix backend run test:rls:read-client`.
+13. Run the standard RLS and scope guardrail checks before promotion.
 
 ## Explicit Out Of Scope
 

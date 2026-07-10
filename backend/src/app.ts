@@ -277,10 +277,11 @@ export const createBackendApp = () => {
 
   app.get("/health/db", publicStatusIpLimiter, publicStatusActorLimiter, async (_req, res) => {
     const payload = await buildReadyPayload();
-    if (payload.dependencies.database.ready) {
+    if (payload.dependencies.database.ready && payload.dependencies.rlsReadDatabase.ready) {
       return res.json({
         status: "ok",
         database: "reachable",
+        rlsReadDatabase: payload.dependencies.rlsReadDatabase.required ? "reachable" : "disabled",
         redis: payload.dependencies.redis.ready || !payload.dependencies.redis.configured ? "ready" : "unreachable",
         objectStorage:
           payload.dependencies.objectStorage.ready || !payload.dependencies.objectStorage.configured ? "ready" : "unreachable",
@@ -290,11 +291,12 @@ export const createBackendApp = () => {
 
     const detail =
       process.env.NODE_ENV === "development"
-        ? payload.dependencies.database.error || "Database connectivity failed"
+        ? payload.dependencies.database.error || payload.dependencies.rlsReadDatabase.error || "Database connectivity failed"
         : "Database connectivity failed";
     return res.status(503).json({
       status: "degraded",
-      database: "unreachable",
+      database: payload.dependencies.database.ready ? "reachable" : "unreachable",
+      rlsReadDatabase: payload.dependencies.rlsReadDatabase.ready ? "ready" : "unreachable",
       error: detail,
       timestamp: new Date().toISOString(),
     });

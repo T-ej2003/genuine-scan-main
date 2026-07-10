@@ -1,5 +1,4 @@
 const assert = require("node:assert/strict");
-const { execFileSync } = require("node:child_process");
 const http = require("node:http");
 const path = require("node:path");
 const { PrismaClient, UserRole } = require("@prisma/client");
@@ -11,6 +10,13 @@ const {
   withP2TestApp,
 } = require("./helpers/p2TestDb");
 const { ids, issueBearerTokens, seedP2Fixtures } = require("./helpers/p2SeedFactories");
+const {
+  applyCandidateRls,
+  buildRoleUrl,
+  createRestrictedRlsReadRole,
+  dropRestrictedRlsReadRole,
+  rollbackCandidateRls,
+} = require("./helpers/rlsReadRuntimeRole");
 
 const command =
   "MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_TEST=true npm --prefix backend run test:rls:batch-allocation-map-runtime";
@@ -25,7 +31,6 @@ if (!isTruthy(process.env.MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_TEST)) {
 const authHeader = (token) => ({ authorization: `Bearer ${token}` });
 const backendRoot = path.resolve(__dirname, "..");
 const distRoot = path.join(backendRoot, "dist");
-const repoRoot = path.resolve(__dirname, "../..");
 
 const mockModule = (relativePath, exportsValue) => {
   const resolved = require.resolve(path.join(distRoot, relativePath));
@@ -37,106 +42,10 @@ const mockModule = (relativePath, exportsValue) => {
   };
 };
 
-const quoteIdent = (value) => {
-  assert.match(value, /^[a-z0-9_]+$/i, "Unsafe PostgreSQL identifier");
-  return `"${value.replace(/"/g, '""')}"`;
-};
-
-const parseDatabaseName = (databaseUrl) => {
-  const parsed = new URL(databaseUrl);
-  return decodeURIComponent(parsed.pathname.replace(/^\//, ""));
-};
-
-const buildRoleUrl = (databaseUrl, roleName) => {
-  const parsed = new URL(databaseUrl);
-  parsed.username = roleName;
-  parsed.password = "";
-  return parsed.toString();
-};
-
-const applySql = (databaseUrl, sql) => {
-  execFileSync("psql", [databaseUrl, "-v", "ON_ERROR_STOP=1", "-c", sql], {
-    cwd: repoRoot,
-    env: { ...process.env },
-    stdio: "inherit",
-  });
-};
-
-const createAppRole = (databaseUrl) => {
-  const roleName = `mscqr_allocation_map_rls_app_${process.pid}_${Date.now()}`.toLowerCase();
-  const databaseName = parseDatabaseName(databaseUrl);
-  const role = quoteIdent(roleName);
-  applySql(
-    databaseUrl,
-    `
-      DROP ROLE IF EXISTS ${role};
-      CREATE ROLE ${role} LOGIN;
-      GRANT CONNECT ON DATABASE ${quoteIdent(databaseName)} TO ${role};
-      GRANT USAGE ON SCHEMA public TO ${role};
-      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role};
-      GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO ${role};
-    `
-  );
-  return roleName;
-};
-
-const dropAppRole = (databaseUrl, roleName) => {
-  if (!roleName) return;
-  const role = quoteIdent(roleName);
-  applySql(databaseUrl, `DROP OWNED BY ${role}; DROP ROLE IF EXISTS ${role};`);
-};
-
 const clearDistRequireCache = () => {
   for (const key of Object.keys(require.cache)) {
     if (key.startsWith(distRoot)) delete require.cache[key];
   }
-};
-
-const applyAllocationMapRouteRls = (databaseUrl) => {
-  applySql(databaseUrl, `
-    DROP POLICY IF EXISTS test_rls_allocation_map_batch_select ON "Batch";
-    DROP POLICY IF EXISTS test_rls_allocation_map_qrcode_select ON "QRCode";
-
-    ALTER TABLE "Batch" ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE "Batch" FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "QRCode" ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE "QRCode" FORCE ROW LEVEL SECURITY;
-
-    CREATE POLICY test_rls_allocation_map_batch_select ON "Batch"
-      FOR SELECT
-      USING (
-        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
-        OR "licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
-        OR "manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
-      );
-
-    CREATE POLICY test_rls_allocation_map_qrcode_select ON "QRCode"
-      FOR SELECT
-      USING (
-        lower(COALESCE(current_setting('app.is_platform_admin', true), 'false')) = 'true'
-        OR "licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
-        OR EXISTS (
-          SELECT 1
-          FROM "Batch" b
-          WHERE b."id" = "QRCode"."batchId"
-            AND (
-              b."licenseeId" = NULLIF(current_setting('app.licensee_id', true), '')
-              OR b."manufacturerId" = NULLIF(current_setting('app.manufacturer_id', true), '')
-            )
-        )
-      );
-  `);
-};
-
-const rollbackAllocationMapRouteRls = (databaseUrl) => {
-  applySql(databaseUrl, `
-    DROP POLICY IF EXISTS test_rls_allocation_map_qrcode_select ON "QRCode";
-    DROP POLICY IF EXISTS test_rls_allocation_map_batch_select ON "Batch";
-    ALTER TABLE "QRCode" NO FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "QRCode" DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE "Batch" NO FORCE ROW LEVEL SECURITY;
-    ALTER TABLE "Batch" DISABLE ROW LEVEL SECURITY;
-  `);
 };
 
 const request = async (baseUrl, method, route, body, options = {}) => {
@@ -180,6 +89,8 @@ const readContext = async (client) => {
   `;
   return rows[0] || {};
 };
+
+const readContextFromRunner = (runner) => runner.$transaction((tx) => readContext(tx));
 
 const withConsoleCapture = async (callback) => {
   const logs = [];
@@ -268,6 +179,7 @@ const assertSafeProofEvent = (event) => {
 
 const runFlagOffRouteAssertions = async () => {
   process.env[flagName] = "false";
+  delete process.env.RLS_READ_DATABASE_URL;
   const logs = await withConsoleCapture(async () => {
     await withP2TestApp(async ({ request, prisma }) => {
       await seedP2Fixtures(prisma);
@@ -303,10 +215,10 @@ const runFlagOnRouteAssertions = async () => {
     adminPrisma = new PrismaClient({ datasources: { db: { url: databaseInfo.databaseUrl } } });
     await seedP2Fixtures(adminPrisma);
 
-    appRoleName = createAppRole(databaseInfo.databaseUrl);
-    applyAllocationMapRouteRls(databaseInfo.databaseUrl);
+    appRoleName = createRestrictedRlsReadRole(databaseInfo.databaseUrl, "mscqr_allocation_rls_read");
+    applyCandidateRls(databaseInfo.databaseUrl, appRoleName);
 
-    process.env.DATABASE_URL = buildRoleUrl(databaseInfo.databaseUrl, appRoleName);
+    process.env.RLS_READ_DATABASE_URL = buildRoleUrl(databaseInfo.databaseUrl, appRoleName);
     clearDistRequireCache();
 
     const proofLogs = [];
@@ -333,7 +245,9 @@ const runFlagOnRouteAssertions = async () => {
     const tokens = await issueBearerTokens();
 
     try {
-      const plainRows = await appPrisma.$transaction((tx) => tx.batch.findMany({ orderBy: [{ id: "asc" }] }));
+      const { getRlsReadPrisma } = require("../dist/config/rlsReadDatabase");
+      const rlsReadPrisma = getRlsReadPrisma();
+      const plainRows = await rlsReadPrisma.$transaction((tx) => tx.batch.findMany({ orderBy: [{ id: "asc" }] }));
       assert.deepEqual(plainRows, [], "Batch RLS must fail closed without transaction-local app context");
 
       const ownMap = await routeRequest("GET", `/api/qr/batches/${ids.batchA}/allocation-map`, null, {
@@ -356,6 +270,38 @@ const runFlagOnRouteAssertions = async () => {
       });
       assert.equal(wrongTenant.status, 404, `wrong tenant must fail closed with existing not-found behavior: ${wrongTenant.text}`);
 
+      const { getScopedBatchAllocationMapPayload } = require("../dist/services/stagingRlsBatchAllocationMapService");
+      await assert.rejects(
+        () => getScopedBatchAllocationMapPayload({
+          user: {
+            userId: ids.licenseeAdminA,
+            email: "org-admin-a@mscqr.test",
+            role: UserRole.ORG_ADMIN,
+            licenseeId: ids.licenseeA,
+            orgId: ids.orgA,
+            sessionStage: "ACTIVE",
+            authAssurance: "ADMIN_MFA",
+          },
+          batchId: ids.batchA,
+        }),
+        /phase-one access is not enabled/,
+        "dormant organization admin must not gain phase-one allocation-map access"
+      );
+
+      const platformMap = await getScopedBatchAllocationMapPayload({
+        user: {
+          userId: ids.superAdmin,
+          email: "platform-admin@mscqr.test",
+          role: UserRole.SUPER_ADMIN,
+          licenseeId: null,
+          orgId: null,
+          sessionStage: "ACTIVE",
+          authAssurance: "ADMIN_MFA",
+        },
+        batchId: ids.batchA,
+      });
+      assert.equal(platformMap.status, "ok", "platform admin must retain explicit allocation-map visibility");
+
       const siblingRoutePath = `/api/qr/batches/${ids.batchA}/validation-evidence`;
       const siblingRoute = await routeRequest("GET", siblingRoutePath, null, {
         headers: authHeader(tokens.licenseeAdminA),
@@ -363,15 +309,15 @@ const runFlagOnRouteAssertions = async () => {
       assert.notEqual(siblingRoute.status, 401, `sibling route should pass auth before telemetry assertion: ${siblingRoute.text}`);
 
       const successProofs = proofLogs.filter((entry) => entry.event.success);
-      assert.equal(successProofs.length, 4, "flag-on allocation-map requests must emit proof events");
+      assert.equal(successProofs.length, 5, "only active phase-one allocation-map reads may emit success proofs");
       assert.deepEqual(
         successProofs.map((entry) => entry.event.contextClass).sort(),
-        ["manufacturer", "tenant_user", "tenant_user", "tenant_user"],
+        ["manufacturer", "platform_admin", "tenant_user", "tenant_user", "tenant_user"],
         "proof events must expose context class only"
       );
       assert.equal(
         successProofs.filter((entry) => entry.event.resultShape === "allocation_map").length,
-        3,
+        4,
         "accessible allocation-map reads should report a coarse available shape"
       );
       assert.equal(
@@ -415,15 +361,14 @@ const runFlagOnRouteAssertions = async () => {
       assert.strictEqual(siblingRouteLog.event.actorLicenseeId, ids.licenseeA, "sibling route must not redact licensee id");
       assert.strictEqual(siblingRouteLog.event.actorOrgId, ids.orgA, "sibling route must not redact organization id");
 
-      const context = await readContext(appPrisma);
-      assert.notEqual(context.user_id, ids.licenseeAdminA, "app.user_id leaked after route transaction");
-      assert.notEqual(context.role, UserRole.LICENSEE_ADMIN, "app.role leaked after route transaction");
-      assert.notEqual(context.licensee_id, ids.licenseeA, "app.licensee_id leaked after route transaction");
-      assert.notEqual(context.manufacturer_id, ids.manufacturerA, "app.manufacturer_id leaked after route transaction");
-      assert.notEqual(context.organization_id, ids.orgA, "app.organization_id leaked after route transaction");
-      assert.notEqual(context.is_platform_admin, "true", "app.is_platform_admin leaked after route transaction");
+      const context = await readContextFromRunner(rlsReadPrisma);
+      assert.equal(context.user_id || "", "", "app.user_id leaked after route transaction");
+      assert.equal(context.role || "", "", "app.role leaked after route transaction");
+      assert.equal(context.licensee_id || "", "", "app.licensee_id leaked after route transaction");
+      assert.equal(context.manufacturer_id || "", "", "app.manufacturer_id leaked after route transaction");
+      assert.equal(context.organization_id || "", "", "app.organization_id leaked after route transaction");
+      assert.equal(context.is_platform_admin || "", "", "app.is_platform_admin leaked after route transaction");
 
-      const { getScopedBatchAllocationMapPayload } = require("../dist/services/stagingRlsBatchAllocationMapService");
       await assert.rejects(
         () =>
           getScopedBatchAllocationMapPayload({
@@ -442,7 +387,7 @@ const runFlagOnRouteAssertions = async () => {
         "staging RLS allocation-map service must fail closed when tenant context is missing"
       );
 
-      const failureProof = proofLogs.find((entry) => !entry.event.success);
+      const failureProof = proofLogs.find((entry) => !entry.event.success && entry.event.failureCategory === "rls_context_missing");
       assert(failureProof, "flag-on allocation-map failures must emit a categorized proof event");
       assert.strictEqual(failureProof.level, "warn");
       assertSafeProofEvent(failureProof.event);
@@ -450,14 +395,19 @@ const runFlagOnRouteAssertions = async () => {
       assert.strictEqual(failureProof.event.resultShape, "unknown");
       assert(!JSON.stringify(failureProof.event).includes("requires app.licensee_id"), "failure proof must not log error text");
     } finally {
-      rollbackAllocationMapRouteRls(databaseInfo.databaseUrl);
+      rollbackCandidateRls(databaseInfo.databaseUrl, appRoleName);
     }
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
+    const rlsReadModule = require.cache[require.resolve("../dist/config/rlsReadDatabase")]
+      ? require("../dist/config/rlsReadDatabase")
+      : null;
+    if (rlsReadModule) await rlsReadModule.disconnectRlsReadPrisma().catch(() => {});
     if (appPrisma?.$disconnect) await appPrisma.$disconnect().catch(() => {});
     if (adminPrisma?.$disconnect) await adminPrisma.$disconnect().catch(() => {});
-    if (databaseInfo?.databaseUrl && appRoleName) dropAppRole(databaseInfo.databaseUrl, appRoleName);
+    if (databaseInfo?.databaseUrl && appRoleName) dropRestrictedRlsReadRole(databaseInfo.databaseUrl, appRoleName);
     if (databaseInfo?.createdDatabaseName) dropP2TestDatabase(databaseInfo);
+    delete process.env.RLS_READ_DATABASE_URL;
   }
 };
 
