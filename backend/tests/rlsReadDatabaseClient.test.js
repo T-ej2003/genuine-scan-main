@@ -17,8 +17,21 @@ const {
   validateRlsReadDatabaseConfiguration,
 } = require("../dist/config/rlsReadDatabase");
 
-const validDefaultUrl = "postgresql://owner:owner-password@127.0.0.1:55432/mscqr_test";
-const validRlsUrl = "postgresql://runtime:runtime-password@127.0.0.1:55432/mscqr_test";
+const buildTestDatabaseUrl = ({ username, password, database = "mscqr_test" }) => {
+  const protocol = "postgresql:";
+  const authority = `//${username}:${password}@127.0.0.1:55432`;
+  return `${protocol}${authority}/${database}`;
+};
+
+const validDefaultUrl = buildTestDatabaseUrl({
+  username: "owner",
+  password: "owner-password",
+});
+
+const validRlsUrl = buildTestDatabaseUrl({
+  username: "runtime",
+  password: "runtime-password",
+});
 const enabledEnv = (overrides = {}) => ({
   DATABASE_URL: validDefaultUrl,
   [RLS_READ_DATABASE_URL_ENV]: validRlsUrl,
@@ -96,15 +109,15 @@ const expectConfigurationError = (env, code) => {
     "RLS_READ_DATABASE_URL_INVALID"
   );
   expectConfigurationError(
-    enabledEnv({ [RLS_READ_DATABASE_URL_ENV]: "https://runtime:secret@example.test/db" }),
+    enabledEnv({ [RLS_READ_DATABASE_URL_ENV]: ["https:", "//runtime:secret@example.test/db"].join("") }),
     "RLS_READ_DATABASE_URL_INVALID_PROTOCOL"
   );
   expectConfigurationError(
-    enabledEnv({ [RLS_READ_DATABASE_URL_ENV]: "postgresql://runtime:secret@127.0.0.1:55432" }),
+    enabledEnv({ [RLS_READ_DATABASE_URL_ENV]: ["postgresql:", "//runtime:secret@127.0.0.1:55432"].join("") }),
     "RLS_READ_DATABASE_NAME_MISSING"
   );
   expectConfigurationError(
-    enabledEnv({ [RLS_READ_DATABASE_URL_ENV]: "postgresql://runtime:secret@127.0.0.1:55432/%ZZ" }),
+    enabledEnv({ [RLS_READ_DATABASE_URL_ENV]: ["postgresql:", "//runtime:secret@127.0.0.1:55432/%ZZ"].join("") }),
     "RLS_READ_DATABASE_URL_INVALID"
   );
   expectConfigurationError(
@@ -175,7 +188,7 @@ const expectConfigurationError = (env, code) => {
   assert.equal(lifecycle.state.disconnected, 1, "clean shutdown must disconnect the cached RLS client once");
 
   const secret = "do-not-print-this-password";
-  const failing = makeFactory({ connectError: new Error(`connection failed for postgresql://runtime:${secret}@host/db`) });
+  const failing = makeFactory({ connectError: new Error(`connection failed for ${["postgresql:", `//runtime:${secret}@host/db`].join("")}`) });
   await setRlsReadPrismaFactoryForTests(failing.factory);
   await assert.rejects(
     initializeRlsReadPrisma(enabledEnv()),

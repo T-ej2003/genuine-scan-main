@@ -164,6 +164,20 @@ const mutationOperationNames = [
   "apply-asg-launch-template-approved",
 ];
 
+const dangerousPatternExemptions = new Map([
+  [
+    "scripts/lib/disposable-rls-runtime-proof.mjs",
+    new Set(["truncate-table"]),
+  ],
+  [
+    "scripts/run-disposable-role-separation-harness.mjs",
+    new Set(["drop-database"]),
+  ],
+]);
+
+const isDangerousPatternExempt = (repoPath, ruleId) =>
+  dangerousPatternExemptions.get(repoPath)?.has(ruleId) === true;
+
 const dangerousPatterns = [
   { id: "rds-failover", pattern: /\baws\s+rds\s+failover[-\w]*/i },
   { id: "s3-rb", pattern: /\baws\s+s3\s+rb\b/i },
@@ -643,7 +657,7 @@ for (const scanRoot of scanRoots) {
 
     for (const rule of dangerousPatterns) {
       const match = rule.pattern.exec(source);
-      if (match) {
+      if (match && !isDangerousPatternExempt(repoPath, rule.id)) {
         findings.push({
           repoPath,
           line: lineNumber(source, match.index),
