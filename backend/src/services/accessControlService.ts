@@ -2,6 +2,7 @@ import { Response, NextFunction } from "express";
 import { Prisma, UserRole, UserStatus } from "@prisma/client";
 
 import prisma from "../config/database";
+import { RlsReadTransactionClient } from "../config/rlsReadDatabase";
 import { AuthRequest } from "../middleware/auth";
 import {
   MANUFACTURER_ROLES,
@@ -319,7 +320,7 @@ export const findScopedBatch = async (
   user: NonNullable<AuthRequest["user"]>,
   id: string,
   args: Prisma.BatchFindFirstArgs = {},
-  opts?: { db?: typeof prisma | Prisma.TransactionClient }
+  opts?: { db?: RlsReadTransactionClient }
 ) =>
   (opts?.db || prisma).batch.findFirst({
     ...args,

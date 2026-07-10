@@ -11,6 +11,7 @@ import {
 } from "@prisma/client";
 
 import prisma from "../../config/database";
+import { RlsReadTransactionClient } from "../../config/rlsReadDatabase";
 import { inspectIppPrinter } from "../ippClient";
 import { testNetworkPrinterConnectivity } from "../../services/networkPrinterSocketService";
 import { matchPrinterCatalogEntry } from "./printerProfileCatalog";
@@ -372,7 +373,7 @@ export const ensurePrinterProfileForPrinter = async (
 
 export const getPrinterProfileForPrinter = async (
   printerId: string,
-  db: Pick<typeof prisma, "printerProfile"> | Prisma.TransactionClient = prisma
+  db: Pick<typeof prisma, "printerProfile"> | RlsReadTransactionClient = prisma
 ) =>
   db.printerProfile.findUnique({
     where: { printerId },

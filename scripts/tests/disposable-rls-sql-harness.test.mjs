@@ -13,7 +13,9 @@ import {
   assertSafeAppRole,
   assertSafeDisposableDatabaseUrl,
   assertSqlFileSafe,
+  assertRuntimeRoleDiagnostics,
   parseArgs,
+  runHarness,
   sanitizeConnectionMetadata,
 } from "../run-disposable-rls-sql-harness.mjs";
 
@@ -175,28 +177,53 @@ test("argument parser keeps route tests opt-in", () => {
 });
 
 test("argument parser accepts explicit route-test and schema-prep switches", () => {
-  const args = parseArgs(["--prepare-schema", "--run-route-tests", "--no-evidence-file", "--json", "--app-role", "mscqr_rls_harness_app"]);
+  const args = parseArgs(["--prepare-schema", "--run-route-tests", "--no-evidence-file", "--json", "--runtime-role", "mscqr_rls_harness_app"]);
 
   assert.equal(args.runRouteTests, true);
   assert.equal(args.prepareSchema, true);
   assert.equal(args.evidenceFile, false);
   assert.equal(args.json, true);
-  assert.equal(args.appRole, "mscqr_rls_harness_app");
+  assert.equal(args.runtimeRole, "mscqr_rls_harness_app");
 });
 
-test("candidate and rollback SQL do not grant or revoke all functions or PUBLIC", () => {
+test("command refuses a missing explicit runtime role without connecting", async () => {
+  const url = dbUrl({ database: "mscqr_rls_harness_test", password: "" });
+  await assert.rejects(
+    runHarness(parseArgs(["--database-url", url, "--no-evidence-file"]), {
+      [CONFIRM_ENV]: CONFIRM_VALUE,
+    }),
+    (error) => error instanceof HarnessSafetyError && /Missing explicit non-owner runtime/.test(error.message),
+  );
+});
+
+test("command refuses using the database owner username as runtime role", async () => {
+  const url = dbUrl({ database: "mscqr_rls_harness_test", user: "same_role", password: "" });
+  await assert.rejects(
+    runHarness(parseArgs(["--database-url", url, "--runtime-role", "same_role", "--no-evidence-file"]), {
+      [CONFIRM_ENV]: CONFIRM_VALUE,
+    }),
+    (error) => error instanceof HarnessSafetyError && /must differ/.test(error.message),
+  );
+});
+
+test("legacy --app-role argument is rejected instead of silently reused", () => {
+  assertRefused(() => parseArgs(["--app-role", "legacy_role"]), /Unknown argument/);
+});
+
+test("candidate and rollback SQL use exact function grants and never grant to PUBLIC", () => {
   const combined = `${fs.readFileSync(candidateSqlPath, "utf8")}\n${fs.readFileSync(rollbackSqlPath, "utf8")}`;
 
   assert.equal(/\bGRANT\s+EXECUTE\s+ON\s+ALL\s+FUNCTIONS\b/i.test(combined), false);
   assert.equal(/\bREVOKE\s+EXECUTE\s+ON\s+ALL\s+FUNCTIONS\b/i.test(combined), false);
-  assert.equal(/\b(?:TO|FROM)\s+PUBLIC\b/i.test(combined), false);
+  assert.equal(/\bGRANT\b[^;]+\bTO\s+PUBLIC\s*;/i.test(combined), false);
+  assert.equal(combined.match(/REVOKE ALL ON FUNCTION app_rls\.[^;]+ FROM PUBLIC;/g)?.length, 17);
 });
 
 test("candidate helper EXECUTE grants exactly match rollback revokes", () => {
   const candidateSql = fs.readFileSync(candidateSqlPath, "utf8");
   const rollbackSql = fs.readFileSync(rollbackSqlPath, "utf8");
-  const grantRegex = /GRANT EXECUTE ON FUNCTION\s+(app_rls\.[^(]+\([^)]*\))\s+TO\s+:"mscqr_staging_app_role";/g;
-  const revokeRegex = /REVOKE EXECUTE ON FUNCTION\s+(app_rls\.[^(]+\([^)]*\))\s+FROM\s+:"mscqr_staging_app_role";/g;
+  const grantRegex = /GRANT EXECUTE ON FUNCTION\s+(app_rls\.[^(]+\([^)]*\))\s+TO\s+:"mscqr_runtime_role";/g;
+  const revokeRegex = /REVOKE EXECUTE ON FUNCTION\s+(app_rls\.[^(]+\([^)]*\))\s+FROM\s+:"mscqr_runtime_role";/g;
   const grants = [...candidateSql.matchAll(grantRegex)].map((match) => match[1]).sort();
   const revokes = [...rollbackSql.matchAll(revokeRegex)].map((match) => match[1]).sort();
 
@@ -204,12 +231,77 @@ test("candidate helper EXECUTE grants exactly match rollback revokes", () => {
   assert.deepEqual(grants, revokes);
 });
 
-test("candidate and rollback require reviewed app role psql variable", () => {
+test("candidate and rollback require explicit non-owner runtime role psql variable", () => {
   const candidateSql = fs.readFileSync(candidateSqlPath, "utf8");
   const rollbackSql = fs.readFileSync(rollbackSqlPath, "utf8");
 
-  assert.match(candidateSql, /\\if :\{\?mscqr_staging_app_role\}/);
-  assert.match(rollbackSql, /\\if :\{\?mscqr_staging_app_role\}/);
-  assert.match(candidateSql, /GRANT USAGE ON SCHEMA app_rls TO :"mscqr_staging_app_role";/);
+  assert.match(candidateSql, /\\if :\{\?mscqr_runtime_role\}/);
+  assert.match(rollbackSql, /\\if :\{\?mscqr_runtime_role\}/);
+  assert.match(candidateSql, /GRANT USAGE ON SCHEMA app_rls TO :"mscqr_runtime_role";/);
   assert.match(rollbackSql, /REVOKE USAGE ON SCHEMA app_rls FROM %I/);
+});
+
+const safeDiagnostics = () => ({
+  identity: {
+    session_user: "mscqr_harness_owner",
+    current_user: "mscqr_harness_runtime",
+    current_role: "mscqr_harness_runtime",
+    row_security: "on",
+  },
+  role: {
+    rolsuper: false,
+    rolbypassrls: false,
+    rolcreaterole: false,
+    rolcreatedb: false,
+    rolreplication: false,
+  },
+  memberships: [],
+  tables: Array.from({ length: 16 }, (_, index) => ({
+    relname: `table_${index}`,
+    relrowsecurity: true,
+    relforcerowsecurity: true,
+    has_select: true,
+    owns_or_inherits_owner: false,
+    current_role_owns: false,
+  })),
+});
+
+test("runtime diagnostic accepts separated least-privileged role", () => {
+  assert.doesNotThrow(() => assertRuntimeRoleDiagnostics(safeDiagnostics(), "mscqr_harness_runtime"));
+});
+
+test("runtime diagnostic rejects table owner", () => {
+  const diagnostics = safeDiagnostics();
+  diagnostics.tables[0].current_role_owns = true;
+  assertRefused(() => assertRuntimeRoleDiagnostics(diagnostics, "mscqr_harness_runtime"), /separation failed/);
+});
+
+test("runtime diagnostic rejects BYPASSRLS", () => {
+  const diagnostics = safeDiagnostics();
+  diagnostics.role.rolbypassrls = true;
+  assertRefused(() => assertRuntimeRoleDiagnostics(diagnostics, "mscqr_harness_runtime"), /forbidden/);
+});
+
+test("runtime diagnostic rejects CREATEDB and CREATEROLE", () => {
+  for (const attribute of ["rolcreatedb", "rolcreaterole"]) {
+    const diagnostics = safeDiagnostics();
+    diagnostics.role[attribute] = true;
+    assertRefused(() => assertRuntimeRoleDiagnostics(diagnostics, "mscqr_harness_runtime"), /forbidden/);
+  }
+});
+
+test("candidate grants SELECT only and rollback reverses the table grant", () => {
+  const candidateSql = fs.readFileSync(candidateSqlPath, "utf8");
+  const rollbackSql = fs.readFileSync(rollbackSqlPath, "utf8");
+  assert.match(candidateSql, /GRANT SELECT ON TABLE[\s\S]+TO :"mscqr_runtime_role";/);
+  assert.doesNotMatch(candidateSql, /GRANT\s+(?:INSERT|UPDATE|DELETE)/i);
+  assert.match(rollbackSql, /REVOKE SELECT ON TABLE[\s\S]+FROM :"mscqr_runtime_role";/);
+});
+
+test("exact application roles gate platform, tenant, and manufacturer context", () => {
+  const candidateSql = fs.readFileSync(candidateSqlPath, "utf8");
+  assert.match(candidateSql, /current_role\(\) IN \('super_admin', 'platform_super_admin'\)/);
+  assert.match(candidateSql, /current_role\(\) = 'licensee_admin'/);
+  assert.match(candidateSql, /current_role\(\) = 'manufacturer'/);
+  assert.doesNotMatch(candidateSql, /\b(org_admin|manufacturer_admin|manufacturer_user)\b/);
 });

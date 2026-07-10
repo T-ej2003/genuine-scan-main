@@ -1,6 +1,4 @@
-import { Prisma } from "@prisma/client";
-
-import prisma from "../config/database";
+import { RlsReadTransactionClient, RlsReadTransactionRunner } from "../config/rlsReadDatabase";
 import { AuthenticatedSessionClaims } from "../types";
 import {
   isStagingRlsManufacturerPrintersReadEnabled,
@@ -31,16 +29,17 @@ const resolvePrinterReadContext = (params: ListScopedManufacturerPrintersReadPar
 
 const resolveLicenseeIdsForPrinterRead = async (
   params: ListScopedManufacturerPrintersReadParams,
-  db?: Prisma.TransactionClient
+  db?: RlsReadTransactionClient
 ) => {
   if (Array.isArray(params.licenseeIds)) return params.licenseeIds;
   if (!isManufacturerRole(params.user.role)) return params.licenseeIds ?? null;
-  return resolveAccessibleLicenseeIdsForUser(params.user, db || prisma);
+  if (!db) return resolveAccessibleLicenseeIdsForUser(params.user);
+  return resolveAccessibleLicenseeIdsForUser(params.user, db);
 };
 
 const loadScopedManufacturerPrintersReadPayload = async (
   params: ListScopedManufacturerPrintersReadParams,
-  db?: Prisma.TransactionClient
+  db?: RlsReadTransactionClient
 ) => {
   const readContext = resolvePrinterReadContext(params);
   const licenseeIds = await resolveLicenseeIdsForPrinterRead(params, db);
@@ -56,15 +55,18 @@ const loadScopedManufacturerPrintersReadPayload = async (
 };
 
 export const listScopedManufacturerPrintersReadPayload = async (
-  params: ListScopedManufacturerPrintersReadParams
+  params: ListScopedManufacturerPrintersReadParams,
+  dependencies: { transactionRunner?: RlsReadTransactionRunner } = {}
 ) => {
   const flagEnabled = isStagingRlsManufacturerPrintersReadEnabled();
   if (flagEnabled) {
     const startedAt = process.hrtime.bigint();
     const contextClass = classifyStagingRlsManufacturerPrintersReadContext(params.user);
     try {
-      const rows = await withStagingRlsBatchReadTransaction(prisma, params.user, (tx) =>
-        loadScopedManufacturerPrintersReadPayload(params, tx)
+      const rows = await withStagingRlsBatchReadTransaction(
+        params.user,
+        (tx) => loadScopedManufacturerPrintersReadPayload(params, tx),
+        dependencies
       );
       recordStagingRlsManufacturerPrintersReadProof({
         flagEnabled,

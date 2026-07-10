@@ -11,24 +11,80 @@
 --     - GET /api/qr/batches/:id/allocation-map
 --     - GET /api/manufacturer/printers
 --
+-- Phase-one application-role boundary:
+--   active: SUPER_ADMIN, PLATFORM_SUPER_ADMIN, LICENSEE_ADMIN, MANUFACTURER
+--   dormant and denied: ORG_ADMIN, MANUFACTURER_ADMIN, MANUFACTURER_USER
+-- Keep dormant enum values for compatibility, but do not add them to a policy
+-- without a separately reviewed activation decision and role-matrix proof.
+--
 -- Operator note:
 --   This template enables and forces RLS on the listed tables. It is intended
 --   only for a deliberate staging validation window after baseline capture,
 --   review, snapshot/backup confirmation, and rollback readiness.
 --
 -- Required psql variable:
---   -v mscqr_staging_app_role=<reviewed_staging_app_db_role>
+--   -v mscqr_runtime_role=<reviewed_non_owner_staging_runtime_db_role>
 --
--- The role must be the exact staging application database role reviewed for
--- this validation window. Do not use PUBLIC.
+-- The role must be the exact non-owner staging runtime database role reviewed
+-- for this validation window. Do not use PUBLIC or the migration/owner role.
 
-\if :{?mscqr_staging_app_role}
+\if :{?mscqr_runtime_role}
 \else
-\echo 'Missing required psql variable: -v mscqr_staging_app_role=<reviewed_staging_app_db_role>'
+\echo 'Missing required psql variable: -v mscqr_runtime_role=<reviewed_non_owner_staging_runtime_db_role>'
 \quit 3
 \endif
 
 BEGIN;
+
+-- The migration/DDL connection owns these tables. The runtime role is a
+-- separate, least-privileged role and is the only role used for policy probes.
+SELECT set_config('app_rls.candidate_runtime_role', :'mscqr_runtime_role', false);
+
+DO $$
+DECLARE
+  runtime_role_name text := current_setting('app_rls.candidate_runtime_role', true);
+  runtime_role pg_roles%ROWTYPE;
+  owned_tables text[];
+BEGIN
+  IF lower(COALESCE(runtime_role_name, '')) = 'public' THEN
+    RAISE EXCEPTION 'PUBLIC cannot be the candidate runtime role';
+  END IF;
+
+  SELECT * INTO runtime_role FROM pg_roles WHERE rolname = runtime_role_name;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Candidate runtime role % does not exist', runtime_role_name;
+  END IF;
+
+  IF runtime_role.rolsuper OR runtime_role.rolbypassrls OR runtime_role.rolcreaterole
+     OR runtime_role.rolcreatedb OR runtime_role.rolreplication THEN
+    RAISE EXCEPTION 'Candidate runtime role % has forbidden elevated attributes', runtime_role_name;
+  END IF;
+
+  IF runtime_role_name = current_user THEN
+    RAISE EXCEPTION 'Candidate runtime role must differ from migration/owner role %', current_user;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_auth_members WHERE member = runtime_role.oid) THEN
+    RAISE EXCEPTION 'Candidate runtime role % must not inherit any database role', runtime_role_name;
+  END IF;
+
+  SELECT array_agg(c.relname ORDER BY c.relname) INTO owned_tables
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public'
+    AND c.relname = ANY(ARRAY[
+      'Organization', 'Licensee', 'User', 'ManufacturerLicenseeLink',
+      'Batch', 'InventoryStatusRollup', 'QRCode', 'PrintJob', 'PrintSession',
+      'PrintItem', 'PrinterRegistration', 'Printer', 'PrinterAttestation',
+      'PrinterAgentSession', 'PrinterProfile', 'PrinterProfileSnapshot'
+    ])
+    AND pg_has_role(runtime_role.oid, c.relowner, 'USAGE');
+
+  IF owned_tables IS NOT NULL THEN
+    RAISE EXCEPTION 'Candidate runtime role owns or inherits ownership of protected tables: %', owned_tables;
+  END IF;
+END
+$$;
 
 -- ---------------------------------------------------------------------------
 -- Shared context helpers
@@ -83,12 +139,24 @@ RETURNS boolean
 LANGUAGE sql
 STABLE
 AS $$
-  SELECT lower(COALESCE(app_rls.setting('app.is_platform_admin'), 'false')) = 'true'
+  SELECT app_rls.current_role() IN ('super_admin', 'platform_super_admin')
+    AND lower(COALESCE(app_rls.setting('app.is_platform_admin'), 'false')) = 'true'
 $$;
 
--- Schema usage is granted only to the explicitly reviewed staging application
+-- PostgreSQL grants EXECUTE on new functions to PUBLIC by default. Revoke that
+-- implicit access for every exact helper signature before granting the runtime
+-- role below.
+REVOKE ALL ON FUNCTION app_rls.setting(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.current_user_id() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.current_role() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.current_licensee_id() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.current_manufacturer_id() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.current_organization_id() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.is_platform_admin() FROM PUBLIC;
+
+-- Schema usage is granted only to the explicitly reviewed staging runtime
 -- role supplied by psql. Helper execution grants below are exact signatures.
-GRANT USAGE ON SCHEMA app_rls TO :"mscqr_staging_app_role";
+GRANT USAGE ON SCHEMA app_rls TO :"mscqr_runtime_role";
 
 -- ---------------------------------------------------------------------------
 -- Non-recursive access helpers
@@ -108,11 +176,16 @@ AS $$
     target_licensee_id IS NOT NULL
     AND (
       app_rls.is_platform_admin()
-      OR target_licensee_id = app_rls.current_licensee_id()
+      OR (
+        app_rls.current_role() = 'licensee_admin'
+        AND target_licensee_id = app_rls.current_licensee_id()
+      )
       OR EXISTS (
         SELECT 1
         FROM "ManufacturerLicenseeLink" mll
-        WHERE mll."manufacturerId" = app_rls.current_manufacturer_id()
+        WHERE app_rls.current_role() = 'manufacturer'
+          AND app_rls.current_manufacturer_id() = app_rls.current_user_id()
+          AND mll."manufacturerId" = app_rls.current_manufacturer_id()
           AND mll."licenseeId" = target_licensee_id
       )
     )
@@ -127,7 +200,10 @@ AS $$
     target_org_id IS NOT NULL
     AND (
       app_rls.is_platform_admin()
-      OR target_org_id = app_rls.current_organization_id()
+      OR (
+        app_rls.current_role() IN ('licensee_admin', 'manufacturer')
+        AND target_org_id = app_rls.current_organization_id()
+      )
     )
 $$;
 
@@ -144,7 +220,11 @@ AS $$
       WHERE b."id" = target_batch_id
         AND (
           app_rls.can_access_licensee(b."licenseeId")
-          OR b."manufacturerId" = app_rls.current_manufacturer_id()
+          OR (
+            app_rls.current_role() = 'manufacturer'
+            AND app_rls.current_manufacturer_id() = app_rls.current_user_id()
+            AND b."manufacturerId" = app_rls.current_manufacturer_id()
+          )
         )
     )
 $$;
@@ -180,7 +260,10 @@ AS $$
       WHERE pr."id" = target_registration_id
         AND (
           app_rls.is_platform_admin()
-          OR pr."userId" = app_rls.current_user_id()
+          OR (
+            app_rls.current_role() IN ('licensee_admin', 'manufacturer')
+            AND pr."userId" = app_rls.current_user_id()
+          )
           OR app_rls.can_access_licensee(pr."licenseeId")
           OR app_rls.can_access_organization(pr."orgId")
         )
@@ -202,8 +285,13 @@ AS $$
           app_rls.is_platform_admin()
           OR app_rls.can_access_licensee(p."licenseeId")
           OR app_rls.can_access_organization(p."orgId")
-          OR p."assignedUserId" = app_rls.current_user_id()
-          OR p."createdByUserId" = app_rls.current_user_id()
+          OR (
+            app_rls.current_role() IN ('licensee_admin', 'manufacturer')
+            AND (
+              p."assignedUserId" = app_rls.current_user_id()
+              OR p."createdByUserId" = app_rls.current_user_id()
+            )
+          )
           OR app_rls.can_access_printer_registration(p."printerRegistrationId")
         )
     )
@@ -222,7 +310,11 @@ AS $$
       WHERE pj."id" = target_print_job_id
         AND (
           app_rls.is_platform_admin()
-          OR pj."manufacturerId" = app_rls.current_manufacturer_id()
+          OR (
+            app_rls.current_role() = 'manufacturer'
+            AND app_rls.current_manufacturer_id() = app_rls.current_user_id()
+            AND pj."manufacturerId" = app_rls.current_manufacturer_id()
+          )
           OR app_rls.can_access_batch(pj."batchId")
           OR app_rls.can_access_printer(pj."printerId")
         )
@@ -242,7 +334,11 @@ AS $$
       WHERE ps."id" = target_print_session_id
         AND (
           app_rls.is_platform_admin()
-          OR ps."manufacturerId" = app_rls.current_manufacturer_id()
+          OR (
+            app_rls.current_role() = 'manufacturer'
+            AND app_rls.current_manufacturer_id() = app_rls.current_user_id()
+            AND ps."manufacturerId" = app_rls.current_manufacturer_id()
+          )
           OR app_rls.can_access_batch(ps."batchId")
           OR app_rls.can_access_print_job(ps."printJobId")
           OR app_rls.can_access_printer(ps."printerId")
@@ -286,23 +382,43 @@ $$;
 
 -- Exact helper execution grants. Do not use blanket function grants: staging
 -- may already have unrelated helpers in app_rls.
-GRANT EXECUTE ON FUNCTION app_rls.setting(text) TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.current_user_id() TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.current_role() TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.current_licensee_id() TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.current_manufacturer_id() TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.current_organization_id() TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.is_platform_admin() TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.can_access_licensee(text) TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.can_access_organization(text) TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.can_access_batch(text) TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.can_access_qr(text) TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.can_access_printer_registration(text) TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.can_access_printer(text) TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.can_access_print_job(text) TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.can_access_print_session(text) TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.can_access_print_item(text) TO :"mscqr_staging_app_role";
-GRANT EXECUTE ON FUNCTION app_rls.can_access_printer_profile(text) TO :"mscqr_staging_app_role";
+REVOKE ALL ON FUNCTION app_rls.can_access_licensee(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.can_access_organization(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.can_access_batch(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.can_access_qr(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.can_access_printer_registration(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.can_access_printer(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.can_access_print_job(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.can_access_print_session(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.can_access_print_item(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.can_access_printer_profile(text) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION app_rls.setting(text) TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.current_user_id() TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.current_role() TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.current_licensee_id() TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.current_manufacturer_id() TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.current_organization_id() TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.is_platform_admin() TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_licensee(text) TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_organization(text) TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_batch(text) TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_qr(text) TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_printer_registration(text) TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_printer(text) TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_print_job(text) TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_print_session(text) TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_print_item(text) TO :"mscqr_runtime_role";
+GRANT EXECUTE ON FUNCTION app_rls.can_access_printer_profile(text) TO :"mscqr_runtime_role";
+
+-- SELECT-only candidate: no sequence privileges are needed because runtime
+-- writes are intentionally blocked. All protected-table grants are explicit.
+GRANT SELECT ON TABLE
+  "Organization", "Licensee", "User", "ManufacturerLicenseeLink",
+  "Batch", "InventoryStatusRollup", "QRCode", "PrintJob", "PrintSession",
+  "PrintItem", "PrinterRegistration", "Printer", "PrinterAttestation",
+  "PrinterAgentSession", "PrinterProfile", "PrinterProfileSnapshot"
+TO :"mscqr_runtime_role";
 
 -- ---------------------------------------------------------------------------
 -- Idempotent policy reset for this candidate template only
@@ -335,8 +451,7 @@ ALTER TABLE "Organization" FORCE ROW LEVEL SECURITY;
 CREATE POLICY rls_candidate_organization_select ON "Organization"
   FOR SELECT
   USING (
-    app_rls.is_platform_admin()
-    OR "id" = app_rls.current_organization_id()
+    app_rls.can_access_organization("id")
   );
 
 ALTER TABLE "Licensee" ENABLE ROW LEVEL SECURITY;
@@ -346,7 +461,6 @@ CREATE POLICY rls_candidate_licensee_select ON "Licensee"
   FOR SELECT
   USING (
     app_rls.can_access_licensee("id")
-    OR "orgId" = app_rls.current_organization_id()
   );
 
 ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;
@@ -356,9 +470,14 @@ CREATE POLICY rls_candidate_user_select ON "User"
   FOR SELECT
   USING (
     app_rls.is_platform_admin()
-    OR "id" = app_rls.current_user_id()
-    OR app_rls.can_access_licensee("licenseeId")
-    OR app_rls.can_access_organization("orgId")
+    OR (
+      app_rls.current_role() IN ('licensee_admin', 'manufacturer')
+      AND "id" = app_rls.current_user_id()
+    )
+    OR (
+      app_rls.current_role() = 'licensee_admin'
+      AND "licenseeId" = app_rls.current_licensee_id()
+    )
     OR EXISTS (
       SELECT 1
       FROM "Batch" b
@@ -382,8 +501,15 @@ CREATE POLICY rls_candidate_manufacturer_licensee_link_select ON "ManufacturerLi
   FOR SELECT
   USING (
     app_rls.is_platform_admin()
-    OR "manufacturerId" = app_rls.current_manufacturer_id()
-    OR "licenseeId" = app_rls.current_licensee_id()
+    OR (
+      app_rls.current_role() = 'manufacturer'
+      AND app_rls.current_manufacturer_id() = app_rls.current_user_id()
+      AND "manufacturerId" = app_rls.current_manufacturer_id()
+    )
+    OR (
+      app_rls.current_role() = 'licensee_admin'
+      AND "licenseeId" = app_rls.current_licensee_id()
+    )
   );
 
 -- ---------------------------------------------------------------------------
@@ -402,7 +528,11 @@ CREATE POLICY rls_candidate_batch_select ON "Batch"
   FOR SELECT
   USING (
     app_rls.can_access_licensee("licenseeId")
-    OR "manufacturerId" = app_rls.current_manufacturer_id()
+    OR (
+      app_rls.current_role() = 'manufacturer'
+      AND app_rls.current_manufacturer_id() = app_rls.current_user_id()
+      AND "manufacturerId" = app_rls.current_manufacturer_id()
+    )
   );
 
 ALTER TABLE "InventoryStatusRollup" ENABLE ROW LEVEL SECURITY;
@@ -412,7 +542,11 @@ CREATE POLICY rls_candidate_inventory_status_rollup_select ON "InventoryStatusRo
   FOR SELECT
   USING (
     app_rls.can_access_licensee("licenseeId")
-    OR "manufacturerId" = app_rls.current_manufacturer_id()
+    OR (
+      app_rls.current_role() = 'manufacturer'
+      AND app_rls.current_manufacturer_id() = app_rls.current_user_id()
+      AND "manufacturerId" = app_rls.current_manufacturer_id()
+    )
     OR app_rls.can_access_batch("batchId")
   );
 
@@ -436,7 +570,11 @@ CREATE POLICY rls_candidate_print_job_select ON "PrintJob"
   FOR SELECT
   USING (
     app_rls.is_platform_admin()
-    OR "manufacturerId" = app_rls.current_manufacturer_id()
+    OR (
+      app_rls.current_role() = 'manufacturer'
+      AND app_rls.current_manufacturer_id() = app_rls.current_user_id()
+      AND "manufacturerId" = app_rls.current_manufacturer_id()
+    )
     OR app_rls.can_access_batch("batchId")
     OR app_rls.can_access_printer("printerId")
   );
@@ -448,7 +586,11 @@ CREATE POLICY rls_candidate_print_session_select ON "PrintSession"
   FOR SELECT
   USING (
     app_rls.is_platform_admin()
-    OR "manufacturerId" = app_rls.current_manufacturer_id()
+    OR (
+      app_rls.current_role() = 'manufacturer'
+      AND app_rls.current_manufacturer_id() = app_rls.current_user_id()
+      AND "manufacturerId" = app_rls.current_manufacturer_id()
+    )
     OR app_rls.can_access_batch("batchId")
     OR app_rls.can_access_print_job("printJobId")
     OR app_rls.can_access_printer("printerId")
@@ -482,7 +624,10 @@ CREATE POLICY rls_candidate_printer_registration_select ON "PrinterRegistration"
   FOR SELECT
   USING (
     app_rls.is_platform_admin()
-    OR "userId" = app_rls.current_user_id()
+    OR (
+      app_rls.current_role() IN ('licensee_admin', 'manufacturer')
+      AND "userId" = app_rls.current_user_id()
+    )
     OR app_rls.can_access_licensee("licenseeId")
     OR app_rls.can_access_organization("orgId")
   );
@@ -498,8 +643,13 @@ CREATE POLICY rls_candidate_printer_select ON "Printer"
     app_rls.is_platform_admin()
     OR app_rls.can_access_licensee("licenseeId")
     OR app_rls.can_access_organization("orgId")
-    OR "assignedUserId" = app_rls.current_user_id()
-    OR "createdByUserId" = app_rls.current_user_id()
+    OR (
+      app_rls.current_role() IN ('licensee_admin', 'manufacturer')
+      AND (
+        "assignedUserId" = app_rls.current_user_id()
+        OR "createdByUserId" = app_rls.current_user_id()
+      )
+    )
     OR app_rls.can_access_printer_registration("printerRegistrationId")
   );
 
@@ -541,3 +691,5 @@ CREATE POLICY rls_candidate_printer_profile_snapshot_select ON "PrinterProfileSn
   );
 
 COMMIT;
+
+SELECT set_config('app_rls.candidate_runtime_role', '', false);

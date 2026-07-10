@@ -37,7 +37,7 @@ export const categorizeStagingRlsBatchReadFailure = (error: unknown): StagingRls
   const name = error instanceof Error ? error.name : "";
 
   if (/requires app\.(user_id|role|licensee_id)/i.test(message)) return "rls_context_missing";
-  if (/does not allow/i.test(message)) return "rls_context_forbidden";
+  if (/does not allow|phase-one access is not enabled/i.test(message)) return "rls_context_forbidden";
   if (/^Prisma/i.test(name)) return "database_error";
   return "unexpected_error";
 };

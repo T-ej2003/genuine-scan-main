@@ -1,6 +1,7 @@
 import { BatchLifecycleState, Prisma, QRStatus } from "@prisma/client";
 
 import prisma from "../config/database";
+import { RlsReadTransactionClient } from "../config/rlsReadDatabase";
 import { listReservableQrCodeSummaries } from "./printReservationService";
 import { getOrComputeVersionedCache } from "./versionedCacheService";
 import {
@@ -10,7 +11,7 @@ import {
 
 const LINEAGE_BACKFILL_COOLDOWN_MS = 5 * 60_000;
 const lineageBackfillState = new Map<string, number>();
-type DbClient = typeof prisma | Prisma.TransactionClient;
+type DbClient = typeof prisma | RlsReadTransactionClient;
 
 const UNASSIGNED_STATUSES = [QRStatus.DORMANT, QRStatus.ACTIVE] as const;
 const PRINTABLE_STATUSES = [QRStatus.ALLOCATED, QRStatus.DORMANT, QRStatus.ACTIVE] as const;

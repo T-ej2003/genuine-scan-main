@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import prisma from "../config/database";
+import { RlsReadTransactionClient, RlsReadTransactionRunner } from "../config/rlsReadDatabase";
 import {
   listBatchOperationalSummaries,
   listCachedBatchOperationalSummaries,
@@ -26,7 +26,7 @@ type LoadBatchListPayloadParams = {
 
 const loadBatchListPayload = async (
   params: LoadBatchListPayloadParams,
-  db?: Prisma.TransactionClient
+  db?: RlsReadTransactionClient
 ) => {
   const where = (await buildScopedWhere(params.user, {
     requestedLicenseeId: params.requestedLicenseeId,
@@ -49,14 +49,19 @@ const loadBatchListPayload = async (
       });
 };
 
-export const listScopedBatchReadPayload = async (params: LoadBatchListPayloadParams) => {
+export const listScopedBatchReadPayload = async (
+  params: LoadBatchListPayloadParams,
+  dependencies: { transactionRunner?: RlsReadTransactionRunner } = {}
+) => {
   const flagEnabled = isStagingRlsBatchesReadEnabled();
   if (flagEnabled) {
     const startedAt = process.hrtime.bigint();
     const contextClass = classifyStagingRlsBatchReadContext(params.user);
     try {
-      const payload = await withStagingRlsBatchReadTransaction(prisma, params.user, (tx) =>
-        loadBatchListPayload(params, tx)
+      const payload = await withStagingRlsBatchReadTransaction(
+        params.user,
+        (tx) => loadBatchListPayload(params, tx),
+        dependencies
       );
       recordStagingRlsBatchReadProof({
         flagEnabled,
