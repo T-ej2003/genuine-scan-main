@@ -33,6 +33,11 @@ output "task_family" {
   value       = aws_ecs_task_definition.backend.family
 }
 
+output "database_role_admin_task_definition_arn" {
+  description = "Reviewed disposable staging-VPC database role executor task definition ARN. Contains no credential value."
+  value       = aws_ecs_task_definition.database_role_admin.arn
+}
+
 output "rds_identifier" {
   description = "Staging RDS identifier."
   value       = aws_db_instance.staging.identifier
