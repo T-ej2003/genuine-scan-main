@@ -289,15 +289,22 @@ The module models:
 - S3 bucket `mscqr-staging-euw2-artifacts-<account_id>`
 - IAM roles and staging-only security groups
 
-The apply role policy template grants IAM management only for the
-Terraform-managed staging ECS roles `mscqr-staging-ecs-execution-role` and
-`mscqr-staging-ecs-task-role`, and only allows attaching or detaching
-`arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy` on the
-execution role. The permissions boundary allows those exact IAM operations while
-denying IAM role management outside those staging roles and denying unreviewed
-managed-policy attachment. The staging ECS task role does not receive managed
-policy attachments; its Terraform-managed permissions must remain inline and
-reviewed in this module.
+The apply role policy template grants general role lifecycle and inline-policy
+management only for the three Terraform-managed staging ECS roles:
+`mscqr-staging-ecs-execution-role`, `mscqr-staging-ecs-task-role`, and
+`mscqr-staging-database-role-admin-task`. The database-admin role is used only
+by the disposable database-role administration task. The policy allows
+attaching or detaching only
+`arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy` and only
+on the execution role. The application task role and database-admin task role
+cannot receive arbitrary or AWS-managed policy attachments; their
+Terraform-managed permissions remain inline and reviewed in this module.
+
+Before controlled apply approval, compare the apply role policy and permissions
+boundary and verify that both contain the same exact three-role lifecycle and
+inline-policy scope. Verify separately that `iam:AttachRolePolicy` and
+`iam:DetachRolePolicy` target only the execution role. A missing role, an extra
+role, or a managed-policy attachment path for either task role blocks approval.
 
 ECS Exec task-role permissions are limited to the four SSM Messages channel actions required by ECS Exec, decrypt access to the staging ECS Exec KMS key for the managed agent, and CloudWatch Logs write permissions to `/aws/ecs/mscqr-staging/exec`. AWS does not support resource-level ARNs for the SSM Messages channel actions or `logs:DescribeLogGroups`, so those policy statements use `Resource = "*"` with the action lists constrained and `aws:RequestedRegion` pinned to `var.aws_region`.
 
