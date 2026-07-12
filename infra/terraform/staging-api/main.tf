@@ -52,6 +52,8 @@ locals {
     INCIDENT_HASH_SALT_CURRENT      = var.staging_secret_arns.incident_hash_salt_current
     AUTH_MFA_ENCRYPTION_KEY         = var.staging_secret_arns.auth_mfa_encryption_key
   }
+
+  app_database_secret_arn_pattern = "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/staging/database-url/app-*"
 }
 
 check "staging_name_guard" {
@@ -169,7 +171,7 @@ resource "aws_iam_role_policy" "ecs_execution_staging_secrets" {
       {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
-        Resource = values(local.backend_secrets)
+        Resource = concat(values(local.backend_secrets), [local.app_database_secret_arn_pattern])
       }
     ]
   })
@@ -189,6 +191,72 @@ resource "aws_iam_role" "ecs_task" {
         Action = "sts:AssumeRole"
       }
     ]
+  })
+}
+
+resource "aws_iam_role" "database_role_admin_task" {
+  name = "mscqr-staging-database-role-admin-task"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "database_role_admin_task_secrets" {
+  name = "mscqr-staging-database-role-admin-secrets"
+  role = aws_iam_role.database_role_admin_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat(
+      [
+        for role, secret_name in {
+          app      = "mscqr/staging/database-url/app"
+          migrator = "mscqr/staging/database-url/migrator"
+          rls-read = "mscqr/staging/database-url/rls-read"
+          } : {
+          Sid      = "Create${replace(title(role), "-", "")}DatabaseRoleSecret"
+          Effect   = "Allow"
+          Action   = ["secretsmanager:CreateSecret"]
+          Resource = "*"
+          Condition = {
+            StringEquals = {
+              "secretsmanager:Name"        = secret_name
+              "aws:RequestedRegion"        = var.aws_region
+              "aws:RequestTag/Environment" = "staging"
+              "aws:RequestTag/Application" = "mscqr"
+              "aws:RequestTag/Purpose"     = "database-role-credential"
+              "aws:RequestTag/ManagedBy"   = "manual-reviewed-script"
+              "aws:RequestTag/Role"        = role
+            }
+          }
+        }
+      ],
+      [{
+        Sid    = "ManageExactStagingDatabaseRoleSecrets"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:PutSecretValue",
+          "secretsmanager:TagResource",
+          "secretsmanager:UpdateSecretVersionStage",
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/staging/database-url/app-*",
+          "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/staging/database-url/migrator-*",
+          "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/staging/database-url/rls-read-*",
+        ]
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+        }
+      }]
+    )
   })
 }
 
@@ -488,6 +556,45 @@ resource "aws_ecs_task_definition" "backend" {
       }
     }
   ])
+}
+
+resource "aws_ecs_task_definition" "database_role_admin" {
+  family                   = "mscqr-staging-database-role-admin"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution.arn
+  task_role_arn            = aws_iam_role.database_role_admin_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+
+  container_definitions = jsonencode([{
+    name      = "db-admin"
+    image     = var.backend_image_uri
+    essential = true
+    command   = ["node", "scripts/staging-database-role-vpc-executor.mjs"]
+    environment = concat(
+      [{ name = "MSCQR_VPC_EXECUTOR_MODE", value = "probe" }],
+      [for entry in local.backend_environment : entry if startswith(entry.name, "MSCQR_STAGING_RLS_")]
+    )
+    secrets                = [{ name = "DATABASE_URL", valueFrom = var.staging_secret_arns.database_url }]
+    readonlyRootFilesystem = true
+    linuxParameters        = { initProcessEnabled = true }
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.backend.name
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = "database-role-admin"
+      }
+    }
+  }])
+
+  tags = merge(local.common_tags, { Component = "database-role-admin" })
 }
 
 resource "aws_ecs_service" "backend" {

@@ -85,6 +85,7 @@
     "test:staging-terraform-apply": "node --test scripts/tests/staging-terraform-apply.test.mjs",
     "test:staging-terraform-backend": "node --test scripts/tests/staging-terraform-backend.test.mjs",
     "test:staging-runtime-secret-sync": "node --test scripts/tests/staging-runtime-secret-sync.test.mjs",
+    "test:staging-database-role-credentials": "node --test scripts/tests/staging-database-role-*.test.mjs",
     "test:db-safety-guard": "node backend/tests/testDbSafetyGuard.test.js",
     "test:system": "playwright test --config=playwright.system.config.ts e2e/system-integration.spec.ts",
     "test:integration": "npm run test:p2:db:env && docker compose -f docker-compose.p2-test.yml up -d --wait p2-postgres p2-redis && REDIS_URL=redis://127.0.0.1:56379/0 REDIS_TLS=false npm run test:integration:ci",

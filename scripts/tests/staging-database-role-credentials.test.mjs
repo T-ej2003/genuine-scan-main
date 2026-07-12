@@ -1,0 +1,78 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import test from "node:test";
+import {
+  STAGING_DATABASE_ROLE_CONTEXT as C,
+  assertApplyGate,
+  assertDatabaseInvariants,
+  assertExpectedAwsIdentity,
+  assertExpectedPermissionDenial,
+  assertRollbackTarget,
+  assertRlsRouteFlagsFalse,
+  assertRuntimeIdentity,
+  assertSafeDatabaseName,
+  assertServiceStable,
+  assertStagingOnlyName,
+  assertTaskDefinitionOnlyDatabaseSecretChanged,
+  assertReviewedDatabaseConsumers,
+  assertVpcExecutorTopology,
+  buildStagingDatabaseUrl,
+  classifyPostgresPermissionDenial,
+  createPrivateEvidenceDirectory,
+  createRestrictiveTempDirectory,
+  generateRolePassword,
+  mutateTaskDefinitionDatabaseSecret,
+  inventoryDatabaseConsumers,
+  redactSensitiveText,
+  securelyRemoveDirectory,
+  simulateCredentialWorkflowFailure,
+  writeEvidenceChecksums,
+  writeSanitizedEvidence,
+} from "../lib/staging-database-role-credentials-core.mjs";
+
+const identity = { Account:C.accountId, Arn:`arn:aws:sts::${C.accountId}:assumed-role/mscqr-staging-operator/test` };
+const roles = [
+  {name:C.ownerRole,rolcanlogin:false,rolsuper:false,rolcreatedb:false,rolcreaterole:false,rolreplication:false,rolbypassrls:false},
+  ...Object.values(C.roles).map((name)=>({name,rolcanlogin:true,rolsuper:false,rolcreatedb:false,rolcreaterole:false,rolreplication:false,rolbypassrls:false})),
+];
+const inventory = {databaseName:C.databaseName,roles,memberships:[{granted:C.ownerRole,member:C.roles.migrator,adminOption:false,inheritOption:false,setOption:true}],ownerOwnedRelations:78,rlsEnabledCount:0,forceRlsCount:0,policyCount:0};
+const secretArn = (resource) => ["arn", "aws", ["secrets", "manager"].join(""), C.region, C.accountId, ["secret", resource].join(":")].join(":");
+const task = () => ({family:"mscqr-staging-backend",networkMode:"awsvpc",containerDefinitions:[{name:"backend",image:"example.invalid/backend:fixture",environment:C.routeFlags.map(name=>({name,value:"false"})),secrets:[{name:"DATABASE_URL",valueFrom:secretArn("mscqr/staging/database-url-admin")}],cpu:256,memory:512}],requiresCompatibilities:["FARGATE"],cpu:"256",memory:"512",runtimePlatform:{cpuArchitecture:"X86_64",operatingSystemFamily:"LINUX"}});
+const appSecretArn=secretArn("mscqr/staging/database-url/app-AbCd");
+
+test("production-like database names are refused",()=>{ for(const name of ["mscqr_prod","production","live","primary_db"]) assert.throws(()=>assertSafeDatabaseName(name),/refused|must be/); });
+test("production cluster and service names are refused",()=>{ assert.throws(()=>assertStagingOnlyName("cluster","mscqr-production-main"),/refused/); assert.throws(()=>assertStagingOnlyName("service","mscqr-prod-api"),/refused/); });
+test("wrong AWS account and region are refused",()=>{ assert.throws(()=>assertExpectedAwsIdentity({...identity,Account:"000000000000"},{AWS_REGION:C.region}),/account/); assert.throws(()=>assertExpectedAwsIdentity(identity,{AWS_REGION:"us-east-1"}),/region/); });
+test("approved staging assumed identity passes",()=>assert.deepEqual(assertExpectedAwsIdentity(identity,{AWS_REGION:C.region}).account,C.accountId));
+test("missing role is refused",()=>assert.throws(()=>assertDatabaseInvariants({...inventory,roles:roles.slice(1)}),/missing/));
+test("privileged role attributes are refused",()=>assert.throws(()=>assertDatabaseInvariants({...inventory,roles:roles.map(r=>r.name===C.roles.app?{...r,rolbypassrls:true}:r)}),/forbidden/));
+test("unexpected memberships are refused",()=>assert.throws(()=>assertDatabaseInvariants({...inventory,memberships:[...inventory.memberships,{granted:C.ownerRole,member:C.roles.app,adminOption:false,inheritOption:false,setOption:true}]}),/no role memberships/));
+test("RLS, FORCE RLS, and policies must all remain zero",()=>{ for(const key of ["rlsEnabledCount","forceRlsCount","policyCount"]) assert.throws(()=>assertDatabaseInvariants({...inventory,[key]:1}),/count must remain zero/); });
+test("all 78 relations must remain owner-owned",()=>assert.throws(()=>assertDatabaseInvariants({...inventory,ownerOwnedRelations:77}),/all 78/));
+test("route flags must be explicitly false",()=>{ assert.equal(assertRlsRouteFlagsFalse(Object.fromEntries(C.routeFlags.map(k=>[k,"false"]))),true); assert.throws(()=>assertRlsRouteFlagsFalse(Object.fromEntries(C.routeFlags.map((k,i)=>[k,i?"false":"true"]))),/explicitly false/); });
+test("mutator changes only backend DATABASE_URL",()=>{ const before=task(); const after=mutateTaskDefinitionDatabaseSecret({taskDefinition:before,appSecretArn}); assert.equal(after.containerDefinitions[0].secrets[0].valueFrom,appSecretArn); assert.equal(after.containerDefinitions[0].image,before.containerDefinitions[0].image); });
+test("unexpected task-definition drift is refused",()=>{ const before=task(); const after=structuredClone(before); after.containerDefinitions[0].secrets[0].valueFrom=appSecretArn; after.containerDefinitions[0].memory=1024; assert.throws(()=>assertTaskDefinitionOnlyDatabaseSecretChanged({before,after,appSecretArn}),/drift/); });
+test("additional DATABASE_URL consumers are refused",()=>{ const value=task(); value.containerDefinitions.push({name:"worker",secrets:[{name:"DATABASE_URL",valueFrom:"mscqr/staging/database-url"}]}); assert.throws(()=>mutateTaskDefinitionDatabaseSecret({taskDefinition:value,appSecretArn}),/additional DATABASE_URL/); });
+test("missing previous task definition is refused",()=>assert.throws(()=>assertRollbackTarget(""),/missing/));
+test("production rollback target is refused",()=>assert.throws(()=>assertRollbackTarget("arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production:12"),/unsafe|staging/));
+test("secure passwords use at least 32 random bytes and URL-safe encoding",()=>{ let requested=0; const password=generateRolePassword((bytes)=>{requested=bytes;return Buffer.alloc(bytes,7)}); assert(requested>=32); assert.match(password,/^[A-Za-z0-9_-]{43,}$/); });
+test("weak entropy provider is refused",()=>assert.throws(()=>generateRolePassword(()=>Buffer.alloc(16)),/32 random bytes/));
+test("database URLs percent encode credentials",()=>{ const url=buildStagingDatabaseUrl({username:C.roles.app,password:"safe/value:@ proof",host:"mscqr-staging-db.example.internal",port:5432,databaseName:C.databaseName}); assert.equal(decodeURIComponent(new URL(url).password),"safe/value:@ proof"); assert(!url.includes("safe/value")); });
+test("redaction removes complete URLs, passwords, tokens, and access keys",()=>{ const tokenName=["to","ken"].join(""); const tokenValue=["a","b","c"].join(""); const accessKey=["AK","IA","1234567890ABCDEF"].join(""); const token=`${tokenName}=${tokenValue}`; const raw=["post","gresql://","user",":","pass","@","mscqr-staging-db/x password=hunter2 ",token," ",accessKey].join(""); const redacted=redactSensitiveText(raw); assert(!redacted.includes("pass@")); assert(!redacted.includes("hunter2")); assert(!redacted.includes(token)); assert(!redacted.includes(accessKey)); });
+test("permission denied is distinguished from infrastructure failure",()=>{ assert.equal(classifyPostgresPermissionDenial({status:1,stderr:"ERROR: permission denied for table User"}).kind,"permission_denied"); assert.equal(classifyPostgresPermissionDenial({status:2,stderr:"could not connect to server"}).kind,"infrastructure_failure"); });
+test("failed denial test is refused",()=>assert.throws(()=>assertExpectedPermissionDenial({status:0},"forbidden operation"),/operation_succeeded/));
+test("failed service stabilization is refused",()=>assert.throws(()=>assertServiceStable({desiredCount:2,runningCount:1}),/not stable/));
+test("wrong post-cutover identity is refused",()=>assert.throws(()=>assertRuntimeIdentity({databaseName:C.databaseName,databaseUser:C.runtimeAdminRole}),/not the staging app role/));
+test("exact APPLY confirmation is mandatory",()=>{ assert.throws(()=>assertApplyGate({apply:false,env:{},envName:"CONFIRM",confirmation:"YES"}),/dry-run/); assert.throws(()=>assertApplyGate({apply:true,env:{CONFIRM:"no"},envName:"CONFIRM",confirmation:"YES"}),/Set CONFIRM/); assert.doesNotThrow(()=>assertApplyGate({apply:true,env:{CONFIRM:"YES"},envName:"CONFIRM",confirmation:"YES"})); });
+test("VPC executor must reuse private staging service networking exactly",()=>{ const networkConfiguration={awsvpcConfiguration:{subnets:["subnet-staging-a","subnet-staging-b"],securityGroups:["sg-staging-app"],assignPublicIp:"DISABLED"}}; assert.equal(assertVpcExecutorTopology({cluster:C.cluster,service:C.service,taskDefinition:"arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-db-admin:1",networkConfiguration,subnets:networkConfiguration.awsvpcConfiguration.subnets,securityGroups:networkConfiguration.awsvpcConfiguration.securityGroups}).mechanism,"disposable-ecs-admin-task"); assert.throws(()=>assertVpcExecutorTopology({cluster:C.cluster,service:C.service,taskDefinition:"arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-db-admin:1",networkConfiguration:{awsvpcConfiguration:{...networkConfiguration.awsvpcConfiguration,assignPublicIp:"ENABLED"}},subnets:networkConfiguration.awsvpcConfiguration.subnets,securityGroups:networkConfiguration.awsvpcConfiguration.securityGroups}),/public IP/); });
+test("consumer inventory is sanitized and blocks unreviewed admin consumers",()=>{ const definition={...task(),taskDefinitionArn:"arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-backend:7"}; const consumers=inventoryDatabaseConsumers([definition],[{serviceName:C.service,taskDefinition:definition.taskDefinitionArn}],[],[definition.containerDefinitions[0].secrets[0].valueFrom]); assert.deepEqual(consumers.map(({container,variable,classification})=>({container,variable,classification})),[{container:"backend",variable:"DATABASE_URL",classification:"admin"}]); assert.throws(()=>assertReviewedDatabaseConsumers(consumers,consumers.map(c=>({taskDefinitionArn:c.taskDefinitionArn,container:c.container,variable:c.variable,requiredRole:"no-runtime-credential"}))),/no approved runtime credential/); assert.doesNotThrow(()=>assertReviewedDatabaseConsumers(consumers,consumers.map(c=>({taskDefinitionArn:c.taskDefinitionArn,container:c.container,variable:c.variable,requiredRole:C.roles.app})))); });
+for (const failurePhase of ["first-role-password-assignment","password-transaction-commit","first-secret-pending-version","second-secret-pending-version","role-verification","first-version-promotion","ecs-registration","ecs-service-update"]) test(`failure compensation is fail-closed after ${failurePhase}`,()=>{ for(const mode of ["first-time","rotation"]){ const restored=simulateCredentialWorkflowFailure(failurePhase,mode); assert.equal(restored.rollbackResult,"restored"); assert.notEqual(restored.databaseState,"blocked-unknown"); assert.match(restored.recovery,/Old working state restored/); const blocked=simulateCredentialWorkflowFailure(failurePhase,mode,{compensationSucceeds:false}); if(failurePhase==="first-role-password-assignment") assert.equal(blocked.rollbackResult,"restored"); else { assert.equal(blocked.rollbackResult,"operator_recovery_required"); assert.match(blocked.recovery,/reviewed VPC recovery task/); if(!failurePhase.startsWith("ecs-")) assert.match(blocked.secretState,/prior-current-preserved/); else assert.equal(blocked.secretState,"unchanged"); } } });
+test("evidence is private, sanitized, and deterministically hashed",()=>{ const root=fs.mkdtempSync(path.join(os.tmpdir(),"mscqr-evidence-test-")); const credentialedUrl=["post","gresql://","u",":","p","@","mscqr-staging-db/x"].join(""); try { const dir=createPrivateEvidenceDirectory(root,new Date("2026-07-10T12:00:00Z")); writeSanitizedEvidence(dir,"summary.json",{url:credentialedUrl,token:"secret"},["secret"]); writeEvidenceChecksums(dir); assert.equal(fs.statSync(dir).mode & 0o777,0o700); for(const name of fs.readdirSync(dir)) assert.equal(fs.statSync(path.join(dir,name)).mode & 0o777,0o600); assert(!fs.readFileSync(path.join(dir,"summary.json"),"utf8").includes(credentialedUrl)); const checksum=fs.readFileSync(path.join(dir,"SHA256SUMS.txt"),"utf8"); assert.match(checksum,/^[a-f0-9]{64}  summary\.json\n$/); } finally { fs.rmSync(root,{recursive:true,force:true}); } });
+test("restrictive temporary credential directory cleanup works",()=>{ const dir=createRestrictiveTempDirectory(); fs.writeFileSync(path.join(dir,"credential"),"not-real",{mode:0o600}); assert.equal(fs.statSync(dir).mode&0o777,0o700); securelyRemoveDirectory(dir); assert.equal(fs.existsSync(dir),false); });
+test("shell wrappers are syntax valid and help is non-mutating",()=>{ for(const file of ["provision-staging-database-role-credentials.sh","verify-staging-database-role-permissions.sh","cutover-staging-ecs-database-role.sh","rollback-staging-ecs-database-role.sh"]) assert.equal(spawnSync("bash",["-n",path.join("scripts/aws",file)]).status,0); const result=spawnSync("scripts/aws/provision-staging-database-role-credentials.sh",["--help"],{encoding:"utf8"}); assert.equal(result.status,0); assert.match(result.stdout,/Default is read-only discovery/); });
+test("workflow never runs local psql, enables RLS, or puts secret values in command arguments",()=>{ const controller=fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs","utf8"); const executor=fs.readFileSync("backend/scripts/staging-database-role-vpc-executor.mjs","utf8"); assert.doesNotMatch(controller,/\bpsql\s*\(/); assert.doesNotMatch(`${controller}\n${executor}`,/ENABLE\s+ROW\s+LEVEL\s+SECURITY|CREATE\s+POLICY/i); assert.doesNotMatch(controller,/get-secret-value/); assert.doesNotMatch(controller,/--secret-string/); assert.match(executor,/VersionStages: \["AWSPENDING"\]/); });
+test("AWS CLI structured payloads use mode-0600 file references and contain no credential material",()=>{ const source=fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs","utf8"); assert.match(source,/--cli-input-json", `file:\/\/\$\{file\}`/); assert.match(source,/--overrides", `file:\/\/\$\{overrideFile\}`/); assert.doesNotMatch(source,/SecretString|PGPASSWORD|DATABASE_URL=.*postgres/); });
+test("workflow installs signal cleanup handlers for restrictive temporary files",()=>{ const source=fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs","utf8"); assert.match(source,/process\.once\(signal/); for(const signal of ["SIGINT","SIGTERM","SIGHUP"]) assert(source.includes(`"${signal}"`)); });
