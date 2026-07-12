@@ -11,6 +11,7 @@ export const STAGING_DATABASE_ROLE_CONTEXT = Object.freeze({
   databaseIdentifier: "mscqr-staging-db",
   cluster: "mscqr-staging-euw2-main",
   service: "mscqr-staging-backend-service-euw2",
+  operatorRole: "mscqr-staging-database-role-operator",
   backendContainer: "backend",
   runtimeAdminRole: "mscqr_staging_admin",
   ownerRole: "mscqr_staging_owner",
@@ -125,6 +126,15 @@ export function assertExpectedAwsIdentity(identity, env = process.env) {
     throw new StagingDatabaseRoleSafetyError("AWS identity must be an assumed staging role.");
   }
   return { account, arn, region };
+}
+
+export function assertDatabaseRoleOperatorIdentity(identity, env = process.env) {
+  const expected = assertExpectedAwsIdentity(identity, env);
+  const assumedRolePrefix = `arn:aws:sts::${STAGING_DATABASE_ROLE_CONTEXT.accountId}:assumed-role/${STAGING_DATABASE_ROLE_CONTEXT.operatorRole}/`;
+  if (!expected.arn.startsWith(assumedRolePrefix) || expected.arn.length === assumedRolePrefix.length) {
+    throw new StagingDatabaseRoleSafetyError(`Probe, provision, and verify execution require assumed role ${STAGING_DATABASE_ROLE_CONTEXT.operatorRole}.`, "DATABASE_ROLE_OPERATOR_IDENTITY_REQUIRED");
+  }
+  return expected;
 }
 
 export function parsePostgresUrl(raw, label = "PostgreSQL URL") {

@@ -7,6 +7,7 @@ import {
   STAGING_DATABASE_ROLE_CONTEXT as C,
   assertApplyGate,
   assertActiveReviewedBackendDatabaseConsumer,
+  assertDatabaseRoleOperatorIdentity,
   assertExpectedAwsIdentity,
   assertReviewedDatabaseConsumers,
   assertRollbackTarget,
@@ -164,7 +165,9 @@ export function executorModeForCommand(command) {
   throw new Error("Unsupported executor command.");
 }
 function provisionOrVerify(command) {
-  const base = discoverBase(); const inventory = databaseConsumerInventory(base); const plan = executorPlan(base);
+  const base = discoverBase();
+  if (APPLY || PROBE) assertDatabaseRoleOperatorIdentity(base.identity, { ...process.env, AWS_REGION: C.region });
+  const inventory = databaseConsumerInventory(base); const plan = executorPlan(base);
   if (!APPLY && !PROBE) return { status: `${command}_dry_run_requires_reachability_probe`, mutatesPostgres: false, mutatesSecretsManager: false, executor: plan.topology, consumerInventory: inventory, probeCommand: `MSCQR_STAGING_VPC_EXECUTOR=disposable-ecs-admin-task MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN=${plan.arn} scripts/aws/${command === "provision" ? "provision-staging-database-role-credentials.sh" : "verify-staging-database-role-permissions.sh"} --probe` };
   if (PROBE) return { status: `${command}_reachability_probe_passed`, mutatesPostgres: false, mutatesSecretsManager: false, result: runExecutor(base, "probe"), consumerInventory: inventory };
   assertApplyGate({ apply: true, envName: command === "provision" ? "MSCQR_STAGING_DATABASE_CREDENTIALS_CONFIRM" : "MSCQR_STAGING_DATABASE_VERIFY_CONFIRM", confirmation: command === "provision" ? "MSCQR_PROVISION_STAGING_DATABASE_ROLE_CREDENTIALS" : "MSCQR_VERIFY_STAGING_DATABASE_ROLE_CREDENTIALS" });

@@ -11,6 +11,31 @@ The Mac controller performs sanitized discovery, starts/waits for the task, inve
 
 The executor must first be present in a reviewed backend image and the Terraform-created admin task definition must be reviewed/applied through the normal infrastructure process. This workflow does not rebuild, replace, or install software in a running container.
 
+## Operator identity split
+
+- Read-only discovery uses the staging Terraform plan role. That identity may run only `discover` or the default non-probe/non-apply planning output; it must not start the disposable task.
+- `--probe`, provision `--apply`, and verify `--apply` require an STS session for `mscqr-staging-database-role-operator`. The controller checks the exact assumed-role ARN before inventory, executor planning, or `ecs:RunTask`.
+- The dedicated IAM user `mscqr-staging-database-role-operator-user` may assume only that operator role through `documents/ops/iam/MSCQR_STAGING_DATABASE_ROLE_OPERATOR_ASSUME_ROLE_POLICY_2026-07-12.json`.
+- The reviewed trust template is `documents/ops/iam/MSCQR_STAGING_DATABASE_ROLE_OPERATOR_TRUST_POLICY_2026-07-12.json`. It trusts only the dedicated operator user and requires MFA. Root, wildcard principals, broad IAM users, and the Terraform plan/apply roles are forbidden. Replacing the user with an approved bootstrap principal requires a separate written approval naming one exact non-root, non-plan, non-apply principal and a matching trust-template update.
+- The assumed-role permissions template is `documents/ops/iam/MSCQR_STAGING_DATABASE_ROLE_OPERATOR_POLICY_2026-07-12.json`. It can run only `mscqr-staging-database-role-admin:*` on the reviewed staging cluster, pass only the database-admin task role and ECS execution role to `ecs-tasks.amazonaws.com`, inspect the reviewed staging ECS/EventBridge inventory, and describe only the three database-role secret patterns. It cannot retrieve secret values.
+- This operator role cannot register task definitions, update services, execute commands in containers, mutate IAM, retrieve or write secrets, or perform consumer cutover. Cutover requires its separately reviewed identity and approval and is never implied by operator-role access.
+
+Local AWS config uses separate profiles. The source profile must belong to the dedicated operator user; do not use the plan/apply profiles as the source:
+
+```ini
+[profile mscqr-staging-database-role-plan]
+role_arn = <reviewed-staging-plan-role-arn>
+source_profile = <reviewed-plan-source-profile>
+region = eu-west-2
+
+[profile mscqr-staging-database-role-operator]
+role_arn = arn:aws:iam::368992683803:role/mscqr-staging-database-role-operator
+source_profile = mscqr-staging-database-role-operator-user
+role_session_name = reviewed-database-role-workflow
+mfa_serial = <dedicated-operator-user-mfa-device-arn>
+region = eu-west-2
+```
+
 ## Safety invariants
 
 - No public RDS endpoint, public task IP, security-group opening, RLS enablement, RLS policy creation, running-image change, or runtime package installation.
@@ -81,7 +106,7 @@ Cutover captures the pre-cutover task-definition ARN and preserved admin-secret 
 These commands are for the reviewed operator. The work documented on 2026-07-11 did not run them against AWS.
 
 ```bash
-export AWS_PROFILE='<reviewed-staging-assumed-role-profile>'
+export AWS_PROFILE='mscqr-staging-database-role-plan'
 export AWS_REGION='eu-west-2'
 export MSCQR_STAGING_VPC_EXECUTOR='disposable-ecs-admin-task'
 export MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN="$(terraform -chdir=infra/terraform/staging-api output -raw database_role_admin_task_definition_arn)"
@@ -92,6 +117,9 @@ node scripts/aws/staging-database-role-credentials.mjs discover
 # Sanitized provisioning plan. It performs no PostgreSQL or Secrets Manager mutation.
 scripts/aws/provision-staging-database-role-credentials.sh
 
+# Switch to the exact assumed operator role before any RunTask path.
+export AWS_PROFILE='mscqr-staging-database-role-operator'
+
 # Reachability/identity probe. It starts one disposable ECS task but performs no
 # PostgreSQL or Secrets Manager mutation. Review this separate ECS RunTask action.
 scripts/aws/provision-staging-database-role-credentials.sh --probe
@@ -101,6 +129,10 @@ scripts/aws/provision-staging-database-role-credentials.sh --probe
 export MSCQR_STAGING_DATABASE_VERIFY_CONFIRM='MSCQR_VERIFY_STAGING_DATABASE_ROLE_CREDENTIALS'
 scripts/aws/verify-staging-database-role-permissions.sh --apply
 
+# Switch away from the database-role operator. Cutover is outside its policy and
+# requires a separately reviewed cutover identity even for its sanitized plan.
+export AWS_PROFILE='<separately-reviewed-staging-cutover-profile>'
+
 # Sanitized cutover plan; no task registration or service update.
 export MSCQR_STAGING_HEALTH_URL='https://<reviewed-staging-host>/healthz'
 scripts/aws/cutover-staging-ecs-database-role.sh
@@ -109,9 +141,11 @@ scripts/aws/cutover-staging-ecs-database-role.sh
 Only after separate human approvals:
 
 ```bash
+export AWS_PROFILE='mscqr-staging-database-role-operator'
 export MSCQR_STAGING_DATABASE_CREDENTIALS_CONFIRM='MSCQR_PROVISION_STAGING_DATABASE_ROLE_CREDENTIALS'
 scripts/aws/provision-staging-database-role-credentials.sh --apply
 
+export AWS_PROFILE='<separately-reviewed-staging-cutover-profile>'
 export MSCQR_STAGING_REPRESENTATIVE_SMOKE_URLS='https://<reviewed-staging-host>/<safe-smoke-1>,https://<reviewed-staging-host>/<safe-smoke-2>'
 export MSCQR_STAGING_ECS_DATABASE_ROLE_CUTOVER_CONFIRM='MSCQR_CUTOVER_STAGING_ECS_TO_APP_DATABASE_ROLE'
 scripts/aws/cutover-staging-ecs-database-role.sh --apply
@@ -123,6 +157,7 @@ Provision approval does not authorize cutover. The reachability probe's ECS `Run
 
 ```bash
 npm run test:staging-database-role-credentials
+npm run check:staging-database-role-operator-iam
 node --check scripts/aws/staging-database-role-credentials.mjs
 node --check scripts/lib/staging-database-role-credentials-core.mjs
 node --check backend/scripts/staging-database-role-vpc-executor.mjs
