@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import {
   STAGING_DATABASE_ROLE_CONTEXT as C,
   assertApplyGate,
+  assertActiveReviewedBackendDatabaseConsumer,
   assertExpectedAwsIdentity,
   assertReviewedDatabaseConsumers,
   assertRollbackTarget,
@@ -22,6 +23,7 @@ import {
   extractRlsRouteFlags,
   findDatabaseUrlSecret,
   inventoryDatabaseConsumers,
+  mergeTaskDefinitions,
   mutateTaskDefinitionDatabaseSecret,
   redactSensitiveText,
   sanitizedTaskDefinitionDiff,
@@ -85,19 +87,28 @@ function listAll(args, resultKey) {
   return values;
 }
 
-function databaseConsumerInventory(base) {
+function databaseConsumerInventory(base, { expectedClassification = null, preservedAdminSecretId = base.adminSecretId, appSecretArn = "" } = {}) {
   const arns = listAll(["ecs", "list-task-definitions", "--status", "ACTIVE", "--sort", "DESC", "--family-prefix", "mscqr-staging"], "taskDefinitionArns");
-  const definitions = arns.map((arn) => awsJson(["ecs", "describe-task-definition", "--task-definition", arn]).taskDefinition);
   const clusterServices = listAll(["ecs", "list-services", "--cluster", C.cluster], "serviceArns");
   const services = [];
   for (let i = 0; i < clusterServices.length; i += 10) services.push(...(awsJson(["ecs", "describe-services", "--cluster", C.cluster, "--services", ...clusterServices.slice(i, i + 10)]).services || []));
+  if (!services.some((value) => value.serviceName === base.service.serviceName)) services.push(base.service);
   const scheduledTargets = [];
   for (const rule of listAll(["events", "list-rules", "--name-prefix", "mscqr-staging"], "Rules")) {
     for (const target of awsJson(["events", "list-targets-by-rule", "--rule", rule.Name]).Targets || []) {
       if (target.EcsParameters?.TaskDefinitionArn) scheduledTargets.push({ scheduleName: rule.Name, taskDefinition: target.EcsParameters.TaskDefinitionArn });
     }
   }
-  const consumers = inventoryDatabaseConsumers(definitions, services.map((value) => ({ serviceName: value.serviceName, taskDefinition: value.taskDefinition })), scheduledTargets, [base.adminSecretId]);
+  const references = [...arns, ...services.map((value) => value.taskDefinition), ...scheduledTargets.map((value) => value.taskDefinition)].filter(Boolean);
+  const describedByReference = new Map([...new Set(references)].map((reference) => [reference, awsJson(["ecs", "describe-task-definition", "--task-definition", reference]).taskDefinition]));
+  const describedDefinitions = [...describedByReference.values()];
+  const definitions = mergeTaskDefinitions(base.taskDefinition, describedDefinitions);
+  const canonicalReference = (reference) => describedByReference.get(reference)?.taskDefinitionArn || reference;
+  const activeServices = services.map((value) => ({ serviceName: value.serviceName, taskDefinition: canonicalReference(value.taskDefinition) }));
+  const activeSchedules = scheduledTargets.map((value) => ({ ...value, taskDefinition: canonicalReference(value.taskDefinition) }));
+  const discoveredAppSecretArn = appSecretArn || awsJson(["secretsmanager", "describe-secret", "--secret-id", C.secretNames.app], { allowFailure: true }).ARN || "";
+  const rlsReadSecretArn = awsJson(["secretsmanager", "describe-secret", "--secret-id", C.secretNames.rlsRead], { allowFailure: true }).ARN || "";
+  const consumers = inventoryDatabaseConsumers(definitions, activeServices, activeSchedules, [preservedAdminSecretId], discoveredAppSecretArn ? [discoveredAppSecretArn] : [], rlsReadSecretArn ? [rlsReadSecretArn] : []);
   const reviewed = consumers.map((consumer) => {
     let requiredRole = "no-runtime-credential";
     if (consumer.service === C.service && consumer.container === C.backendContainer && consumer.variable === "DATABASE_URL") requiredRole = C.roles.app;
@@ -105,6 +116,7 @@ function databaseConsumerInventory(base) {
     return { taskDefinitionArn: consumer.taskDefinitionArn, container: consumer.container, variable: consumer.variable, requiredRole };
   });
   assertReviewedDatabaseConsumers(consumers.filter((item) => item.service || item.schedule), reviewed);
+  assertActiveReviewedBackendDatabaseConsumer(consumers, { expectedClassification });
   return { consumers, reviewed };
 }
 
@@ -166,7 +178,9 @@ function smokeChecks() { const urls=String(process.env.MSCQR_STAGING_REPRESENTAT
 function runtimeIdentity() { const tasks=awsJson(["ecs","list-tasks","--cluster",C.cluster,"--service-name",C.service,"--desired-status","RUNNING"]).taskArns||[]; if(tasks.length!==1) throw new Error("Expected one stable backend task for identity proof."); const command=`node -e "const{PrismaClient}=require('@prisma/client');const p=new PrismaClient();p.\\$queryRawUnsafe('SELECT current_database() AS database_name,current_user AS database_user').then(r=>console.log(JSON.stringify(r[0]))).finally(()=>p.\\$disconnect())"`; const result=run("aws",["ecs","execute-command","--cluster",C.cluster,"--task",tasks[0],"--container",C.backendContainer,"--interactive","--command",command,"--region",C.region],{allowFailure:true}); if(result.status) throw new Error("Sanitized runtime database identity proof failed."); const match=result.stdout.match(/\{"database_name":"([^"]+)","database_user":"([^"]+)"\}/); if(!match) throw new Error("Runtime identity output was missing."); const identity={databaseName:match[1],databaseUser:match[2]}; assertRuntimeIdentity(identity); return identity; }
 function rollbackService(previousArn) { awsJson(["ecs", "update-service", "--cluster", C.cluster, "--service", C.service, "--task-definition", previousArn]); run("aws", ["ecs", "wait", "services-stable", "--cluster", C.cluster, "--services", C.service, "--region", C.region]); healthCheck(); }
 function cutover() {
-  const base = discoverBase(); const inventory = databaseConsumerInventory(base); runExecutor(base, "verify"); healthCheck();
+  const base = discoverBase(); const inventory = databaseConsumerInventory(base, { expectedClassification: "admin" }); runExecutor(base, "verify"); healthCheck();
+  const previousTaskDefinitionArn = base.taskArn;
+  const preservedAdminSecretId = base.adminSecretId;
   const app = awsJson(["secretsmanager", "describe-secret", "--secret-id", C.secretNames.app]);
   const current = Object.entries(app.VersionIdsToStages || {}).find(([, stages]) => stages.includes("AWSCURRENT"))?.[0];
   if (!current) throw new Error("App secret has no AWSCURRENT version.");
@@ -184,11 +198,13 @@ function cutover() {
     if (process.env.MSCQR_TEST_FAILURE_PHASE === "ecs-service-update") throw new Error("Injected ECS service update failure.");
     run("aws", ["ecs", "wait", "services-stable", "--cluster", C.cluster, "--services", C.service, "--region", C.region]);
     const service = awsJson(["ecs", "describe-services", "--cluster", C.cluster, "--services", C.service]).services?.[0]; assertServiceStable(service, newArn); healthCheck(); const identity=runtimeIdentity(); const smokes=smokeChecks();
-    writeSanitizedEvidence(evidence, "cutover-result.json", { status: "healthy", previousTaskDefinitionArn: base.taskArn, newTaskDefinitionArn: newArn, appSecretCurrentVersionId: current, runtimeIdentity:identity, smokeChecks:smokes }); writeEvidenceChecksums(evidence);
-    return { status: "cutover_complete", previousTaskDefinitionArn: base.taskArn, newTaskDefinitionArn: newArn, evidenceDirectory: path.relative(ROOT, evidence) };
+    const postCutoverBase = discoverBase();
+    const postCutoverInventory = databaseConsumerInventory(postCutoverBase, { expectedClassification: "app", preservedAdminSecretId, appSecretArn: app.ARN });
+    writeSanitizedEvidence(evidence, "cutover-result.json", { status: "healthy", previousTaskDefinitionArn, newTaskDefinitionArn: newArn, appSecretCurrentVersionId: current, runtimeIdentity:identity, smokeChecks:smokes, consumerInventory: postCutoverInventory }); writeEvidenceChecksums(evidence);
+    return { status: "cutover_complete", previousTaskDefinitionArn, newTaskDefinitionArn: newArn, evidenceDirectory: path.relative(ROOT, evidence) };
   } catch (error) {
-    let rollbackResult = "not_required"; if (serviceUpdated) try { rollbackService(base.taskArn); rollbackResult = "restored"; } catch { rollbackResult = "operator_recovery_required"; }
-    writeSanitizedEvidence(evidence, "cutover-failure.json", { phase: newArn ? "ecs-service-update" : "ecs-registration", failureClassification: error.code || "ECS_CUTOVER_FAILURE", previousTaskDefinitionArn: base.taskArn, newTaskDefinitionArn: newArn || null, rollbackResult }); writeEvidenceChecksums(evidence); throw error;
+    let rollbackResult = "not_required"; if (serviceUpdated) try { rollbackService(previousTaskDefinitionArn); rollbackResult = "restored"; } catch { rollbackResult = "operator_recovery_required"; }
+    writeSanitizedEvidence(evidence, "cutover-failure.json", { phase: newArn ? "ecs-service-update" : "ecs-registration", failureClassification: error.code || "ECS_CUTOVER_FAILURE", previousTaskDefinitionArn, newTaskDefinitionArn: newArn || null, rollbackResult }); writeEvidenceChecksums(evidence); throw error;
   }
 }
 
