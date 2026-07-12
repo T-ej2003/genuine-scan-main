@@ -251,6 +251,21 @@ test("staging Terraform apply role policy is scoped to reviewed staging ECS role
   assert.match(combinedOutput(result), /Apply role policy is scoped to Terraform-managed staging ECS IAM roles only/);
 });
 
+for (const [action, statementIndex] of [["iam:GetRole", 0], ["iam:GetRolePolicy", 1], ["iam:PutRolePolicy", 1]]) {
+  test(`staging Terraform apply role policy requires ${action} for the database-role admin task role`, () => {
+    const result = runIamPolicyCheckWithFixtures({
+      applyRolePolicyMutator: (policy) => {
+        policy.Statement[statementIndex].Resource = policy.Statement[statementIndex].Resource.filter(
+          (resource) => !resource.endsWith("/mscqr-staging-database-role-admin-task"),
+        );
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(combinedOutput(result), new RegExp(`${action} must allow required Terraform-managed role`));
+  });
+}
+
 test("staging Terraform apply role policy rejects production-looking IAM role ARNs", () => {
   const result = runIamPolicyCheckWithFixtures({
     applyRolePolicyMutator: (policy) => {
@@ -280,6 +295,17 @@ test("staging Terraform apply role policy rejects managed policy attachment to t
   const result = runIamPolicyCheckWithFixtures({
     applyRolePolicyMutator: (policy) => {
       policy.Statement[2].Resource = "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role";
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(combinedOutput(result), /managed policy attach\/detach must target only/);
+});
+
+test("staging Terraform apply role policy rejects managed policy attachment to database-role admin task role", () => {
+  const result = runIamPolicyCheckWithFixtures({
+    applyRolePolicyMutator: (policy) => {
+      policy.Statement[2].Resource = "arn:aws:iam::368992683803:role/mscqr-staging-database-role-admin-task";
     },
   });
 
@@ -331,6 +357,19 @@ test("staging Terraform apply boundary requires task role managed policy attachm
 
   assert.notEqual(result.status, 0);
   assert.match(combinedOutput(result), /must deny managed policy attachment to the staging ECS task role/);
+});
+
+test("staging Terraform apply boundary requires database-role admin managed policy attachment deny", () => {
+  const result = runIamPolicyCheckWithFixtures({
+    boundaryMutator: (boundary) => {
+      boundary.Statement = boundary.Statement.filter(
+        (statement) => statement.Sid !== "DenyManagedPolicyAttachmentsOnStagingDatabaseRoleAdminTaskRole",
+      );
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(combinedOutput(result), /must deny managed policy attachment to the staging database-role admin task role/);
 });
 
 test("role markers must be segment-aware", () => {

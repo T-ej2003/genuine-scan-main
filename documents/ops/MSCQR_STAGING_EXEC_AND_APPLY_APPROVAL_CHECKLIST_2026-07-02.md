@@ -31,7 +31,11 @@ This checklist is preparation-only. It does not authorize production changes, da
 - [ ] Scheduled/manual remote-state drift detection is configured through `.github/workflows/staging-terraform-remote-state-drift.yml` using GitHub OIDC, not long-lived access keys.
 - [ ] State migration, if not already complete, used only `scripts/migrate-staging-terraform-state-to-s3.mjs` with an explicit final reconciled 39-resource source state backup path and the migration gates.
 - [ ] The local reconciled state backup remains preserved under ignored private storage until the remote state is verified by `terraform init` and a fresh zero-diff plan.
-- [ ] The apply role policy grants IAM management only for `mscqr-staging-ecs-execution-role`, `mscqr-staging-ecs-task-role`, and the reviewed `AmazonECSTaskExecutionRolePolicy` attachment on the execution role.
+- [ ] General role-management actions are scoped to exactly the three Terraform-managed roles: `mscqr-staging-ecs-execution-role`, `mscqr-staging-ecs-task-role`, and `mscqr-staging-database-role-admin-task`.
+- [ ] Inline-policy actions (`iam:GetRolePolicy`, `iam:PutRolePolicy`, and `iam:DeleteRolePolicy`) are scoped to exactly those same three Terraform-managed roles.
+- [ ] `iam:AttachRolePolicy` and `iam:DetachRolePolicy` remain restricted to `mscqr-staging-ecs-execution-role` and the reviewed `AmazonECSTaskExecutionRolePolicy`; neither task role is an attachment target.
+- [ ] `mscqr-staging-database-role-admin-task` cannot receive arbitrary or AWS-managed policy attachments; its Terraform-managed permissions remain inline only.
+- [ ] The apply role policy and permissions boundary contain the same exact three-role lifecycle and inline-policy scope; any missing or additional role blocks approval.
 - [ ] No `AdministratorAccess`, general IAM administrator policy, production-looking role ARN, or IAM `Resource="*"` write permission is attached to the apply role.
 - [ ] The staging plan role remains read/plan only and will not be used for apply.
 - [ ] The selected apply profile is the staging apply profile, not a plan/read profile and not production-looking.

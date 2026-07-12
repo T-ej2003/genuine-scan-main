@@ -67,11 +67,15 @@ checker, and only then rerun the failed bootstrap step.
 7. Attach the least-privilege staging Terraform apply role policy template
    `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_ROLE_POLICY_2026-07-08.json`
    to `mscqr-staging-terraform-apply-role`. This policy allows Terraform to
-   create and manage only the Terraform-managed staging ECS IAM roles
-   `mscqr-staging-ecs-execution-role` and `mscqr-staging-ecs-task-role`, plus
-   the reviewed `AmazonECSTaskExecutionRolePolicy` attachment on the execution
-   role. Do not attach AdministratorAccess or a general IAM administrator
-   policy.
+   perform general role lifecycle and inline-policy operations only for the
+   three Terraform-managed staging ECS IAM roles:
+   `mscqr-staging-ecs-execution-role`, `mscqr-staging-ecs-task-role`, and
+   `mscqr-staging-database-role-admin-task`. The third role is used only by the
+   disposable database-role administration task. Managed-policy attachment is
+   forbidden for both task roles; only the reviewed
+   `AmazonECSTaskExecutionRolePolicy` may be attached to or detached from the
+   execution role. Do not attach AdministratorAccess or a general IAM
+   administrator policy.
 8. Attach
    `documents/ops/iam/MSCQR_STAGING_TERRAFORM_BACKEND_ACCESS_POLICY_2026-07-08.json`
    to the staging plan role and to `mscqr-staging-terraform-apply-role`. This
@@ -81,6 +85,10 @@ checker, and only then rerun the failed bootstrap step.
    `staging-api/terraform.tfstate.tflock`.
 9. Confirm `npm run check:staging-iam-policies` passes after the apply operator
    policy and boundary template are reviewed.
+   Compare the apply role policy and permissions boundary directly: both must
+   name the same exact three roles for lifecycle and inline-policy operations,
+   while managed-policy attachment remains execution-role-only. Any missing or
+   additional role blocks approval.
 10. Configure a local AWS profile named with staging and apply markers, for
    example `<staging-apply-profile>`.
 11. Verify the identity:
