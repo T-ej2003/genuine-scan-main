@@ -266,6 +266,20 @@ for (const [action, statementIndex] of [["iam:GetRole", 0], ["iam:GetRolePolicy"
   });
 }
 
+for (const [action, statementIndex] of [["iam:GetRole", 0], ["iam:GetRolePolicy", 1], ["iam:PutRolePolicy", 1]]) {
+  test(`staging Terraform apply role policy requires ${action} for the database-role executor broker role`, () => {
+    const result = runIamPolicyCheckWithFixtures({
+      applyRolePolicyMutator: (policy) => {
+        policy.Statement[statementIndex].Resource = policy.Statement[statementIndex].Resource.filter(
+          (resource) => !resource.endsWith("/mscqr-staging-database-role-executor-broker-role"),
+        );
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(combinedOutput(result), new RegExp(`${action} must allow required Terraform-managed role`));
+  });
+}
+
 test("staging Terraform apply role policy rejects production-looking IAM role ARNs", () => {
   const result = runIamPolicyCheckWithFixtures({
     applyRolePolicyMutator: (policy) => {
@@ -370,6 +384,18 @@ test("staging Terraform apply boundary requires database-role admin managed poli
 
   assert.notEqual(result.status, 0);
   assert.match(combinedOutput(result), /must deny managed policy attachment to the staging database-role admin task role/);
+});
+
+test("staging Terraform apply boundary requires database-role executor broker managed policy attachment deny", () => {
+  const result = runIamPolicyCheckWithFixtures({
+    boundaryMutator: (boundary) => {
+      boundary.Statement = boundary.Statement.filter(
+        (statement) => statement.Sid !== "DenyManagedPolicyAttachmentsOnStagingDatabaseRoleExecutorBrokerRole",
+      );
+    },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(combinedOutput(result), /must deny managed policy attachment to the staging database-role executor broker role/);
 });
 
 test("role markers must be segment-aware", () => {

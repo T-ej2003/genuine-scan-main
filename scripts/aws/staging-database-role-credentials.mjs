@@ -7,6 +7,7 @@ import {
   STAGING_DATABASE_ROLE_CONTEXT as C,
   assertApplyGate,
   assertActiveReviewedBackendDatabaseConsumer,
+  assertDatabaseRoleOperatorIdentity,
   assertExpectedAwsIdentity,
   assertReviewedDatabaseConsumers,
   assertRollbackTarget,
@@ -106,8 +107,14 @@ function databaseConsumerInventory(base, { expectedClassification = null, preser
   const canonicalReference = (reference) => describedByReference.get(reference)?.taskDefinitionArn || reference;
   const activeServices = services.map((value) => ({ serviceName: value.serviceName, taskDefinition: canonicalReference(value.taskDefinition) }));
   const activeSchedules = scheduledTargets.map((value) => ({ ...value, taskDefinition: canonicalReference(value.taskDefinition) }));
-  const discoveredAppSecretArn = appSecretArn || awsJson(["secretsmanager", "describe-secret", "--secret-id", C.secretNames.app], { allowFailure: true }).ARN || "";
-  const rlsReadSecretArn = awsJson(["secretsmanager", "describe-secret", "--secret-id", C.secretNames.rlsRead], { allowFailure: true }).ARN || "";
+  const inventoriedSecretIds = definitions.flatMap((definition) => (definition.containerDefinitions || []).flatMap((container) => (container.secrets || []).map((secret) => secret.valueFrom).filter(Boolean)));
+  const uniqueMatchingSecret = (fragment) => {
+    const matches = [...new Set(inventoriedSecretIds.filter((secretId) => secretId.includes(`:secret:mscqr/staging/database-url/${fragment}-`)))];
+    if (matches.length > 1) throw new Error(`Multiple ${fragment} database-role secret identifiers require review.`);
+    return matches[0] || "";
+  };
+  const discoveredAppSecretArn = appSecretArn || uniqueMatchingSecret("app");
+  const rlsReadSecretArn = uniqueMatchingSecret("rls-read");
   const consumers = inventoryDatabaseConsumers(definitions, activeServices, activeSchedules, [preservedAdminSecretId], discoveredAppSecretArn ? [discoveredAppSecretArn] : [], rlsReadSecretArn ? [rlsReadSecretArn] : []);
   const reviewed = consumers.map((consumer) => {
     let requiredRole = "no-runtime-credential";
@@ -141,19 +148,21 @@ function runExecutor(base, mode) {
   const executor = executorPlan(base);
   const directory = tempDirectory();
   try {
-    const overrideFile = path.join(directory, "overrides.json");
-    fs.writeFileSync(overrideFile, JSON.stringify({ containerOverrides: [{ name: "db-admin", environment: [{ name: "MSCQR_VPC_EXECUTOR_MODE", value: mode }] }] }), { mode: 0o600, flag: "wx" });
-    const networkFile = path.join(directory, "network.json");
-    fs.writeFileSync(networkFile, JSON.stringify(base.service.networkConfiguration.awsvpcConfiguration), { mode: 0o600, flag: "wx" });
-    const network = JSON.parse(fs.readFileSync(networkFile, "utf8"));
-    const started = awsJson(["ecs", "run-task", "--cluster", C.cluster, "--task-definition", executor.arn, "--launch-type", "FARGATE", "--count", "1", "--network-configuration", JSON.stringify({ awsvpcConfiguration: network }), "--overrides", `file://${overrideFile}`]);
-    if (started.failures?.length || started.tasks?.length !== 1) throw new Error("Disposable staging VPC executor did not start.");
-    const taskArn = started.tasks[0].taskArn;
+    const requestFile = path.join(directory, "broker-request.json");
+    const responseFile = path.join(directory, "broker-response.json");
+    fs.writeFileSync(requestFile, JSON.stringify({ mode }), { mode: 0o600, flag: "wx" });
+    const invoked = run("aws", ["lambda", "invoke", "--function-name", C.brokerFunction, "--cli-binary-format", "raw-in-base64-out", "--payload", `fileb://${requestFile}`, responseFile, "--region", C.region, "--output", "json"]);
+    let metadata; let started;
+    try { metadata = JSON.parse(invoked.stdout || "{}"); started = JSON.parse(fs.readFileSync(responseFile, "utf8")); } catch { throw new Error("Broker returned invalid JSON."); }
+    if (metadata.FunctionError || metadata.StatusCode !== 200 || Object.keys(started).sort().join(",") !== "status,taskArn" || started.status !== "started") throw new Error("Broker refused or failed to start the reviewed executor.");
+    const taskArn = started.taskArn;
+    const expectedTaskPrefix = `arn:aws:ecs:${C.region}:${C.accountId}:task/${C.cluster}/`;
+    if (typeof taskArn !== "string" || !taskArn.startsWith(expectedTaskPrefix)) throw new Error("Broker returned a task outside the reviewed staging cluster.");
     run("aws", ["ecs", "wait", "tasks-stopped", "--cluster", C.cluster, "--tasks", taskArn, "--region", C.region]);
     const stopped = awsJson(["ecs", "describe-tasks", "--cluster", C.cluster, "--tasks", taskArn]).tasks?.[0];
     const container = stopped?.containers?.find((item) => item.name === "db-admin");
     if (container?.exitCode !== 0) throw Object.assign(new Error("VPC executor blocked; inspect sanitized task logs and follow recovery instructions."), { code: "VPC_EXECUTOR_FAILED" });
-    return { mechanism: executor.topology.mechanism, taskArn, exitCode: container.exitCode, topology: executor.topology };
+    return { mechanism: "lambda-brokered-disposable-ecs-admin-task", brokerFunction: C.brokerFunction, taskArn, exitCode: container.exitCode, topology: executor.topology };
   } finally { cleanup(directory); }
 }
 
@@ -164,7 +173,9 @@ export function executorModeForCommand(command) {
   throw new Error("Unsupported executor command.");
 }
 function provisionOrVerify(command) {
-  const base = discoverBase(); const inventory = databaseConsumerInventory(base); const plan = executorPlan(base);
+  const base = discoverBase();
+  if (APPLY || PROBE) assertDatabaseRoleOperatorIdentity(base.identity, { ...process.env, AWS_REGION: C.region });
+  const inventory = databaseConsumerInventory(base); const plan = executorPlan(base);
   if (!APPLY && !PROBE) return { status: `${command}_dry_run_requires_reachability_probe`, mutatesPostgres: false, mutatesSecretsManager: false, executor: plan.topology, consumerInventory: inventory, probeCommand: `MSCQR_STAGING_VPC_EXECUTOR=disposable-ecs-admin-task MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN=${plan.arn} scripts/aws/${command === "provision" ? "provision-staging-database-role-credentials.sh" : "verify-staging-database-role-permissions.sh"} --probe` };
   if (PROBE) return { status: `${command}_reachability_probe_passed`, mutatesPostgres: false, mutatesSecretsManager: false, result: runExecutor(base, "probe"), consumerInventory: inventory };
   assertApplyGate({ apply: true, envName: command === "provision" ? "MSCQR_STAGING_DATABASE_CREDENTIALS_CONFIRM" : "MSCQR_STAGING_DATABASE_VERIFY_CONFIRM", confirmation: command === "provision" ? "MSCQR_PROVISION_STAGING_DATABASE_ROLE_CREDENTIALS" : "MSCQR_VERIFY_STAGING_DATABASE_ROLE_CREDENTIALS" });

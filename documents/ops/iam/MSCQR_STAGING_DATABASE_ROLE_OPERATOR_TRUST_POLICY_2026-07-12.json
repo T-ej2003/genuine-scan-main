@@ -1,0 +1,18 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "TrustDedicatedStagingDatabaseRoleOperatorUser",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::368992683803:user/mscqr-staging-database-role-operator-user"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    }
+  ]
+}

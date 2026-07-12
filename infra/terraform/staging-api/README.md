@@ -290,21 +290,37 @@ The module models:
 - IAM roles and staging-only security groups
 
 The apply role policy template grants general role lifecycle and inline-policy
-management only for the three Terraform-managed staging ECS roles:
+management only for the four Terraform-managed staging runtime roles:
 `mscqr-staging-ecs-execution-role`, `mscqr-staging-ecs-task-role`, and
-`mscqr-staging-database-role-admin-task`. The database-admin role is used only
-by the disposable database-role administration task. The policy allows
+`mscqr-staging-database-role-admin-task`, plus
+`mscqr-staging-database-role-executor-broker-role`. The database-admin role is
+used only by the disposable database-role administration task; the broker role
+is used only by the fixed-input Lambda launch broker. The policy allows
 attaching or detaching only
 `arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy` and only
-on the execution role. The application task role and database-admin task role
+on the execution role. The application task role, database-admin task role, and broker role
 cannot receive arbitrary or AWS-managed policy attachments; their
 Terraform-managed permissions remain inline and reviewed in this module.
 
 Before controlled apply approval, compare the apply role policy and permissions
-boundary and verify that both contain the same exact three-role lifecycle and
+boundary and verify that both contain the same exact four-role lifecycle and
 inline-policy scope. Verify separately that `iam:AttachRolePolicy` and
 `iam:DetachRolePolicy` target only the execution role. A missing role, an extra
-role, or a managed-policy attachment path for either task role blocks approval.
+role, or a managed-policy attachment path for either task role or the broker role blocks approval.
+
+The human database-role operator policy has no `ecs:RunTask` or `iam:PassRole`.
+It may invoke only `mscqr-staging-database-role-executor-broker`. The broker
+Lambda accepts exactly `{ "mode": "probe|provision|verify" }`, rejects extra
+fields, and constructs a count-one Fargate request from Terraform-controlled
+cluster, task-definition revision, private subnet, ECS security-group, and
+disabled-public-IP values. Its only container override targets `db-admin` and
+sets `MSCQR_VPC_EXECUTOR_MODE` to the validated enum. Caller-supplied commands,
+environment variables, roles, networking, task definitions, counts, launch
+settings, platform versions, and tags are not accepted. Only the broker role
+holds exact-cluster `ecs:RunTask` and ECS-tasks-only `iam:PassRole`; it has no
+Secrets Manager access. The human operator also has no Secrets Manager actions;
+discovery classifies only secret references already exposed by reviewed task
+definitions.
 
 ECS Exec task-role permissions are limited to the four SSM Messages channel actions required by ECS Exec, decrypt access to the staging ECS Exec KMS key for the managed agent, and CloudWatch Logs write permissions to `/aws/ecs/mscqr-staging/exec`. AWS does not support resource-level ARNs for the SSM Messages channel actions or `logs:DescribeLogGroups`, so those policy statements use `Resource = "*"` with the action lists constrained and `aws:RequestedRegion` pinned to `var.aws_region`.
 

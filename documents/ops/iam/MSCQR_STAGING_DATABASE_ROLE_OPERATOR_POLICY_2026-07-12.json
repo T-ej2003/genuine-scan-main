@@ -1,0 +1,53 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeOnlyReviewedDatabaseRoleExecutorBroker",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-staging-database-role-executor-broker"
+    },
+    {
+      "Sid": "DescribeReviewedStagingBackendService",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeServices",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-staging-euw2-main/mscqr-staging-backend-service-euw2"
+    },
+    {
+      "Sid": "DescribeReviewedDisposableDatabaseRoleTasks",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTasks",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-staging-euw2-main/*"
+    },
+    {
+      "Sid": "DescribeReviewedStagingTaskDefinitions",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTaskDefinition",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-*"
+    },
+    {
+      "Sid": "ListReviewedStagingServices",
+      "Effect": "Allow",
+      "Action": "ecs:ListServices",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main"
+    },
+    {
+      "Sid": "ListReviewedStagingTaskDefinitions",
+      "Effect": "Allow",
+      "Action": "ecs:ListTaskDefinitions",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ListReviewedStagingEventBridgeRules",
+      "Effect": "Allow",
+      "Action": "events:ListRules",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ListReviewedStagingEventBridgeTargets",
+      "Effect": "Allow",
+      "Action": "events:ListTargetsByRule",
+      "Resource": "arn:aws:events:eu-west-2:368992683803:rule/mscqr-staging*"
+    }
+  ]
+}

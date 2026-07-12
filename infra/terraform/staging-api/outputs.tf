@@ -38,6 +38,11 @@ output "database_role_admin_task_definition_arn" {
   value       = aws_ecs_task_definition.database_role_admin.arn
 }
 
+output "database_role_executor_broker_function_name" {
+  description = "Exact staging broker Lambda used to launch the reviewed disposable database-role task."
+  value       = aws_lambda_function.database_role_executor_broker.function_name
+}
+
 output "rds_identifier" {
   description = "Staging RDS identifier."
   value       = aws_db_instance.staging.identifier

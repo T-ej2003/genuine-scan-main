@@ -605,6 +605,77 @@ resource "aws_ecs_task_definition" "database_role_admin" {
   tags = merge(local.common_tags, { Component = "database-role-admin" })
 }
 
+data "archive_file" "database_role_executor_broker" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/database-role-executor-broker"
+  output_path = "${path.module}/.terraform/database-role-executor-broker.zip"
+}
+
+resource "aws_iam_role" "database_role_executor_broker" {
+  name = "mscqr-staging-database-role-executor-broker-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "database_role_executor_broker" {
+  name = "mscqr-staging-database-role-executor-broker"
+  role = aws_iam_role.database_role_executor_broker.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "RunReviewedDisposableDatabaseRoleTask"
+        Effect   = "Allow"
+        Action   = ["ecs:RunTask"]
+        Resource = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-staging-database-role-admin:*"
+        Condition = {
+          ArnEquals = { "ecs:cluster" = aws_ecs_cluster.staging.arn }
+        }
+      },
+      {
+        Sid      = "PassOnlyReviewedDatabaseRoleTaskRoles"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = [aws_iam_role.database_role_admin_task.arn, aws_iam_role.ecs_execution.arn]
+        Condition = {
+          StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
+        }
+      },
+    ]
+  })
+}
+
+resource "aws_lambda_function" "database_role_executor_broker" {
+  function_name                  = "mscqr-staging-database-role-executor-broker"
+  role                           = aws_iam_role.database_role_executor_broker.arn
+  runtime                        = "nodejs22.x"
+  handler                        = "index.handler"
+  filename                       = data.archive_file.database_role_executor_broker.output_path
+  source_code_hash               = data.archive_file.database_role_executor_broker.output_base64sha256
+  memory_size                    = 128
+  timeout                        = 30
+  reserved_concurrent_executions = 1
+
+  environment {
+    variables = {
+      BROKER_CLUSTER_ARN          = aws_ecs_cluster.staging.arn
+      BROKER_TASK_DEFINITION_ARN  = aws_ecs_task_definition.database_role_admin.arn
+      BROKER_PRIVATE_SUBNETS_JSON = jsonencode(var.app_private_subnet_ids)
+      BROKER_SECURITY_GROUPS_JSON = jsonencode([aws_security_group.ecs.id])
+    }
+  }
+
+  tags = merge(local.common_tags, { Component = "database-role-executor-broker" })
+}
+
 resource "aws_ecs_service" "backend" {
   name                   = local.service_name
   cluster                = aws_ecs_cluster.staging.id
