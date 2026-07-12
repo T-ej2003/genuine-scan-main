@@ -301,29 +301,66 @@ export function assertVpcExecutorTopology({ cluster, service, taskDefinition, ne
   return { mechanism: "disposable-ecs-admin-task", cluster, service, taskDefinition, subnets: actualSubnets, securityGroups: actualGroups, assignPublicIp: "DISABLED" };
 }
 
-export function inventoryDatabaseConsumers(taskDefinitions, services = [], scheduledTargets = [], adminSecretIds = []) {
-  const serviceByTask = new Map(services.map((service) => [service.taskDefinition, service.serviceName]));
+export function taskDefinitionReferenceParts(reference) {
+  const value = toText(reference);
+  const resource = value.includes("task-definition/") ? value.split("task-definition/").at(-1) : value;
+  const match = resource.match(/^([^/:]+)(?::(\d+))?$/);
+  if (!match) return { reference: value, family: "", revision: null };
+  return { reference: value, family: match[1], revision: match[2] ? Number(match[2]) : null };
+}
+
+export function taskDefinitionMatchesReference(definition, reference) {
+  const expected = taskDefinitionReferenceParts(reference);
+  const actualRevision = definition?.revision ?? taskDefinitionReferenceParts(definition?.taskDefinitionArn).revision;
+  return Boolean(expected.family) && definition?.family === expected.family &&
+    (expected.revision === null || Number(actualRevision) === expected.revision);
+}
+
+export function mergeTaskDefinitions(...groups) {
+  const definitions = new Map();
+  for (const definition of groups.flat()) {
+    if (!definition?.taskDefinitionArn) continue;
+    const key = taskDefinitionReferenceParts(definition.taskDefinitionArn);
+    if (!key.family || key.revision === null) throw new StagingDatabaseRoleSafetyError("Task definition inventory contains an unresolved reference.", "TASK_DEFINITION_UNRESOLVED");
+    definitions.set(`${key.family}:${key.revision}`, definition);
+  }
+  return [...definitions.values()];
+}
+
+export function inventoryDatabaseConsumers(taskDefinitions, services = [], scheduledTargets = [], adminSecretIds = [], appSecretIds = []) {
   const consumers = [];
-  for (const definition of taskDefinitions || []) {
+  for (const definition of mergeTaskDefinitions(taskDefinitions || [])) {
     const arn = toText(definition.taskDefinitionArn);
     assertRollbackTarget(arn);
+    const activeContexts = [
+      ...services.filter((service) => taskDefinitionMatchesReference(definition, service.taskDefinition)).map((service) => ({ service: service.serviceName, schedule: null })),
+      ...scheduledTargets.filter((target) => taskDefinitionMatchesReference(definition, target.taskDefinition)).map((target) => ({ service: null, schedule: target.scheduleName })),
+    ];
+    const contexts = activeContexts.length ? activeContexts : [{ service: null, schedule: null }];
     for (const container of definition.containerDefinitions || []) {
       for (const secret of container.secrets || []) {
         if (!["DATABASE_URL", "RLS_READ_DATABASE_URL"].includes(secret?.name) && !adminSecretIds.includes(secret?.valueFrom)) continue;
-        consumers.push({
-          taskDefinitionArn: arn,
-          family: definition.family,
-          service: serviceByTask.get(arn) || null,
-          schedule: scheduledTargets.find((target) => target.taskDefinition === arn || target.taskDefinition.endsWith(`/${definition.family}`) || target.taskDefinition.endsWith(`/${definition.family}:${definition.revision}`))?.scheduleName || null,
-          container: container.name,
-          variable: secret.name,
-          secretId: secret.valueFrom,
-          classification: secret.name === "RLS_READ_DATABASE_URL" ? "rls-read" : adminSecretIds.includes(secret.valueFrom) ? "admin" : "review-required",
+        for (const context of contexts) consumers.push({
+          taskDefinitionArn: arn, family: definition.family, ...context, container: container.name,
+          variable: secret.name, secretId: secret.valueFrom,
+          classification: secret.name === "RLS_READ_DATABASE_URL" ? "rls-read" : adminSecretIds.includes(secret.valueFrom) ? "admin" : appSecretIds.includes(secret.valueFrom) ? "app" : "review-required",
         });
       }
     }
   }
-  return consumers.sort((a, b) => `${a.family}/${a.container}/${a.variable}`.localeCompare(`${b.family}/${b.container}/${b.variable}`));
+  return consumers.sort((a, b) => `${a.family}/${a.service}/${a.schedule}/${a.container}/${a.variable}`.localeCompare(`${b.family}/${b.service}/${b.schedule}/${b.container}/${b.variable}`));
+}
+
+export function assertActiveReviewedBackendDatabaseConsumer(consumers, { expectedClassification = null } = {}) {
+  const active = (consumers || []).filter((consumer) => consumer.service || consumer.schedule);
+  const matches = active.filter((consumer) => consumer.service === STAGING_DATABASE_ROLE_CONTEXT.service && consumer.container === STAGING_DATABASE_ROLE_CONTEXT.backendContainer && consumer.variable === "DATABASE_URL");
+  if (matches.length !== 1) throw new StagingDatabaseRoleSafetyError("Expected exactly one active reviewed staging backend service DATABASE_URL consumer.", "ACTIVE_BACKEND_DATABASE_CONSUMER_INVARIANT");
+  if (active.some((consumer) => consumer !== matches[0] && ["DATABASE_URL", "RLS_READ_DATABASE_URL"].includes(consumer.variable))) {
+    throw new StagingDatabaseRoleSafetyError("An additional active database consumer blocks the staging database-role workflow.", "ACTIVE_DATABASE_CONSUMER_INVARIANT");
+  }
+  const allowed = expectedClassification ? [expectedClassification] : ["admin", "app"];
+  if (!allowed.includes(matches[0].classification)) throw new StagingDatabaseRoleSafetyError(`Active reviewed backend DATABASE_URL must be classified as ${allowed.join(" or ")}.`, "ACTIVE_BACKEND_DATABASE_CLASSIFICATION");
+  return matches[0];
 }
 
 export function assertReviewedDatabaseConsumers(consumers, reviewed) {

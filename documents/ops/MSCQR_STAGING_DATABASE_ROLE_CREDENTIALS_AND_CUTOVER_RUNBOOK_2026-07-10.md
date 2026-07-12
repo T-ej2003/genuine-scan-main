@@ -70,7 +70,9 @@ The repository-managed staging API root declares one long-running service and no
 | Sidecars | no database credential | Any sidecar `DATABASE_URL`, `RLS_READ_DATABASE_URL`, or admin-secret reference blocks |
 | `RLS_READ_DATABASE_URL` | not injected | All staged RLS route flags are exactly `false` |
 
-Every active task-definition revision is listed in sanitized output. Inactive historical revisions are not runtime consumers and are not modified or destroyed. A service/scheduled consumer classified `no-runtime-credential`, an unreviewed admin reference, RLS-read injection while flags are false, or migrator credential in a service blocks cutover.
+Every active task-definition revision is listed in sanitized output. The reviewed active backend service task definition fetched directly from `describe-services` is always inventoried, even if `list-task-definitions` omits it; full ARNs, `family:revision`, and family task-definition references are normalized and deduplicated. Inactive historical revisions are evidence only, are not runtime consumers, and are not modified or destroyed.
+
+Discovery fails closed unless exactly one active `mscqr-staging-backend-service-euw2` consumer uses container `backend` variable `DATABASE_URL`. That consumer must classify as `admin` before cutover or `app` after cutover. Zero matches, duplicate backend matches, sidecar credentials, or any additional active service or EventBridge database consumer block probe, provisioning, verification, and cutover. A service/scheduled consumer classified `no-runtime-credential`, an unreviewed admin reference, RLS-read injection while flags are false, or migrator credential in a service also blocks.
 
 ## Exact pre-APPLY commands
 
