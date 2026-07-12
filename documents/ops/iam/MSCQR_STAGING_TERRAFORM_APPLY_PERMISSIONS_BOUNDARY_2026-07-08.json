@@ -74,6 +74,7 @@
       ],
       "NotResource": [
         "arn:aws:iam::368992683803:role/mscqr-staging-database-role-admin-task",
+        "arn:aws:iam::368992683803:role/mscqr-staging-database-role-executor-broker-role",
         "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role",
         "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role"
       ]
@@ -91,6 +92,15 @@
           "iam:PolicyARN": "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
         }
       }
+    },
+    {
+      "Sid": "DenyManagedPolicyAttachmentsOnStagingDatabaseRoleExecutorBrokerRole",
+      "Effect": "Deny",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-staging-database-role-executor-broker-role"
     },
     {
       "Sid": "DenyManagedPolicyAttachmentsOnStagingDatabaseRoleAdminTaskRole",

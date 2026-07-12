@@ -8,11 +8,7 @@ const accountId = "368992683803";
 const roleName = "mscqr-staging-database-role-operator";
 const operatorUserArn = `arn:aws:iam::${accountId}:user/mscqr-staging-database-role-operator-user`;
 const operatorRoleArn = `arn:aws:iam::${accountId}:role/${roleName}`;
-const adminTaskRoleArn = `arn:aws:iam::${accountId}:role/mscqr-staging-database-role-admin-task`;
-const executionRoleArn = `arn:aws:iam::${accountId}:role/mscqr-staging-ecs-execution-role`;
-const runTaskArn = `arn:aws:ecs:eu-west-2:${accountId}:task-definition/mscqr-staging-database-role-admin:*`;
-const clusterArn = `arn:aws:ecs:eu-west-2:${accountId}:cluster/mscqr-staging-euw2-main`;
-const secretArns = ["app", "migrator", "rls-read"].map((role) => `arn:aws:secretsmanager:eu-west-2:${accountId}:secret:mscqr/staging/database-url/${role}-*`);
+const brokerFunctionArn = `arn:aws:lambda:eu-west-2:${accountId}:function:mscqr-staging-database-role-executor-broker`;
 const defaults = {
   trust: "documents/ops/iam/MSCQR_STAGING_DATABASE_ROLE_OPERATOR_TRUST_POLICY_2026-07-12.json",
   assume: "documents/ops/iam/MSCQR_STAGING_DATABASE_ROLE_OPERATOR_ASSUME_ROLE_POLICY_2026-07-12.json",
@@ -24,6 +20,8 @@ const overrides = {
   role: process.env.MSCQR_STAGING_DATABASE_ROLE_OPERATOR_POLICY_PATH,
 };
 const failures = [];
+const terraformSource = fs.readFileSync(path.join(root, "infra/terraform/staging-api/main.tf"), "utf8");
+const brokerRolePolicy = terraformSource.match(/resource "aws_iam_role_policy" "database_role_executor_broker"[\s\S]*?(?=\nresource "aws_lambda_function")/)?.[0] || "";
 const asArray = (value) => Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
 const same = (actual, expected) => JSON.stringify([...actual].sort()) === JSON.stringify([...expected].sort());
 const read = (key) => {
@@ -70,32 +68,38 @@ if (assume) {
 
 if (role) {
   const allowedActions = new Set([
-    "ecs:RunTask", "ecs:DescribeTasks", "ecs:DescribeTaskDefinition", "ecs:DescribeServices", "ecs:ListTaskDefinitions", "ecs:ListServices",
-    "events:ListRules", "events:ListTargetsByRule", "secretsmanager:DescribeSecret", "iam:PassRole",
+    "lambda:InvokeFunction", "ecs:DescribeTasks", "ecs:DescribeTaskDefinition", "ecs:DescribeServices", "ecs:ListTaskDefinitions", "ecs:ListServices",
+    "events:ListRules", "events:ListTargetsByRule",
   ]);
   const seenActions = new Set(role.Statement.flatMap((statement) => asArray(statement.Action)));
   for (const action of seenActions) if (!allowedActions.has(action) || action.includes("*")) failures.push(`Unapproved or wildcard action: ${action}.`);
   for (const action of allowedActions) if (!seenActions.has(action)) failures.push(`Missing required action ${action}.`);
   for (const statement of role.Statement) if (statement.Effect !== "Allow") failures.push(`${statement.Sid || "Statement"}: only explicit Allow statements are permitted.`);
 
-  const runTask = requireStatement(role, "RunReviewedDisposableDatabaseRoleTask");
-  if (runTask && (!same(asArray(runTask.Action), ["ecs:RunTask"]) || !same(asArray(runTask.Resource), [runTaskArn]) || runTask.Condition?.ArnEquals?.["ecs:cluster"] !== clusterArn)) {
-    failures.push("ecs:RunTask must target only the reviewed database-role-admin task family on the reviewed staging cluster.");
+  for (const forbidden of ["ecs:RunTask", "iam:PassRole", "ecs:RegisterTaskDefinition", "ecs:UpdateService", "ecs:ExecuteCommand", "secretsmanager:GetSecretValue"]) {
+    if (seenActions.has(forbidden)) failures.push(`Human operator policy must not allow ${forbidden}.`);
   }
-  if (asArray(runTask?.Resource).includes("*")) failures.push("Wildcard ecs:RunTask resources are forbidden.");
+  const invoke = requireStatement(role, "InvokeOnlyReviewedDatabaseRoleExecutorBroker");
+  if (invoke && (!same(asArray(invoke.Action), ["lambda:InvokeFunction"]) || !same(asArray(invoke.Resource), [brokerFunctionArn]))) {
+    failures.push("Human operator may invoke only the exact staging database-role executor broker Lambda.");
+  }
 
-  const passRole = requireStatement(role, "PassOnlyReviewedDatabaseRoleTaskRoles");
-  if (passRole && (!same(asArray(passRole.Action), ["iam:PassRole"]) || !same(asArray(passRole.Resource), [adminTaskRoleArn, executionRoleArn]))) {
-    failures.push("iam:PassRole must target only the reviewed admin task and ECS execution roles.");
-  }
-  if (asArray(passRole?.Resource).some((resource) => resource === "*" || resource.includes("*"))) failures.push("Wildcard iam:PassRole resources are forbidden.");
-  if (passRole?.Condition?.StringEquals?.["iam:PassedToService"] !== "ecs-tasks.amazonaws.com") failures.push("iam:PassRole requires iam:PassedToService = ecs-tasks.amazonaws.com.");
-
-  const secrets = requireStatement(role, "DescribeReviewedStagingDatabaseRoleSecrets");
-  if (secrets && (!same(asArray(secrets.Action), ["secretsmanager:DescribeSecret"]) || !same(asArray(secrets.Resource), secretArns))) {
-    failures.push("secretsmanager:DescribeSecret must target only the three reviewed database-role secret patterns.");
-  }
+  if ([...seenActions].some((action) => action.startsWith("secretsmanager:"))) failures.push("Human operator policy must not allow Secrets Manager actions.");
   rejectProduction(role, "Role policy");
+}
+
+if (!brokerRolePolicy) failures.push("Terraform broker execution-role policy is missing.");
+else {
+  for (const required of [
+    "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-staging-database-role-admin:*",
+    "ArnEquals = { \"ecs:cluster\" = aws_ecs_cluster.staging.arn }",
+    "aws_iam_role.database_role_admin_task.arn",
+    "aws_iam_role.ecs_execution.arn",
+    "StringEquals = { \"iam:PassedToService\" = \"ecs-tasks.amazonaws.com\" }",
+  ]) if (!brokerRolePolicy.includes(required)) failures.push(`Terraform broker execution-role policy is missing required scope: ${required}.`);
+  if (/Resource\s*=\s*"\*"/.test(brokerRolePolicy) || /secretsmanager:GetSecretValue|ecs:RegisterTaskDefinition|ecs:UpdateService|ecs:ExecuteCommand/.test(brokerRolePolicy)) {
+    failures.push("Terraform broker execution role contains a wildcard or forbidden permission.");
+  }
 }
 
 if (failures.length) {
@@ -105,4 +109,4 @@ if (failures.length) {
 }
 console.log("Staging database-role operator IAM lint passed.");
 console.log(`Validated assumed role: ${roleName}.`);
-console.log("RunTask and PassRole are exact-resource scoped; PassRole is ECS-tasks-only.");
+console.log("Human operator has no RunTask or PassRole; only the exact broker Lambda is invokable.");

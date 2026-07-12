@@ -7,18 +7,19 @@ Scope: staging account `368992683803`, `eu-west-2`, database `mscqr_staging`, cl
 
 The former Mac-side `psql` workflow is retired. A confirmation variable cannot create VPC reachability. PostgreSQL and secret-value phases now run only in the reviewed disposable Fargate task `mscqr-staging-database-role-admin`, using the same backend image, private subnets, security groups, execution role, and private RDS path as the staging backend. The task has no public IP, service, load balancer, inbound rule, or package-install step. The controller refuses a different image or network topology.
 
-The Mac controller performs sanitized discovery, starts/waits for the task, inventories consumers, and performs the separately approved ECS cutover. It never calls `psql`, retrieves a database secret, receives a generated password, or puts a secret value. Executor overrides contain only the fixed mode `probe`, `provision`, or `verify`; no password or URL is placed in a command, argument, log, or evidence file.
+The Mac controller performs sanitized discovery, invokes the fixed-input broker Lambda, waits for the returned reviewed-cluster task ARN, inventories consumers, and performs the separately approved ECS cutover. It never calls `ecs:RunTask`, `psql`, retrieves a database secret, receives a generated password, or puts a secret value. The broker accepts only `{ "mode": "probe|provision|verify" }`, rejects extra fields, and constructs the sole reviewed container environment override; no password or URL is placed in a command, argument, log, or evidence file.
 
 The executor must first be present in a reviewed backend image and the Terraform-created admin task definition must be reviewed/applied through the normal infrastructure process. This workflow does not rebuild, replace, or install software in a running container.
 
 ## Operator identity split
 
 - Read-only discovery uses the staging Terraform plan role. That identity may run only `discover` or the default non-probe/non-apply planning output; it must not start the disposable task.
-- `--probe`, provision `--apply`, and verify `--apply` require an STS session for `mscqr-staging-database-role-operator`. The controller checks the exact assumed-role ARN before inventory, executor planning, or `ecs:RunTask`.
+- `--probe`, provision `--apply`, and verify `--apply` require an STS session for `mscqr-staging-database-role-operator`. The controller checks the exact assumed-role ARN before inventory, executor planning, or broker invocation.
 - The dedicated IAM user `mscqr-staging-database-role-operator-user` may assume only that operator role through `documents/ops/iam/MSCQR_STAGING_DATABASE_ROLE_OPERATOR_ASSUME_ROLE_POLICY_2026-07-12.json`.
 - The reviewed trust template is `documents/ops/iam/MSCQR_STAGING_DATABASE_ROLE_OPERATOR_TRUST_POLICY_2026-07-12.json`. It trusts only the dedicated operator user and requires MFA. Root, wildcard principals, broad IAM users, and the Terraform plan/apply roles are forbidden. Replacing the user with an approved bootstrap principal requires a separate written approval naming one exact non-root, non-plan, non-apply principal and a matching trust-template update.
-- The assumed-role permissions template is `documents/ops/iam/MSCQR_STAGING_DATABASE_ROLE_OPERATOR_POLICY_2026-07-12.json`. It can run only `mscqr-staging-database-role-admin:*` on the reviewed staging cluster, pass only the database-admin task role and ECS execution role to `ecs-tasks.amazonaws.com`, inspect the reviewed staging ECS/EventBridge inventory, and describe only the three database-role secret patterns. It cannot retrieve secret values.
-- This operator role cannot register task definitions, update services, execute commands in containers, mutate IAM, retrieve or write secrets, or perform consumer cutover. Cutover requires its separately reviewed identity and approval and is never implied by operator-role access.
+- The assumed-role permissions template is `documents/ops/iam/MSCQR_STAGING_DATABASE_ROLE_OPERATOR_POLICY_2026-07-12.json`. It can invoke only `mscqr-staging-database-role-executor-broker` and inspect the reviewed staging ECS/EventBridge inventory. Consumer classification uses secret references already present in task definitions, so the human role has no Secrets Manager permission, `ecs:RunTask`, or `iam:PassRole`.
+- The broker is the only task-launch path. It accepts exactly one `mode` field with enum `probe`, `provision`, or `verify`; hard-codes the cluster, exact Terraform-produced admin task-definition revision, Fargate/count-one launch, private subnets, ECS security group, disabled public IP, `db-admin` container, and sole `MSCQR_VPC_EXECUTOR_MODE` override. It accepts no caller command, environment, task definition, role, network, count, launch type, platform version, or tag input and returns only sanitized task ARN/status metadata.
+- The broker execution role alone has exact-cluster `ecs:RunTask` and ECS-tasks-only `iam:PassRole` for the database-admin task and execution roles. It has no secret-value permission. The human operator role cannot register task definitions, update services, execute commands in containers, mutate IAM, retrieve or write secrets, or perform consumer cutover. Cutover requires its separately reviewed identity and approval and is never implied by broker invocation.
 
 Local AWS config uses separate profiles. The source profile must belong to the dedicated operator user; do not use the plan/apply profiles as the source:
 
@@ -117,11 +118,12 @@ node scripts/aws/staging-database-role-credentials.mjs discover
 # Sanitized provisioning plan. It performs no PostgreSQL or Secrets Manager mutation.
 scripts/aws/provision-staging-database-role-credentials.sh
 
-# Switch to the exact assumed operator role before any RunTask path.
+# Switch to the exact assumed operator role before any broker invocation.
 export AWS_PROFILE='mscqr-staging-database-role-operator'
 
 # Reachability/identity probe. It starts one disposable ECS task but performs no
-# PostgreSQL or Secrets Manager mutation. Review this separate ECS RunTask action.
+# PostgreSQL or Secrets Manager mutation. The human invokes only the broker;
+# the broker constructs the fixed ECS request.
 scripts/aws/provision-staging-database-role-credentials.sh --probe
 
 # Runs the complete permission matrix using the three AWSCURRENT credentials
@@ -151,7 +153,7 @@ export MSCQR_STAGING_ECS_DATABASE_ROLE_CUTOVER_CONFIRM='MSCQR_CUTOVER_STAGING_EC
 scripts/aws/cutover-staging-ecs-database-role.sh --apply
 ```
 
-Provision approval does not authorize cutover. The reachability probe's ECS `RunTask` is not implicit authorization for database or secret mutation.
+Provision approval does not authorize cutover. Broker invocation for a reachability probe is not implicit authorization for database or secret mutation. Provision and verify retain their separate exact confirmation gates.
 
 ## Local validation
 

@@ -68,11 +68,13 @@ checker, and only then rerun the failed bootstrap step.
    `documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_ROLE_POLICY_2026-07-08.json`
    to `mscqr-staging-terraform-apply-role`. This policy allows Terraform to
    perform general role lifecycle and inline-policy operations only for the
-   three Terraform-managed staging ECS IAM roles:
+   four Terraform-managed staging runtime IAM roles:
    `mscqr-staging-ecs-execution-role`, `mscqr-staging-ecs-task-role`, and
-   `mscqr-staging-database-role-admin-task`. The third role is used only by the
-   disposable database-role administration task. Managed-policy attachment is
-   forbidden for both task roles; only the reviewed
+   `mscqr-staging-database-role-admin-task`, plus
+   `mscqr-staging-database-role-executor-broker-role`. The database-admin role
+   is used only by the disposable task; the broker role is used only by the
+   fixed-input Lambda launch broker. Managed-policy attachment is forbidden for
+   both task roles and the broker role; only the reviewed
    `AmazonECSTaskExecutionRolePolicy` may be attached to or detached from the
    execution role. Do not attach AdministratorAccess or a general IAM
    administrator policy.
@@ -86,7 +88,7 @@ checker, and only then rerun the failed bootstrap step.
 9. Confirm `npm run check:staging-iam-policies` passes after the apply operator
    policy and boundary template are reviewed.
    Compare the apply role policy and permissions boundary directly: both must
-   name the same exact three roles for lifecycle and inline-policy operations,
+   name the same exact four roles for lifecycle and inline-policy operations,
    while managed-policy attachment remains execution-role-only. Any missing or
    additional role blocks approval.
 10. Configure a local AWS profile named with staging and apply markers, for

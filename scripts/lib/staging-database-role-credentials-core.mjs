@@ -12,6 +12,7 @@ export const STAGING_DATABASE_ROLE_CONTEXT = Object.freeze({
   cluster: "mscqr-staging-euw2-main",
   service: "mscqr-staging-backend-service-euw2",
   operatorRole: "mscqr-staging-database-role-operator",
+  brokerFunction: "mscqr-staging-database-role-executor-broker",
   backendContainer: "backend",
   runtimeAdminRole: "mscqr_staging_admin",
   ownerRole: "mscqr_staging_owner",

@@ -52,12 +52,14 @@ const explicitlyAllowedWriteActions = new Set([
 ]);
 const stagingTerraformManagedRoleArns = new Set([
   "arn:aws:iam::368992683803:role/mscqr-staging-database-role-admin-task",
+  "arn:aws:iam::368992683803:role/mscqr-staging-database-role-executor-broker-role",
   "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role",
   "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role",
 ]);
 const stagingTerraformExecutionRoleArn = "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role";
 const stagingTerraformTaskRoleArn = "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role";
 const stagingTerraformDatabaseRoleAdminTaskRoleArn = "arn:aws:iam::368992683803:role/mscqr-staging-database-role-admin-task";
+const stagingTerraformDatabaseRoleExecutorBrokerRoleArn = "arn:aws:iam::368992683803:role/mscqr-staging-database-role-executor-broker-role";
 const reviewedEcsExecutionManagedPolicyArn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy";
 const backendStateBucketArn = "arn:aws:s3:::mscqr-staging-terraform-state-368992683803";
 const backendStateObjectArn = `${backendStateBucketArn}/staging-api/terraform.tfstate`;
@@ -473,6 +475,7 @@ const validateApplyPermissionsBoundary = () => {
   let hasUnreviewedManagedPolicyAttachmentDeny = false;
   let hasTaskRoleManagedPolicyAttachmentDeny = false;
   let hasDatabaseRoleAdminManagedPolicyAttachmentDeny = false;
+  let hasDatabaseRoleExecutorBrokerManagedPolicyAttachmentDeny = false;
   const requiredDenyConflicts = [];
 
   for (const [index, statement] of boundary.Statement.entries()) {
@@ -575,6 +578,15 @@ const validateApplyPermissionsBoundary = () => {
     ) {
       hasDatabaseRoleAdminManagedPolicyAttachmentDeny = true;
     }
+    if (
+      statement.Effect === "Deny" &&
+      actions.includes("iam:AttachRolePolicy") &&
+      actions.includes("iam:DetachRolePolicy") &&
+      resources.length === 1 &&
+      resources[0] === stagingTerraformDatabaseRoleExecutorBrokerRoleArn
+    ) {
+      hasDatabaseRoleExecutorBrokerManagedPolicyAttachmentDeny = true;
+    }
 
     if (statement.Effect === "Deny") {
       for (const requiredAction of requiredStagingTerraformIamActions) {
@@ -624,6 +636,9 @@ const validateApplyPermissionsBoundary = () => {
   }
   if (!hasDatabaseRoleAdminManagedPolicyAttachmentDeny) {
     addFailure(`${applyBoundaryRelPath}: must deny managed policy attachment to the staging database-role admin task role.`);
+  }
+  if (!hasDatabaseRoleExecutorBrokerManagedPolicyAttachmentDeny) {
+    addFailure(`${applyBoundaryRelPath}: must deny managed policy attachment to the staging database-role executor broker role.`);
   }
   if (requiredDenyConflicts.length > 0) {
     for (const conflict of requiredDenyConflicts) {
