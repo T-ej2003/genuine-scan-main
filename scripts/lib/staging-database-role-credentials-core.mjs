@@ -327,7 +327,14 @@ export function mergeTaskDefinitions(...groups) {
   return [...definitions.values()];
 }
 
-export function inventoryDatabaseConsumers(taskDefinitions, services = [], scheduledTargets = [], adminSecretIds = [], appSecretIds = []) {
+export function inventoryDatabaseConsumers(taskDefinitions, services = [], scheduledTargets = [], adminSecretIds = [], appSecretIds = [], rlsReadSecretIds = []) {
+  const adminIds = new Set((adminSecretIds || []).map(toText).filter(Boolean));
+  const appIds = new Set((appSecretIds || []).map(toText).filter(Boolean));
+  const rlsReadIds = new Set((rlsReadSecretIds || []).map(toText).filter(Boolean));
+  const classifiedIds = [...adminIds, ...appIds, ...rlsReadIds];
+  if (new Set(classifiedIds).size !== classifiedIds.length) {
+    throw new StagingDatabaseRoleSafetyError("Admin, app, and RLS-read database secret identifiers must be distinct.", "DATABASE_SECRET_CLASSIFICATION_AMBIGUOUS");
+  }
   const consumers = [];
   for (const definition of mergeTaskDefinitions(taskDefinitions || [])) {
     const arn = toText(definition.taskDefinitionArn);
@@ -339,11 +346,11 @@ export function inventoryDatabaseConsumers(taskDefinitions, services = [], sched
     const contexts = activeContexts.length ? activeContexts : [{ service: null, schedule: null }];
     for (const container of definition.containerDefinitions || []) {
       for (const secret of container.secrets || []) {
-        if (!["DATABASE_URL", "RLS_READ_DATABASE_URL"].includes(secret?.name) && !adminSecretIds.includes(secret?.valueFrom)) continue;
+        if (!["DATABASE_URL", "RLS_READ_DATABASE_URL"].includes(secret?.name) && !adminIds.has(secret?.valueFrom)) continue;
         for (const context of contexts) consumers.push({
           taskDefinitionArn: arn, family: definition.family, ...context, container: container.name,
           variable: secret.name, secretId: secret.valueFrom,
-          classification: secret.name === "RLS_READ_DATABASE_URL" ? "rls-read" : adminSecretIds.includes(secret.valueFrom) ? "admin" : appSecretIds.includes(secret.valueFrom) ? "app" : "review-required",
+          classification: adminIds.has(secret.valueFrom) ? "admin" : appIds.has(secret.valueFrom) ? "app" : rlsReadIds.has(secret.valueFrom) ? "rls-read" : "review-required",
         });
       }
     }
@@ -397,7 +404,7 @@ export function simulateCredentialWorkflowFailure(failurePhase, mode = "rotation
   const supported = new Set([
     "first-role-password-assignment", "password-transaction-commit", "first-secret-pending-version",
     "second-secret-pending-version", "role-verification", "first-version-promotion",
-    "ecs-registration", "ecs-service-update",
+    "ecs-registration", "ecs-service-update", "ecs-post-cutover-inventory",
   ]);
   if (!supported.has(failurePhase)) throw new StagingDatabaseRoleSafetyError("Unsupported failure-injection phase.");
   if (!["first-time", "rotation"].includes(mode)) throw new StagingDatabaseRoleSafetyError("Provisioning mode must be first-time or rotation.");
@@ -409,7 +416,7 @@ export function simulateCredentialWorkflowFailure(failurePhase, mode = "rotation
     mode,
     databaseState: transactionRolledBack ? "unchanged" : rollbackResult === "restored" ? (mode === "first-time" ? "password-null" : "previous-passwords") : "blocked-unknown",
     secretState: ecsOnly ? "unchanged" : rollbackResult === "restored" ? "prior-current-preserved-failed-pending-unstaged" : "prior-current-preserved-recovery-required",
-    ecsState: failurePhase === "ecs-service-update" ? (rollbackResult === "restored" ? "previous-task-definition" : "recovery-required") : "unchanged",
+    ecsState: ["ecs-service-update", "ecs-post-cutover-inventory"].includes(failurePhase) ? (rollbackResult === "restored" ? "previous-task-definition" : "recovery-required") : "unchanged",
     rollbackResult,
     recovery: recoveryInstruction({ mode, phase: failurePhase, rollbackResult }),
   };

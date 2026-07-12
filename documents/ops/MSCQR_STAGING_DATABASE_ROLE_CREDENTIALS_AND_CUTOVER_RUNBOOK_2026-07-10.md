@@ -74,6 +74,8 @@ Every active task-definition revision is listed in sanitized output. The reviewe
 
 Discovery fails closed unless exactly one active `mscqr-staging-backend-service-euw2` consumer uses container `backend` variable `DATABASE_URL`. That consumer must classify as `admin` before cutover or `app` after cutover. Zero matches, duplicate backend matches, sidecar credentials, or any additional active service or EventBridge database consumer block probe, provisioning, verification, and cutover. A service/scheduled consumer classified `no-runtime-credential`, an unreviewed admin reference, RLS-read injection while flags are false, or migrator credential in a service also blocks.
 
+Cutover captures the pre-cutover task-definition ARN and preserved admin-secret ARN before the service update. Post-cutover inventory receives that preserved admin identifier and the app-secret ARN separately; it never derives the admin identifier from the updated service definition. Equal admin/app identifiers are an ambiguity and fail closed. A failed post-cutover inventory restores the captured pre-cutover task definition.
+
 ## Exact pre-APPLY commands
 
 These commands are for the reviewed operator. The work documented on 2026-07-11 did not run them against AWS.
