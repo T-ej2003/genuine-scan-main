@@ -268,6 +268,13 @@ resource "aws_iam_role_policy" "ecs_task_artifacts" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid      = "AllowBucketReadinessChecks"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket", "s3:GetBucketLocation"]
+        Resource = aws_s3_bucket.artifacts.arn
+      },
+      {
+        Sid      = "AllowRlsValidationPrefixList"
         Effect   = "Allow"
         Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.artifacts.arn
@@ -278,6 +285,7 @@ resource "aws_iam_role_policy" "ecs_task_artifacts" {
         }
       },
       {
+        Sid      = "AllowRlsValidationPrefixObjects"
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = "${aws_s3_bucket.artifacts.arn}/rls-validation/*"
