@@ -29,7 +29,12 @@
       "Sid": "ListReviewedStagingServices",
       "Effect": "Allow",
       "Action": "ecs:ListServices",
-      "Resource": "*"
+      "Resource": "*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main"
+        }
+      }
     },
     {
       "Sid": "ListReviewedStagingTaskDefinitions",
