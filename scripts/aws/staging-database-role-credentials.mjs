@@ -3,17 +3,20 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
+import { lookup } from "node:dns/promises";
 import {
   STAGING_DATABASE_ROLE_CONTEXT as C,
   assertApplyGate,
   assertActiveReviewedBackendDatabaseConsumer,
+  assertConsistentStagingHttpUrls,
+  assertDatabaseRoleCutoverIdentity,
   assertDatabaseRoleOperatorIdentity,
+  assertDatabaseRoleVerificationReceipt,
   assertExpectedAwsIdentity,
   assertReviewedDatabaseConsumers,
   assertRollbackTarget,
   assertRlsRouteFlagsFalse,
   assertRuntimeIdentity,
-  assertSafeStagingHttpUrl,
   assertServiceStable,
   assertStagingOnlyName,
   assertTaskDefinitionOnlyDatabaseSecretChanged,
@@ -180,16 +183,73 @@ function provisionOrVerify(command) {
   if (PROBE) return { status: `${command}_reachability_probe_passed`, mutatesPostgres: false, mutatesSecretsManager: false, result: runExecutor(base, "probe"), consumerInventory: inventory };
   assertApplyGate({ apply: true, envName: command === "provision" ? "MSCQR_STAGING_DATABASE_CREDENTIALS_CONFIRM" : "MSCQR_STAGING_DATABASE_VERIFY_CONFIRM", confirmation: command === "provision" ? "MSCQR_PROVISION_STAGING_DATABASE_ROLE_CREDENTIALS" : "MSCQR_VERIFY_STAGING_DATABASE_ROLE_CREDENTIALS" });
   const result = runExecutor(base, executorModeForCommand(command));
-  const evidence = evidenceDirectory(); writeSanitizedEvidence(evidence, `${command}-controller-summary.json`, { phase: command, result, consumerInventory: inventory }); writeEvidenceChecksums(evidence);
-  return { status: `${command}_vpc_executor_complete`, result, evidenceDirectory: path.relative(ROOT, evidence) };
+  const evidence = evidenceDirectory();
+  writeSanitizedEvidence(evidence, `${command}-controller-summary.json`, { phase: command, result, consumerInventory: inventory });
+  let verificationReceiptPath = null;
+  if (command === "verify") {
+    const receipt = {
+      status: "staging_database_role_permission_matrix_passed",
+      permissionMatrixPassed: true,
+      accountId: C.accountId,
+      region: C.region,
+      cluster: C.cluster,
+      service: C.service,
+      backendTaskDefinitionArn: base.taskArn,
+      executorTaskDefinitionArn: executorPlan(base).arn,
+      executorTaskArn: result.taskArn,
+      verifiedRoles: Object.values(C.roles),
+      rlsRouteFlags: extractRlsRouteFlags(base.taskDefinition),
+      verifiedAt: new Date().toISOString(),
+    };
+    verificationReceiptPath = path.relative(ROOT, writeSanitizedEvidence(evidence, "verification-receipt.json", receipt));
+  }
+  writeEvidenceChecksums(evidence);
+  return { status: `${command}_vpc_executor_complete`, result, evidenceDirectory: path.relative(ROOT, evidence), verificationReceiptPath };
 }
 
-function healthCheck() { const url = assertSafeStagingHttpUrl(process.env.MSCQR_STAGING_HEALTH_URL || "", "Staging health URL"); const result = run("curl", ["--fail", "--silent", "--show-error", "--max-time", "20", url], { allowFailure: true }); if (result.status) throw new Error("Staging health endpoint failed."); return true; }
-function smokeChecks() { const urls=String(process.env.MSCQR_STAGING_REPRESENTATIVE_SMOKE_URLS||"").split(",").map(v=>v.trim()).filter(Boolean); if(!urls.length) throw new Error("Representative credential-free staging smoke URLs are required."); return urls.map((value,index)=>{ const url=assertSafeStagingHttpUrl(value,`Representative smoke URL ${index+1}`); const result=run("curl",["--fail","--silent","--show-error","--max-time","20",url],{allowFailure:true}); if(result.status) throw new Error(`Representative smoke ${index+1} failed.`); return {url,passed:true}; }); }
+function reviewedUrls() {
+  const smokeUrls = String(process.env.MSCQR_STAGING_REPRESENTATIVE_SMOKE_URLS || "").split(",").map((value) => value.trim()).filter(Boolean);
+  return assertConsistentStagingHttpUrls(process.env.MSCQR_STAGING_HEALTH_URL || "", smokeUrls);
+}
+async function assertHostnameResolves(hostname) {
+  try { await lookup(hostname); }
+  catch { throw new Error("Reviewed staging URL hostname did not resolve."); }
+}
+async function healthCheck(urls = reviewedUrls()) { await assertHostnameResolves(urls.hostname); const result = run("curl", ["--fail", "--silent", "--show-error", "--max-time", "20", urls.healthUrl], { allowFailure: true }); if (result.status) throw new Error("Staging health endpoint failed."); return { url: urls.healthUrl, passed: true }; }
+async function smokeChecks(urls = reviewedUrls()) { await assertHostnameResolves(urls.hostname); return urls.smokeUrls.map((url,index)=>{ const result=run("curl",["--fail","--silent","--show-error","--max-time","20",url],{allowFailure:true}); if(result.status) throw new Error(`Representative smoke ${index+1} failed.`); return {url,passed:true}; }); }
 function runtimeIdentity() { const tasks=awsJson(["ecs","list-tasks","--cluster",C.cluster,"--service-name",C.service,"--desired-status","RUNNING"]).taskArns||[]; if(tasks.length!==1) throw new Error("Expected one stable backend task for identity proof."); const command=`node -e "const{PrismaClient}=require('@prisma/client');const p=new PrismaClient();p.\\$queryRawUnsafe('SELECT current_database() AS database_name,current_user AS database_user').then(r=>console.log(JSON.stringify(r[0]))).finally(()=>p.\\$disconnect())"`; const result=run("aws",["ecs","execute-command","--cluster",C.cluster,"--task",tasks[0],"--container",C.backendContainer,"--interactive","--command",command,"--region",C.region],{allowFailure:true}); if(result.status) throw new Error("Sanitized runtime database identity proof failed."); const match=result.stdout.match(/\{"database_name":"([^"]+)","database_user":"([^"]+)"\}/); if(!match) throw new Error("Runtime identity output was missing."); const identity={databaseName:match[1],databaseUser:match[2]}; assertRuntimeIdentity(identity); return identity; }
-function rollbackService(previousArn) { awsJson(["ecs", "update-service", "--cluster", C.cluster, "--service", C.service, "--task-definition", previousArn]); run("aws", ["ecs", "wait", "services-stable", "--cluster", C.cluster, "--services", C.service, "--region", C.region]); healthCheck(); }
-function cutover() {
-  const base = discoverBase(); const inventory = databaseConsumerInventory(base, { expectedClassification: "admin" }); runExecutor(base, "verify"); healthCheck();
+async function rollbackService(previousArn, urls = reviewedUrls()) { awsJson(["ecs", "update-service", "--cluster", C.cluster, "--service", C.service, "--task-definition", previousArn]); run("aws", ["ecs", "wait", "services-stable", "--cluster", C.cluster, "--services", C.service, "--region", C.region]); await healthCheck(urls); }
+function verifiedReceipt(base) {
+  const receiptPath = process.env.MSCQR_STAGING_DATABASE_ROLE_VERIFICATION_RECEIPT || "";
+  if (!receiptPath) throw new Error("MSCQR_STAGING_DATABASE_ROLE_VERIFICATION_RECEIPT is required.");
+  const resolved = path.resolve(ROOT, receiptPath);
+  const receiptRoot = path.join(ROOT, "scratch", "staging-database-role-credentials-");
+  if (!resolved.startsWith(receiptRoot) || path.basename(resolved) !== "verification-receipt.json") {
+    throw new Error("Database-role verification receipt must be the generated scratch verification-receipt.json file.");
+  }
+  let receipt;
+  try {
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile() || (stat.mode & 0o077) !== 0) throw new Error("unsafe receipt permissions");
+    receipt = JSON.parse(fs.readFileSync(resolved, "utf8"));
+  }
+  catch { throw new Error("Database-role verification receipt could not be read."); }
+  assertDatabaseRoleVerificationReceipt(receipt, { currentTaskDefinitionArn: base.taskArn });
+  const task = awsJson(["ecs", "describe-tasks", "--cluster", C.cluster, "--tasks", receipt.executorTaskArn]).tasks?.[0];
+  const container = task?.containers?.find((item) => item.name === "db-admin");
+  if (!task || task.lastStatus !== "STOPPED" || task.taskDefinitionArn !== receipt.executorTaskDefinitionArn || container?.exitCode !== 0) {
+    throw new Error("Database-role verification receipt was not corroborated by a successful reviewed executor task.");
+  }
+  return receipt;
+}
+async function cutover() {
+  const base = discoverBase();
+  assertDatabaseRoleCutoverIdentity(base.identity, { ...process.env, AWS_REGION: C.region });
+  const inventory = databaseConsumerInventory(base, { expectedClassification: "admin" });
+  const receipt = verifiedReceipt(base);
+  const urls = reviewedUrls();
+  const preflightHealth = await healthCheck(urls);
+  const preflightSmokes = await smokeChecks(urls);
   const previousTaskDefinitionArn = base.taskArn;
   const preservedAdminSecretId = base.adminSecretId;
   const app = awsJson(["secretsmanager", "describe-secret", "--secret-id", C.secretNames.app]);
@@ -198,7 +258,23 @@ function cutover() {
   const payload = mutateTaskDefinitionDatabaseSecret({ taskDefinition: base.taskDefinition, tags: base.tags, appSecretArn: app.ARN });
   const before = taskDefinitionRegistrationPayload(base.taskDefinition, base.tags); assertTaskDefinitionOnlyDatabaseSecretChanged({ before, after: payload, appSecretArn: app.ARN });
   const diff = sanitizedTaskDefinitionDiff({ before, after: payload });
-  if (!APPLY) return { status: "cutover_dry_run_ready", executor: executorPlan(base).topology, consumerInventory: inventory, appSecretCurrentVersionId: current, proposedDiff: diff, mutatesAws: false };
+  if (!APPLY) return {
+    status: "cutover_dry_run_ready",
+    currentTaskDefinitionArn: previousTaskDefinitionArn,
+    currentDatabaseSecretClassification: "admin",
+    appSecret: { arn: app.ARN, name: app.Name, hasCurrentVersion: true },
+    proposedDiff: diff,
+    healthUrl: urls.healthUrl,
+    smokeUrls: urls.smokeUrls,
+    preflightHealth,
+    preflightSmokes,
+    verificationReceipt: { verifiedAt: receipt.verifiedAt, executorTaskArn: receipt.executorTaskArn, permissionMatrixPassed: true },
+    cutoverIdentityPermissionsSufficient: true,
+    applyOnlyPermissionsDynamicallyProven: false,
+    permissionEvidence: "exact cutover role identity, reviewed static policy lint, and all non-mutating live preflight calls succeeded; apply-only calls were not executed",
+    consumerInventory: inventory,
+    mutatesAws: false,
+  };
   assertApplyGate({ apply: true, envName: "MSCQR_STAGING_ECS_DATABASE_ROLE_CUTOVER_CONFIRM", confirmation: "MSCQR_CUTOVER_STAGING_ECS_TO_APP_DATABASE_ROLE" });
   const evidence = evidenceDirectory(); let newArn = ""; let serviceUpdated = false;
   try {
@@ -208,19 +284,19 @@ function cutover() {
     awsJson(["ecs", "update-service", "--cluster", C.cluster, "--service", C.service, "--task-definition", newArn]); serviceUpdated = true;
     if (process.env.MSCQR_TEST_FAILURE_PHASE === "ecs-service-update") throw new Error("Injected ECS service update failure.");
     run("aws", ["ecs", "wait", "services-stable", "--cluster", C.cluster, "--services", C.service, "--region", C.region]);
-    const service = awsJson(["ecs", "describe-services", "--cluster", C.cluster, "--services", C.service]).services?.[0]; assertServiceStable(service, newArn); healthCheck(); const identity=runtimeIdentity(); const smokes=smokeChecks();
+    const service = awsJson(["ecs", "describe-services", "--cluster", C.cluster, "--services", C.service]).services?.[0]; assertServiceStable(service, newArn); await healthCheck(urls); const identity=runtimeIdentity(); const smokes=await smokeChecks(urls);
     const postCutoverBase = discoverBase();
     const postCutoverInventory = databaseConsumerInventory(postCutoverBase, { expectedClassification: "app", preservedAdminSecretId, appSecretArn: app.ARN });
     writeSanitizedEvidence(evidence, "cutover-result.json", { status: "healthy", previousTaskDefinitionArn, newTaskDefinitionArn: newArn, appSecretCurrentVersionId: current, runtimeIdentity:identity, smokeChecks:smokes, consumerInventory: postCutoverInventory }); writeEvidenceChecksums(evidence);
     return { status: "cutover_complete", previousTaskDefinitionArn, newTaskDefinitionArn: newArn, evidenceDirectory: path.relative(ROOT, evidence) };
   } catch (error) {
-    let rollbackResult = "not_required"; if (serviceUpdated) try { rollbackService(previousTaskDefinitionArn); rollbackResult = "restored"; } catch { rollbackResult = "operator_recovery_required"; }
+    let rollbackResult = "not_required"; if (serviceUpdated) try { await rollbackService(previousTaskDefinitionArn); rollbackResult = "restored"; } catch { rollbackResult = "operator_recovery_required"; }
     writeSanitizedEvidence(evidence, "cutover-failure.json", { phase: newArn ? "ecs-service-update" : "ecs-registration", failureClassification: error.code || "ECS_CUTOVER_FAILURE", previousTaskDefinitionArn, newTaskDefinitionArn: newArn || null, rollbackResult }); writeEvidenceChecksums(evidence); throw error;
   }
 }
 
-function rollback() { discoverBase(); const previous = assertRollbackTarget(process.env.PREVIOUS_TASK_DEFINITION_ARN || ""); if (!APPLY) return { status: "rollback_dry_run_ready", targetTaskDefinitionArn: previous, mutatesAws: false }; assertApplyGate({ apply: true, envName: "MSCQR_STAGING_ECS_DATABASE_ROLE_ROLLBACK_CONFIRM", confirmation: "MSCQR_ROLLBACK_STAGING_ECS_DATABASE_ROLE" }); rollbackService(previous); return { status: "rollback_complete", targetTaskDefinitionArn: previous }; }
-export function execute() {
+async function rollback() { const base = discoverBase(); assertDatabaseRoleCutoverIdentity(base.identity, { ...process.env, AWS_REGION: C.region }); const previous = assertRollbackTarget(process.env.PREVIOUS_TASK_DEFINITION_ARN || ""); if (!APPLY) return { status: "rollback_dry_run_ready", targetTaskDefinitionArn: previous, mutatesAws: false }; assertApplyGate({ apply: true, envName: "MSCQR_STAGING_ECS_DATABASE_ROLE_ROLLBACK_CONFIRM", confirmation: "MSCQR_ROLLBACK_STAGING_ECS_DATABASE_ROLE" }); await rollbackService(previous); return { status: "rollback_complete", targetTaskDefinitionArn: previous }; }
+export async function execute() {
   if (process.argv.includes("--help")) return { status: "help", usage: usage() };
   if (interrupted) throw new Error("Controller was interrupted.");
   if (COMMAND === "discover") { const base = discoverBase(); return { status: "discovery_complete", mutatesAws: false, accountId: base.identity.Account, region: C.region, cluster: C.cluster, service: C.service, taskDefinitionArn: base.taskArn, executor: executorPlan(base).topology, consumerInventory: databaseConsumerInventory(base), routeFlags: extractRlsRouteFlags(base.taskDefinition) }; }
@@ -229,4 +305,4 @@ export function execute() {
   if (COMMAND === "rollback") return rollback();
   throw new Error(`Unknown command: ${COMMAND}`);
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) try { console.log(JSON.stringify(execute(), null, 2)); } catch (error) { console.error(JSON.stringify({ status: "blocked", reason: redactSensitiveText(error.message), code: error.code || "STAGING_DATABASE_ROLE_WORKFLOW_FAILED" }, null, 2)); process.exitCode = 2; }
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) try { console.log(JSON.stringify(await execute(), null, 2)); } catch (error) { console.error(JSON.stringify({ status: "blocked", reason: redactSensitiveText(error.message), code: error.code || "STAGING_DATABASE_ROLE_WORKFLOW_FAILED" }, null, 2)); process.exitCode = 2; }

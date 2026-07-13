@@ -207,6 +207,206 @@ resource "aws_iam_role" "database_role_admin_task" {
   })
 }
 
+resource "aws_iam_role" "database_role_cutover" {
+  name = "mscqr-staging-database-role-cutover"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "TrustDedicatedStagingDatabaseRoleCutoverUserWithMfa"
+      Effect    = "Allow"
+      Principal = { AWS = var.database_role_cutover_operator_principal_arn }
+      Action    = "sts:AssumeRole"
+      Condition = {
+        Bool = { "aws:MultiFactorAuthPresent" = "true" }
+      }
+    }]
+  })
+
+  tags = merge(local.common_tags, { Component = "database-role-cutover" })
+}
+
+resource "aws_iam_role_policy" "database_role_cutover" {
+  name = "mscqr-staging-database-role-cutover"
+  role = aws_iam_role.database_role_cutover.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "IdentifyExactStagingAccount"
+        Effect   = "Allow"
+        Action   = ["sts:GetCallerIdentity"]
+        Resource = "*"
+      },
+      {
+        Sid      = "DescribeExactStagingBackendService"
+        Effect   = "Allow"
+        Action   = ["ecs:DescribeServices"]
+        Resource = "arn:aws:ecs:${var.aws_region}:${var.account_id}:service/${local.cluster_name}/${local.service_name}"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+            "ecs:cluster"         = aws_ecs_cluster.staging.arn
+          }
+        }
+      },
+      {
+        Sid      = "DescribeOnlyReviewedStagingTasks"
+        Effect   = "Allow"
+        Action   = ["ecs:DescribeTasks"]
+        Resource = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.cluster_name}/*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+            "ecs:cluster"         = aws_ecs_cluster.staging.arn
+          }
+        }
+      },
+      {
+        Sid      = "DescribeTaskDefinitionsRequiredByEcsApi"
+        Effect   = "Allow"
+        Action   = ["ecs:DescribeTaskDefinition"]
+        Resource = "*"
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+        }
+      },
+      {
+        Sid      = "ListExactStagingClusterServices"
+        Effect   = "Allow"
+        Action   = ["ecs:ListServices"]
+        Resource = "*"
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+          ArnEquals    = { "ecs:cluster" = aws_ecs_cluster.staging.arn }
+        }
+      },
+      {
+        Sid      = "ListTaskDefinitionsRequiredByEcsApi"
+        Effect   = "Allow"
+        Action   = ["ecs:ListTaskDefinitions"]
+        Resource = "*"
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+        }
+      },
+      {
+        Sid      = "ListExactStagingBackendTasks"
+        Effect   = "Allow"
+        Action   = ["ecs:ListTasks"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+            "ecs:cluster"         = aws_ecs_cluster.staging.arn
+          }
+        }
+      },
+      {
+        Sid      = "ListStagingEventBridgeRulesRequiredForConsumerInventory"
+        Effect   = "Allow"
+        Action   = ["events:ListRules"]
+        Resource = "*"
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+        }
+      },
+      {
+        Sid      = "ListOnlyStagingEventBridgeRuleTargets"
+        Effect   = "Allow"
+        Action   = ["events:ListTargetsByRule"]
+        Resource = "arn:aws:events:${var.aws_region}:${var.account_id}:rule/mscqr-staging*"
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+        }
+      },
+      {
+        Sid      = "DescribeOnlyStagingAppDatabaseSecretMetadata"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:DescribeSecret"]
+        Resource = local.app_database_secret_arn_pattern
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+        }
+      },
+      {
+        Sid      = "RegisterOnlyReviewedStagingBackendTaskDefinitionFamily"
+        Effect   = "Allow"
+        Action   = ["ecs:RegisterTaskDefinition"]
+        Resource = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/${local.task_family}:*"
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+        }
+      },
+      {
+        Sid      = "TagOnlyReviewedStagingBackendTaskDefinitionOnRegistration"
+        Effect   = "Allow"
+        Action   = ["ecs:TagResource"]
+        Resource = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/${local.task_family}:*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+            "ecs:CreateAction"    = "RegisterTaskDefinition"
+          }
+        }
+      },
+      {
+        Sid      = "UpdateOnlyExactStagingBackendService"
+        Effect   = "Allow"
+        Action   = ["ecs:UpdateService"]
+        Resource = "arn:aws:ecs:${var.aws_region}:${var.account_id}:service/${local.cluster_name}/${local.service_name}"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+            "ecs:cluster"         = aws_ecs_cluster.staging.arn
+          }
+          ArnLike = {
+            "ecs:task-definition" = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/${local.task_family}:*"
+          }
+        }
+      },
+      {
+        Sid    = "ExecuteIdentityProofOnlyInReviewedBackendContainer"
+        Effect = "Allow"
+        Action = ["ecs:ExecuteCommand"]
+        Resource = [
+          aws_ecs_cluster.staging.arn,
+          "arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.cluster_name}/*",
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+            "ecs:cluster"         = aws_ecs_cluster.staging.arn
+            "ecs:container-name"  = "backend"
+          }
+          ArnLike = {
+            "ecs:task" = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.cluster_name}/*"
+          }
+        }
+      },
+      {
+        Sid      = "GenerateOnlyStagingExecSessionDataKey"
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey"]
+        Resource = aws_kms_key.ecs_exec_logs.arn
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+        }
+      },
+      {
+        Sid      = "PassOnlyReviewedStagingBackendTaskRolesToEcs"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = [aws_iam_role.ecs_execution.arn, aws_iam_role.ecs_task.arn]
+        Condition = {
+          StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
+        }
+      },
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "database_role_admin_task_secrets" {
   name = "mscqr-staging-database-role-admin-secrets"
   role = aws_iam_role.database_role_admin_task.id

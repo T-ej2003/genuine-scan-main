@@ -200,6 +200,8 @@ The safe outputs in this module expose only non-secret endpoint metadata:
 - `staging_rds_address`, `staging_rds_endpoint`, `staging_rds_port`
 - `staging_rds_database_name`, `staging_rds_username`
 - `staging_redis_primary_endpoint_address`, `staging_redis_port`
+- `staging_alb_dns_name`, `staging_base_url`, `staging_health_url`
+- `database_role_cutover_role_arn`
 
 They do not include passwords, tokens, or full connection URLs. Terraform state
 will contain normal Terraform resource metadata and those non-secret outputs;
@@ -290,23 +292,31 @@ The module models:
 - IAM roles and staging-only security groups
 
 The apply role policy template grants general role lifecycle and inline-policy
-management only for the four Terraform-managed staging runtime roles:
+management only for the five Terraform-managed staging runtime roles:
 `mscqr-staging-ecs-execution-role`, `mscqr-staging-ecs-task-role`, and
 `mscqr-staging-database-role-admin-task`, plus
-`mscqr-staging-database-role-executor-broker-role`. The database-admin role is
+`mscqr-staging-database-role-executor-broker-role`, and
+`mscqr-staging-database-role-cutover`. The database-admin role is
 used only by the disposable database-role administration task; the broker role
 is used only by the fixed-input Lambda launch broker. The policy allows
 attaching or detaching only
 `arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy` and only
-on the execution role. The application task role, database-admin task role, and broker role
+on the execution role. The application task role, database-admin task role, broker role, and cutover role
 cannot receive arbitrary or AWS-managed policy attachments; their
 Terraform-managed permissions remain inline and reviewed in this module.
 
 Before controlled apply approval, compare the apply role policy and permissions
-boundary and verify that both contain the same exact four-role lifecycle and
+boundary and verify that both contain the same exact five-role lifecycle and
 inline-policy scope. Verify separately that `iam:AttachRolePolicy` and
 `iam:DetachRolePolicy` target only the execution role. A missing role, an extra
-role, or a managed-policy attachment path for either task role or the broker role blocks approval.
+role, or a managed-policy attachment path for either task role, the broker role, or the cutover role blocks approval.
+
+The dedicated `mscqr-staging-database-role-cutover` role is trusted only by the
+exact cutover source user with MFA. Terraform plan/apply roles and the existing
+database-role operator are not trust principals. Its inline policy permits only
+the reviewed staging ECS cutover, automatic rollback, app-secret metadata read,
+and runtime identity proof described in
+`documents/ops/MSCQR_STAGING_DATABASE_ROLE_CUTOVER_IAM_AND_ENDPOINT_DISCOVERY_2026-07-13.md`.
 
 The human database-role operator policy has no `ecs:RunTask` or `iam:PassRole`.
 It may invoke only `mscqr-staging-database-role-executor-broker`. The broker

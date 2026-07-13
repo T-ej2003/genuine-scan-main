@@ -52,6 +52,7 @@ const explicitlyAllowedWriteActions = new Set([
 ]);
 const stagingTerraformManagedRoleArns = new Set([
   "arn:aws:iam::368992683803:role/mscqr-staging-database-role-admin-task",
+  "arn:aws:iam::368992683803:role/mscqr-staging-database-role-cutover",
   "arn:aws:iam::368992683803:role/mscqr-staging-database-role-executor-broker-role",
   "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role",
   "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role",

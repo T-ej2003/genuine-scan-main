@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AssumeOnlyStagingDatabaseRoleCutover",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-staging-database-role-cutover"
+    }
+  ]
+}

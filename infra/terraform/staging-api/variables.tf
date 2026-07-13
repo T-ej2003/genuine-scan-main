@@ -14,8 +14,19 @@ variable "account_id" {
   description = "AWS account ID expected for staging resources."
 
   validation {
-    condition     = can(regex("^[0-9]{12}$", var.account_id))
-    error_message = "account_id must be a 12 digit AWS account ID."
+    condition     = var.account_id == "368992683803"
+    error_message = "account_id must be the reviewed staging account 368992683803."
+  }
+}
+
+variable "database_role_cutover_operator_principal_arn" {
+  type        = string
+  description = "Exact dedicated IAM user allowed to assume the staging database-role cutover role with MFA."
+  default     = "arn:aws:iam::368992683803:user/mscqr-staging-database-role-cutover-user"
+
+  validation {
+    condition     = var.database_role_cutover_operator_principal_arn == "arn:aws:iam::368992683803:user/mscqr-staging-database-role-cutover-user"
+    error_message = "Only the dedicated staging database-role cutover user may be trusted."
   }
 }
 
