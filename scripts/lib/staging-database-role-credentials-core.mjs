@@ -12,6 +12,7 @@ export const STAGING_DATABASE_ROLE_CONTEXT = Object.freeze({
   cluster: "mscqr-staging-euw2-main",
   service: "mscqr-staging-backend-service-euw2",
   operatorRole: "mscqr-staging-database-role-operator",
+  cutoverRole: "mscqr-staging-database-role-cutover",
   brokerFunction: "mscqr-staging-database-role-executor-broker",
   backendContainer: "backend",
   runtimeAdminRole: "mscqr_staging_admin",
@@ -106,8 +107,25 @@ export function assertSafeStagingHttpUrl(value, label = "Health URL") {
   if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) {
     throw new StagingDatabaseRoleSafetyError(`${label} must be a credential-free HTTP(S) URL.`);
   }
+  if (/reviewed-staging-host|staging\.example\.com|example\.(?:com|org|net)|placeholder/i.test(parsed.hostname)) {
+    throw new StagingDatabaseRoleSafetyError(`${label} contains a placeholder hostname.`);
+  }
   assertStagingOnlyName(`${label} hostname`, parsed.hostname);
   return parsed.toString();
+}
+
+export function assertConsistentStagingHttpUrls(healthUrl, smokeUrls) {
+  const health = new URL(assertSafeStagingHttpUrl(healthUrl, "Staging health URL"));
+  if (!Array.isArray(smokeUrls) || smokeUrls.length === 0) {
+    throw new StagingDatabaseRoleSafetyError("Representative credential-free staging smoke URLs are required.");
+  }
+  const smokes = smokeUrls.map((value, index) => new URL(assertSafeStagingHttpUrl(value, `Representative smoke URL ${index + 1}`)));
+  for (const smoke of smokes) {
+    if (smoke.hostname !== health.hostname || smoke.protocol !== health.protocol || smoke.port !== health.port) {
+      throw new StagingDatabaseRoleSafetyError("Health and smoke URLs must use the same reviewed staging origin.");
+    }
+  }
+  return { healthUrl: health.toString(), smokeUrls: smokes.map((url) => url.toString()), hostname: health.hostname };
 }
 
 export function assertExpectedAwsIdentity(identity, env = process.env) {
@@ -136,6 +154,43 @@ export function assertDatabaseRoleOperatorIdentity(identity, env = process.env) 
     throw new StagingDatabaseRoleSafetyError(`Probe, provision, and verify execution require assumed role ${STAGING_DATABASE_ROLE_CONTEXT.operatorRole}.`, "DATABASE_ROLE_OPERATOR_IDENTITY_REQUIRED");
   }
   return expected;
+}
+
+export function assertDatabaseRoleCutoverIdentity(identity, env = process.env) {
+  const expected = assertExpectedAwsIdentity(identity, env);
+  const assumedRolePrefix = `arn:aws:sts::${STAGING_DATABASE_ROLE_CONTEXT.accountId}:assumed-role/${STAGING_DATABASE_ROLE_CONTEXT.cutoverRole}/`;
+  if (!expected.arn.startsWith(assumedRolePrefix) || expected.arn.length === assumedRolePrefix.length) {
+    throw new StagingDatabaseRoleSafetyError(`Cutover and rollback require assumed role ${STAGING_DATABASE_ROLE_CONTEXT.cutoverRole}.`, "DATABASE_ROLE_CUTOVER_IDENTITY_REQUIRED");
+  }
+  return expected;
+}
+
+export function assertDatabaseRoleVerificationReceipt(receipt, { currentTaskDefinitionArn, now = Date.now(), maxAgeMs = 45 * 60 * 1000 } = {}) {
+  const expectedRoles = Object.values(STAGING_DATABASE_ROLE_CONTEXT.roles);
+  if (receipt?.status !== "staging_database_role_permission_matrix_passed" || receipt?.permissionMatrixPassed !== true) {
+    throw new StagingDatabaseRoleSafetyError("A successful database-role permission-matrix receipt is required.", "DATABASE_ROLE_VERIFICATION_RECEIPT_REQUIRED");
+  }
+  if (receipt.accountId !== STAGING_DATABASE_ROLE_CONTEXT.accountId || receipt.region !== STAGING_DATABASE_ROLE_CONTEXT.region ||
+      receipt.cluster !== STAGING_DATABASE_ROLE_CONTEXT.cluster || receipt.service !== STAGING_DATABASE_ROLE_CONTEXT.service) {
+    throw new StagingDatabaseRoleSafetyError("Database-role verification receipt targets an unexpected AWS environment.");
+  }
+  if (receipt.backendTaskDefinitionArn !== currentTaskDefinitionArn) {
+    throw new StagingDatabaseRoleSafetyError("Database-role verification receipt does not match the current backend task definition.");
+  }
+  assertRollbackTarget(receipt.executorTaskDefinitionArn);
+  const taskPrefix = `arn:aws:ecs:${STAGING_DATABASE_ROLE_CONTEXT.region}:${STAGING_DATABASE_ROLE_CONTEXT.accountId}:task/${STAGING_DATABASE_ROLE_CONTEXT.cluster}/`;
+  if (typeof receipt.executorTaskArn !== "string" || !receipt.executorTaskArn.startsWith(taskPrefix)) {
+    throw new StagingDatabaseRoleSafetyError("Database-role verification receipt has an unexpected executor task ARN.");
+  }
+  const verifiedAt = Date.parse(receipt.verifiedAt);
+  if (!Number.isFinite(verifiedAt) || verifiedAt > now + 60_000 || now - verifiedAt > maxAgeMs) {
+    throw new StagingDatabaseRoleSafetyError("Database-role verification receipt is expired or has an invalid timestamp.");
+  }
+  if (JSON.stringify([...(receipt.verifiedRoles || [])].sort()) !== JSON.stringify([...expectedRoles].sort())) {
+    throw new StagingDatabaseRoleSafetyError("Database-role verification receipt does not cover the complete reviewed role matrix.");
+  }
+  assertRlsRouteFlagsFalse(receipt.rlsRouteFlags);
+  return receipt;
 }
 
 export function parsePostgresUrl(raw, label = "PostgreSQL URL") {

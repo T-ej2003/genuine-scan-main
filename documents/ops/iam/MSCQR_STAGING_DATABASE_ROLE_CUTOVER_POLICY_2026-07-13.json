@@ -1,0 +1,186 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "IdentifyExactStagingAccount",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    },
+    {
+      "Sid": "DescribeExactStagingBackendService",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeServices",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-staging-euw2-main/mscqr-staging-backend-service-euw2",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main"
+        }
+      }
+    },
+    {
+      "Sid": "DescribeOnlyReviewedStagingTasks",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTasks",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-staging-euw2-main/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main"
+        }
+      }
+    },
+    {
+      "Sid": "DescribeTaskDefinitionsRequiredByEcsApi",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTaskDefinition",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ListExactStagingClusterServices",
+      "Effect": "Allow",
+      "Action": "ecs:ListServices",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        },
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main"
+        }
+      }
+    },
+    {
+      "Sid": "ListTaskDefinitionsRequiredByEcsApi",
+      "Effect": "Allow",
+      "Action": "ecs:ListTaskDefinitions",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ListExactStagingBackendTasks",
+      "Effect": "Allow",
+      "Action": "ecs:ListTasks",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main"
+        }
+      }
+    },
+    {
+      "Sid": "ListStagingEventBridgeRulesRequiredForConsumerInventory",
+      "Effect": "Allow",
+      "Action": "events:ListRules",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ListOnlyStagingEventBridgeRuleTargets",
+      "Effect": "Allow",
+      "Action": "events:ListTargetsByRule",
+      "Resource": "arn:aws:events:eu-west-2:368992683803:rule/mscqr-staging*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "DescribeOnlyStagingAppDatabaseSecretMetadata",
+      "Effect": "Allow",
+      "Action": "secretsmanager:DescribeSecret",
+      "Resource": "${STAGING_APP_DATABASE_SECRET_ARN_PATTERN}",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "RegisterOnlyReviewedStagingBackendTaskDefinitionFamily",
+      "Effect": "Allow",
+      "Action": "ecs:RegisterTaskDefinition",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-backend:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "UpdateOnlyExactStagingBackendService",
+      "Effect": "Allow",
+      "Action": "ecs:UpdateService",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-staging-euw2-main/mscqr-staging-backend-service-euw2",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main"
+        },
+        "ArnLike": {
+          "ecs:task-definition": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-backend:*"
+        }
+      }
+    },
+    {
+      "Sid": "ExecuteIdentityProofOnlyInReviewedBackendContainer",
+      "Effect": "Allow",
+      "Action": "ecs:ExecuteCommand",
+      "Resource": [
+        "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main",
+        "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-staging-euw2-main/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main",
+          "ecs:container-name": "backend"
+        },
+        "ArnLike": {
+          "ecs:task": "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-staging-euw2-main/*"
+        }
+      }
+    },
+    {
+      "Sid": "GenerateOnlyStagingExecSessionDataKey",
+      "Effect": "Allow",
+      "Action": "kms:GenerateDataKey",
+      "Resource": "${STAGING_ECS_EXEC_KMS_KEY_ARN}",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "PassOnlyReviewedStagingBackendTaskRolesToEcs",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-staging-ecs-execution-role",
+        "arn:aws:iam::368992683803:role/mscqr-staging-ecs-task-role"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ecs-tasks.amazonaws.com"
+        }
+      }
+    }
+  ]
+}

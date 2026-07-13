@@ -43,6 +43,21 @@ output "database_role_executor_broker_function_name" {
   value       = aws_lambda_function.database_role_executor_broker.function_name
 }
 
+output "database_role_cutover_role_arn" {
+  description = "Dedicated MFA-gated role for the reviewed staging ECS database-role cutover only."
+  value       = aws_iam_role.database_role_cutover.arn
+}
+
+output "staging_base_url" {
+  description = "HTTP base URL for the Terraform-managed staging ALB. No custom DNS record exists in this module."
+  value       = "http://${aws_lb.staging.dns_name}"
+}
+
+output "staging_health_url" {
+  description = "Credential-free live-health URL for the Terraform-managed staging ALB."
+  value       = "http://${aws_lb.staging.dns_name}/health/live"
+}
+
 output "rds_identifier" {
   description = "Staging RDS identifier."
   value       = aws_db_instance.staging.identifier
