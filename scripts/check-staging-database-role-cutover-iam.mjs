@@ -62,12 +62,12 @@ if (role) {
   const allowedActions = new Set([
     "sts:GetCallerIdentity", "ecs:DescribeServices", "ecs:DescribeTasks", "ecs:DescribeTaskDefinition", "ecs:ListServices",
     "ecs:ListTaskDefinitions", "ecs:ListTasks", "events:ListRules", "events:ListTargetsByRule", "secretsmanager:DescribeSecret",
-    "ecs:RegisterTaskDefinition", "ecs:UpdateService", "ecs:ExecuteCommand", "kms:GenerateDataKey", "iam:PassRole",
+    "ecs:RegisterTaskDefinition", "ecs:TagResource", "ecs:UpdateService", "ecs:ExecuteCommand", "kms:GenerateDataKey", "iam:PassRole",
   ]);
   const actions = new Set(role.Statement.flatMap((item) => asArray(item.Action)));
   for (const action of allowedActions) if (!actions.has(action)) failures.push(`Missing required action ${action}.`);
   for (const action of actions) if (!allowedActions.has(action) || action.includes("*")) failures.push(`Unapproved or wildcard action ${action}.`);
-  for (const forbidden of ["lambda:InvokeFunction", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecret", "rds:ModifyDBInstance", "ecs:RunTask", "ssmmessages:CreateControlChannel", "ssmmessages:OpenDataChannel"]) if (actions.has(forbidden)) failures.push(`Forbidden action ${forbidden}.`);
+  for (const forbidden of ["lambda:InvokeFunction", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecret", "rds:ModifyDBInstance", "ecs:RunTask", "ecs:UntagResource", "ssmmessages:CreateControlChannel", "ssmmessages:OpenDataChannel"]) if (actions.has(forbidden)) failures.push(`Forbidden action ${forbidden}.`);
   for (const item of role.Statement) if (item.Effect !== "Allow") failures.push(`${item.Sid || "Statement"}: only explicit Allow statements are permitted.`);
 
   const exactResources = new Map([
@@ -76,6 +76,7 @@ if (role) {
     ["ListOnlyStagingEventBridgeRuleTargets", `arn:aws:events:${region}:${accountId}:rule/mscqr-staging*`],
     ["DescribeOnlyStagingAppDatabaseSecretMetadata", appSecretArn],
     ["RegisterOnlyReviewedStagingBackendTaskDefinitionFamily", taskDefinitionArn],
+    ["TagOnlyReviewedStagingBackendTaskDefinitionOnRegistration", taskDefinitionArn],
     ["UpdateOnlyExactStagingBackendService", serviceArn],
   ]);
   for (const [sid, resource] of exactResources) if (!resourceIs(statement(role, sid)?.Resource, resource)) failures.push(`${sid} must use only ${resource}.`);
@@ -91,6 +92,8 @@ if (role) {
   if (listTasks?.Condition?.StringEquals?.["ecs:cluster"] !== clusterArn) failures.push("ListTasks must be constrained to the exact staging cluster.");
   const update = statement(role, "UpdateOnlyExactStagingBackendService");
   if (update?.Condition?.ArnLike?.["ecs:task-definition"] !== taskDefinitionArn) failures.push("UpdateService must accept only the reviewed backend task-definition family.");
+  const tagOnCreate = statement(role, "TagOnlyReviewedStagingBackendTaskDefinitionOnRegistration");
+  if (!same(asArray(tagOnCreate?.Action), ["ecs:TagResource"]) || tagOnCreate?.Condition?.StringEquals?.["ecs:CreateAction"] !== "RegisterTaskDefinition") failures.push("TagResource must be limited to RegisterTaskDefinition tag-on-create.");
   const execute = statement(role, "ExecuteIdentityProofOnlyInReviewedBackendContainer");
   if (!resourceIs(execute?.Resource, [clusterArn, taskArn]) || execute?.Condition?.StringEquals?.["ecs:container-name"] !== "backend" || execute?.Condition?.StringEquals?.["ecs:cluster"] !== clusterArn) failures.push("ExecuteCommand must be constrained to the reviewed cluster tasks and backend container.");
   const passRole = statement(role, "PassOnlyReviewedStagingBackendTaskRolesToEcs");
@@ -101,8 +104,8 @@ if (role) {
 
 const terraform = fs.readFileSync(path.join(root, "infra/terraform/staging-api/main.tf"), "utf8");
 const terraformPolicy = terraform.match(/resource "aws_iam_role_policy" "database_role_cutover"[\s\S]*?(?=\nresource |$)/)?.[0] || "";
-for (const required of [roleName, "aws:MultiFactorAuthPresent", "ecs:RegisterTaskDefinition", "ecs:UpdateService", "ecs:ExecuteCommand", "secretsmanager:DescribeSecret", "iam:PassedToService", "aws_kms_key.ecs_exec_logs.arn"]) if (!terraform.includes(required)) failures.push(`Terraform cutover role is missing ${required}.`);
-for (const forbidden of ["lambda:InvokeFunction", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "rds:ModifyDBInstance", "ecs:RunTask"]) if (terraformPolicy.includes(forbidden)) failures.push(`Terraform cutover role contains forbidden action ${forbidden}.`);
+for (const required of [roleName, "aws:MultiFactorAuthPresent", "ecs:RegisterTaskDefinition", "ecs:TagResource", "ecs:CreateAction", "ecs:UpdateService", "ecs:ExecuteCommand", "secretsmanager:DescribeSecret", "iam:PassedToService", "aws_kms_key.ecs_exec_logs.arn"]) if (!terraform.includes(required)) failures.push(`Terraform cutover role is missing ${required}.`);
+for (const forbidden of ["lambda:InvokeFunction", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "rds:ModifyDBInstance", "ecs:RunTask", "ecs:UntagResource"]) if (terraformPolicy.includes(forbidden)) failures.push(`Terraform cutover role contains forbidden action ${forbidden}.`);
 
 if (failures.length) {
   console.error("Staging database-role cutover IAM lint failed:");

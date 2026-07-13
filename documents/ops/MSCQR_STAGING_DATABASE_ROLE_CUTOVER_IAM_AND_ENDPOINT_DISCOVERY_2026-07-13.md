@@ -19,7 +19,7 @@ The role/profile target is `mscqr-staging-database-role-cutover`. It is isolated
 | consumer inventory | `ecs:ListTaskDefinitions`, `ecs:ListServices`, `events:ListRules`, `events:ListTargetsByRule` | Fail on an unreviewed service, schedule, sidecar, or database consumer. |
 | receipt proof | `ecs:DescribeTasks` | Corroborate the fresh verification receipt against a stopped admin task with exit code zero. |
 | secret metadata | `secretsmanager:DescribeSecret` | Exact app secret ARN pattern; no secret value. |
-| registration | `ecs:RegisterTaskDefinition` | Only `mscqr-staging-backend:*`, after structural proof that only `DATABASE_URL.valueFrom` changed. |
+| registration | `ecs:RegisterTaskDefinition`, `ecs:TagResource` | Only `mscqr-staging-backend:*`, after structural proof that only `DATABASE_URL.valueFrom` changed. Existing task-definition tags remain in the registration payload; tagging is authorized only when `ecs:CreateAction` is `RegisterTaskDefinition`. |
 | role delegation | `iam:PassRole` | Exact staging task/execution roles and only `ecs-tasks.amazonaws.com`. |
 | cutover/rollback | `ecs:UpdateService` | Exact staging backend service and backend task-definition family. |
 | runtime proof | `ecs:ListTasks`, `ecs:ExecuteCommand` | Sole running task for the exact service; fixed `current_database()/current_user` SELECT in container `backend`. |
@@ -38,7 +38,7 @@ The ECS waiter is backed by `DescribeServices`. Health and smoke checks use cred
 - `ecs:ListTasks`, constrained to the exact cluster and region for Fargate;
 - `events:ListRules`, region-constrained with the controller's fixed staging name prefix.
 
-All other entries use exact ARNs or staging-only ARN patterns. The JSON runtime template retains `${STAGING_APP_DATABASE_SECRET_ARN_PATTERN}` for operator substitution so a complete secret ARN shape is not committed; Terraform constructs the exact staging app-secret pattern from account and region variables. `RegisterTaskDefinition` uses `task-definition/mscqr-staging-backend:*`; `UpdateService` uses the exact service plus task-definition-family condition.
+All other entries use exact ARNs or staging-only ARN patterns. The JSON runtime template retains `${STAGING_APP_DATABASE_SECRET_ARN_PATTERN}` for operator substitution so a complete secret ARN shape is not committed; Terraform constructs the exact staging app-secret pattern from account and region variables. `RegisterTaskDefinition` and its tag-on-create-only `TagResource` permission use `task-definition/mscqr-staging-backend:*`; the latter also requires `ecs:CreateAction = RegisterTaskDefinition`. `UpdateService` uses the exact service plus task-definition-family condition. No additional wildcard resource is needed for tag preservation.
 
 ## Endpoint discovery
 

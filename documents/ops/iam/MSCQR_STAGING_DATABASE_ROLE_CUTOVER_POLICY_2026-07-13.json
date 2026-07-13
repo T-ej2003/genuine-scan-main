@@ -124,6 +124,18 @@
       }
     },
     {
+      "Sid": "TagOnlyReviewedStagingBackendTaskDefinitionOnRegistration",
+      "Effect": "Allow",
+      "Action": "ecs:TagResource",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-backend:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "ecs:CreateAction": "RegisterTaskDefinition"
+        }
+      }
+    },
+    {
       "Sid": "UpdateOnlyExactStagingBackendService",
       "Effect": "Allow",
       "Action": "ecs:UpdateService",

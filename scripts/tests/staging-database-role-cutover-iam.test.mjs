@@ -41,11 +41,46 @@ test("dedicated staging cutover IAM templates pass", () => {
 test("cutover role exposes only reviewed calls and no broker, secret-value, RDS, or SSM channel access", () => {
   const policy = read(files.role);
   const actions = policy.Statement.flatMap((statement) => Array.isArray(statement.Action) ? statement.Action : [statement.Action]);
-  for (const forbidden of ["lambda:InvokeFunction", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecretVersionStage", "rds:ModifyDBInstance", "ecs:RunTask", "ssmmessages:CreateControlChannel", "ssmmessages:OpenDataChannel"]) assert(!actions.includes(forbidden));
+  for (const forbidden of ["lambda:InvokeFunction", "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecretVersionStage", "rds:ModifyDBInstance", "ecs:RunTask", "ecs:UntagResource", "ssmmessages:CreateControlChannel", "ssmmessages:OpenDataChannel"]) assert(!actions.includes(forbidden));
   assert(actions.includes("secretsmanager:DescribeSecret"));
   assert(actions.includes("ecs:RegisterTaskDefinition"));
+  assert(actions.includes("ecs:TagResource"));
   assert(actions.includes("ecs:UpdateService"));
   assert(actions.includes("ecs:ExecuteCommand"));
+  assert(actions.every((action) => !action.includes("*")));
+});
+
+test("task-definition tagging is limited to reviewed-family RegisterTaskDefinition tag-on-create", async (t) => {
+  const policy = read(files.role);
+  const tag = policy.Statement.find((statement) => statement.Sid === "TagOnlyReviewedStagingBackendTaskDefinitionOnRegistration");
+  assert.equal(tag.Action, "ecs:TagResource");
+  assert.equal(tag.Resource, `arn:aws:ecs:${C.region}:${C.accountId}:task-definition/mscqr-staging-backend:*`);
+  assert.deepEqual(tag.Condition.StringEquals, {
+    "aws:RequestedRegion": C.region,
+    "ecs:CreateAction": "RegisterTaskDefinition",
+  });
+
+  await t.test("rejects unrelated ECS resources and task-definition families", () => {
+    for (const resource of [
+      `arn:aws:ecs:${C.region}:${C.accountId}:service/${C.cluster}/${C.service}`,
+      `arn:aws:ecs:${C.region}:${C.accountId}:task-definition/unrelated:*`,
+      "*",
+    ]) {
+      const result = runCheck({ role: (fixture) => { fixture.Statement.find((statement) => statement.Sid === tag.Sid).Resource = resource; } });
+      assert.notEqual(result.status, 0);
+      assert.match(output(result), /TagOnlyReviewedStagingBackendTaskDefinitionOnRegistration must use only|Resource wildcard is not approved/);
+    }
+  });
+
+  await t.test("rejects ordinary tagging and wildcard actions", () => {
+    const wrongCreateAction = runCheck({ role: (fixture) => { fixture.Statement.find((statement) => statement.Sid === tag.Sid).Condition.StringEquals["ecs:CreateAction"] = "CreateService"; } });
+    assert.notEqual(wrongCreateAction.status, 0);
+    assert.match(output(wrongCreateAction), /TagResource must be limited to RegisterTaskDefinition tag-on-create/);
+
+    const wildcardAction = runCheck({ role: (fixture) => { fixture.Statement.find((statement) => statement.Sid === tag.Sid).Action = "ecs:*"; } });
+    assert.notEqual(wildcardAction.status, 0);
+    assert.match(output(wildcardAction), /Unapproved or wildcard action ecs:\*/);
+  });
 });
 
 test("cutover role wildcards exist only for APIs that require them", () => {

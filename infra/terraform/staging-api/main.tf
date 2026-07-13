@@ -340,6 +340,18 @@ resource "aws_iam_role_policy" "database_role_cutover" {
         }
       },
       {
+        Sid      = "TagOnlyReviewedStagingBackendTaskDefinitionOnRegistration"
+        Effect   = "Allow"
+        Action   = ["ecs:TagResource"]
+        Resource = "arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/${local.task_family}:*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion" = var.aws_region
+            "ecs:CreateAction"    = "RegisterTaskDefinition"
+          }
+        }
+      },
+      {
         Sid      = "UpdateOnlyExactStagingBackendService"
         Effect   = "Allow"
         Action   = ["ecs:UpdateService"]
