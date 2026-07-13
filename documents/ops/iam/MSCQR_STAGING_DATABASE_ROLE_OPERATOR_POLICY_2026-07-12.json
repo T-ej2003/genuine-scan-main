@@ -23,13 +23,13 @@
       "Sid": "DescribeReviewedStagingTaskDefinitions",
       "Effect": "Allow",
       "Action": "ecs:DescribeTaskDefinition",
-      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-*"
+      "Resource": "*"
     },
     {
       "Sid": "ListReviewedStagingServices",
       "Effect": "Allow",
       "Action": "ecs:ListServices",
-      "Resource": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main"
+      "Resource": "*"
     },
     {
       "Sid": "ListReviewedStagingTaskDefinitions",
