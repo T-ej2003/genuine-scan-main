@@ -41,6 +41,16 @@ export const REVIEWED_RLS_READ_TABLES = Object.freeze([
   "PrinterAttestation", "PrinterAgentSession", "PrinterProfile", "PrinterProfileSnapshot",
 ]);
 
+export const RUNTIME_IDENTITY_BEGIN = "MSCQR_DB_IDENTITY_BEGIN";
+export const RUNTIME_IDENTITY_END = "MSCQR_DB_IDENTITY_END";
+export const RUNTIME_IDENTITY_FAILURE_CLASSIFICATIONS = Object.freeze([
+  "command_failed",
+  "delimiters_missing",
+  "invalid_json",
+  "unexpected_database",
+  "unexpected_user",
+]);
+
 const forbiddenMarkers = ["prod", "production", "live", "primary"];
 const privilegedRoleAttributes = ["rolsuper", "rolcreatedb", "rolcreaterole", "rolreplication", "rolbypassrls"];
 const roleNamePattern = /^[a-z][a-z0-9_]{0,62}$/;
@@ -603,12 +613,73 @@ export function assertServiceStable(service, expectedTaskDefinitionArn = "") {
 
 export function assertRuntimeIdentity(identity) {
   if (identity?.databaseName !== STAGING_DATABASE_ROLE_CONTEXT.databaseName) {
-    throw new StagingDatabaseRoleSafetyError("Runtime database identity did not report the staging database.", "RUNTIME_DATABASE_IDENTITY");
+    throw new StagingDatabaseRoleSafetyError("Runtime database identity did not report the expected staging database.", "unexpected_database");
   }
   if (identity?.databaseUser !== STAGING_DATABASE_ROLE_CONTEXT.roles.app) {
-    throw new StagingDatabaseRoleSafetyError("Runtime database identity is not the staging app role.", "RUNTIME_DATABASE_IDENTITY");
+    throw new StagingDatabaseRoleSafetyError("Runtime database identity is not the staging app role.", "unexpected_user");
   }
   return true;
+}
+
+function runtimeIdentityFailure(classification) {
+  const messages = {
+    command_failed: "Runtime database identity command failed.",
+    delimiters_missing: "Runtime database identity delimiters were missing or ambiguous.",
+    invalid_json: "Runtime database identity payload was invalid.",
+  };
+  return new StagingDatabaseRoleSafetyError(messages[classification], classification);
+}
+
+export function stripTerminalControlFraming(value) {
+  return String(value ?? "")
+    .replace(/\u001B[PX^_][\s\S]*?(?:\u001B\\|\u0007)/g, "")
+    .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "")
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\u001B[@-_]/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "")
+    .replace(/\r\n?/g, "\n");
+}
+
+function delimitedRuntimeIdentityPayload(value) {
+  const lines = stripTerminalControlFraming(value).split("\n");
+  const begins = [];
+  const ends = [];
+  lines.forEach((line, index) => {
+    const delimiter = line.trim();
+    if (delimiter === RUNTIME_IDENTITY_BEGIN) begins.push(index);
+    if (delimiter === RUNTIME_IDENTITY_END) ends.push(index);
+  });
+  if (begins.length !== 1 || ends.length !== 1 || begins[0] >= ends[0]) return null;
+  return lines.slice(begins[0] + 1, ends[0]).join("\n").trim();
+}
+
+export function parseRuntimeIdentityProof(result) {
+  if (result?.status !== 0) throw runtimeIdentityFailure("command_failed");
+  const payloads = [result?.stdout, result?.stderr]
+    .map(delimitedRuntimeIdentityPayload)
+    .filter((payload) => payload !== null);
+  if (payloads.length !== 1) throw runtimeIdentityFailure("delimiters_missing");
+
+  let parsed;
+  try { parsed = JSON.parse(payloads[0]); }
+  catch { throw runtimeIdentityFailure("invalid_json"); }
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object" ||
+      Object.keys(parsed).sort().join(",") !== "database_name,database_user" ||
+      typeof parsed.database_name !== "string" || typeof parsed.database_user !== "string") {
+    throw runtimeIdentityFailure("invalid_json");
+  }
+  const identity = { databaseName: parsed.database_name, databaseUser: parsed.database_user };
+  assertRuntimeIdentity(identity);
+  return identity;
+}
+
+export async function compensateEcsCutoverFailure({ error, serviceUpdated, rollback }) {
+  let rollbackResult = "not_required";
+  if (serviceUpdated) {
+    try { await rollback(); rollbackResult = "restored"; }
+    catch { rollbackResult = "operator_recovery_required"; }
+  }
+  return { failureClassification: error?.code || "ECS_CUTOVER_FAILURE", rollbackResult };
 }
 
 export function assertRoleInventory(inventory) {

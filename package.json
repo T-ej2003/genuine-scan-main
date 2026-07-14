@@ -88,6 +88,7 @@
     "test:staging-terraform-backend": "node --test scripts/tests/staging-terraform-backend.test.mjs",
     "test:staging-runtime-secret-sync": "node --test scripts/tests/staging-runtime-secret-sync.test.mjs",
     "test:staging-database-role-credentials": "node --test scripts/tests/staging-database-role-*.test.mjs",
+    "test:staging-database-role-runtime-identity-parser": "node scripts/aws/verify-staging-ecs-runtime-identity-parser.mjs",
     "test:staging-database-role-cutover-iam": "node --test scripts/tests/staging-database-role-cutover-iam.test.mjs",
     "test:db-safety-guard": "node backend/tests/testDbSafetyGuard.test.js",
     "test:system": "playwright test --config=playwright.system.config.ts e2e/system-integration.spec.ts",
