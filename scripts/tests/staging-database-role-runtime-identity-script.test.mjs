@@ -6,6 +6,7 @@ import {
   RUNTIME_IDENTITY_BEGIN,
   RUNTIME_IDENTITY_END,
   compensateEcsCutoverFailure,
+  awsCliEnvironment,
   parseRuntimeIdentityProof,
   runtimeIdentityCommand,
 } from "../lib/staging-database-role-credentials-core.mjs";
@@ -29,11 +30,28 @@ test("ECS Exec command directly invokes the versioned runtime script", () => {
 
 test("active-image preflight accepts only the expected admin identity", () => {
   const adminBlock = `${RUNTIME_IDENTITY_BEGIN}\n{\"database_name\":\"mscqr_staging\",\"database_user\":\"mscqr_staging_admin\"}\n${RUNTIME_IDENTITY_END}\n`;
+  const appBlock = `${RUNTIME_IDENTITY_BEGIN}\n{\"database_name\":\"mscqr_staging\",\"database_user\":\"mscqr_staging_app\"}\n${RUNTIME_IDENTITY_END}\n`;
   assert.deepEqual(
     parseRuntimeIdentityProof({ status: 0, stdout: adminBlock, stderr: "" }, { expectedUser: "mscqr_staging_admin" }),
     { databaseName: "mscqr_staging", databaseUser: "mscqr_staging_admin" },
   );
+  assert.throws(() => parseRuntimeIdentityProof({ status: 0, stdout: appBlock, stderr: "" }, { expectedUser: "mscqr_staging_admin" }), (error) => error.code === "unexpected_user");
   assert.throws(() => parseRuntimeIdentityProof({ status: 0, stdout: adminBlock, stderr: "" }), (error) => error.code === "unexpected_user");
+});
+
+test("exported temporary credentials suppress profile re-assumption in child AWS processes", () => {
+  const env = awsCliEnvironment({
+    AWS_ACCESS_KEY_ID: "temporary-access-key-fixture",
+    AWS_SECRET_ACCESS_KEY: "temporary-secret-fixture",
+    AWS_SESSION_TOKEN: "temporary-session-fixture",
+    AWS_PROFILE: "mfa-profile-must-not-propagate",
+    AWS_DEFAULT_PROFILE: "mfa-profile-must-not-propagate",
+    AWS_REGION: "eu-west-2",
+  });
+  assert.equal(env.AWS_PROFILE, undefined);
+  assert.equal(env.AWS_DEFAULT_PROFILE, undefined);
+  assert.equal(env.AWS_SESSION_TOKEN, "temporary-session-fixture");
+  assert.throws(() => awsCliEnvironment({ AWS_ACCESS_KEY_ID: "incomplete" }), (error) => error.code === "AWS_TEMPORARY_CREDENTIALS_INCOMPLETE");
 });
 
 test("runtime identity script prints one exact stdout block and runs only the identity query", async () => {

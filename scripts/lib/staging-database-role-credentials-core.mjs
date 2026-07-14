@@ -46,6 +46,7 @@ export const RUNTIME_IDENTITY_END = "MSCQR_DB_IDENTITY_END";
 export const RUNTIME_IDENTITY_SCRIPT_PATH = "/app/scripts/runtimeDatabaseIdentity.js";
 export const RUNTIME_IDENTITY_FAILURE_CLASSIFICATIONS = Object.freeze([
   "command_failed",
+  "session_handshake_failed",
   "delimiters_missing",
   "invalid_json",
   "unexpected_database",
@@ -287,6 +288,23 @@ export function redactSensitiveText(value, sensitiveValues = []) {
     .replace(/\b(password|secret|token)\s*=\s*[^\s,;]+/gi, "$1=<redacted>")
     .replace(/\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, "<redacted-aws-access-key>");
   return output;
+}
+
+export function awsCliEnvironment(env = process.env) {
+  const names = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"];
+  const present = names.filter((name) => toText(env[name]));
+  if (present.length > 0 && present.length !== names.length) {
+    throw new StagingDatabaseRoleSafetyError(
+      "Exported temporary AWS credentials must include access key ID, secret access key, and session token.",
+      "AWS_TEMPORARY_CREDENTIALS_INCOMPLETE",
+    );
+  }
+  const child = { ...env };
+  if (present.length === names.length) {
+    delete child.AWS_PROFILE;
+    delete child.AWS_DEFAULT_PROFILE;
+  }
+  return child;
 }
 
 export function generateRolePassword(randomBytes = crypto.randomBytes) {
@@ -635,6 +653,7 @@ export function assertRuntimeIdentity(identity, {
 function runtimeIdentityFailure(classification) {
   const messages = {
     command_failed: "Runtime database identity command failed.",
+    session_handshake_failed: "Runtime database identity session handshake failed.",
     delimiters_missing: "Runtime database identity delimiters were missing or ambiguous.",
     invalid_json: "Runtime database identity payload was invalid.",
   };
@@ -665,7 +684,13 @@ function delimitedRuntimeIdentityPayload(value) {
 }
 
 export function parseRuntimeIdentityProof(result, expectedIdentity = {}) {
-  if (result?.status !== 0) throw runtimeIdentityFailure("command_failed");
+  if (result?.status !== 0) {
+    const framing = stripTerminalControlFraming(`${result?.stdout ?? ""}\n${result?.stderr ?? ""}`).toLowerCase();
+    const classification = /(?:handshake[^\n]*(?:fail|error)|kms|encryption key|targetnotconnected)/.test(framing)
+      ? "session_handshake_failed"
+      : "command_failed";
+    throw runtimeIdentityFailure(classification);
+  }
   const payloads = [result?.stdout, result?.stderr]
     .map(delimitedRuntimeIdentityPayload)
     .filter((payload) => payload !== null);
