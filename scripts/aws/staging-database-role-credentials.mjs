@@ -46,6 +46,8 @@ const PROBE = process.argv.includes("--probe");
 const COMMAND = process.argv.slice(2).find((item) => !item.startsWith("--")) || "discover";
 const ADMIN_TASK_ARN = process.env.MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN || "";
 const PTY_CAPTURE = path.join(import.meta.dirname, "capture-pty-command.py");
+const PTY_CAPTURE_TIMEOUT_SECONDS = 120;
+const PTY_CAPTURE_MAX_OUTPUT_BYTES = 1024 * 1024;
 const activeTemporaryDirectories = new Set();
 let interrupted = false;
 
@@ -225,11 +227,13 @@ async function smokeChecks(urls = reviewedUrls()) { await assertHostnameResolves
 function runtimeIdentity(expectedUser = C.roles.app) {
   const tasks = awsJson(["ecs", "list-tasks", "--cluster", C.cluster, "--service-name", C.service, "--desired-status", "RUNNING"]).taskArns || [];
   if (tasks.length !== 1) throw new Error("Expected one stable backend task for identity proof.");
-  const result = spawnSync("python3", [PTY_CAPTURE, "aws", "ecs", "execute-command", "--cluster", C.cluster, "--task", tasks[0], "--container", C.backendContainer, "--interactive", "--command", runtimeIdentityCommand(), "--region", C.region], {
+  const result = spawnSync("python3", [PTY_CAPTURE, String(PTY_CAPTURE_TIMEOUT_SECONDS), String(PTY_CAPTURE_MAX_OUTPUT_BYTES), "--", "aws", "ecs", "execute-command", "--cluster", C.cluster, "--task", tasks[0], "--container", C.backendContainer, "--interactive", "--command", runtimeIdentityCommand(), "--region", C.region], {
     encoding: "utf8",
     env: awsCliEnvironment(),
-    maxBuffer: 32 * 1024 * 1024,
+    killSignal: "SIGTERM",
+    maxBuffer: PTY_CAPTURE_MAX_OUTPUT_BYTES + 64 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
+    timeout: (PTY_CAPTURE_TIMEOUT_SECONDS + 10) * 1000,
   });
   if (result.error) throw Object.assign(new Error("Runtime identity PTY transport failed to start."), { code: "command_failed" });
   return parseRuntimeIdentityProof(result, { expectedUser });

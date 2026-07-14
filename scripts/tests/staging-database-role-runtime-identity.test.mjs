@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import {
@@ -32,6 +35,9 @@ test("runtime identity parser rejects duplicate delimited payloads as ambiguous"
 for (const stream of ["stdout", "stderr"]) test(`PTY transport captures ${stream} delimiters split across terminal chunks`, () => {
   const result = spawnSync("python3", [
     "scripts/aws/capture-pty-command.py",
+    "5",
+    String(1024 * 1024),
+    "--",
     process.execPath,
     "scripts/fixtures/staging-ecs-runtime-identity-chunked-emitter.mjs",
     stream,
@@ -40,10 +46,68 @@ for (const stream of ["stdout", "stderr"]) test(`PTY transport captures ${stream
   assert.deepEqual(parseRuntimeIdentityProof(result), { databaseName: "mscqr_staging", databaseUser: "mscqr_staging_app" });
 });
 
+test("PTY transport times out, terminates its child process group, and reaps the child", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-pty-timeout-"));
+  const marker = path.join(directory, "child-pid");
+  const started = Date.now();
+  try {
+    const result = spawnSync("python3", [
+      "scripts/aws/capture-pty-command.py", "0.5", String(1024 * 1024), "--",
+      process.execPath, "scripts/fixtures/staging-ecs-runtime-identity-chunked-emitter.mjs", "hang", marker,
+    ], { encoding: "utf8", timeout: 5000 });
+    assert.equal(result.status, 124);
+    assert(Date.now() - started < 5000);
+    const childPid = Number(fs.readFileSync(marker, "utf8"));
+    assert.throws(() => process.kill(childPid, 0), (error) => error.code === "ESRCH");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("PTY transport bounds captured output before the Node buffer limit", () => {
+  const result = spawnSync("python3", [
+    "scripts/aws/capture-pty-command.py", "5", "1024", "--",
+    process.execPath, "scripts/fixtures/staging-ecs-runtime-identity-chunked-emitter.mjs", "flood", "2048",
+  ], { encoding: "utf8", timeout: 5000 });
+  assert.equal(result.status, 126);
+  assert(Buffer.byteLength(result.stdout) <= 1024);
+});
+
+test("PTY transport termination signal cleans up and reaps the child", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-pty-signal-"));
+  const marker = path.join(directory, "child-pid");
+  const wrapper = spawn("python3", [
+    "scripts/aws/capture-pty-command.py", "30", String(1024 * 1024), "--",
+    process.execPath, "scripts/fixtures/staging-ecs-runtime-identity-chunked-emitter.mjs", "hang", marker,
+  ], { stdio: "ignore" });
+  try {
+    for (let attempt = 0; attempt < 80 && !fs.existsSync(marker); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const childPid = Number(fs.readFileSync(marker, "utf8"));
+    wrapper.kill("SIGTERM");
+    const [code, signalName] = await once(wrapper, "exit");
+    assert.equal(code, 143);
+    assert.equal(signalName, null);
+    assert.throws(() => process.kill(childPid, 0), (error) => error.code === "ESRCH");
+  } finally {
+    if (wrapper.exitCode === null) wrapper.kill("SIGKILL");
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("PTY CI exercises lifecycle safety on Linux and macOS", () => {
+  const workflow = fs.readFileSync(".github/workflows/pty-runtime-identity.yml", "utf8");
+  assert.match(workflow, /os: \[ubuntu-latest, macos-latest\]/);
+  assert.match(workflow, /python-version: "3\.12"/);
+  assert.match(workflow, /--test-name-pattern='\^PTY transport'/);
+  assert.match(workflow, /timeout-minutes: 5/);
+});
+
 test("cutover captures direct-script PTY output without logging raw streams", () => {
   const source = fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs", "utf8");
   assert.match(source, /"--command", runtimeIdentityCommand\(\)/);
-  assert.match(source, /PTY_CAPTURE, "aws", "ecs", "execute-command"/);
+  assert.match(source, /PTY_CAPTURE, String\(PTY_CAPTURE_TIMEOUT_SECONDS\), String\(PTY_CAPTURE_MAX_OUTPUT_BYTES\), "--", "aws", "ecs", "execute-command"/);
   assert.match(source, /parseRuntimeIdentityProof\(result/);
   assert.match(source, /compensateEcsCutoverFailure\(/);
   assert.doesNotMatch(source, /node\s+-e|SELECT current_database/);

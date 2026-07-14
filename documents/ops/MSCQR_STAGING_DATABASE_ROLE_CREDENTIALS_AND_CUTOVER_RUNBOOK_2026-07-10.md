@@ -11,6 +11,10 @@ Root cause: `aws ecs execute-command --interactive` and the Session Manager plug
 
 The controller now launches the unchanged AWS CLI argument vector through `scripts/aws/capture-pty-command.py`. This standard-library macOS/Linux wrapper allocates a real PTY without a shell, forwards no command text through a quoting layer, and returns the merged terminal byte stream only to the controller's in-memory capture. The controller never prints or persists that stream. The existing parser still strips only terminal control framing, requires exactly one ordered marked block, requires the exact two-field JSON object, and validates the exact expected database and role. Duplicate/missing delimiters, malformed JSON, wrong database, wrong role, empty output, nonzero process exit, and Session Manager handshake/KMS failure all fail closed. Handshake/KMS failure has the distinct sanitized code `session_handshake_failed`.
 
+The PTY boundary is lifecycle-limited: the session has a fixed 120-second deadline and a 1 MiB raw-output ceiling, while the parent `spawnSync` has a 130-second backstop and a slightly larger buffer only for wrapper overhead. Timeout, output overflow, read/write failure, or controller termination closes the PTY, sends `SIGTERM` to the child process group, escalates to `SIGKILL` after five seconds, and always calls `waitpid`. Only the sanitized nonzero transport classification reaches controller output.
+
+`.github/workflows/pty-runtime-identity.yml` runs the actual PTY stdout/stderr, split-chunk, timeout/termination/reaping, and output-bound tests on both `ubuntu-latest` and `macos-latest` with Node 24 and Python 3.12. It installs no repository dependencies and has read-only repository permission.
+
 Pre-mutation proof still requires `mscqr_staging` / `mscqr_staging_admin` from the active task using exactly:
 
 ```text
@@ -256,6 +260,7 @@ Provision approval does not authorize cutover. Broker invocation for a reachabil
 npm run test:staging-database-role-credentials
 npm run test:staging-database-role-runtime-identity-parser
 node --test scripts/tests/staging-database-role-runtime-identity.test.mjs scripts/tests/staging-database-role-runtime-identity-script.test.mjs
+node --test --test-name-pattern='^PTY transport' scripts/tests/staging-database-role-runtime-identity.test.mjs
 npm run check:staging-database-role-operator-iam
 npm run check:staging-database-role-cutover-iam
 node --check scripts/aws/staging-database-role-credentials.mjs
