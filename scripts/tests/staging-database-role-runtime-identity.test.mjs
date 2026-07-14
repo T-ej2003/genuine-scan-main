@@ -26,13 +26,12 @@ test("runtime identity parser rejects duplicate delimited payloads as ambiguous"
   assert.throws(() => parseRuntimeIdentityProof({ status: 0, stdout: valid, stderr: valid }), (error) => error.code === "delimiters_missing");
 });
 
-test("cutover command emits exact delimiters and delegates parsing without logging raw streams", () => {
+test("cutover delegates direct-script output parsing without logging raw streams", () => {
   const source = fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs", "utf8");
-  assert.match(source, /SELECT current_database\(\) AS database_name,current_user AS database_user/);
-  assert.match(source, /RUNTIME_IDENTITY_BEGIN/);
-  assert.match(source, /RUNTIME_IDENTITY_END/);
-  assert.match(source, /parseRuntimeIdentityProof\(result\)/);
+  assert.match(source, /"--command", runtimeIdentityCommand\(\)/);
+  assert.match(source, /parseRuntimeIdentityProof\(result/);
   assert.match(source, /compensateEcsCutoverFailure\(/);
+  assert.doesNotMatch(source, /node\s+-e|SELECT current_database/);
   assert.doesNotMatch(source, /result\.stdout\.match|console\.(?:log|error)\(result\.(?:stdout|stderr)/);
 });
 

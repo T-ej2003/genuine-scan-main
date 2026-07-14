@@ -21,6 +21,39 @@ The controller checks both captured streams independently, removes terminal cont
 
 Runtime identity proof retains only these sanitized failure classifications: `command_failed`, `delimiters_missing`, `invalid_json`, `unexpected_database`, and `unexpected_user`. Every classification enters the same automatic previous-task-definition rollback path. A failed rollback records only `operator_recovery_required` as the rollback result and requires the documented operator recovery procedure.
 
+## 2026-07-14 post-PR #121 transport failure and versioned probe
+
+The next operator-run cutover after merged PR #121 passed dry-run, registered and deployed `mscqr-staging-backend:4`, and reached service stability. Runtime proof then failed closed with `delimiters_missing`. The sanitized `scratch/staging-database-role-credentials-20260714T072135Z/cutover-failure.json` confirms `previousTaskDefinitionArn = mscqr-staging-backend:2`, `newTaskDefinitionArn = mscqr-staging-backend:4`, and `rollbackResult = restored`. RLS remained disabled. Revisions `:3` and `:4` are retained and must not be deregistered as part of this workflow.
+
+PR #121 fixed consumer parsing, but its producer remained a shell-interpreted inline program. The exact command value passed to ECS Exec was:
+
+```text
+node -e 'const{PrismaClient}=require("@prisma/client");const p=new PrismaClient();p.$queryRawUnsafe("SELECT current_database() AS database_name,current_user AS database_user").then(r=>process.stdout.write("MSCQR_DB_IDENTITY_BEGIN\n"+JSON.stringify(r[0])+"\nMSCQR_DB_IDENTITY_END\n")).finally(()=>p.$disconnect())'
+```
+
+That command crossed JavaScript template construction, AWS CLI argument handling, the ECS Exec interactive PTY, and a remote shell before Node parsed it. Shell quoting, command echo, or Session Manager stream behavior could therefore omit or transform the marked block even when the session itself returned success.
+
+The controller now passes this exact command value with no nested program or quote characters:
+
+```text
+node /app/scripts/runtimeDatabaseIdentity.js
+```
+
+`backend/scripts/runtimeDatabaseIdentity.js` is copied into `/app/scripts` by the backend runtime Dockerfile. It runs only `SELECT current_database(), current_user`, disconnects before reporting success, and writes one compact marked block to stdout. Failure writes one fixed sanitized code to stderr, exits nonzero, and suppresses internal messages and stack traces.
+
+Before cutover registration or service update, the controller invokes the same direct command against the active admin-credential backend task and requires exact identity `mscqr_staging` / `mscqr_staging_admin`. Missing script, command failure, uncaptured output, unexpected database, or unexpected role blocks before mutation. Post-deployment proof reuses the same command and requires `mscqr_staging` / `mscqr_staging_app`; any failure after service update retains automatic rollback.
+
+### Required image sequence before another cutover
+
+The current staging backend image was built from SHA `82cc14631f0bdc552fa369f66ecc4ac3c1dbdaea` and cannot contain the newly added script. A new backend image is therefore mandatory before another database-role cutover:
+
+1. Merge this fix and build/publish the backend image from the resulting reviewed SHA through the existing signed ECS image workflow.
+2. Deploy that image to staging while preserving the current admin `DATABASE_URL` reference and keeping every staged RLS flag exactly `false`.
+3. Verify `/version`, `/health/live`, and `/health/ready` against the new SHA.
+4. Generate a fresh database-role verification receipt bound to the new active backend task definition.
+5. Run the cutover dry-run. Its active-task capability proof must report `runtimeIdentityCapability.passed = true` before any APPLY approval is considered.
+6. Treat the later database-role cutover as a separate approval. Image deployment does not authorize credential cutover.
+
 ## Launch decision
 
 The former Mac-side `psql` workflow is retired. A confirmation variable cannot create VPC reachability. PostgreSQL and secret-value phases now run only in the reviewed disposable Fargate task `mscqr-staging-database-role-admin`, using the same backend image, private subnets, security groups, execution role, and private RDS path as the staging backend. The task has no public IP, service, load balancer, inbound rule, or package-install step. The controller refuses a different image or network topology.
@@ -85,7 +118,7 @@ region = eu-west-2
 5. `pending-versions`: for rotation, write each new URL directly as `AWSPENDING`. For first-time provisioning, create an `AWSCURRENT` non-credential placeholder (`{"status":"unprovisioned"}`), then add the credential as `AWSPENDING`. This avoids exposing an unverified credential as current while respecting Secrets Manager's first-version `AWSCURRENT` behavior.
 6. `role-verification`: connect with each in-memory URL. Verify identities; app read/write inside an intentional rollback plus forbidden DDL/role operations; migrator `SET LOCAL ROLE` DDL inside an intentional rollback plus forbidden role creation; RLS-read access to the reviewed graph plus forbidden writes, DDL, owner role, and outside-graph reads. Every mutating denial probe is transactionally rolled back even when it unexpectedly succeeds. Infrastructure, authentication, rollback, and post-rollback connection failures fail verification.
 7. `promote-versions`: move `AWSCURRENT` to each verified pending version, which preserves the former current version as `AWSPREVIOUS`, then remove `AWSPENDING`. Any partial promotion triggers compensation.
-8. `consumer-cutover`: require and corroborate a fresh verification receipt, separately register one backend revision changing only `backend.secrets[DATABASE_URL].valueFrom`, update the single staging service, wait, prove runtime identity `mscqr_staging_app`, run health/smoke checks, and re-inventory.
+8. `consumer-cutover`: require and corroborate a fresh verification receipt, prove the active admin-role task contains and transports the versioned identity script, separately register one backend revision changing only `backend.secrets[DATABASE_URL].valueFrom`, update the single staging service, wait, prove runtime identity `mscqr_staging_app`, run health/smoke checks, and re-inventory.
 9. `complete`: success requires all three role tests, all three current secret versions, the complete consumer gate, runtime identity, health, and smoke checks.
 
 AWS documents that `file://` makes the CLI read parameter content from the named file. This workflow uses it only for non-secret task-definition and override JSON; secret values use the in-task SDK and never cross the CLI. Moving `AWSCURRENT` with `UpdateSecretVersionStage` preserves the displaced version under `AWSPREVIOUS`.
@@ -193,6 +226,7 @@ npm run check:staging-database-role-operator-iam
 npm run check:staging-database-role-cutover-iam
 node --check scripts/aws/staging-database-role-credentials.mjs
 node --check scripts/lib/staging-database-role-credentials-core.mjs
+node --check backend/scripts/runtimeDatabaseIdentity.js
 node --check backend/scripts/staging-database-role-vpc-executor.mjs
 terraform -chdir=infra/terraform/staging-api fmt -check
 terraform -chdir=infra/terraform/staging-api validate
