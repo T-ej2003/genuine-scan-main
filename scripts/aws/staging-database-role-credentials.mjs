@@ -6,6 +6,8 @@ import { spawnSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import {
   STAGING_DATABASE_ROLE_CONTEXT as C,
+  RUNTIME_IDENTITY_BEGIN,
+  RUNTIME_IDENTITY_END,
   assertApplyGate,
   assertActiveReviewedBackendDatabaseConsumer,
   assertConsistentStagingHttpUrls,
@@ -16,7 +18,6 @@ import {
   assertReviewedDatabaseConsumers,
   assertRollbackTarget,
   assertRlsRouteFlagsFalse,
-  assertRuntimeIdentity,
   assertServiceStable,
   assertStagingOnlyName,
   assertTaskDefinitionOnlyDatabaseSecretChanged,
@@ -24,11 +25,13 @@ import {
   assertVpcExecutorTopology,
   createPrivateEvidenceDirectory,
   createRestrictiveTempDirectory,
+  compensateEcsCutoverFailure,
   extractRlsRouteFlags,
   findDatabaseUrlSecret,
   inventoryDatabaseConsumers,
   mergeTaskDefinitions,
   mutateTaskDefinitionDatabaseSecret,
+  parseRuntimeIdentityProof,
   redactSensitiveText,
   sanitizedTaskDefinitionDiff,
   securelyRemoveDirectory,
@@ -217,7 +220,13 @@ async function assertHostnameResolves(hostname) {
 }
 async function healthCheck(urls = reviewedUrls()) { await assertHostnameResolves(urls.hostname); const result = run("curl", ["--fail", "--silent", "--show-error", "--max-time", "20", urls.healthUrl], { allowFailure: true }); if (result.status) throw new Error("Staging health endpoint failed."); return { url: urls.healthUrl, passed: true }; }
 async function smokeChecks(urls = reviewedUrls()) { await assertHostnameResolves(urls.hostname); return urls.smokeUrls.map((url,index)=>{ const result=run("curl",["--fail","--silent","--show-error","--max-time","20",url],{allowFailure:true}); if(result.status) throw new Error(`Representative smoke ${index+1} failed.`); return {url,passed:true}; }); }
-function runtimeIdentity() { const tasks=awsJson(["ecs","list-tasks","--cluster",C.cluster,"--service-name",C.service,"--desired-status","RUNNING"]).taskArns||[]; if(tasks.length!==1) throw new Error("Expected one stable backend task for identity proof."); const command=`node -e "const{PrismaClient}=require('@prisma/client');const p=new PrismaClient();p.\\$queryRawUnsafe('SELECT current_database() AS database_name,current_user AS database_user').then(r=>console.log(JSON.stringify(r[0]))).finally(()=>p.\\$disconnect())"`; const result=run("aws",["ecs","execute-command","--cluster",C.cluster,"--task",tasks[0],"--container",C.backendContainer,"--interactive","--command",command,"--region",C.region],{allowFailure:true}); if(result.status) throw new Error("Sanitized runtime database identity proof failed."); const match=result.stdout.match(/\{"database_name":"([^"]+)","database_user":"([^"]+)"\}/); if(!match) throw new Error("Runtime identity output was missing."); const identity={databaseName:match[1],databaseUser:match[2]}; assertRuntimeIdentity(identity); return identity; }
+function runtimeIdentity() {
+  const tasks = awsJson(["ecs", "list-tasks", "--cluster", C.cluster, "--service-name", C.service, "--desired-status", "RUNNING"]).taskArns || [];
+  if (tasks.length !== 1) throw new Error("Expected one stable backend task for identity proof.");
+  const script = `const{PrismaClient}=require("@prisma/client");const p=new PrismaClient();p.$queryRawUnsafe("SELECT current_database() AS database_name,current_user AS database_user").then(r=>process.stdout.write("${RUNTIME_IDENTITY_BEGIN}\\n"+JSON.stringify(r[0])+"\\n${RUNTIME_IDENTITY_END}\\n")).finally(()=>p.$disconnect())`;
+  const result = run("aws", ["ecs", "execute-command", "--cluster", C.cluster, "--task", tasks[0], "--container", C.backendContainer, "--interactive", "--command", `node -e '${script}'`, "--region", C.region], { allowFailure: true });
+  return parseRuntimeIdentityProof(result);
+}
 async function rollbackService(previousArn, urls = reviewedUrls()) { awsJson(["ecs", "update-service", "--cluster", C.cluster, "--service", C.service, "--task-definition", previousArn]); run("aws", ["ecs", "wait", "services-stable", "--cluster", C.cluster, "--services", C.service, "--region", C.region]); await healthCheck(urls); }
 function verifiedReceipt(base) {
   const receiptPath = process.env.MSCQR_STAGING_DATABASE_ROLE_VERIFICATION_RECEIPT || "";
@@ -290,8 +299,8 @@ async function cutover() {
     writeSanitizedEvidence(evidence, "cutover-result.json", { status: "healthy", previousTaskDefinitionArn, newTaskDefinitionArn: newArn, appSecretCurrentVersionId: current, runtimeIdentity:identity, smokeChecks:smokes, consumerInventory: postCutoverInventory }); writeEvidenceChecksums(evidence);
     return { status: "cutover_complete", previousTaskDefinitionArn, newTaskDefinitionArn: newArn, evidenceDirectory: path.relative(ROOT, evidence) };
   } catch (error) {
-    let rollbackResult = "not_required"; if (serviceUpdated) try { await rollbackService(previousTaskDefinitionArn); rollbackResult = "restored"; } catch { rollbackResult = "operator_recovery_required"; }
-    writeSanitizedEvidence(evidence, "cutover-failure.json", { phase: newArn ? "ecs-service-update" : "ecs-registration", failureClassification: error.code || "ECS_CUTOVER_FAILURE", previousTaskDefinitionArn, newTaskDefinitionArn: newArn || null, rollbackResult }); writeEvidenceChecksums(evidence); throw error;
+    const failure = await compensateEcsCutoverFailure({ error, serviceUpdated, rollback: () => rollbackService(previousTaskDefinitionArn) });
+    writeSanitizedEvidence(evidence, "cutover-failure.json", { phase: newArn ? "ecs-service-update" : "ecs-registration", ...failure, previousTaskDefinitionArn, newTaskDefinitionArn: newArn || null }); writeEvidenceChecksums(evidence); throw error;
   }
 }
 

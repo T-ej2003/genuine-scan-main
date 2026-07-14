@@ -1,7 +1,25 @@
 # MSCQR staging database-role credentials and ECS cutover runbook
 
-Date: 2026-07-13
+Date: 2026-07-14
 Scope: staging account `368992683803`, `eu-west-2`, database `mscqr_staging`, cluster `mscqr-staging-euw2-main`, service `mscqr-staging-backend-service-euw2`.
+
+## 2026-07-14 live cutover failure and parser fix
+
+The first operator-run cutover after PR #120 registered `mscqr-staging-backend:3` and the service became healthy, but runtime identity proof returned the sanitized failure `Runtime identity output was missing.` Automatic rollback restored `mscqr-staging-backend:2`; `/health/live` and `/health/ready` passed after rollback, `cutover-failure.json` recorded `rollbackResult = restored`, and RLS remained disabled. Revision `:3` is intentionally preserved for investigation and must not be deregistered by this workflow.
+
+The failure was in controller parsing, not a demonstrated database-authentication failure. The old controller regex-matched one compact JSON shape in ECS Exec `stdout`. ECS Exec and Session Manager can add banners, terminal control sequences, CRLF, framing on `stderr`, or line breaks around otherwise valid command output.
+
+The runtime command now emits exactly one marked payload using only `SELECT current_database(), current_user`:
+
+```text
+MSCQR_DB_IDENTITY_BEGIN
+{"database_name":"mscqr_staging","database_user":"mscqr_staging_app"}
+MSCQR_DB_IDENTITY_END
+```
+
+The controller checks both captured streams independently, removes terminal control framing, normalizes line endings, requires exactly one ordered delimiter pair, trims only the enclosed payload, and calls `JSON.parse`. The payload must be an object with exactly two string fields, `database_name` and `database_user`; their values must be exactly `mscqr_staging` and `mscqr_staging_app`. Duplicate or ambiguous marked payloads fail closed. Raw ECS Exec output, database URLs, credentials, secret values, and any SQL beyond the two identity functions are never written to normal logs or evidence.
+
+Runtime identity proof retains only these sanitized failure classifications: `command_failed`, `delimiters_missing`, `invalid_json`, `unexpected_database`, and `unexpected_user`. Every classification enters the same automatic previous-task-definition rollback path. A failed rollback records only `operator_recovery_required` as the rollback result and requires the documented operator recovery procedure.
 
 ## Launch decision
 
@@ -170,6 +188,7 @@ Provision approval does not authorize cutover. Broker invocation for a reachabil
 
 ```bash
 npm run test:staging-database-role-credentials
+npm run test:staging-database-role-runtime-identity-parser
 npm run check:staging-database-role-operator-iam
 npm run check:staging-database-role-cutover-iam
 node --check scripts/aws/staging-database-role-credentials.mjs
