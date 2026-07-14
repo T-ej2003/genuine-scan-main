@@ -8,6 +8,8 @@ const identity = JSON.stringify({ database_name: C.databaseName, database_user: 
 const block = (payload = identity, newline = "\n") => `${BEGIN}${newline}${payload}${newline}${END}${newline}`;
 
 export const runtimeIdentityParserFixtures = Object.freeze([
+  { name: "stdout-only", result: { status: 0, stdout: block(), stderr: "" }, expected: "ok" },
+  { name: "stderr-only", result: { status: 0, stdout: "", stderr: block() }, expected: "ok" },
   { name: "session-manager-banner", result: { status: 0, stdout: `The Session Manager plugin was installed successfully.\nStarting session.\n${block()}`, stderr: "" }, expected: "ok" },
   { name: "ansi-framing", result: { status: 0, stdout: `\u001b[32m${BEGIN}\u001b[0m\n${identity}\n\u001b[32m${END}\u001b[0m\n`, stderr: "" }, expected: "ok" },
   { name: "crlf", result: { status: 0, stdout: block(identity, "\r\n"), stderr: "" }, expected: "ok" },

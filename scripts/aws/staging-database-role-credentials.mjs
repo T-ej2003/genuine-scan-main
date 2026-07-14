@@ -6,8 +6,6 @@ import { spawnSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import {
   STAGING_DATABASE_ROLE_CONTEXT as C,
-  RUNTIME_IDENTITY_BEGIN,
-  RUNTIME_IDENTITY_END,
   assertApplyGate,
   assertActiveReviewedBackendDatabaseConsumer,
   assertConsistentStagingHttpUrls,
@@ -33,6 +31,7 @@ import {
   mutateTaskDefinitionDatabaseSecret,
   parseRuntimeIdentityProof,
   redactSensitiveText,
+  runtimeIdentityCommand,
   sanitizedTaskDefinitionDiff,
   securelyRemoveDirectory,
   taskDefinitionRegistrationPayload,
@@ -220,12 +219,11 @@ async function assertHostnameResolves(hostname) {
 }
 async function healthCheck(urls = reviewedUrls()) { await assertHostnameResolves(urls.hostname); const result = run("curl", ["--fail", "--silent", "--show-error", "--max-time", "20", urls.healthUrl], { allowFailure: true }); if (result.status) throw new Error("Staging health endpoint failed."); return { url: urls.healthUrl, passed: true }; }
 async function smokeChecks(urls = reviewedUrls()) { await assertHostnameResolves(urls.hostname); return urls.smokeUrls.map((url,index)=>{ const result=run("curl",["--fail","--silent","--show-error","--max-time","20",url],{allowFailure:true}); if(result.status) throw new Error(`Representative smoke ${index+1} failed.`); return {url,passed:true}; }); }
-function runtimeIdentity() {
+function runtimeIdentity(expectedUser = C.roles.app) {
   const tasks = awsJson(["ecs", "list-tasks", "--cluster", C.cluster, "--service-name", C.service, "--desired-status", "RUNNING"]).taskArns || [];
   if (tasks.length !== 1) throw new Error("Expected one stable backend task for identity proof.");
-  const script = `const{PrismaClient}=require("@prisma/client");const p=new PrismaClient();p.$queryRawUnsafe("SELECT current_database() AS database_name,current_user AS database_user").then(r=>process.stdout.write("${RUNTIME_IDENTITY_BEGIN}\\n"+JSON.stringify(r[0])+"\\n${RUNTIME_IDENTITY_END}\\n")).finally(()=>p.$disconnect())`;
-  const result = run("aws", ["ecs", "execute-command", "--cluster", C.cluster, "--task", tasks[0], "--container", C.backendContainer, "--interactive", "--command", `node -e '${script}'`, "--region", C.region], { allowFailure: true });
-  return parseRuntimeIdentityProof(result);
+  const result = run("aws", ["ecs", "execute-command", "--cluster", C.cluster, "--task", tasks[0], "--container", C.backendContainer, "--interactive", "--command", runtimeIdentityCommand(), "--region", C.region], { allowFailure: true });
+  return parseRuntimeIdentityProof(result, { expectedUser });
 }
 async function rollbackService(previousArn, urls = reviewedUrls()) { awsJson(["ecs", "update-service", "--cluster", C.cluster, "--service", C.service, "--task-definition", previousArn]); run("aws", ["ecs", "wait", "services-stable", "--cluster", C.cluster, "--services", C.service, "--region", C.region]); await healthCheck(urls); }
 function verifiedReceipt(base) {
@@ -259,6 +257,8 @@ async function cutover() {
   const urls = reviewedUrls();
   const preflightHealth = await healthCheck(urls);
   const preflightSmokes = await smokeChecks(urls);
+  assertServiceStable(base.service, base.taskArn);
+  const runtimeIdentityCapability = runtimeIdentity(C.runtimeAdminRole);
   const previousTaskDefinitionArn = base.taskArn;
   const preservedAdminSecretId = base.adminSecretId;
   const app = awsJson(["secretsmanager", "describe-secret", "--secret-id", C.secretNames.app]);
@@ -277,6 +277,7 @@ async function cutover() {
     smokeUrls: urls.smokeUrls,
     preflightHealth,
     preflightSmokes,
+    runtimeIdentityCapability: { passed: true, command: runtimeIdentityCommand(), identity: runtimeIdentityCapability },
     verificationReceipt: { verifiedAt: receipt.verifiedAt, executorTaskArn: receipt.executorTaskArn, permissionMatrixPassed: true },
     cutoverIdentityPermissionsSufficient: true,
     applyOnlyPermissionsDynamicallyProven: false,

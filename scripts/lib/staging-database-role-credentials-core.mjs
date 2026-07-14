@@ -43,6 +43,7 @@ export const REVIEWED_RLS_READ_TABLES = Object.freeze([
 
 export const RUNTIME_IDENTITY_BEGIN = "MSCQR_DB_IDENTITY_BEGIN";
 export const RUNTIME_IDENTITY_END = "MSCQR_DB_IDENTITY_END";
+export const RUNTIME_IDENTITY_SCRIPT_PATH = "/app/scripts/runtimeDatabaseIdentity.js";
 export const RUNTIME_IDENTITY_FAILURE_CLASSIFICATIONS = Object.freeze([
   "command_failed",
   "delimiters_missing",
@@ -611,12 +612,22 @@ export function assertServiceStable(service, expectedTaskDefinitionArn = "") {
   return true;
 }
 
-export function assertRuntimeIdentity(identity) {
-  if (identity?.databaseName !== STAGING_DATABASE_ROLE_CONTEXT.databaseName) {
+export function runtimeIdentityCommand() {
+  return `node ${RUNTIME_IDENTITY_SCRIPT_PATH}`;
+}
+
+export function assertRuntimeIdentity(identity, {
+  expectedDatabase = STAGING_DATABASE_ROLE_CONTEXT.databaseName,
+  expectedUser = STAGING_DATABASE_ROLE_CONTEXT.roles.app,
+} = {}) {
+  if (identity?.databaseName !== expectedDatabase) {
     throw new StagingDatabaseRoleSafetyError("Runtime database identity did not report the expected staging database.", "unexpected_database");
   }
-  if (identity?.databaseUser !== STAGING_DATABASE_ROLE_CONTEXT.roles.app) {
-    throw new StagingDatabaseRoleSafetyError("Runtime database identity is not the staging app role.", "unexpected_user");
+  if (identity?.databaseUser !== expectedUser) {
+    const message = expectedUser === STAGING_DATABASE_ROLE_CONTEXT.roles.app
+      ? "Runtime database identity is not the staging app role."
+      : "Runtime database identity did not report the expected staging role.";
+    throw new StagingDatabaseRoleSafetyError(message, "unexpected_user");
   }
   return true;
 }
@@ -653,7 +664,7 @@ function delimitedRuntimeIdentityPayload(value) {
   return lines.slice(begins[0] + 1, ends[0]).join("\n").trim();
 }
 
-export function parseRuntimeIdentityProof(result) {
+export function parseRuntimeIdentityProof(result, expectedIdentity = {}) {
   if (result?.status !== 0) throw runtimeIdentityFailure("command_failed");
   const payloads = [result?.stdout, result?.stderr]
     .map(delimitedRuntimeIdentityPayload)
@@ -669,7 +680,7 @@ export function parseRuntimeIdentityProof(result) {
     throw runtimeIdentityFailure("invalid_json");
   }
   const identity = { databaseName: parsed.database_name, databaseUser: parsed.database_user };
-  assertRuntimeIdentity(identity);
+  assertRuntimeIdentity(identity, expectedIdentity);
   return identity;
 }
 
