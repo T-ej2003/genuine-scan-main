@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import process from "node:process";
 import test from "node:test";
 import {
   RUNTIME_IDENTITY_FAILURE_CLASSIFICATIONS,
@@ -11,7 +13,7 @@ import { runtimeIdentityParserFixtures } from "../fixtures/staging-ecs-runtime-i
 for (const fixture of runtimeIdentityParserFixtures) {
   test(`runtime identity parser handles ${fixture.name}`, () => {
     if (fixture.expected === "ok") {
-      assert.deepEqual(parseRuntimeIdentityProof(fixture.result), { databaseName: "mscqr_staging", databaseUser: "mscqr_staging_app" });
+      assert.deepEqual(parseRuntimeIdentityProof(fixture.result, fixture.expectedIdentity), fixture.expectedResult || { databaseName: "mscqr_staging", databaseUser: "mscqr_staging_app" });
       return;
     }
     assert.throws(() => parseRuntimeIdentityProof(fixture.result), (error) => {
@@ -24,15 +26,38 @@ for (const fixture of runtimeIdentityParserFixtures) {
 test("runtime identity parser rejects duplicate delimited payloads as ambiguous", () => {
   const valid = runtimeIdentityParserFixtures.find(({ name }) => name === "crlf").result.stdout;
   assert.throws(() => parseRuntimeIdentityProof({ status: 0, stdout: valid, stderr: valid }), (error) => error.code === "delimiters_missing");
+  assert.throws(() => parseRuntimeIdentityProof({ status: 0, stdout: `${valid}${valid}`, stderr: "" }), (error) => error.code === "delimiters_missing");
 });
 
-test("cutover delegates direct-script output parsing without logging raw streams", () => {
+for (const stream of ["stdout", "stderr"]) test(`PTY transport captures ${stream} delimiters split across terminal chunks`, () => {
+  const result = spawnSync("python3", [
+    "scripts/aws/capture-pty-command.py",
+    process.execPath,
+    "scripts/fixtures/staging-ecs-runtime-identity-chunked-emitter.mjs",
+    stream,
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 0);
+  assert.deepEqual(parseRuntimeIdentityProof(result), { databaseName: "mscqr_staging", databaseUser: "mscqr_staging_app" });
+});
+
+test("cutover captures direct-script PTY output without logging raw streams", () => {
   const source = fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs", "utf8");
   assert.match(source, /"--command", runtimeIdentityCommand\(\)/);
+  assert.match(source, /PTY_CAPTURE, "aws", "ecs", "execute-command"/);
   assert.match(source, /parseRuntimeIdentityProof\(result/);
   assert.match(source, /compensateEcsCutoverFailure\(/);
   assert.doesNotMatch(source, /node\s+-e|SELECT current_database/);
   assert.doesNotMatch(source, /result\.stdout\.match|console\.(?:log|error)\(result\.(?:stdout|stderr)/);
+});
+
+test("admin proof remains before every cutover mutation and app proof failure remains compensating", () => {
+  const source = fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs", "utf8");
+  const adminProof = source.indexOf("runtimeIdentity(C.runtimeAdminRole)");
+  const registration = source.indexOf('"register-task-definition"');
+  const serviceUpdate = source.indexOf('"update-service"', registration);
+  const appProof = source.indexOf("runtimeIdentity()", serviceUpdate);
+  const compensation = source.indexOf("compensateEcsCutoverFailure", appProof);
+  assert(adminProof > 0 && registration > adminProof && serviceUpdate > registration && appProof > serviceUpdate && compensation > appProof);
 });
 
 for (const classification of RUNTIME_IDENTITY_FAILURE_CLASSIFICATIONS) {

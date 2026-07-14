@@ -3,6 +3,39 @@
 Date: 2026-07-14
 Scope: staging account `368992683803`, `eu-west-2`, database `mscqr_staging`, cluster `mscqr-staging-euw2-main`, service `mscqr-staging-backend-service-euw2`.
 
+## 2026-07-14 ECS Exec PTY evidence transport fix
+
+The remaining blocker was reproduced on the active `mscqr-staging-backend:5` task definition and backend image digest `sha256:e56d40ed0267a28785c6e7554e7613daf5574be451e01ffcf23ed71488c65037`. A manual interactive ECS Exec session visibly returned the exact admin identity block, while the controller returned `delimiters_missing`. The admin `DATABASE_URL` remains active, every `MSCQR_STAGING_RLS_*` flag remains `false`, and no cutover mutation occurred.
+
+Root cause: `aws ecs execute-command --interactive` and the Session Manager plugin exchange the remote stream through a terminal session. `spawnSync` pipes are not a pseudo-terminal, so visible session bytes were not reliably present in `result.stdout` or `result.stderr`. The strict parser was correct; its transport was not.
+
+The controller now launches the unchanged AWS CLI argument vector through `scripts/aws/capture-pty-command.py`. This standard-library macOS/Linux wrapper allocates a real PTY without a shell, forwards no command text through a quoting layer, and returns the merged terminal byte stream only to the controller's in-memory capture. The controller never prints or persists that stream. The existing parser still strips only terminal control framing, requires exactly one ordered marked block, requires the exact two-field JSON object, and validates the exact expected database and role. Duplicate/missing delimiters, malformed JSON, wrong database, wrong role, empty output, nonzero process exit, and Session Manager handshake/KMS failure all fail closed. Handshake/KMS failure has the distinct sanitized code `session_handshake_failed`.
+
+Pre-mutation proof still requires `mscqr_staging` / `mscqr_staging_admin` from the active task using exactly:
+
+```text
+node /app/scripts/runtimeDatabaseIdentity.js
+```
+
+Task registration and service update remain unreachable until that proof succeeds. After deployment, the same command must return `mscqr_staging` / `mscqr_staging_app`; any failure still invokes automatic rollback to the captured previous task definition, waits for service stability, and reruns health.
+
+### Exported temporary AWS credentials
+
+The controller supports an already-exported STS credential triplet: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`. If any member is present, all three are mandatory. For a complete triplet, child AWS CLI and Session Manager processes inherit the temporary credentials but have `AWS_PROFILE` and `AWS_DEFAULT_PROFILE` removed, preventing the plugin from re-assuming an MFA profile. Credential values are never printed. Profile-only execution remains supported when no exported credential field is present.
+
+Before a dry-run, validate presence without displaying values:
+
+```bash
+test -n "${AWS_ACCESS_KEY_ID:-}" \
+  && test -n "${AWS_SECRET_ACCESS_KEY:-}" \
+  && test -n "${AWS_SESSION_TOKEN:-}"
+export AWS_REGION='eu-west-2'
+command -v python3
+aws sts get-caller-identity --output json
+```
+
+The returned ARN must be the exact assumed `mscqr-staging-database-role-cutover` role before running the cutover controller. Do not paste credential values into arguments, files, logs, or evidence.
+
 ## 2026-07-14 live cutover failure and parser fix
 
 The first operator-run cutover after PR #120 registered `mscqr-staging-backend:3` and the service became healthy, but runtime identity proof returned the sanitized failure `Runtime identity output was missing.` Automatic rollback restored `mscqr-staging-backend:2`; `/health/live` and `/health/ready` passed after rollback, `cutover-failure.json` recorded `rollbackResult = restored`, and RLS remained disabled. Revision `:3` is intentionally preserved for investigation and must not be deregistered by this workflow.
@@ -17,9 +50,9 @@ MSCQR_DB_IDENTITY_BEGIN
 MSCQR_DB_IDENTITY_END
 ```
 
-The controller checks both captured streams independently, removes terminal control framing, normalizes line endings, requires exactly one ordered delimiter pair, trims only the enclosed payload, and calls `JSON.parse`. The payload must be an object with exactly two string fields, `database_name` and `database_user`; their values must be exactly `mscqr_staging` and `mscqr_staging_app`. Duplicate or ambiguous marked payloads fail closed. Raw ECS Exec output, database URLs, credentials, secret values, and any SQL beyond the two identity functions are never written to normal logs or evidence.
+The strict parser checks the captured result streams independently, removes terminal control framing, normalizes line endings, requires exactly one ordered delimiter pair, trims only the enclosed payload, and calls `JSON.parse`. The payload must be an object with exactly two string fields, `database_name` and `database_user`; their values must be exactly `mscqr_staging` and `mscqr_staging_app`. Duplicate or ambiguous marked payloads fail closed. Raw ECS Exec output, database URLs, credentials, secret values, and any SQL beyond the two identity functions are never written to normal logs or evidence.
 
-Runtime identity proof retains only these sanitized failure classifications: `command_failed`, `delimiters_missing`, `invalid_json`, `unexpected_database`, and `unexpected_user`. Every classification enters the same automatic previous-task-definition rollback path. A failed rollback records only `operator_recovery_required` as the rollback result and requires the documented operator recovery procedure.
+Runtime identity proof retains only these sanitized failure classifications: `command_failed`, `session_handshake_failed`, `delimiters_missing`, `invalid_json`, `unexpected_database`, and `unexpected_user`. Every classification enters the same automatic previous-task-definition rollback path. A failed rollback records only `operator_recovery_required` as the rollback result and requires the documented operator recovery procedure.
 
 ## 2026-07-14 post-PR #121 transport failure and versioned probe
 
@@ -222,6 +255,7 @@ Provision approval does not authorize cutover. Broker invocation for a reachabil
 ```bash
 npm run test:staging-database-role-credentials
 npm run test:staging-database-role-runtime-identity-parser
+node --test scripts/tests/staging-database-role-runtime-identity.test.mjs scripts/tests/staging-database-role-runtime-identity-script.test.mjs
 npm run check:staging-database-role-operator-iam
 npm run check:staging-database-role-cutover-iam
 node --check scripts/aws/staging-database-role-credentials.mjs

@@ -1,0 +1,7 @@
+The Session Manager plugin was installed successfully. Use the AWS CLI to start a session.
+
+Starting session with SessionId: reviewed-manual-transcript
+MSCQR_DB_IDENTITY_BEGIN
+{"database_name":"mscqr_staging","database_user":"mscqr_staging_admin"}
+MSCQR_DB_IDENTITY_END
+Exiting session with sessionId: reviewed-manual-transcript.
