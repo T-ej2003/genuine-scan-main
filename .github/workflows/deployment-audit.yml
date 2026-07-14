@@ -82,7 +82,23 @@ jobs:
           build-mode: none
 
       - name: Analyze with CodeQL
+        id: codeql-analyze
         uses: github/codeql-action/analyze@v4
+        with:
+          output: audit-artifacts/codeql
+          # Private repositories owned by personal accounts cannot enable GitHub
+          # Code Security, but CodeQL analysis and local SARIF remain useful.
+          upload: ${{ github.event.repository.private && github.event.repository.owner.type == 'User' && 'never' || 'always' }}
+
+      - name: Summarize unavailable CodeQL upload
+        if: ${{ always() && steps.codeql-analyze.outcome == 'success' && github.event.repository.private && github.event.repository.owner.type == 'User' }}
+        run: |
+          {
+            echo '### CodeQL SARIF upload'
+            echo
+            echo 'CodeQL analysis completed and its SARIF is included in the deployment audit artifact.'
+            echo 'GitHub SARIF upload was skipped because code scanning is unavailable for this private personal-account repository.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install OSV Scanner
         run: |

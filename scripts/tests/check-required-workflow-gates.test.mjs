@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 
 import {
@@ -120,4 +121,15 @@ test("manual workflow_dispatch run matching the target SHA passes", () => {
   );
 
   assert.equal(selected.id, 2);
+});
+
+test("deployment audit keeps scanners blocking while skipping unsupported private-user CodeQL upload", () => {
+  const workflow = fs.readFileSync(".github/workflows/deployment-audit.yml", "utf8");
+  assert.match(workflow, /output: audit-artifacts\/codeql/);
+  assert.match(workflow, /repository\.private && github\.event\.repository\.owner\.type == 'User' && 'never' \|\| 'always'/);
+  assert.match(workflow, /SARIF upload was skipped because code scanning is unavailable for this private personal-account repository/);
+  assert.doesNotMatch(workflow, /continue-on-error/);
+  for (const requiredStep of ["Run OSV Scanner", "Gitleaks secrets scan", "Trivy IaC scan", "Trivy container scan", "Generate SBOM"]) {
+    assert.match(workflow, new RegExp(`- name: ${requiredStep}`));
+  }
 });
