@@ -1,0 +1,21 @@
+#!/usr/bin/env node
+import { manifests } from "./lib/program-inventory.mjs";
+
+const { decisions, workflows, tables } = manifests();
+const priority = [
+  ["architecture-decision", () => decisions.decisions.find((decision) => decision.blockingStatus === "blocking" && decision.status !== "resolved")],
+  ["runtime-identity", () => decisions.decisions.find((decision) => /identity|role/i.test(`${decision.id} ${decision.question}`) && decision.status !== "resolved")],
+  ["context-boundary", () => workflows.workflows.find((workflow) => workflow.authorizationBoundaryType === "authenticated-context" && workflow.implementationStatus !== "complete")],
+  ["pre-auth-boundary", () => workflows.workflows.find((workflow) => workflow.authorizationBoundaryType === "pre-auth-security-function" && workflow.implementationStatus !== "complete")],
+  ["authenticated-workflow", () => workflows.workflows.find((workflow) => workflow.authenticationStage === "authenticated" && workflow.implementationStatus !== "complete")],
+  ["worker-system-workflow", () => workflows.workflows.find((workflow) => ["worker", "scheduled", "startup", "cli"].includes(workflow.executionSurface) && workflow.implementationStatus !== "complete")],
+  ["policy-generation", () => tables.tables.find((table) => table.policyStatus !== "complete")],
+  ["disposable-certification", () => tables.tables.find((table) => table.verificationStatus !== "certified")],
+];
+for (const [phase, find] of priority) {
+  const item = find();
+  if (!item) continue;
+  const isDecision = "question" in item;
+  console.log(JSON.stringify({ phase, id: item.id, objective: isDecision ? item.question : `Complete ${item.name || item.prismaModel}`, canonicalFiles: isDecision ? ["documents/security/rls-program/decisions.json", "documents/security/rls-program/ARCHITECTURE.md"] : item.canonicalSourceFiles || ["documents/security/rls-program/tables.json"], architectureSections: isDecision ? ["Final database role model", "Canonical transaction context"] : ["Completion definition"], requiredTests: isDecision ? [] : item.requiredUnitTests || ["scripts/tests/full-database-rls-program.test.mjs"] }));
+  break;
+}
