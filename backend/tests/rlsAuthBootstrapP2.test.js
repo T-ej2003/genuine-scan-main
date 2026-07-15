@@ -85,6 +85,21 @@ const messageOf = async (promise) => {
   assert.fail("Expected rejection");
 };
 
+const withRlsContext = (client, context, callback) => client.$transaction(async (tx) => {
+  const values = {
+    "app.user_id": context.userId || "",
+    "app.role": context.role,
+    "app.licensee_id": context.licenseeId || "",
+    "app.manufacturer_id": context.manufacturerId || "",
+    "app.organization_id": context.organizationId || "",
+    "app.is_platform_admin": context.isPlatformAdmin ? "true" : "false",
+  };
+  for (const [setting, value] of Object.entries(values)) {
+    await tx.$executeRaw`SELECT set_config(${setting}, ${value}, true)`;
+  }
+  return callback(tx);
+});
+
 const toBase64Url = (value) => Buffer.from(value).toString("base64url");
 const mergeResponseCookies = (jar, headers) => {
   const values = typeof headers.getSetCookie === "function"
@@ -372,6 +387,119 @@ const main = async () => {
       return tx.user.findMany({ where: { id: ids.manufacturerB }, select: { id: true } });
     });
     assert.deepEqual(foreignRows, [], "normal authenticated tenant isolation must remain enforced");
+
+    // Shared-table FORCE RLS compatibility characterizations. These assertions
+    // describe the reviewed policy exactly; they must not be relaxed to make an
+    // application path pass.
+    const manufacturerContext = {
+      userId: ids.manufacturerA,
+      role: "manufacturer",
+      licenseeId: ids.licenseeA,
+      manufacturerId: ids.manufacturerA,
+      organizationId: ids.orgA,
+      isPlatformAdmin: false,
+    };
+    const selfUser = await withRlsContext(app, manufacturerContext, (tx) =>
+      tx.user.findUnique({ where: { id: ids.manufacturerA }, select: { id: true } })
+    );
+    assert.deepEqual(selfUser, { id: ids.manufacturerA }, "self User SELECT is context-repairable");
+    const selfUpdate = await withRlsContext(app, manufacturerContext, (tx) =>
+      tx.user.updateMany({ where: { id: ids.manufacturerA }, data: { name: "Auth Maker A" } })
+    );
+    assert.equal(selfUpdate.count, 1, "self User UPDATE is allowed by the reviewed actor-self policy");
+    const crossUpdate = await withRlsContext(app, manufacturerContext, (tx) =>
+      tx.user.updateMany({ where: { id: ids.manufacturerB }, data: { failedLoginAttempts: 0 } })
+    );
+    assert.equal(crossUpdate.count, 0, "cross-user UPDATE requires explicitly reviewed policy expansion");
+    await assert.rejects(
+      withRlsContext(app, manufacturerContext, (tx) => tx.user.create({ data: {
+        id: "10000000-0000-4202-8300-000000000001",
+        email: "rls-auth-created@mscqr.test",
+        name: "Denied creation",
+        role: UserRole.MANUFACTURER,
+        orgId: ids.orgA,
+        licenseeId: ids.licenseeA,
+      } })),
+      /row-level security/i,
+      "User INSERT remains blocked without a reviewed INSERT policy"
+    );
+    const deleteUser = await withRlsContext(app, manufacturerContext, (tx) =>
+      tx.user.deleteMany({ where: { id: ids.manufacturerA } })
+    );
+    assert.equal(deleteUser.count, 0, "User DELETE remains blocked without a reviewed DELETE policy");
+
+    const licenseeAdminContext = {
+      userId: ids.manufacturerA,
+      role: "licensee_admin",
+      licenseeId: ids.licenseeA,
+      organizationId: ids.orgA,
+      isPlatformAdmin: false,
+    };
+    const tenantUsers = await withRlsContext(app, licenseeAdminContext, (tx) =>
+      tx.user.findMany({ select: { id: true }, orderBy: { id: "asc" } })
+    );
+    assert.deepEqual(tenantUsers, [{ id: ids.manufacturerA }], "licensee-admin listing is tenant-scoped by context");
+    await assert.rejects(
+      withRlsContext(app, licenseeAdminContext, (tx) => tx.user.create({ data: {
+        id: "10000000-0000-4202-8300-000000000002",
+        email: "rls-auth-invite@mscqr.test",
+        name: "Denied invite",
+        role: UserRole.MANUFACTURER,
+        orgId: ids.orgA,
+        licenseeId: ids.licenseeA,
+      } })),
+      /row-level security/i,
+      "licensee-admin creation/invitation requires a reviewed INSERT policy"
+    );
+
+    const platformUsers = await withRlsContext(app, {
+      userId: ids.manufacturerA,
+      role: "platform_super_admin",
+      organizationId: ids.orgA,
+      isPlatformAdmin: true,
+    }, (tx) => tx.user.findMany({ select: { id: true } }));
+    assert.equal(platformUsers.length, 4, "the reviewed SELECT policy permits platform-wide listing when trusted context says platform admin");
+
+    const loginBoundaryLookup = await app.$queryRaw`SELECT "id" FROM app_auth.lookup_password_user(${emailA})`;
+    assert.deepEqual(loginBoundaryLookup, [{ id: ids.manufacturerA }], "the reviewed password-login boundary remains available without actor context");
+    const passwordResetLookup = await app.user.findFirst({ where: { email: emailA }, select: { id: true } });
+    assert.equal(passwordResetLookup, null, "contextless password-reset lookup needs its own narrow function boundary");
+    const resetCompletion = await app.user.updateMany({
+      where: { id: ids.manufacturerA },
+      data: { passwordHash: "denied-password-reset-characterization" },
+    });
+    assert.equal(resetCompletion.count, 0, "contextless password-reset completion is denied and needs its own narrow boundary");
+    const mfaSelfService = await withRlsContext(app, manufacturerContext, (tx) =>
+      tx.user.findUnique({ where: { id: ids.manufacturerA }, select: { id: true, passwordHash: true } })
+    );
+    assert.equal(mfaSelfService.id, ids.manufacturerA, "MFA self-service User read is compatible when actor context is transaction-local");
+    const crossUserAdminUpdate = await withRlsContext(app, licenseeAdminContext, (tx) =>
+      tx.user.updateMany({ where: { id: ids.manufacturerB }, data: { failedLoginAttempts: 0 } })
+    );
+    assert.equal(crossUserAdminUpdate.count, 0, "cross-user administrator UPDATE needs reviewed semantics");
+    const breakGlassMfaTarget = await app.user.findFirst({ where: { email: emailA }, select: { id: true } });
+    assert.equal(breakGlassMfaTarget, null, "contextless break-glass MFA target lookup needs a restricted system authorization design");
+
+    const sharedReads = await withRlsContext(app, manufacturerContext, async (tx) => ({
+      organizations: await tx.organization.findMany({ select: { id: true } }),
+      licensees: await tx.licensee.findMany({ select: { id: true } }),
+      links: await tx.manufacturerLicenseeLink.findMany({ select: { manufacturerId: true, licenseeId: true } }),
+    }));
+    assert.deepEqual(sharedReads.organizations, [{ id: ids.orgA }], "Organization SELECT is context-repairable");
+    assert.deepEqual(sharedReads.licensees, [{ id: ids.licenseeA }], "Licensee SELECT is context-repairable");
+    assert.deepEqual(sharedReads.links, [{ manufacturerId: ids.manufacturerA, licenseeId: ids.licenseeA }], "link SELECT uses the reviewed non-recursive predicate");
+    await assert.rejects(
+      withRlsContext(app, manufacturerContext, (tx) => tx.manufacturerLicenseeLink.create({
+        data: { manufacturerId: ids.manufacturerA, licenseeId: ids.licenseeB },
+      })),
+      /row-level security/i,
+      "manufacturer-link creation requires a reviewed INSERT policy"
+    );
+    const removeLink = await withRlsContext(app, manufacturerContext, (tx) =>
+      tx.manufacturerLicenseeLink.deleteMany({ where: { manufacturerId: ids.manufacturerA, licenseeId: ids.licenseeA } })
+    );
+    assert.equal(removeLink.count, 0, "manufacturer-link removal requires a reviewed DELETE policy");
+    assert.equal(await app.user.count(), 0, "a contextless background User read fails closed and needs system-role redesign");
 
     process.env.DATABASE_URL = runtimeUrl;
     process.env.RLS_READ_DATABASE_URL = buildRoleUrl(dbInfo.databaseUrl, rlsReadRole);
