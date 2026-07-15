@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { boundaries, categories, commands, manifests, parseSchema, scanProductionAccess, sharedApplyIsBlocked, surfaces } from "./lib/program-inventory.mjs";
+import { boundaries, categories, commands, manifests, parseSchema, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateRuntimeIdentities } from "./lib/program-inventory.mjs";
 
 const { tables, workflows, identities, decisions } = manifests();
 assert(tables && workflows && identities && decisions, "all four manifests must exist");
@@ -37,9 +37,6 @@ for (const workflow of workflows.workflows) {
 }
 const mappedAccessIds = new Set(workflows.workflows.flatMap((workflow) => workflow.supportingEvidence.map((evidence) => evidence.accessId)));
 for (const access of scanProductionAccess().accesses) assert(mappedAccessIds.has(access.id), `production access ${access.id} is not mapped to a workflow`);
-for (const identity of identities.identities) {
-  assert.equal(identity.mayUseBypassRls, false, `${identity.id} requests BYPASSRLS`);
-  assert.equal(identity.superuser, false, `${identity.id} requests superuser`);
-}
+validateRuntimeIdentities(identities, decisions);
 assert(sharedApplyIsBlocked(), "existing shared-table apply must remain blocked before BEGIN");
 console.log(JSON.stringify({ valid: true, tables: tables.tables.length, workflows: workflows.workflows.length, productionAccessSites: mappedAccessIds.size }));

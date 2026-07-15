@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildTableManifest, buildWorkflowManifest, decisionManifestPath, identityManifestPath, manifests, parseSchema, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { buildTableManifest, buildWorkflowManifest, decisionManifestPath, identityManifestPath, manifests, parseSchema, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, validateRuntimeIdentities, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 
 const snapshot = () => [tableManifestPath, workflowManifestPath, decisionManifestPath].map((file) => fs.readFileSync(file, "utf8"));
 
@@ -56,7 +56,7 @@ test("unregistered or legacy classifications require import and registration evi
 });
 
 test("security-sensitive tables and runtime identities fail closed", () => {
-  const { tables, identities } = manifests();
+  const { tables, identities, decisions } = manifests();
   for (const table of tables.tables.filter((item) => item.category === "security-sensitive")) {
     assert(table.unresolvedDecisions.length || table.policyStatus === "special-boundary-designed");
     assert.notEqual(table.policyStatus, "ordinary-tenant-access");
@@ -65,6 +65,26 @@ test("security-sensitive tables and runtime identities fail closed", () => {
     assert.equal(identity.mayUseBypassRls, false);
     assert.equal(identity.superuser, false);
   }
+  validateRuntimeIdentities(identities, decisions);
+});
+
+test("runtime-role validator rejects unsafe ownership, privilege, credential, and break-glass designs", () => {
+  const { identities, decisions } = manifests();
+  const rejects = (id, mutate, pattern) => {
+    const candidate = structuredClone(identities);
+    mutate(candidate.identities.find((identity) => identity.id === id), candidate.identities);
+    assert.throws(() => validateRuntimeIdentities(candidate, decisions), pattern);
+  };
+  rejects("identity-authenticated-app", (identity) => { identity.superuser = true; }, /superuser/);
+  rejects("identity-worker", (identity) => { identity.mayUseBypassRls = true; }, /BYPASSRLS/);
+  rejects("identity-authenticated-app", (identity) => { identity.mayOwnProtectedTables = true; }, /may own protected tables/);
+  rejects("identity-table-owner", (identity) => { identity.loginExpectation = "LOGIN"; }, /owner role must be NOLOGIN|runtime identity may own/);
+  rejects("identity-pre-auth-app", (identity, candidate) => { identity.credentialSource = candidate.find((item) => item.id === "identity-authenticated-app").credentialSource; }, /must not share credential sources/);
+  rejects("identity-pre-auth-app", (identity) => { identity.allowedCommands.push("SELECT"); }, /pre-auth may only/);
+  rejects("identity-restricted-read", (identity) => { identity.allowedCommands.push("UPDATE"); }, /restricted read/);
+  rejects("identity-migration", (identity) => { identity.maySetRole = true; }, /SET ROLE/);
+  rejects("identity-production-break-glass", (identity) => { identity.standingCredential = true; }, /standing credential/);
+  rejects("identity-worker", (identity) => { delete identity.environmentRoleNames.production; }, /patterns are incomplete|production role name/);
 });
 
 test("activation remains manual and the shared-table apply remains blocked", () => {

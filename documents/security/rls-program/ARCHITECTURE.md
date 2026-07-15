@@ -8,12 +8,24 @@ This directory is the machine-readable programme authority for taking every Pris
 
 ## Final database role model
 
-- Protected tables are owned by a dedicated `NOLOGIN`, `NOSUPERUSER`, `NOBYPASSRLS` owner that runtime roles cannot reach with membership or `SET ROLE`.
-- LOGIN roles are separated by authenticated application, restricted read, worker/job family, migration, staging operator, and ephemeral production break-glass purpose.
-- Named authentication functions use a dedicated `NOLOGIN` owner with only exact column grants. Runtime roles never own those functions.
-- No runtime or operator identity uses superuser or `BYPASSRLS`. Migration and operator authority does not imply application authority.
+`decision-runtime-role-split` is resolved. Development uses `mscqr_dev_*`, staging uses `mscqr_staging_*`, and production uses `mscqr_prod_*`. Every applicable LOGIN identity has a distinct credential source per environment. Protected tables are owned by `*_owner`; approved authentication functions are owned by `*_auth_owner`. Both owners are `NOLOGIN`, `NOSUPERUSER`, and `NOBYPASSRLS`, and no runtime, migration, or operator role has membership in or a `SET ROLE` path to either owner.
 
-Exact environment role names and credential splits remain blocked by `decision-runtime-role-split`, `decision-object-ownership-chain`, and `decision-operator-administration`.
+| Logical identity | Environment role-name pattern | Login | Permitted schemas | Command classes | Ownership | SET ROLE | CREATE | SECURITY DEFINER execution | Credential source | Rotation expectation |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Authenticated application | `mscqr_{dev,staging,prod}_app` | LOGIN | `public`, `app_rls` | CONNECT, USAGE, workflow-generated table commands, authenticated helpers | None | No | No | Approved authenticated helper signatures only | Dedicated app secret per environment | Managed rotation and immediate exposure rotation |
+| Restricted read | `mscqr_{dev,staging,prod}_rls_read` | LOGIN | `public`, `app_rls` | CONNECT, USAGE, approved SELECT, pure context helpers | None | No | No | Pure transaction-context helpers only | Dedicated read secret per environment | Managed independently from app/operator credentials |
+| Pre-authentication executor | `mscqr_{dev,staging,prod}_preauth` | LOGIN | `app_auth` only | CONNECT, USAGE, EXECUTE on exact signatures | None; no table grants | No | No | Exact named `app_auth` functions only | Dedicated pre-auth secret per environment | Managed independently; never shared with app/worker/migration |
+| Worker | `mscqr_{dev,staging,prod}_worker` | LOGIN | `public`, `app_rls` | CONNECT, USAGE, workflow-generated commands and worker helpers | None | No | No | Approved worker signatures only | Dedicated worker secret per environment | Managed independently from scheduled/app credentials |
+| Scheduled job | `mscqr_{dev,staging,prod}_scheduled` | LOGIN | `public`, `app_rls` | CONNECT, USAGE, schedule-generated commands and helpers | None | No | No | Approved scheduled signatures only | Dedicated scheduled secret per environment | Managed independently from worker/app credentials |
+| Migration | `mscqr_{dev,staging,prod}_migration` | LOGIN | Reviewed deployment schemas | CONNECT, USAGE, reviewed DDL, mandatory ownership transfer | No enduring protected-object ownership | No | Approved deployment only | None | Dedicated deployment secret per environment | Deployment-only retrieval and managed rotation |
+| Table owner | `mscqr_{dev,staging,prod}_owner` | NOLOGIN | `public` | Protected table/policy ownership | Protected tables and policies | No | No | None | None | Not applicable |
+| Authentication-function owner | `mscqr_{dev,staging,prod}_auth_owner` | NOLOGIN | `app_auth`, `pg_catalog` | Function/schema ownership and exact required column privileges | `app_auth` and approved functions only; no application tables | No | No | Owns functions; never executes as a runtime identity | None | Not applicable |
+| Operator administration | `mscqr_{dev,staging,prod}_operator` | Broker-controlled LOGIN | Approved schemas only | Broker command allowlist and temporary narrow grants | None | No | No | Approved operator signatures only | Ephemeral broker credential per environment | Automatic expiry and revocation after each operation |
+| Production break-glass | `mscqr_prod_breakglass_<incident>_<nonce>` or equivalent temporary grant | Ephemeral LOGIN only | Incident-approved only | Incident command allowlist only | None | No | No | Incident-approved exact signatures only | Broker-issued after dual approval and strong MFA; no standing credential | Hard expiry plus automatic revocation on completion or failure |
+
+The break-glass name is a creation pattern, not a standing reusable role. Issuance requires dual approval, strong MFA, an incident/ticket, explicit expiry, an exact command allowlist, an immutable audit transcript, and automatic revocation. Development and staging do not define a production break-glass identity; they use their broker-controlled operator roles.
+
+Migration may perform required DDL only through an explicitly approved deployment and ownership-transfer process. It must transfer protected tables and policies to `*_owner`, and approved `app_auth` objects to `*_auth_owner`, before the deployment is complete. Migration and operator authority never implies application authority. `decision-object-ownership-chain` and `decision-operator-administration` remain open for the exact transfer and broker implementation; they do not reopen the resolved identity split.
 
 ## Canonical transaction context
 

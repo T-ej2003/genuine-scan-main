@@ -425,10 +425,31 @@
         "Separate credentials per execution class",
         "One application credential with exact non-overlapping grants"
       ],
-      "recommendedOption": "Separate authenticated, restricted-read, and worker credentials; reuse the authenticated credential for pre-auth only if grant equivalence is proven.",
+      "recommendedOption": "Adopted: separate app, rls_read, preauth, worker, scheduled, migration, and operator credential sources in every applicable environment; use NOLOGIN owner and auth_owner roles; use no standing production break-glass credential.",
       "blockingStatus": "blocking",
       "owner": "Security architecture and platform engineering",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-07-15",
+      "resolution": {
+        "environmentPrefixes": {
+          "development": "mscqr_dev_*",
+          "staging": "mscqr_staging_*",
+          "production": "mscqr_prod_*"
+        },
+        "roleSuffixes": [
+          "app",
+          "rls_read",
+          "preauth",
+          "worker",
+          "scheduled",
+          "migration",
+          "owner",
+          "auth_owner",
+          "operator"
+        ],
+        "productionBreakGlass": "No standing reusable role or permanent credential; broker issues mscqr_prod_breakglass_<incident>_<nonce> or an equivalent temporary narrow grant after dual approval, strong MFA, ticket binding, expiry, command allowlisting, immutable audit, and automatic revocation.",
+        "authority": "documents/security/rls-program/runtime-identities.json schemaVersion 2 and the ARCHITECTURE.md runtime role matrix"
+      }
     },
     {
       "id": "decision-table-ownership-classification",

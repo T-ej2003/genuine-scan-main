@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
+import assert from "node:assert/strict";
 
 export const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
 export const programDir = path.join(repoRoot, "documents/security/rls-program");
@@ -330,6 +331,70 @@ export const buildWorkflowManifest = () => {
 };
 
 export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath) });
+export const validateRuntimeIdentities = (manifest, decisionManifest) => {
+  const identities = manifest.identities;
+  const byId = new Map(identities.map((identity) => [identity.id, identity]));
+  const suffixes = new Map([
+    ["identity-authenticated-app", "app"],
+    ["identity-restricted-read", "rls_read"],
+    ["identity-pre-auth-app", "preauth"],
+    ["identity-worker", "worker"],
+    ["identity-scheduled-job", "scheduled"],
+    ["identity-migration", "migration"],
+    ["identity-table-owner", "owner"],
+    ["identity-auth-function-owner", "auth_owner"],
+    ["identity-staging-operator-admin", "operator"],
+  ]);
+  assert.equal(identities.length, 10, "exactly ten logical runtime identities are required");
+  for (const [id, suffix] of suffixes) {
+    const identity = byId.get(id);
+    assert(identity, `${id} is missing`);
+    assert.equal(identity.environmentRoleNames?.development, `mscqr_dev_${suffix}`, `${id} development role name is invalid`);
+    assert.equal(identity.environmentRoleNames?.staging, `mscqr_staging_${suffix}`, `${id} staging role name is invalid`);
+    assert.equal(identity.environmentRoleNames?.production, `mscqr_prod_${suffix}`, `${id} production role name is invalid`);
+  }
+  for (const identity of identities) {
+    assert.equal(identity.superuser, false, `${identity.id} requests superuser`);
+    assert.equal(identity.mayUseBypassRls, false, `${identity.id} requests BYPASSRLS`);
+    assert.equal(identity.maySetRole, false, `${identity.id} may SET ROLE`);
+    assert(identity.credentialSource?.trim(), `${identity.id} credential source is missing`);
+    assert(identity.rotationExpectation?.trim(), `${identity.id} rotation expectation is missing`);
+    assert(identity.securityDefinerExecution?.trim(), `${identity.id} SECURITY DEFINER rule is missing`);
+    assert(identity.environmentRoleNames && ["development", "staging", "production"].every((environment) => identity.environmentRoleNames[environment]?.trim()), `${identity.id} environment role-name patterns are incomplete`);
+    if (identity.loginExpectation !== "NOLOGIN") assert.equal(identity.mayOwnProtectedTables, false, `${identity.id} runtime identity may own protected tables`);
+  }
+  for (const id of ["identity-table-owner", "identity-auth-function-owner"]) assert.equal(byId.get(id).loginExpectation, "NOLOGIN", `${id} owner role must be NOLOGIN`);
+  assert.equal(byId.get("identity-table-owner").mayOwnProtectedTables, true, "table owner must own protected tables");
+  assert.equal(byId.get("identity-auth-function-owner").mayOwnProtectedTables, false, "auth_owner must not own application tables");
+
+  const credentialIds = ["identity-authenticated-app", "identity-pre-auth-app", "identity-worker", "identity-migration"];
+  assert.equal(new Set(credentialIds.map((id) => byId.get(id).credentialSource)).size, credentialIds.length, "app, pre-auth, worker, and migration must not share credential sources");
+  assert.notEqual(byId.get("identity-worker").credentialSource, byId.get("identity-scheduled-job").credentialSource, "worker and scheduled credentials must remain distinct");
+
+  const preauth = byId.get("identity-pre-auth-app");
+  assert.equal(preauth.tablePrivilegeMode, "none", "pre-auth must have no direct table privileges");
+  assert.deepEqual([...preauth.allowedCommands].sort(), ["CONNECT", "EXECUTE", "USAGE"], "pre-auth may only CONNECT, use app_auth, and execute exact functions");
+  assert.deepEqual(preauth.allowedSchemas, ["app_auth"], "pre-auth may not receive unrestricted public schema access");
+  const restrictedRead = byId.get("identity-restricted-read");
+  assert(!restrictedRead.allowedCommands.some((command) => ["INSERT", "UPDATE", "DELETE", "UPSERT", "CREATE", "ALTER", "DROP"].includes(command)), "restricted read has write or DDL privileges");
+
+  const app = byId.get("identity-authenticated-app");
+  assert(!app.allowedSchemas.includes("app_auth"), "authenticated app must not receive unrestricted app_auth access");
+  assert.match(app.securityDefinerExecution, /authenticated helper signatures only/i, "authenticated app helper execution is too broad");
+
+  const breakGlass = byId.get("identity-production-break-glass");
+  assert(breakGlass, "production break-glass identity is missing");
+  assert.equal(breakGlass.environmentRoleNames.development, "not-applicable-production-only");
+  assert.equal(breakGlass.environmentRoleNames.staging, "not-applicable-production-only");
+  assert.match(breakGlass.environmentRoleNames.production, /^mscqr_prod_breakglass_<incident>_<nonce>$/, "production break-glass must use an ephemeral role-name pattern");
+  assert.equal(breakGlass.loginExpectation, "EPHEMERAL_LOGIN", "production break-glass must not be a standing LOGIN role");
+  assert.equal(breakGlass.standingCredential, false, "production break-glass must not have a standing credential");
+  assert.match(breakGlass.credentialSource, /ephemeral.*broker/i, "production break-glass must be broker-issued and ephemeral");
+  for (const requirement of ["dual approval", "strong MFA", "incident or ticket", "explicit expiry", "command allowlist", "immutable audit transcript", "automatic revocation"]) assert(breakGlass.approvalRequirements.includes(requirement), `production break-glass lacks ${requirement}`);
+
+  const decision = decisionManifest.decisions.find((item) => item.id === "decision-runtime-role-split");
+  assert.equal(decision?.status, "resolved", "decision-runtime-role-split may be resolved only after the complete role model validates");
+};
 export const sharedApplyIsBlocked = () => {
   const source = fs.readFileSync(path.join(repoRoot, blockedApplyPath), "utf8");
   return source.indexOf("RAISE EXCEPTION 'Shared batch RLS apply blocked") >= 0 && source.indexOf("RAISE EXCEPTION 'Shared batch RLS apply blocked") < source.indexOf("BEGIN;");
