@@ -1226,7 +1226,24 @@
       "recommendedOption": "Use exact named functions only for irreducible pre-auth commands; no generic query function or direct fallback.",
       "blockingStatus": "blocking",
       "owner": "Authentication security owner",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-07-16",
+      "resolution": {
+        "authority": "documents/security/rls-program/pre-auth-functions.json",
+        "selectedWorkflows": 11,
+        "exactFunctions": 7,
+        "movedBehindContext": 4,
+        "operatorOnly": 0,
+        "retired": 0,
+        "guarantees": [
+          "No dynamic SQL or generic query input",
+          "SET search_path=pg_catalog and fully qualified application objects",
+          "NOLOGIN auth owner; EXECUTE only for pre-auth runtime",
+          "PUBLIC, restricted-read and authenticated-app execution denied",
+          "No direct table grants to pre-auth runtime",
+          "Caller-set app.* variables are not authority"
+        ]
+      }
     },
     {
       "id": "decision-worker-identity-model",

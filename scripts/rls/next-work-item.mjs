@@ -20,7 +20,7 @@ const priority = [
   ["disposable-certification", () => tables.tables.find((table) => table.verificationStatus !== "certified")],
 ];
 const manifestSelectors = {
-  "decision-pre-auth-boundary": { commandRuleActor: "pre-auth-runtime", workflowBoundary: "pre-auth-security-function" },
+  "decision-pre-auth-boundary": { commandRuleActor: "pre-auth-runtime", workflowBoundary: "pre-auth-security-function", preAuthFunctionIds: "all" },
   "decision-worker-identity-model": { commandRuleBoundary: "restricted-worker", executionSurfaces: ["worker", "scheduled"] },
   "decision-object-ownership-chain": { physicalOwnerRole: "identity-table-owner" },
   "decision-operator-administration": { commandRuleActors: ["operator-admin", "break-glass"] },

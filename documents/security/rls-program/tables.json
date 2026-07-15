@@ -4409,6 +4409,7 @@
       ],
       "intendedDatabaseRoles": [
         "identity-auth-function-owner",
+        "identity-authenticated-app",
         "identity-pre-auth-app"
       ],
       "rlsApplicability": "force-rls-target",
@@ -4559,18 +4560,28 @@
         "identity-pre-auth-app"
       ],
       "allowedRuntimeWriters": [
+        "identity-authenticated-app",
         "identity-pre-auth-app"
       ],
       "allowedCommandsByIdentity": [
         {
           "identityId": "identity-auth-function-owner",
           "commands": [
-            "INSERT",
             "SELECT",
             "UPDATE"
           ],
           "conditions": [
             "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
+        {
+          "identityId": "identity-authenticated-app",
+          "commands": [
+            "INSERT",
+            "UPDATE"
+          ],
+          "conditions": [
+            "Reviewed canonical workflow with transaction-local actor/tenant context"
           ]
         },
         {
@@ -7893,7 +7904,7 @@
           ]
         }
       ],
-      "preAuthAccessMode": "denied; actor or system context required",
+      "preAuthAccessMode": "exact-named-security-definer-function-only",
       "workerAccessMode": "transaction-local tenant/actor scope or exact approved function; no global bypass",
       "appendOnly": false,
       "hardDeleteAllowed": "never",
@@ -8201,9 +8212,7 @@
         "UPDATE"
       ],
       "intendedDatabaseRoles": [
-        "identity-auth-function-owner",
-        "identity-authenticated-app",
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -8382,44 +8391,25 @@
       ],
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
       "allowedRuntimeWriters": [
-        "identity-authenticated-app",
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
       "allowedCommandsByIdentity": [
         {
-          "identityId": "identity-auth-function-owner",
+          "identityId": "identity-authenticated-app",
           "commands": [
             "INSERT",
             "SELECT",
             "UPDATE"
           ],
           "conditions": [
-            "Exact named function-required column privileges only; no generic query authority"
-          ]
-        },
-        {
-          "identityId": "identity-authenticated-app",
-          "commands": [
-            "UPDATE"
-          ],
-          "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
-          ]
-        },
-        {
-          "identityId": "identity-pre-auth-app",
-          "commands": [
-            "EXECUTE"
-          ],
-          "conditions": [
-            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         }
       ],
-      "preAuthAccessMode": "exact-named-security-definer-function-only",
+      "preAuthAccessMode": "denied; actor or system context required",
       "workerAccessMode": "transaction-local tenant/actor scope or exact approved function; no global bypass",
       "appendOnly": false,
       "hardDeleteAllowed": "never",

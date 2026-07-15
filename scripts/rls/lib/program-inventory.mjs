@@ -15,6 +15,8 @@ export const policyDependencyGraphPath = path.join(programDir, "policy-dependenc
 export const tableOwnershipReviewPath = path.join(programDir, "TABLE_OWNERSHIP_REVIEW.md");
 export const commandSemanticsPath = path.join(programDir, "command-semantics.json");
 export const commandSemanticsReviewPath = path.join(programDir, "COMMAND_SEMANTICS_REVIEW.md");
+export const preAuthFunctionsPath = path.join(programDir, "pre-auth-functions.json");
+export const preAuthBoundaryReviewPath = path.join(programDir, "PRE_AUTH_BOUNDARY_REVIEW.md");
 export const blockedApplyPath = "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql";
 
 export const commands = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "UPSERT", "COUNT", "RAW_SQL"]);
@@ -867,6 +869,189 @@ export const writeCommandSemanticsReview = (manifest, tableManifest, workflowMan
   fs.writeFileSync(commandSemanticsReviewPath, `${lines.join("\n")}\n`);
 };
 
+const PREAUTH_WORKFLOW_BOUNDARIES = Object.freeze({
+  "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user": ["password-login lookup", "exact-security-definer-function", "preauth-fn-lookup-password-user", "none"],
+  "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure": ["failed-login recording", "exact-security-definer-function", "preauth-fn-record-password-failure", "none"],
+  "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset": ["password-reset request", "exact-security-definer-function", "preauth-fn-request-password-reset", "none"],
+  "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token": ["password-reset completion", "exact-security-definer-function", "preauth-fn-consume-password-reset", "none"],
+  "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview": ["invitation/setup-link lookup", "exact-security-definer-function", "preauth-fn-lookup-invitation", "none"],
+  "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite": ["invitation/setup-link consumption", "exact-security-definer-function", "preauth-fn-consume-invitation", "none"],
+  "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification": ["email-verification consumption", "exact-security-definer-function", "preauth-fn-consume-email-verification", "none"],
+  "workflow-internal-backend-src-services-auth-auth-service-ts-login-with-password": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "password-verified"],
+  "workflow-internal-backend-src-services-auth-email-verification-service-ts-request-email-change-verification": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "step-up-verified"],
+  "workflow-internal-backend-src-services-auth-mfa-adapter-ts-create-stable-mfa-login-challenge": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "mfa-bootstrap"],
+  "workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "mfa-bootstrap"],
+});
+
+const arg = (name, type, nullable = false) => ({ name, type, nullable });
+const column = (name, type, nullable = false) => ({ name, type, nullable });
+const access = (tableId, command, columns) => ({ tableId, command, columns });
+const functionContract = (definition) => ({
+  sqlSchema: "app_auth",
+  fixedSearchPath: "pg_catalog",
+  securityDefiner: true,
+  dynamicSqlAllowed: false,
+  genericQueryInputsAllowed: false,
+  fullyQualifiedApplicationObjects: true,
+  callerOwnedFunctionsAllowed: false,
+  callerSetContextTrusted: false,
+  ownerIdentity: "identity-auth-function-owner",
+  executableRuntimeIdentities: ["identity-pre-auth-app"],
+  publicExecutionDenied: true,
+  restrictedReadExecutionDenied: true,
+  appExecutionStatus: "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
+  transactionRequirements: "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
+  implementationStatus: "contract-only; SQL not generated",
+  ...definition,
+});
+
+const buildPreAuthFunctionManifest = () => {
+  const functions = [
+    functionContract({
+      id: "preauth-fn-lookup-password-user", sqlFunctionName: "lookup_password_user", arguments: [arg("requested_email", "text")],
+      returnColumns: [column("id", "text"), column("email", "text"), column("passwordHash", "text", true), column("name", "text"), column("role", "text"), column("licenseeId", "text", true), column("orgId", "text", true), column("status", "text"), column("isActive", "boolean"), column("disabledAt", "timestamp without time zone", true), column("deletedAt", "timestamp without time zone", true), column("failedLoginAttempts", "integer"), column("lockedUntil", "timestamp without time zone", true), column("lastLoginAt", "timestamp without time zone", true), column("emailVerifiedAt", "timestamp without time zone", true)],
+      purpose: "Find exactly one password-login candidate without actor context and return only password-verification/account-state/context bootstrap fields.", supportingWorkflowIds: ["workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user"], tablesRead: ["table-user"], tablesWritten: [],
+      exactAllowedColumns: [access("table-user", "SELECT", ["id", "email", "passwordHash", "name", "role", "licenseeId", "orgId", "status", "isActive", "disabledAt", "deletedAt", "failedLoginAttempts", "lockedUntil", "lastLoginAt", "emailVerifiedAt"])],
+      inputNormalization: "Trim and lowercase exactly once; require 3..320 characters and a single local@domain.tld shape; reject non-normalized or malformed input.", duplicateStateBehavior: "Materialize at most two case-insensitive matches and return zero rows unless exactly one exists.", tokenBindingRequirements: "Not a token flow; requested email is the sole normalized lookup key and caller-set app.* variables are ignored.", expiryChecks: "not-applicable", expiryRequired: false, oneTimeConsumptionBehavior: "not-applicable", oneTimeToken: false, rowLockingRequirements: "None; read-only lookup.", replayProtection: "Read-only; endpoint rate limiting and generic credential errors prevent enumeration.", volatility: "STABLE", parallelSafety: "SAFE", auditEventRequirement: "Authentication service records a generic login outcome without password hash or existence disclosure.", rateLimitExpectation: "Shared login pre-auth limiter plus IP and actor limiter.", secretColumnExposures: [{ tableId: "table-user", column: "passwordHash", justification: "Required only for local password verification inside the trusted backend; never returned to the HTTP caller or logged." }], externalResponseMode: "generic-invalid-credentials", returnsAccountExistenceToExternalCaller: false,
+      allowScenarios: ["One normalized active or inactive account candidate is returned for local password and account-state evaluation."], denyScenarios: ["Malformed email, duplicate case-insensitive state, missing account, direct User enumeration, session-variable redirection, unrelated role, PUBLIC, or restricted-read execution returns no candidate or permission denial."], p2TestRequirements: ["Exact signature/catalog security", "normalization and malformed email denial", "zero/one/duplicate matches", "session-variable manipulation cannot redirect lookup", "passwordHash is never exposed outside backend verification"],
+    }),
+    functionContract({
+      id: "preauth-fn-record-password-failure", sqlFunctionName: "record_password_failure", arguments: [arg("requested_email", "text"), arg("attempted_at", "timestamp without time zone"), arg("max_attempts", "integer"), arg("lockout_minutes", "integer")], returnColumns: [column("failedLoginAttempts", "integer"), column("lockedUntil", "timestamp without time zone", true)],
+      purpose: "Atomically increment one normalized account's failed-login counter and establish bounded lockout state.", supportingWorkflowIds: ["workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure"], tablesRead: ["table-user"], tablesWritten: ["table-user"], exactAllowedColumns: [access("table-user", "SELECT", ["id", "email", "failedLoginAttempts", "lockedUntil"]), access("table-user", "UPDATE", ["failedLoginAttempts", "lockedUntil", "updatedAt"])],
+      inputNormalization: "Email must already be trimmed/lowercase and valid; attempted_at is required; max_attempts is 1..100; lockout_minutes is 1..1440.", duplicateStateBehavior: "Update zero rows unless exactly one case-insensitive email match exists.", tokenBindingRequirements: "Not a token flow; the normalized email and attempted_at bind the exact failure event.", expiryChecks: "not-applicable", expiryRequired: false, oneTimeConsumptionBehavior: "not-applicable", oneTimeToken: false, rowLockingRequirements: "Single UPDATE acquires the row lock and increments from the stored value; concurrent failures cannot lose increments.", replayProtection: "Each invocation is an auditable failed attempt; bounded inputs prevent arbitrary lockout duration and the function never clears an existing lock.", volatility: "VOLATILE", parallelSafety: "UNSAFE", auditEventRequirement: "Generic AUTH_LOGIN_FAIL/LOCKED event; no account-existence or credential detail.", rateLimitExpectation: "Shared login pre-auth limiter plus IP and actor limiter.", secretColumnExposures: [], externalResponseMode: "same-error-as-unknown-account", returnsAccountExistenceToExternalCaller: false,
+      allowScenarios: ["A valid failed attempt updates exactly one normalized account and returns only counter/lockout state."], denyScenarios: ["Malformed/bounds-invalid input, duplicate state, unknown account, cross-account update, arbitrary columns, or caller-selected lockout outside bounds updates nothing."], p2TestRequirements: ["parallel increment and threshold crossing", "duplicate/unknown no-op", "bounded inputs", "existing lock preservation", "exact returned columns"],
+    }),
+    functionContract({
+      id: "preauth-fn-request-password-reset", sqlFunctionName: "request_password_reset", arguments: [arg("requested_email", "text"), arg("reset_token_hash", "text"), arg("expires_at", "timestamp without time zone"), arg("requested_at", "timestamp without time zone"), arg("created_ip_hash", "text", true), arg("user_agent_hash", "text", true)], returnColumns: [column("accepted", "boolean"), column("deliveryRequired", "boolean"), column("userId", "text", true), column("email", "text", true), column("licenseeId", "text", true), column("orgId", "text", true), column("expiresAt", "timestamp without time zone", true)],
+      purpose: "Issue a reset-token row for exactly one eligible account while preserving a constant-success external response.", supportingWorkflowIds: ["workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset"], tablesRead: ["table-user"], tablesWritten: ["table-password-reset"], exactAllowedColumns: [access("table-user", "SELECT", ["id", "email", "isActive", "deletedAt", "licenseeId", "orgId"]), access("table-password-reset", "INSERT", ["orgId", "userId", "tokenHash", "expiresAt", "createdIpHash", "userAgentHash"])],
+      inputNormalization: "Trim/lowercase and validate email; require a fixed-format server-generated token hash; requested_at is required; expires_at must be after requested_at and within configured reset TTL ceiling.", duplicateStateBehavior: "Ambiguous case-insensitive account state issues no token but returns the same accepted external outcome.", tokenBindingRequirements: "The server generates the opaque raw token, passes only its hash, and the inserted row binds it to exactly one User.id and orgId.", expiryChecks: "expires_at must be future, finite, and within the reviewed reset TTL ceiling.", expiryRequired: true, oneTimeConsumptionBehavior: "Issuance only; the token row is marked unused and may be consumed once by preauth-fn-consume-password-reset.", oneTimeToken: true, rowLockingRequirements: "No account mutation; unique tokenHash plus exact-one account match. Collision fails closed.", replayProtection: "Unique token hash, rate limiting, bounded TTL, and constant external response.", volatility: "VOLATILE", parallelSafety: "UNSAFE", auditEventRequirement: "Generic reset-request event and response; nullable internal delivery fields must never be serialized to the requester.", rateLimitExpectation: "Password-reset route, IP, normalized-email, and issuance-frequency limits.", secretColumnExposures: [], externalResponseMode: "constant-success", returnsAccountExistenceToExternalCaller: false,
+      allowScenarios: ["Eligible exact account gets one bound reset row; backend may use internal delivery fields to send the link while HTTP returns only accepted=true."], denyScenarios: ["Malformed email/hash, duplicate account, inactive/deleted account, invalid expiry, token collision, or rate-limit violation issues no token and never reveals existence."], p2TestRequirements: ["constant external response equivalence", "duplicate/inactive/deleted no issuance", "unique hash and bounded expiry", "returned internal fields cannot cross the route response"],
+    }),
+    functionContract({
+      id: "preauth-fn-consume-password-reset", sqlFunctionName: "consume_password_reset_token", arguments: [arg("token_hash_candidates", "text[]"), arg("new_password_hash", "text"), arg("consumed_at", "timestamp without time zone")], returnColumns: [column("id", "text"), column("email", "text"), column("name", "text"), column("role", "text"), column("licenseeId", "text", true), column("orgId", "text", true)],
+      purpose: "Atomically consume one valid reset token, activate/update its bound account password, and revoke existing sessions.", supportingWorkflowIds: ["workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"], tablesRead: ["table-password-reset", "table-user", "table-refresh-token"], tablesWritten: ["table-password-reset", "table-user", "table-refresh-token"], exactAllowedColumns: [access("table-password-reset", "SELECT", ["id", "userId", "tokenHash", "usedAt", "expiresAt"]), access("table-password-reset", "UPDATE", ["usedAt"]), access("table-user", "SELECT", ["id", "email", "name", "role", "licenseeId", "orgId"]), access("table-user", "UPDATE", ["passwordHash", "status", "emailVerifiedAt", "failedLoginAttempts", "lockedUntil", "updatedAt"]), access("table-refresh-token", "SELECT", ["userId", "revokedAt"]), access("table-refresh-token", "UPDATE", ["revokedAt", "revokedReason", "lastUsedAt"])],
+      inputNormalization: "Require 1..3 non-empty fixed-format server-derived hash candidates, one approved password hash format, and non-null consumed_at; reject raw tokens and duplicate candidate values.", duplicateStateBehavior: "Lock at most two matching reset rows and fail closed unless exactly one token row and one bound user exist.", tokenBindingRequirements: "Candidate hashes derive only from the supplied opaque token; matched PasswordReset.userId is the sole account authority.", expiryChecks: "Matched token expiresAt must be greater than consumed_at.", expiryRequired: true, oneTimeConsumptionBehavior: "Require usedAt IS NULL under row lock; set usedAt=consumed_at in the same transaction as password update and session revocation.", oneTimeToken: true, rowLockingRequirements: "SELECT matching PasswordReset FOR UPDATE, verify exactly one, and lock/update the bound User before mutation.", replayProtection: "Atomic usedAt transition and row lock; concurrent/replayed calls return no success.", volatility: "VOLATILE", parallelSafety: "UNSAFE", auditEventRequirement: "AUTH_PASSWORD_RESET_COMPLETED after commit; no token/hash/password in audit.", rateLimitExpectation: "Reset-completion IP/actor limiter plus bounded token attempts.", secretColumnExposures: [{ tableId: "table-user", column: "passwordHash", justification: "Accepted only as a server-generated write value; never selected or returned." }, { tableId: "table-password-reset", column: "tokenHash", justification: "Compared internally to server-derived candidates; never returned." }], externalResponseMode: "generic-invalid-or-expired-token", returnsAccountExistenceToExternalCaller: false,
+      allowScenarios: ["One unexpired unused token atomically changes only its bound account and revokes that account's live refresh tokens."], denyScenarios: ["Unknown, ambiguous, expired, used, replayed, cross-account, raw-token, malformed-hash, or concurrent consumption changes nothing."], p2TestRequirements: ["FOR UPDATE/concurrent single winner", "expiry and usedAt denial", "atomic rollback across three tables", "all live sessions revoked", "cross-account and duplicate hash denial"],
+    }),
+    functionContract({
+      id: "preauth-fn-lookup-invitation", sqlFunctionName: "lookup_invitation_token", arguments: [arg("token_hash_candidates", "text[]"), arg("checked_at", "timestamp without time zone")], returnColumns: [column("email", "text"), column("role", "text"), column("expiresAt", "timestamp without time zone"), column("licenseeName", "text", true), column("requiresConnector", "boolean")],
+      purpose: "Return the minimal preview for one valid invitation token without exposing its hash or unrelated tenant data.", supportingWorkflowIds: ["workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"], tablesRead: ["table-invite", "table-licensee"], tablesWritten: [], exactAllowedColumns: [access("table-invite", "SELECT", ["tokenHash", "email", "role", "expiresAt", "usedAt", "licenseeId"]), access("table-licensee", "SELECT", ["id", "name"])],
+      inputNormalization: "Require 1..3 unique fixed-format server-derived token hashes and non-null checked_at; raw token fragments are forbidden.", duplicateStateBehavior: "Return zero rows unless exactly one Invite matches all candidate hashes; duplicate/ambiguous state fails closed.", tokenBindingRequirements: "The preview is bound only to the exact invite hash, stored role, stored email, stored licensee, and optional matching Licensee.id.", expiryChecks: "Require usedAt IS NULL and expiresAt > checked_at.", expiryRequired: true, oneTimeConsumptionBehavior: "Read-only preview; rejects consumed tokens but does not consume a valid token.", oneTimeToken: true, rowLockingRequirements: "None for preview; consumption rechecks under lock.", replayProtection: "No state change; expiry, usedAt, bounded candidates, rate limiting, and minimal projection limit replay value.", volatility: "STABLE", parallelSafety: "SAFE", auditEventRequirement: "No token/hash logging; abnormal repeated preview attempts are security telemetry only.", rateLimitExpectation: "Invite-preview route plus IP and actor limiter.", secretColumnExposures: [{ tableId: "table-invite", column: "tokenHash", justification: "Compared internally only; never returned." }], externalResponseMode: "generic-invalid-or-expired-invite", returnsAccountExistenceToExternalCaller: false,
+      allowScenarios: ["One unused unexpired token returns only its intended email, role, expiry, licensee display name, and connector requirement."], denyScenarios: ["Unknown, malformed, ambiguous, expired, used, token-fragment, or cross-invite input returns no preview."], p2TestRequirements: ["minimal projection", "used/expired/duplicate denial", "candidate bounds", "no hash or unrelated Licensee columns returned"],
+    }),
+    functionContract({
+      id: "preauth-fn-consume-invitation", sqlFunctionName: "consume_invitation_token", arguments: [arg("token_hash_candidates", "text[]"), arg("new_password_hash", "text"), arg("requested_name", "text", true), arg("consumed_at", "timestamp without time zone")], returnColumns: [column("id", "text"), column("email", "text"), column("name", "text"), column("role", "text"), column("licenseeId", "text", true), column("orgId", "text", true), column("status", "text")],
+      purpose: "Atomically activate the existing account bound to one invitation without changing its role or tenant ownership.", supportingWorkflowIds: ["workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"], tablesRead: ["table-invite", "table-user"], tablesWritten: ["table-invite", "table-user"], exactAllowedColumns: [access("table-invite", "SELECT", ["id", "orgId", "licenseeId", "email", "role", "manufacturerId", "tokenHash", "expiresAt", "usedAt"]), access("table-invite", "UPDATE", ["usedAt", "acceptedByUserId"]), access("table-user", "SELECT", ["id", "email", "role", "orgId", "licenseeId", "status", "isActive", "deletedAt"]), access("table-user", "UPDATE", ["passwordHash", "status", "emailVerifiedAt", "name", "failedLoginAttempts", "lockedUntil", "updatedAt"])],
+      inputNormalization: "Require bounded unique server-derived hash candidates, approved password hash, name trimmed to the product limit, and non-null consumed_at.", duplicateStateBehavior: "Lock at most two matches and fail unless exactly one Invite and exactly one existing User with normalized Invite.email exist.", tokenBindingRequirements: "Invite email, role, orgId and licenseeId must equal the existing User binding; function never creates a user or writes role/orgId/licenseeId/manufacturerId.", expiryChecks: "Require Invite.expiresAt > consumed_at.", expiryRequired: true, oneTimeConsumptionBehavior: "Require usedAt IS NULL under lock and atomically set usedAt/acceptedByUserId with account activation.", oneTimeToken: true, rowLockingRequirements: "Lock the Invite and bound User; exactly one transaction performs validation, password/state update, and consumption.", replayProtection: "Atomic usedAt transition, row locks, and exact account/tenant/role binding.", volatility: "VOLATILE", parallelSafety: "UNSAFE", auditEventRequirement: "AUTH_INVITE_ACCEPTED after commit with invite/user IDs; no token/hash/password.", rateLimitExpectation: "Invite-accept route plus IP and actor limiter.", secretColumnExposures: [{ tableId: "table-user", column: "passwordHash", justification: "Accepted only as a server-generated write value; never selected or returned." }, { tableId: "table-invite", column: "tokenHash", justification: "Compared internally only; never returned." }], externalResponseMode: "generic-invalid-or-expired-invite", returnsAccountExistenceToExternalCaller: false, roleCeiling: "Never writes User.role or tenant keys. A licensee/manufacturer invite cannot create or promote SUPER_ADMIN/PLATFORM_SUPER_ADMIN; any platform invite must already bind an operator-created matching platform user.",
+      allowScenarios: ["One matching unused invite activates only its pre-created, same-email, same-role, same-tenant account."], denyScenarios: ["Role/tenant mismatch, missing user, attempted platform elevation, expired/used/ambiguous token, disabled/deleted account, or replay changes nothing."], p2TestRequirements: ["single concurrent winner", "role/org/licensee immutability", "licensee invite platform ceiling", "missing/disabled/deleted user denial", "atomic invite/user rollback"],
+    }),
+    functionContract({
+      id: "preauth-fn-consume-email-verification", sqlFunctionName: "consume_email_verification_token", arguments: [arg("token_hash_candidates", "text[]"), arg("consumed_at", "timestamp without time zone")], returnColumns: [column("verified", "boolean"), column("purpose", "text"), column("userId", "text"), column("email", "text")],
+      purpose: "Atomically consume one account-bound email-verification token, apply its exact verification/email-change state, and revoke sessions after an email change.", supportingWorkflowIds: ["workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"], tablesRead: ["table-email-verification-token", "table-user", "table-refresh-token"], tablesWritten: ["table-email-verification-token", "table-user", "table-refresh-token"], exactAllowedColumns: [access("table-email-verification-token", "SELECT", ["id", "userId", "email", "pendingEmail", "purpose", "tokenHash", "expiresAt", "usedAt"]), access("table-email-verification-token", "UPDATE", ["usedAt"]), access("table-user", "SELECT", ["id", "email", "pendingEmail", "orgId", "licenseeId", "status", "isActive", "deletedAt"]), access("table-user", "UPDATE", ["email", "pendingEmail", "pendingEmailRequestedAt", "emailVerifiedAt", "status", "updatedAt"]), access("table-refresh-token", "SELECT", ["userId", "revokedAt"]), access("table-refresh-token", "UPDATE", ["revokedAt", "revokedReason", "lastUsedAt"])],
+      inputNormalization: "Require 1..3 unique fixed-format server-derived token hashes and non-null consumed_at; token fragments and arbitrary user IDs are forbidden.", duplicateStateBehavior: "Lock at most two token matches and fail unless exactly one token and its exact User.id exist; pending-email collision also fails closed.", tokenBindingRequirements: "EmailVerificationToken.userId is the sole account authority; EMAIL_CHANGE additionally requires token.pendingEmail to equal User.pendingEmail and remain globally unique.", expiryChecks: "Require expiresAt > consumed_at.", expiryRequired: true, oneTimeConsumptionBehavior: "Require usedAt IS NULL under lock; set usedAt in the same transaction as emailVerifiedAt/email transition and any session revocation.", oneTimeToken: true, rowLockingRequirements: "Lock token and bound User; uniqueness check and mutations execute atomically.", replayProtection: "Atomic usedAt transition and row lock; already-verified accounts are idempotent only when the same unused account-bound token is valid, then token is consumed once.", volatility: "VOLATILE", parallelSafety: "UNSAFE", auditEventRequirement: "AUTH_EMAIL_VERIFIED or AUTH_EMAIL_CHANGE_CONFIRMED after commit; no token/hash.", rateLimitExpectation: "Email-verification route plus IP and actor limiter.", secretColumnExposures: [{ tableId: "table-email-verification-token", column: "tokenHash", justification: "Compared internally only; never returned." }], externalResponseMode: "generic-invalid-or-expired-verification", returnsAccountExistenceToExternalCaller: false,
+      allowScenarios: ["One unused unexpired token verifies only its bound account; EMAIL_CHANGE also applies the bound pending email and revokes that account's sessions."], denyScenarios: ["Unknown, ambiguous, expired, used, cross-account, pending-email mismatch/collision, disabled/deleted account, fragment lookup, or replay changes nothing."], p2TestRequirements: ["account binding", "single concurrent winner", "already-verified safe behavior", "email collision denial", "EMAIL_CHANGE session revocation", "atomic rollback"],
+    }),
+  ].sort((a, b) => a.id.localeCompare(b.id));
+  return { schemaVersion: 1, generatedFrom: ["documents/security/rls-program/workflows.json", "documents/security/rls-program/command-semantics.json", "backend/src/services/auth"], functionCount: functions.length, securityInvariants: ["No dynamic SQL or generic query input", "SET search_path=pg_catalog and fully qualified application objects", "NOLOGIN auth owner; EXECUTE only for pre-auth runtime", "PUBLIC, restricted-read and authenticated-app execution denied", "No direct table grants to pre-auth runtime", "Caller-set app.* variables are not authority"], functions };
+};
+
+export const buildPreAuthBoundary = (workflowManifest, commandManifest, currentTableManifest = null) => {
+  const selected = workflowManifest.workflows.filter((workflow) => workflow.authorizationBoundaryType === "pre-auth-security-function" || PREAUTH_WORKFLOW_BOUNDARIES[workflow.id]);
+  assert.deepEqual(selected.map((workflow) => workflow.id).sort(), Object.keys(PREAUTH_WORKFLOW_BOUNDARIES).sort(), "pre-auth workflow selector drifted; classify every selected workflow explicitly");
+  for (const workflow of selected) {
+    const [group, boundaryMode, functionId, assurance] = PREAUTH_WORKFLOW_BOUNDARIES[workflow.id];
+    workflow.preAuthBoundary = { workflowGroup: group, boundaryMode, functionId, status: "resolved" };
+    workflow.unresolvedDecisions = workflow.unresolvedDecisions.filter((id) => id !== "decision-pre-auth-boundary");
+    workflow.contextRequirementsSource = "human-reviewed";
+    workflow.requiredAssurance = [assurance];
+    if (boundaryMode === "ordinary-authenticated-context") {
+      workflow.authorizationBoundaryType = "authenticated-context";
+      workflow.authenticationStage = "actor-resolved-bootstrap";
+      workflow.actorClasses = ["authenticated-user"];
+      workflow.commandActorClasses = ["authenticated-user"];
+      workflow.runtimeIdentities = ["identity-authenticated-app"];
+      workflow.contextRequirements = ["Install canonical actor context from the verified password/bootstrap-token identity before any table command."];
+    } else {
+      workflow.contextRequirements = [`EXECUTE only ${functionId}; no direct table access or caller-set app.* authority.`];
+      workflow.preAuthFunctionId = functionId;
+    }
+    for (const rule of commandManifest.rules.filter((rule) => rule.supportingWorkflowIds.includes(workflow.id))) {
+      rule.preAuthBoundary = workflow.preAuthBoundary;
+      rule.minimumAssurance = assurance;
+      if (boundaryMode === "ordinary-authenticated-context") {
+        rule.actorClasses = ["authenticated-user"];
+        rule.runtimeIdentities = ["identity-authenticated-app"];
+        rule.requiresNamedFunction = false;
+        rule.namedFunctionClass = "none";
+        rule.authorizationBoundary = "ordinary-rls";
+        rule.allowScenarios = [`Resolved actor using identity-authenticated-app at ${assurance} performs the command only after canonical transaction context is installed.`];
+        rule.denyScenarios = ["Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."];
+      } else rule.preAuthFunctionId = functionId;
+    }
+  }
+  const manifest = buildPreAuthFunctionManifest();
+  const functionIds = new Set(manifest.functions.map((fn) => fn.id));
+  for (const workflow of selected.filter((item) => item.preAuthBoundary.boundaryMode === "exact-security-definer-function")) assert(functionIds.has(workflow.preAuthBoundary.functionId), `${workflow.id} references missing pre-auth function`);
+  writeJson(preAuthFunctionsPath, manifest);
+
+  const tableManifest = currentTableManifest || readJson(tableManifestPath);
+  const functionTables = new Set(manifest.functions.flatMap((fn) => [...fn.tablesRead, ...fn.tablesWritten]));
+  const movedTables = new Set(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context").flatMap((workflow) => workflow.tablesTouched));
+  for (const table of tableManifest.tables) {
+    if (functionTables.has(table.id)) table.preAuthAccessMode = "exact-named-security-definer-function-only";
+    else if (movedTables.has(table.id)) table.preAuthAccessMode = "denied; actor or system context required";
+  }
+  if (!currentTableManifest) {
+    writeJson(tableManifestPath, tableManifest);
+    writeTableOwnershipReview(tableManifest, buildPolicyDependencyGraph(tableManifest));
+  }
+
+  const identityManifest = readJson(identityManifestPath);
+  const preAuth = identityManifest.identities.find((identity) => identity.id === "identity-pre-auth-app");
+  preAuth.approvedFunctionIds = manifest.functions.map((fn) => fn.id);
+  preAuth.directTablePrivileges = [];
+  preAuth.publicSchemaCreate = false;
+  preAuth.restrictedReadHelperAccess = false;
+  preAuth.resolvedDecisions = [...new Set([...preAuth.resolvedDecisions, "decision-pre-auth-boundary"])].sort();
+  preAuth.unresolvedDecisions = preAuth.unresolvedDecisions.filter((id) => id !== "decision-pre-auth-boundary");
+  const owner = identityManifest.identities.find((identity) => identity.id === "identity-auth-function-owner");
+  owner.approvedFunctionIds = manifest.functions.map((fn) => fn.id);
+  owner.resolvedDecisions = [...new Set([...owner.resolvedDecisions, "decision-pre-auth-boundary"])].sort();
+  owner.unresolvedDecisions = owner.unresolvedDecisions.filter((id) => id !== "decision-pre-auth-boundary");
+  writeJson(identityManifestPath, identityManifest);
+  return manifest;
+};
+
+export const writePreAuthBoundaryReview = (manifest, workflows) => {
+  const selected = workflows.filter((workflow) => workflow.preAuthBoundary);
+  const moved = selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context");
+  const lines = ["# MSCQR pre-authentication boundary review", "", "This review defines function contracts only. It creates no SQL function, grant, role, policy, RLS state, or runtime behavior.", "", `Selected workflows: ${selected.length}; exact functions: ${manifest.functions.length}; moved behind actor context: ${moved.length}; operator-only: 0; retired: 0.`, "", "## Workflow reconciliation", "", "| Workflow | Group | Boundary | Function/assurance |", "|---|---|---|---|"];
+  for (const workflow of selected.sort((a, b) => a.id.localeCompare(b.id))) lines.push(`| ${workflow.id} | ${workflow.preAuthBoundary.workflowGroup} | ${workflow.preAuthBoundary.boundaryMode} | ${workflow.preAuthBoundary.functionId || workflow.requiredAssurance.join(", ")} |`);
+  lines.push("", "## Exact function families", "", "| Function | Purpose | Reads | Writes | One-time |", "|---|---|---|---|---:|");
+  for (const fn of manifest.functions) lines.push(`| ${fn.id} (` + "`" + `${fn.sqlSchema}.${fn.sqlFunctionName}` + "`" + `) | ${fn.purpose} | ${fn.tablesRead.join(", ") || "none"} | ${fn.tablesWritten.join(", ") || "none"} | ${fn.oneTimeToken ? "yes" : "no"} |`);
+  lines.push("", "Exact arguments, return columns, table/column exposure, normalization, duplicate-state handling, expiry, locking, replay, transaction and P2 requirements live in `pre-auth-functions.json`.", "", "## Execution grants and remaining implementation", "", "The LOGIN pre-auth runtime receives only CONNECT, app_auth USAGE and EXECUTE on the seven exact signatures. PUBLIC, restricted-read and authenticated-app execution are denied; the NOLOGIN auth owner owns only app_auth and approved functions and receives exact required table-column privileges. SQL implementation, grants, caller migration and disposable PostgreSQL proof remain future work.", "", "All token functions reject ambiguous matches. Reset, invitation and email-consumption functions lock the token row and atomically consume it with account/session mutations. Reset request uses a constant-success external response. Invitation consumption never writes role or tenant ownership and cannot elevate a licensee invitation to a platform role.", "");
+  fs.writeFileSync(preAuthBoundaryReviewPath, `${lines.join("\n")}\n`);
+};
+
+export const buildPreAuthProgramme = () => {
+  const workflowManifest = readJson(workflowManifestPath);
+  const commandManifest = readJson(commandSemanticsPath);
+  const manifest = buildPreAuthBoundary(workflowManifest, commandManifest);
+  writePreAuthBoundaryReview(manifest, workflowManifest.workflows);
+  writeJson(workflowManifestPath, workflowManifest);
+  writeJson(commandSemanticsPath, commandManifest);
+  const decisions = readJson(decisionManifestPath);
+  const decision = decisions.decisions.find((item) => item.id === "decision-pre-auth-boundary");
+  const selected = workflowManifest.workflows.filter((workflow) => workflow.preAuthBoundary);
+  decision.status = "resolved";
+  decision.resolvedAt = "2026-07-16";
+  decision.affectedWorkflows = selected.map((workflow) => workflow.id);
+  decision.affectedTables = [...new Set(selected.flatMap((workflow) => workflow.tablesTouched))].sort();
+  decision.resolution = { authority: "documents/security/rls-program/pre-auth-functions.json", selectedWorkflows: selected.length, exactFunctions: manifest.functions.length, movedBehindContext: selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context").length, operatorOnly: 0, retired: 0, guarantees: manifest.securityInvariants };
+  writeJson(decisionManifestPath, decisions);
+  return manifest;
+};
+
 export const buildWorkflowManifest = () => {
   const scan = scanProductionAccess();
   const existing = readJson(workflowManifestPath, { schemaVersion: 1, workflows: [] });
@@ -933,7 +1118,10 @@ export const buildWorkflowManifest = () => {
     if (READ_ROLE_MODELS.has(table.prismaModel)) table.classificationEvidence.push("Existing read-role evidence: documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql includes this table in the reviewed SELECT-only baseline.");
   }
   const commandManifest = buildCommandSemantics(tableManifest, result);
+  const preAuthManifest = buildPreAuthBoundary(result, commandManifest, tableManifest);
   writeCommandSemanticsReview(commandManifest, tableManifest, result);
+  writePreAuthBoundaryReview(preAuthManifest, result.workflows);
+  writeJson(commandSemanticsPath, commandManifest);
   writeJson(workflowManifestPath, result);
   writeJson(tableManifestPath, tableManifest);
   const graph = buildPolicyDependencyGraph(tableManifest);
@@ -957,6 +1145,15 @@ export const buildWorkflowManifest = () => {
         };
         continue;
       }
+      if (decision.id === "decision-pre-auth-boundary") {
+        const selected = workflows.filter((workflow) => workflow.preAuthBoundary);
+        decision.status = "resolved";
+        decision.resolvedAt = "2026-07-16";
+        decision.affectedWorkflows = selected.map((workflow) => workflow.id);
+        decision.affectedTables = [...new Set(selected.flatMap((workflow) => workflow.tablesTouched))].sort();
+        decision.resolution = { authority: "documents/security/rls-program/pre-auth-functions.json", selectedWorkflows: selected.length, exactFunctions: preAuthManifest.functions.length, movedBehindContext: selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context").length, operatorOnly: 0, retired: 0, guarantees: preAuthManifest.securityInvariants };
+        continue;
+      }
       decision.affectedWorkflows = workflows.filter((workflow) => workflow.unresolvedDecisions.includes(decision.id)
         || decision.id === "decision-runtime-role-split"
         || (decision.id === "decision-operator-administration" && workflow.authorizationBoundaryType === "operator-break-glass")).map((workflow) => workflow.id);
@@ -970,7 +1167,91 @@ export const buildWorkflowManifest = () => {
   return result;
 };
 
-export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath) });
+export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath) });
+export const validatePreAuthFunctions = (manifest, workflowManifest, commandManifest, identityManifest, tableManifest) => {
+  assert(manifest?.functions?.length, "pre-auth function manifest is missing");
+  const workflows = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
+  const tables = new Map(tableManifest.tables.map((table) => [table.id, table]));
+  const identities = new Map(identityManifest.identities.map((identity) => [identity.id, identity]));
+  const functionIds = new Set(manifest.functions.map((fn) => fn.id));
+  assert.equal(functionIds.size, manifest.functions.length, "pre-auth function IDs must be unique");
+  const selectedWorkflows = workflowManifest.workflows.filter((workflow) => workflow.authorizationBoundaryType === "pre-auth-security-function" || workflow.preAuthBoundary);
+  assert.deepEqual(selectedWorkflows.map((workflow) => workflow.id).sort(), Object.keys(PREAUTH_WORKFLOW_BOUNDARIES).sort(), "a pre-auth workflow lacks a boundary or the reviewed selector drifted");
+  const canonicalFunctions = new Map(buildPreAuthFunctionManifest().functions.map((fn) => [fn.id, fn]));
+  const forbiddenArgument = /(?:table|sql|column|predicate|query|json|role|tenant|schema)/i;
+  for (const fn of manifest.functions) {
+    assert(/^preauth-fn-[a-z0-9-]+$/.test(fn.id) && /^[a-z][a-z0-9_]*$/.test(fn.sqlFunctionName), `${fn.id} has an unstable ID or function name`);
+    assert.equal(fn.sqlSchema, "app_auth", `${fn.id} must use app_auth`);
+    assert(fn.arguments.length && new Set(fn.arguments.map((item) => item.name)).size === fn.arguments.length, `${fn.id} lacks an exact argument list`);
+    for (const item of fn.arguments) {
+      assert(item.name && item.type && typeof item.nullable === "boolean", `${fn.id} has an incomplete argument`);
+      assert(!forbiddenArgument.test(item.name) && !/^(?:json|jsonb|regclass|name)$/i.test(item.type), `${fn.id} accepts generic query input`);
+    }
+    assert.deepEqual(fn.arguments, canonicalFunctions.get(fn.id)?.arguments, `${fn.id} exact argument signature drifted`);
+    assert(fn.returnColumns.length && new Set(fn.returnColumns.map((item) => item.name)).size === fn.returnColumns.length, `${fn.id} lacks exact return columns`);
+    for (const item of fn.returnColumns) assert(item.name && item.type && typeof item.nullable === "boolean", `${fn.id} has an incomplete return column`);
+    assert.deepEqual(fn.returnColumns, canonicalFunctions.get(fn.id)?.returnColumns, `${fn.id} exact return columns drifted`);
+    assert.equal(fn.publicExecutionDenied, true, `${fn.id} allows PUBLIC execute`);
+    assert.equal(fn.restrictedReadExecutionDenied, true, `${fn.id} allows restricted-read execute`);
+    assert.equal(fn.appExecutionStatus.startsWith("denied"), true, `${fn.id} allows authenticated-app execution`);
+    assert.equal(fn.fixedSearchPath, "pg_catalog", `${fn.id} search_path is not fixed`);
+    assert.equal(fn.dynamicSqlAllowed, false, `${fn.id} permits dynamic SQL`);
+    assert.equal(fn.genericQueryInputsAllowed, false, `${fn.id} permits generic query input`);
+    assert.equal(fn.fullyQualifiedApplicationObjects, true, `${fn.id} may use unqualified application objects`);
+    assert.equal(fn.callerOwnedFunctionsAllowed, false, `${fn.id} may call caller-owned functions`);
+    assert.equal(fn.callerSetContextTrusted, false, `${fn.id} trusts caller-set app context`);
+    assert.equal(identities.get(fn.ownerIdentity)?.loginExpectation, "NOLOGIN", `${fn.id} owner may LOGIN`);
+    assert.deepEqual(fn.executableRuntimeIdentities, ["identity-pre-auth-app"], `${fn.id} has broad execution identities`);
+    assert(["STABLE", "VOLATILE"].includes(fn.volatility) && ["SAFE", "UNSAFE"].includes(fn.parallelSafety), `${fn.id} lacks volatility/parallel classification`);
+    assert(fn.inputNormalization && fn.duplicateStateBehavior && fn.rowLockingRequirements && fn.replayProtection && fn.transactionRequirements, `${fn.id} lacks fail-closed behavior`);
+    assert(fn.allowScenarios.length && fn.denyScenarios.length && fn.p2TestRequirements.length, `${fn.id} lacks scenarios or P2 tests`);
+    for (const workflowId of fn.supportingWorkflowIds) assert(workflows.has(workflowId), `${fn.id} references unknown workflow ${workflowId}`);
+    for (const tableId of [...fn.tablesRead, ...fn.tablesWritten]) assert(tables.has(tableId), `${fn.id} references unknown table ${tableId}`);
+    for (const entry of fn.exactAllowedColumns) {
+      const table = tables.get(entry.tableId);
+      assert(table && policyCommands.has(entry.command) && entry.columns.length, `${fn.id} has invalid table/command columns`);
+      const schemaColumns = new Set(table.schemaEvidence.fields.map((field) => field.name));
+      for (const name of entry.columns) assert(schemaColumns.has(name), `${fn.id} references unknown ${entry.tableId}.${name}`);
+    }
+    for (const exposure of fn.secretColumnExposures) assert(exposure.justification?.trim(), `${fn.id} exposes a secret without justification`);
+    if (fn.oneTimeToken) {
+      assert.equal(fn.expiryRequired, true, `${fn.id} token flow lacks expiry`);
+      assert(!/not-applicable/i.test(fn.oneTimeConsumptionBehavior), `${fn.id} token flow lacks one-time semantics`);
+      assert(fn.expiryChecks && !/not-applicable/i.test(fn.expiryChecks), `${fn.id} token flow lacks expiry checks`);
+    }
+  }
+  const resetRequest = manifest.functions.find((fn) => fn.id === "preauth-fn-request-password-reset");
+  assert.equal(resetRequest.externalResponseMode, "constant-success", "reset request reveals account existence");
+  assert.equal(resetRequest.returnsAccountExistenceToExternalCaller, false, "reset request reveals account existence");
+  const resetCompletion = manifest.functions.find((fn) => fn.id === "preauth-fn-consume-password-reset");
+  assert(/FOR UPDATE/i.test(resetCompletion.rowLockingRequirements) && /same transaction|transaction/i.test(resetCompletion.oneTimeConsumptionBehavior), "reset completion is non-atomic");
+  const invitation = manifest.functions.find((fn) => fn.id === "preauth-fn-consume-invitation");
+  assert(/cannot create or promote SUPER_ADMIN\/PLATFORM_SUPER_ADMIN/i.test(invitation.roleCeiling), "invitation lacks platform-role ceiling");
+  const verification = manifest.functions.find((fn) => fn.id === "preauth-fn-consume-email-verification");
+  assert(/sole account authority/i.test(verification.tokenBindingRequirements), "email verification is not account-bound");
+  const preAuth = identities.get("identity-pre-auth-app");
+  assert.equal(preAuth.tablePrivilegeMode, "none", "pre-auth role has direct table privileges");
+  assert.deepEqual(preAuth.directTablePrivileges, [], "pre-auth role has direct table privileges");
+  assert.deepEqual(new Set(preAuth.approvedFunctionIds), functionIds, "pre-auth role function allowlist drifted");
+  for (const workflow of selectedWorkflows) {
+    assert(workflow.preAuthBoundary, `${workflow.id} pre-auth workflow lacks a boundary`);
+    assert.equal(workflow.preAuthBoundary.status, "resolved", `${workflow.id} lacks a resolved pre-auth boundary`);
+    assert(!workflow.unresolvedDecisions.includes("decision-pre-auth-boundary"), `${workflow.id} retains unresolved pre-auth semantics`);
+    if (workflow.preAuthBoundary.boundaryMode === "exact-security-definer-function") {
+      assert(functionIds.has(workflow.preAuthBoundary.functionId), `${workflow.id} references unknown function`);
+      assert.equal(workflow.preAuthFunctionId, workflow.preAuthBoundary.functionId, `${workflow.id} lacks its exact named function reference`);
+      for (const rule of commandManifest.rules.filter((item) => item.supportingWorkflowIds.includes(workflow.id))) {
+        assert.equal(rule.requiresNamedFunction, true, `${workflow.id} command degraded to an ordinary policy`);
+        assert.equal(rule.preAuthFunctionId, workflow.preAuthBoundary.functionId, `${workflow.id} command lacks its exact function`);
+      }
+    }
+    if (workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context") {
+      assert(!workflow.actorClasses.includes("pre-auth-runtime") && !workflow.runtimeIdentities.includes("identity-pre-auth-app"), `${workflow.id} moved workflow retains pre-auth access`);
+      for (const rule of commandManifest.rules.filter((item) => item.supportingWorkflowIds.includes(workflow.id))) assert(!rule.actorClasses.includes("pre-auth-runtime") && !rule.runtimeIdentities.includes("identity-pre-auth-app"), `${workflow.id} moved rule retains pre-auth access`);
+    }
+  }
+  return true;
+};
 export const validateRuntimeIdentities = (manifest, decisionManifest) => {
   const identities = manifest.identities;
   const byId = new Map(identities.map((identity) => [identity.id, identity]));

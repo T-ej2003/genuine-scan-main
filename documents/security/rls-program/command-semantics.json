@@ -12983,13 +12983,12 @@
       "tableId": "table-email-verification-token",
       "command": "INSERT",
       "actorClasses": [
-        "anonymous",
-        "pre-auth-runtime"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
-      "minimumAssurance": "none",
+      "minimumAssurance": "step-up-verified",
       "scopeRule": "table-email-verification-token row must join through table-user on userId=id; no alternative parent.",
       "allowedColumns": [
         "purpose"
@@ -13019,13 +13018,13 @@
         "usedAt"
       ],
       "withCheckRule": "New row preserves table-email-verification-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -13036,13 +13035,19 @@
         "backend/src/services/auth/emailVerificationService.ts"
       ],
       "allowScenarios": [
-        "anonymous or pre-auth-runtime using identity-pre-auth-app at none performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at step-up-verified performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
-      "confidence": "high",
-      "status": "architecture-resolved"
+      "confidence": "medium",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-email-verification-token-select-e1561aa306f2",
@@ -13113,20 +13118,26 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
     },
     {
       "id": "command-email-verification-token-update-56821d292ecf",
       "tableId": "table-email-verification-token",
       "command": "UPDATE",
       "actorClasses": [
-        "anonymous",
-        "pre-auth-runtime"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
-      "minimumAssurance": "none",
+      "minimumAssurance": "step-up-verified",
       "scopeRule": "table-email-verification-token row must join through table-user on userId=id; no alternative parent.",
       "allowedColumns": [
         "purpose"
@@ -13158,13 +13169,13 @@
         "usedAt"
       ],
       "withCheckRule": "New row preserves table-email-verification-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -13175,13 +13186,19 @@
         "backend/src/services/auth/emailVerificationService.ts"
       ],
       "allowScenarios": [
-        "anonymous or pre-auth-runtime using identity-pre-auth-app at none performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at step-up-verified performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
-      "confidence": "high",
-      "status": "architecture-resolved"
+      "confidence": "medium",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-email-verification-token-update-e1561aa306f2",
@@ -13249,7 +13266,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
     },
     {
       "id": "command-evidence-retention-job-delete-prohibited",
@@ -18925,7 +18949,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
     },
     {
       "id": "command-invite-select-d113603cb7d4",
@@ -18998,7 +19029,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link lookup",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-lookup-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-lookup-invitation"
     },
     {
       "id": "command-invite-update-3d8df17bed93",
@@ -19133,7 +19171,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
     },
     {
       "id": "command-licensee-delete-a05563be592f",
@@ -20803,7 +20848,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link lookup",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-lookup-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-lookup-invitation"
     },
     {
       "id": "command-licensee-select-e3ba477495b1",
@@ -22396,11 +22448,10 @@
       "tableId": "table-mfa-login-challenge",
       "command": "INSERT",
       "actorClasses": [
-        "anonymous",
-        "pre-auth-runtime"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-bootstrap",
       "scopeRule": "table-mfa-login-challenge row must join through table-user on userId=id; no alternative parent.",
@@ -22436,13 +22487,13 @@
         "expiresAt"
       ],
       "withCheckRule": "New row preserves table-mfa-login-challenge row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -22453,24 +22504,29 @@
         "backend/src/services/auth/mfaAdapter.ts"
       ],
       "allowScenarios": [
-        "anonymous or pre-auth-runtime using identity-pre-auth-app at mfa-bootstrap performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at mfa-bootstrap performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
-      "confidence": "high",
-      "status": "architecture-resolved"
+      "confidence": "medium",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-mfa-login-challenge-select-986a6bc31b69",
       "tableId": "table-mfa-login-challenge",
       "command": "SELECT",
       "actorClasses": [
-        "anonymous",
-        "pre-auth-runtime"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-bootstrap",
       "scopeRule": "table-mfa-login-challenge row must join through table-user on userId=id; no alternative parent.",
@@ -22512,13 +22568,13 @@
         "expiresAt"
       ],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -22529,13 +22585,19 @@
         "backend/src/services/auth/mfaAdapter.ts"
       ],
       "allowScenarios": [
-        "anonymous or pre-auth-runtime using identity-pre-auth-app at mfa-bootstrap performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at mfa-bootstrap performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
-      "confidence": "high",
-      "status": "architecture-resolved"
+      "confidence": "medium",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-mfa-login-challenge-update-0767280f618f",
@@ -22613,11 +22675,10 @@
       "tableId": "table-mfa-login-challenge",
       "command": "UPDATE",
       "actorClasses": [
-        "anonymous",
-        "pre-auth-runtime"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-bootstrap",
       "scopeRule": "table-mfa-login-challenge row must join through table-user on userId=id; no alternative parent.",
@@ -22655,13 +22716,13 @@
         "expiresAt"
       ],
       "withCheckRule": "New row preserves table-mfa-login-challenge row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -22672,13 +22733,19 @@
         "backend/src/services/auth/mfaAdapter.ts"
       ],
       "allowScenarios": [
-        "anonymous or pre-auth-runtime using identity-pre-auth-app at mfa-bootstrap performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at mfa-bootstrap performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
-      "confidence": "high",
-      "status": "architecture-resolved"
+      "confidence": "medium",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-notification-delete-prohibited",
@@ -25228,7 +25295,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset request",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-request-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-request-password-reset"
     },
     {
       "id": "command-password-reset-select-963323294162",
@@ -25296,7 +25370,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
     },
     {
       "id": "command-password-reset-update-963323294162",
@@ -25361,7 +25442,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
     },
     {
       "id": "command-policy-alert-delete-prohibited",
@@ -62423,7 +62511,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
     },
     {
       "id": "command-refresh-token-update-b3134cb2e0c7",
@@ -62568,7 +62663,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
     },
     {
       "id": "command-replacement-chain-delete-prohibited",
@@ -71639,13 +71741,12 @@
       "tableId": "table-user",
       "command": "SELECT",
       "actorClasses": [
-        "anonymous",
-        "pre-auth-runtime"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
-      "minimumAssurance": "none",
+      "minimumAssurance": "step-up-verified",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
         "createdAt",
@@ -71699,13 +71800,13 @@
         "status"
       ],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -71716,13 +71817,19 @@
         "backend/src/services/auth/emailVerificationService.ts"
       ],
       "allowScenarios": [
-        "anonymous or pre-auth-runtime using identity-pre-auth-app at none performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at step-up-verified performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
-      "confidence": "high",
-      "status": "architecture-resolved"
+      "confidence": "medium",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-user-select-56e28c0be62e",
@@ -72708,7 +72815,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-login lookup",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-lookup-password-user",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-lookup-password-user"
     },
     {
       "id": "command-user-select-879433841e62",
@@ -72887,7 +73001,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "failed-login recording",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-record-password-failure",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-record-password-failure"
     },
     {
       "id": "command-user-select-93fe5e2f9580",
@@ -72977,7 +73098,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
     },
     {
       "id": "command-user-select-97535583a8fe",
@@ -74231,7 +74359,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
     },
     {
       "id": "command-user-select-e3ba477495b1",
@@ -74410,7 +74545,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset request",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-request-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-request-password-reset"
     },
     {
       "id": "command-user-select-fcb995864029",
@@ -75182,13 +75324,12 @@
       "tableId": "table-user",
       "command": "UPDATE",
       "actorClasses": [
-        "anonymous",
-        "pre-auth-runtime"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
-      "minimumAssurance": "none",
+      "minimumAssurance": "step-up-verified",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
         "disabledReason",
@@ -75235,13 +75376,13 @@
         "status"
       ],
       "withCheckRule": "New row preserves Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -75252,13 +75393,19 @@
         "backend/src/services/auth/emailVerificationService.ts"
       ],
       "allowScenarios": [
-        "anonymous or pre-auth-runtime using identity-pre-auth-app at none performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at step-up-verified performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
-      "confidence": "high",
-      "status": "architecture-resolved"
+      "confidence": "medium",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-user-update-5f77f5708f23",
@@ -75587,7 +75734,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
     },
     {
       "id": "command-user-update-963323294162",
@@ -75670,20 +75824,26 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
     },
     {
       "id": "command-user-update-97a7383cb700",
       "tableId": "table-user",
       "command": "UPDATE",
       "actorClasses": [
-        "anonymous",
-        "pre-auth-runtime"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
-        "identity-pre-auth-app"
+        "identity-authenticated-app"
       ],
-      "minimumAssurance": "none",
+      "minimumAssurance": "password-verified",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
         "disabledReason",
@@ -75730,13 +75890,13 @@
         "status"
       ],
       "withCheckRule": "New row preserves Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -75747,13 +75907,19 @@
         "backend/src/services/auth/authService.ts"
       ],
       "allowScenarios": [
-        "anonymous or pre-auth-runtime using identity-pre-auth-app at none performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at password-verified performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
-      "confidence": "high",
-      "status": "architecture-resolved"
+      "confidence": "medium",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-user-update-b9cf437eb9dc",
@@ -76000,7 +76166,14 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
     },
     {
       "id": "command-user-update-fcd02a1a5d81",

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, parseSchema, policyDependencyGraphPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validateRuntimeIdentities, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, parseSchema, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validatePreAuthFunctions, validateRuntimeIdentities, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 
-const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
+const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
 
 test("all Prisma models and production access sites are represented exactly and deterministically", () => {
   const before = snapshot();
@@ -87,6 +87,40 @@ test("command semantics mutation guards fail closed", () => {
   rejects((rule) => rule.requiresRestrictedWorkerBoundary, (rule) => { rule.authorizationBoundary = "ordinary-rls"; }, /worker boundary degraded/);
   rejects((rule) => rule.lifecycleColumns.length && rule.authorizationBoundary !== "prohibited", (rule) => { rule.allowedLifecycleStates = []; }, /lifecycle omitted/);
   rejects((rule) => rule.command === "DELETE" && rule.hardDeleteSemantics === "prohibited", (rule, candidate) => { candidate.rules.splice(candidate.rules.indexOf(rule), 1); }, /general hard delete enabled/);
+});
+
+test("pre-auth workflows reduce to exact functions or actor context", () => {
+  const { workflows, commandSemantics, preAuthFunctions, identities, tables, decisions } = manifests();
+  const selected = workflows.workflows.filter((workflow) => workflow.preAuthBoundary);
+  assert.equal(selected.length, 11);
+  assert.equal(preAuthFunctions.functions.length, 7);
+  assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context").length, 4);
+  assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "operator-only").length, 0);
+  assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "retired").length, 0);
+  assert(validatePreAuthFunctions(preAuthFunctions, workflows, commandSemantics, identities, tables));
+  assert.equal(decisions.decisions.find((decision) => decision.id === "decision-pre-auth-boundary")?.status, "resolved");
+});
+
+test("pre-auth function mutation guards fail closed", () => {
+  const current = manifests();
+  const rejects = (mutate, pattern) => {
+    const candidate = structuredClone(current);
+    mutate(candidate);
+    assert.throws(() => validatePreAuthFunctions(candidate.preAuthFunctions, candidate.workflows, candidate.commandSemantics, candidate.identities, candidate.tables), pattern);
+  };
+  rejects((candidate) => { candidate.preAuthFunctions.functions[0].arguments.push({ name: "query_json", type: "jsonb", nullable: false }); }, /generic query input/);
+  rejects((candidate) => { candidate.preAuthFunctions.functions[0].publicExecutionDenied = false; }, /PUBLIC execute/);
+  rejects((candidate) => { candidate.preAuthFunctions.functions[0].restrictedReadExecutionDenied = false; }, /restricted-read execute/);
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-auth-function-owner").loginExpectation = "LOGIN"; }, /owner may LOGIN/);
+  rejects((candidate) => { candidate.preAuthFunctions.functions[0].fixedSearchPath = "pg_catalog, public"; }, /search_path/);
+  rejects((candidate) => { candidate.preAuthFunctions.functions.find((fn) => fn.oneTimeToken).expiryRequired = false; }, /lacks expiry/);
+  rejects((candidate) => { candidate.preAuthFunctions.functions.find((fn) => fn.oneTimeToken).oneTimeConsumptionBehavior = "not-applicable"; }, /one-time semantics/);
+  rejects((candidate) => { candidate.preAuthFunctions.functions.find((fn) => fn.id === "preauth-fn-request-password-reset").externalResponseMode = "account-found"; }, /reveals account existence/);
+  rejects((candidate) => { candidate.preAuthFunctions.functions.find((fn) => fn.id === "preauth-fn-consume-invitation").roleCeiling = "any stored invite role"; }, /platform-role ceiling/);
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-pre-auth-app").directTablePrivileges = ["SELECT public.User"]; }, /direct table privileges/);
+  rejects((candidate) => { delete candidate.workflows.workflows.find((workflow) => workflow.authorizationBoundaryType === "pre-auth-security-function").preAuthBoundary; }, /pre-auth workflow lacks a boundary/);
+  rejects((candidate) => { candidate.workflows.workflows.find((workflow) => workflow.preAuthBoundary?.boundaryMode === "ordinary-authenticated-context").runtimeIdentities = ["identity-pre-auth-app"]; }, /moved workflow retains pre-auth access/);
+  rejects((candidate) => { candidate.preAuthFunctions.functions.find((fn) => fn.secretColumnExposures.length).secretColumnExposures[0].justification = ""; }, /secret without justification/);
 });
 
 test("tests do not inflate production totals and repeated technical calls remain one functional workflow", () => {
@@ -206,4 +240,6 @@ test("human manifests are present and parseable", () => {
   assert(JSON.parse(fs.readFileSync(decisionManifestPath, "utf8")).decisions.length > 0);
   assert(JSON.parse(fs.readFileSync(commandSemanticsPath, "utf8")).rules.length > 0);
   assert(fs.readFileSync(commandSemanticsReviewPath, "utf8").includes("Boundary and deletion summary"));
+  assert.equal(JSON.parse(fs.readFileSync(preAuthFunctionsPath, "utf8")).functions.length, 7);
+  assert(fs.readFileSync(preAuthBoundaryReviewPath, "utf8").includes("Exact function families"));
 });

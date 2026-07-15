@@ -24,8 +24,19 @@
       },
       "purpose": "Authenticated HTTP operations using transaction-local actor context.",
       "loginExpectation": "LOGIN",
-      "allowedSchemas": ["public", "app_rls"],
-      "allowedCommands": ["CONNECT", "USAGE", "SELECT", "INSERT", "UPDATE", "DELETE", "EXECUTE_AUTHENTICATED_HELPERS"],
+      "allowedSchemas": [
+        "public",
+        "app_rls"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "EXECUTE_AUTHENTICATED_HELPERS"
+      ],
       "tablePrivilegeMode": "command-specific grants generated from reviewed workflows",
       "securityDefinerExecution": "approved authenticated helper signatures only",
       "mayExecuteSecurityDefinerFunctions": true,
@@ -38,9 +49,15 @@
       "credentialSource": "dedicated-authenticated-app-secret-per-environment",
       "standingCredential": true,
       "rotationExpectation": "Managed rotation per environment and immediate rotation on suspected exposure; never shared with another logical identity.",
-      "auditRequirements": ["Record actor, tenant, command, assurance, policy version, result, and request ID without secrets or row payloads."],
-      "resolvedDecisions": ["decision-runtime-role-split"],
-      "unresolvedDecisions": ["decision-policy-command-semantics"]
+      "auditRequirements": [
+        "Record actor, tenant, command, assurance, policy version, result, and request ID without secrets or row payloads."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [
+        "decision-policy-command-semantics"
+      ]
     },
     {
       "id": "identity-restricted-read",
@@ -53,8 +70,16 @@
       },
       "purpose": "Read-only RLS projections and canary validation.",
       "loginExpectation": "LOGIN",
-      "allowedSchemas": ["public", "app_rls"],
-      "allowedCommands": ["CONNECT", "USAGE", "SELECT", "EXECUTE_CONTEXT_HELPERS"],
+      "allowedSchemas": [
+        "public",
+        "app_rls"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "SELECT",
+        "EXECUTE_CONTEXT_HELPERS"
+      ],
       "tablePrivilegeMode": "SELECT only on explicitly approved tables",
       "securityDefinerExecution": "pure transaction-context helpers only",
       "mayExecuteSecurityDefinerFunctions": false,
@@ -67,8 +92,12 @@
       "credentialSource": "dedicated-restricted-read-secret-per-environment",
       "standingCredential": true,
       "rotationExpectation": "Managed rotation per environment; independent of application and validation-operator credentials.",
-      "auditRequirements": ["Record route, actor, tenant, policy revision, validation purpose, and denial class."],
-      "resolvedDecisions": ["decision-runtime-role-split"],
+      "auditRequirements": [
+        "Record route, actor, tenant, policy revision, validation purpose, and denial class."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split"
+      ],
       "unresolvedDecisions": []
     },
     {
@@ -82,8 +111,14 @@
       },
       "purpose": "Execute exact named app_auth functions before actor context exists.",
       "loginExpectation": "LOGIN",
-      "allowedSchemas": ["app_auth"],
-      "allowedCommands": ["CONNECT", "USAGE", "EXECUTE"],
+      "allowedSchemas": [
+        "app_auth"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "EXECUTE"
+      ],
       "tablePrivilegeMode": "none",
       "securityDefinerExecution": "explicit app_auth function signatures only; no generic query function",
       "mayExecuteSecurityDefinerFunctions": true,
@@ -96,9 +131,26 @@
       "credentialSource": "dedicated-preauth-secret-per-environment",
       "standingCredential": true,
       "rotationExpectation": "Managed rotation per environment; never shared with authenticated application, worker, or migration.",
-      "auditRequirements": ["Record exact function signature, generic outcome, request ID, replay/rate-limit decision; never record supplied credentials or tokens."],
-      "resolvedDecisions": ["decision-runtime-role-split"],
-      "unresolvedDecisions": ["decision-pre-auth-boundary"]
+      "auditRequirements": [
+        "Record exact function signature, generic outcome, request ID, replay/rate-limit decision; never record supplied credentials or tokens."
+      ],
+      "resolvedDecisions": [
+        "decision-pre-auth-boundary",
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [],
+      "approvedFunctionIds": [
+        "preauth-fn-consume-email-verification",
+        "preauth-fn-consume-invitation",
+        "preauth-fn-consume-password-reset",
+        "preauth-fn-lookup-invitation",
+        "preauth-fn-lookup-password-user",
+        "preauth-fn-record-password-failure",
+        "preauth-fn-request-password-reset"
+      ],
+      "directTablePrivileges": [],
+      "publicSchemaCreate": false,
+      "restrictedReadHelperAccess": false
     },
     {
       "id": "identity-worker",
@@ -111,8 +163,19 @@
       },
       "purpose": "Process asynchronous jobs using verified durable job and tenant scope.",
       "loginExpectation": "LOGIN",
-      "allowedSchemas": ["public", "app_rls"],
-      "allowedCommands": ["CONNECT", "USAGE", "SELECT", "INSERT", "UPDATE", "DELETE", "EXECUTE_WORKER_HELPERS"],
+      "allowedSchemas": [
+        "public",
+        "app_rls"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "EXECUTE_WORKER_HELPERS"
+      ],
       "tablePrivilegeMode": "command-specific grants generated from reviewed worker workflows",
       "securityDefinerExecution": "explicitly approved worker function signatures only",
       "mayExecuteSecurityDefinerFunctions": true,
@@ -125,9 +188,15 @@
       "credentialSource": "dedicated-worker-secret-per-environment",
       "standingCredential": true,
       "rotationExpectation": "Managed rotation per environment; distinct from scheduled and interactive runtime credentials.",
-      "auditRequirements": ["Record job ID/type, durably verified tenant, authorization version, attempts, result, and idempotency key."],
-      "resolvedDecisions": ["decision-runtime-role-split"],
-      "unresolvedDecisions": ["decision-worker-identity-model"]
+      "auditRequirements": [
+        "Record job ID/type, durably verified tenant, authorization version, attempts, result, and idempotency key."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [
+        "decision-worker-identity-model"
+      ]
     },
     {
       "id": "identity-scheduled-job",
@@ -140,8 +209,19 @@
       },
       "purpose": "Run scheduled maintenance separately from interactive worker execution.",
       "loginExpectation": "LOGIN",
-      "allowedSchemas": ["public", "app_rls"],
-      "allowedCommands": ["CONNECT", "USAGE", "SELECT", "INSERT", "UPDATE", "DELETE", "EXECUTE_SCHEDULED_HELPERS"],
+      "allowedSchemas": [
+        "public",
+        "app_rls"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "EXECUTE_SCHEDULED_HELPERS"
+      ],
       "tablePrivilegeMode": "command-specific grants generated from reviewed scheduled workflows",
       "securityDefinerExecution": "explicitly approved scheduled function signatures only",
       "mayExecuteSecurityDefinerFunctions": true,
@@ -154,9 +234,15 @@
       "credentialSource": "dedicated-scheduled-secret-per-environment",
       "standingCredential": true,
       "rotationExpectation": "Managed rotation per environment; distinct from worker and application credentials.",
-      "auditRequirements": ["Record schedule revision, durably verified tenant/job scope, counts, failures, retries, and idempotency evidence."],
-      "resolvedDecisions": ["decision-runtime-role-split"],
-      "unresolvedDecisions": ["decision-worker-identity-model"]
+      "auditRequirements": [
+        "Record schedule revision, durably verified tenant/job scope, counts, failures, retries, and idempotency evidence."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [
+        "decision-worker-identity-model"
+      ]
     },
     {
       "id": "identity-migration",
@@ -169,8 +255,19 @@
       },
       "purpose": "Run reviewed schema deployment only.",
       "loginExpectation": "LOGIN",
-      "allowedSchemas": ["public", "app_rls", "app_auth"],
-      "allowedCommands": ["CONNECT", "USAGE", "CREATE", "ALTER", "DROP", "OWNERSHIP_TRANSFER"],
+      "allowedSchemas": [
+        "public",
+        "app_rls",
+        "app_auth"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "CREATE",
+        "ALTER",
+        "DROP",
+        "OWNERSHIP_TRANSFER"
+      ],
       "tablePrivilegeMode": "reviewed deployment DDL only",
       "securityDefinerExecution": "none",
       "mayExecuteSecurityDefinerFunctions": false,
@@ -183,9 +280,15 @@
       "credentialSource": "dedicated-deployment-secret-per-environment",
       "standingCredential": true,
       "rotationExpectation": "Deployment-only retrieval with managed rotation; unavailable to application, worker, scheduled, and operator execution.",
-      "auditRequirements": ["Record migration checksum, release identity, start/end, target, ownership transfers, and catalog postconditions."],
-      "resolvedDecisions": ["decision-runtime-role-split"],
-      "unresolvedDecisions": ["decision-object-ownership-chain"]
+      "auditRequirements": [
+        "Record migration checksum, release identity, start/end, target, ownership transfers, and catalog postconditions."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [
+        "decision-object-ownership-chain"
+      ]
     },
     {
       "id": "identity-table-owner",
@@ -198,8 +301,12 @@
       },
       "purpose": "Own protected tables and policies without providing an execution identity.",
       "loginExpectation": "NOLOGIN",
-      "allowedSchemas": ["public"],
-      "allowedCommands": ["OWNERSHIP"],
+      "allowedSchemas": [
+        "public"
+      ],
+      "allowedCommands": [
+        "OWNERSHIP"
+      ],
       "tablePrivilegeMode": "owns protected tables and policies",
       "securityDefinerExecution": "none",
       "mayExecuteSecurityDefinerFunctions": false,
@@ -212,9 +319,15 @@
       "credentialSource": "none-nologin",
       "standingCredential": false,
       "rotationExpectation": "Not applicable; NOLOGIN role has no credential.",
-      "auditRequirements": ["Catalog tests prove NOLOGIN, NOSUPERUSER, NOBYPASSRLS, exact ownership, and absence of membership or SET ROLE reachability."],
-      "resolvedDecisions": ["decision-runtime-role-split"],
-      "unresolvedDecisions": ["decision-object-ownership-chain"]
+      "auditRequirements": [
+        "Catalog tests prove NOLOGIN, NOSUPERUSER, NOBYPASSRLS, exact ownership, and absence of membership or SET ROLE reachability."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [
+        "decision-object-ownership-chain"
+      ]
     },
     {
       "id": "identity-auth-function-owner",
@@ -227,8 +340,14 @@
       },
       "purpose": "Own only the approved app_auth schema and exact authentication functions.",
       "loginExpectation": "NOLOGIN",
-      "allowedSchemas": ["app_auth", "pg_catalog"],
-      "allowedCommands": ["OWNERSHIP", "REQUIRED_COLUMN_PRIVILEGES"],
+      "allowedSchemas": [
+        "app_auth",
+        "pg_catalog"
+      ],
+      "allowedCommands": [
+        "OWNERSHIP",
+        "REQUIRED_COLUMN_PRIVILEGES"
+      ],
       "tablePrivilegeMode": "exact required column privileges only; owns no application table",
       "securityDefinerExecution": "owns exact approved app_auth functions but is not an execution identity",
       "mayExecuteSecurityDefinerFunctions": false,
@@ -241,9 +360,23 @@
       "credentialSource": "none-nologin",
       "standingCredential": false,
       "rotationExpectation": "Not applicable; NOLOGIN role has no credential.",
-      "auditRequirements": ["Catalog tests prove exact ownership, fixed search_path, column grants, PUBLIC revoke, and no membership reachability."],
-      "resolvedDecisions": ["decision-runtime-role-split"],
-      "unresolvedDecisions": ["decision-pre-auth-boundary"]
+      "auditRequirements": [
+        "Catalog tests prove exact ownership, fixed search_path, column grants, PUBLIC revoke, and no membership reachability."
+      ],
+      "resolvedDecisions": [
+        "decision-pre-auth-boundary",
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [],
+      "approvedFunctionIds": [
+        "preauth-fn-consume-email-verification",
+        "preauth-fn-consume-invitation",
+        "preauth-fn-consume-password-reset",
+        "preauth-fn-lookup-invitation",
+        "preauth-fn-lookup-password-user",
+        "preauth-fn-record-password-failure",
+        "preauth-fn-request-password-reset"
+      ]
     },
     {
       "id": "identity-staging-operator-admin",
@@ -256,8 +389,16 @@
       },
       "purpose": "Broker-controlled, audited environment administration without standing ownership authority.",
       "loginExpectation": "LOGIN",
-      "allowedSchemas": ["public", "app_rls", "app_auth"],
-      "allowedCommands": ["CONNECT", "USAGE", "BROKER_ALLOWLISTED_ADMINISTRATION"],
+      "allowedSchemas": [
+        "public",
+        "app_rls",
+        "app_auth"
+      ],
+      "allowedCommands": [
+        "CONNECT",
+        "USAGE",
+        "BROKER_ALLOWLISTED_ADMINISTRATION"
+      ],
       "tablePrivilegeMode": "no standing table privileges; temporary command-scoped grants only",
       "securityDefinerExecution": "approved operator function signatures only when broker-authorized",
       "mayExecuteSecurityDefinerFunctions": true,
@@ -270,9 +411,15 @@
       "credentialSource": "ephemeral-broker-issued-operator-credential-per-environment",
       "standingCredential": false,
       "rotationExpectation": "Short-lived credential expires automatically after the approved operation; revoke immediately on completion or failure.",
-      "auditRequirements": ["Capture approval, operator, exact command allowlist, checksum, target guard, start/end, result, and immutable transcript."],
-      "resolvedDecisions": ["decision-runtime-role-split"],
-      "unresolvedDecisions": ["decision-operator-administration"]
+      "auditRequirements": [
+        "Capture approval, operator, exact command allowlist, checksum, target guard, start/end, result, and immutable transcript."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [
+        "decision-operator-administration"
+      ]
     },
     {
       "id": "identity-production-break-glass",
@@ -285,8 +432,12 @@
       },
       "purpose": "Ephemeral production incident identity or temporary narrowly scoped grant; never a standing reusable role with permanent credentials.",
       "loginExpectation": "EPHEMERAL_LOGIN",
-      "allowedSchemas": ["incident-approved-only"],
-      "allowedCommands": ["INCIDENT_COMMAND_ALLOWLIST_ONLY"],
+      "allowedSchemas": [
+        "incident-approved-only"
+      ],
+      "allowedCommands": [
+        "INCIDENT_COMMAND_ALLOWLIST_ONLY"
+      ],
       "tablePrivilegeMode": "temporary narrowly scoped grants only",
       "securityDefinerExecution": "incident-approved exact function signatures only",
       "mayExecuteSecurityDefinerFunctions": true,
@@ -299,10 +450,24 @@
       "credentialSource": "ephemeral-production-broker-issued-after-dual-approval-and-strong-mfa",
       "standingCredential": false,
       "rotationExpectation": "Single incident use; hard expiry and automatic revocation on completion, expiry, approval withdrawal, or broker failure.",
-      "approvalRequirements": ["dual approval", "strong MFA", "incident or ticket", "explicit expiry", "command allowlist", "immutable audit transcript", "automatic revocation"],
-      "auditRequirements": ["Immutable session transcript records incident/ticket, approvers, MFA assurance, exact scope, expiry, commands, rows affected, result, and revocation."],
-      "resolvedDecisions": ["decision-runtime-role-split"],
-      "unresolvedDecisions": ["decision-operator-administration"]
+      "approvalRequirements": [
+        "dual approval",
+        "strong MFA",
+        "incident or ticket",
+        "explicit expiry",
+        "command allowlist",
+        "immutable audit transcript",
+        "automatic revocation"
+      ],
+      "auditRequirements": [
+        "Immutable session transcript records incident/ticket, approvers, MFA assurance, exact scope, expiry, commands, rows affected, result, and revocation."
+      ],
+      "resolvedDecisions": [
+        "decision-runtime-role-split"
+      ],
+      "unresolvedDecisions": [
+        "decision-operator-administration"
+      ]
     }
   ]
 }

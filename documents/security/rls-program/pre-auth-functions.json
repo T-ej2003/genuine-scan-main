@@ -1,0 +1,1125 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": [
+    "documents/security/rls-program/workflows.json",
+    "documents/security/rls-program/command-semantics.json",
+    "backend/src/services/auth"
+  ],
+  "functionCount": 7,
+  "securityInvariants": [
+    "No dynamic SQL or generic query input",
+    "SET search_path=pg_catalog and fully qualified application objects",
+    "NOLOGIN auth owner; EXECUTE only for pre-auth runtime",
+    "PUBLIC, restricted-read and authenticated-app execution denied",
+    "No direct table grants to pre-auth runtime",
+    "Caller-set app.* variables are not authority"
+  ],
+  "functions": [
+    {
+      "sqlSchema": "app_auth",
+      "fixedSearchPath": "pg_catalog",
+      "securityDefiner": true,
+      "dynamicSqlAllowed": false,
+      "genericQueryInputsAllowed": false,
+      "fullyQualifiedApplicationObjects": true,
+      "callerOwnedFunctionsAllowed": false,
+      "callerSetContextTrusted": false,
+      "ownerIdentity": "identity-auth-function-owner",
+      "executableRuntimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "publicExecutionDenied": true,
+      "restrictedReadExecutionDenied": true,
+      "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
+      "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
+      "implementationStatus": "contract-only; SQL not generated",
+      "id": "preauth-fn-consume-email-verification",
+      "sqlFunctionName": "consume_email_verification_token",
+      "arguments": [
+        {
+          "name": "token_hash_candidates",
+          "type": "text[]",
+          "nullable": false
+        },
+        {
+          "name": "consumed_at",
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      ],
+      "returnColumns": [
+        {
+          "name": "verified",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "purpose",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "userId",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "nullable": false
+        }
+      ],
+      "purpose": "Atomically consume one account-bound email-verification token, apply its exact verification/email-change state, and revoke sessions after an email change.",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
+      ],
+      "tablesRead": [
+        "table-email-verification-token",
+        "table-user",
+        "table-refresh-token"
+      ],
+      "tablesWritten": [
+        "table-email-verification-token",
+        "table-user",
+        "table-refresh-token"
+      ],
+      "exactAllowedColumns": [
+        {
+          "tableId": "table-email-verification-token",
+          "command": "SELECT",
+          "columns": [
+            "id",
+            "userId",
+            "email",
+            "pendingEmail",
+            "purpose",
+            "tokenHash",
+            "expiresAt",
+            "usedAt"
+          ]
+        },
+        {
+          "tableId": "table-email-verification-token",
+          "command": "UPDATE",
+          "columns": [
+            "usedAt"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "command": "SELECT",
+          "columns": [
+            "id",
+            "email",
+            "pendingEmail",
+            "orgId",
+            "licenseeId",
+            "status",
+            "isActive",
+            "deletedAt"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "command": "UPDATE",
+          "columns": [
+            "email",
+            "pendingEmail",
+            "pendingEmailRequestedAt",
+            "emailVerifiedAt",
+            "status",
+            "updatedAt"
+          ]
+        },
+        {
+          "tableId": "table-refresh-token",
+          "command": "SELECT",
+          "columns": [
+            "userId",
+            "revokedAt"
+          ]
+        },
+        {
+          "tableId": "table-refresh-token",
+          "command": "UPDATE",
+          "columns": [
+            "revokedAt",
+            "revokedReason",
+            "lastUsedAt"
+          ]
+        }
+      ],
+      "inputNormalization": "Require 1..3 unique fixed-format server-derived token hashes and non-null consumed_at; token fragments and arbitrary user IDs are forbidden.",
+      "duplicateStateBehavior": "Lock at most two token matches and fail unless exactly one token and its exact User.id exist; pending-email collision also fails closed.",
+      "tokenBindingRequirements": "EmailVerificationToken.userId is the sole account authority; EMAIL_CHANGE additionally requires token.pendingEmail to equal User.pendingEmail and remain globally unique.",
+      "expiryChecks": "Require expiresAt > consumed_at.",
+      "expiryRequired": true,
+      "oneTimeConsumptionBehavior": "Require usedAt IS NULL under lock; set usedAt in the same transaction as emailVerifiedAt/email transition and any session revocation.",
+      "oneTimeToken": true,
+      "rowLockingRequirements": "Lock token and bound User; uniqueness check and mutations execute atomically.",
+      "replayProtection": "Atomic usedAt transition and row lock; already-verified accounts are idempotent only when the same unused account-bound token is valid, then token is consumed once.",
+      "volatility": "VOLATILE",
+      "parallelSafety": "UNSAFE",
+      "auditEventRequirement": "AUTH_EMAIL_VERIFIED or AUTH_EMAIL_CHANGE_CONFIRMED after commit; no token/hash.",
+      "rateLimitExpectation": "Email-verification route plus IP and actor limiter.",
+      "secretColumnExposures": [
+        {
+          "tableId": "table-email-verification-token",
+          "column": "tokenHash",
+          "justification": "Compared internally only; never returned."
+        }
+      ],
+      "externalResponseMode": "generic-invalid-or-expired-verification",
+      "returnsAccountExistenceToExternalCaller": false,
+      "allowScenarios": [
+        "One unused unexpired token verifies only its bound account; EMAIL_CHANGE also applies the bound pending email and revokes that account's sessions."
+      ],
+      "denyScenarios": [
+        "Unknown, ambiguous, expired, used, cross-account, pending-email mismatch/collision, disabled/deleted account, fragment lookup, or replay changes nothing."
+      ],
+      "p2TestRequirements": [
+        "account binding",
+        "single concurrent winner",
+        "already-verified safe behavior",
+        "email collision denial",
+        "EMAIL_CHANGE session revocation",
+        "atomic rollback"
+      ]
+    },
+    {
+      "sqlSchema": "app_auth",
+      "fixedSearchPath": "pg_catalog",
+      "securityDefiner": true,
+      "dynamicSqlAllowed": false,
+      "genericQueryInputsAllowed": false,
+      "fullyQualifiedApplicationObjects": true,
+      "callerOwnedFunctionsAllowed": false,
+      "callerSetContextTrusted": false,
+      "ownerIdentity": "identity-auth-function-owner",
+      "executableRuntimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "publicExecutionDenied": true,
+      "restrictedReadExecutionDenied": true,
+      "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
+      "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
+      "implementationStatus": "contract-only; SQL not generated",
+      "id": "preauth-fn-consume-invitation",
+      "sqlFunctionName": "consume_invitation_token",
+      "arguments": [
+        {
+          "name": "token_hash_candidates",
+          "type": "text[]",
+          "nullable": false
+        },
+        {
+          "name": "new_password_hash",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "requested_name",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "consumed_at",
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      ],
+      "returnColumns": [
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "role",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "licenseeId",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "orgId",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "nullable": false
+        }
+      ],
+      "purpose": "Atomically activate the existing account bound to one invitation without changing its role or tenant ownership.",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
+      ],
+      "tablesRead": [
+        "table-invite",
+        "table-user"
+      ],
+      "tablesWritten": [
+        "table-invite",
+        "table-user"
+      ],
+      "exactAllowedColumns": [
+        {
+          "tableId": "table-invite",
+          "command": "SELECT",
+          "columns": [
+            "id",
+            "orgId",
+            "licenseeId",
+            "email",
+            "role",
+            "manufacturerId",
+            "tokenHash",
+            "expiresAt",
+            "usedAt"
+          ]
+        },
+        {
+          "tableId": "table-invite",
+          "command": "UPDATE",
+          "columns": [
+            "usedAt",
+            "acceptedByUserId"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "command": "SELECT",
+          "columns": [
+            "id",
+            "email",
+            "role",
+            "orgId",
+            "licenseeId",
+            "status",
+            "isActive",
+            "deletedAt"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "command": "UPDATE",
+          "columns": [
+            "passwordHash",
+            "status",
+            "emailVerifiedAt",
+            "name",
+            "failedLoginAttempts",
+            "lockedUntil",
+            "updatedAt"
+          ]
+        }
+      ],
+      "inputNormalization": "Require bounded unique server-derived hash candidates, approved password hash, name trimmed to the product limit, and non-null consumed_at.",
+      "duplicateStateBehavior": "Lock at most two matches and fail unless exactly one Invite and exactly one existing User with normalized Invite.email exist.",
+      "tokenBindingRequirements": "Invite email, role, orgId and licenseeId must equal the existing User binding; function never creates a user or writes role/orgId/licenseeId/manufacturerId.",
+      "expiryChecks": "Require Invite.expiresAt > consumed_at.",
+      "expiryRequired": true,
+      "oneTimeConsumptionBehavior": "Require usedAt IS NULL under lock and atomically set usedAt/acceptedByUserId with account activation.",
+      "oneTimeToken": true,
+      "rowLockingRequirements": "Lock the Invite and bound User; exactly one transaction performs validation, password/state update, and consumption.",
+      "replayProtection": "Atomic usedAt transition, row locks, and exact account/tenant/role binding.",
+      "volatility": "VOLATILE",
+      "parallelSafety": "UNSAFE",
+      "auditEventRequirement": "AUTH_INVITE_ACCEPTED after commit with invite/user IDs; no token/hash/password.",
+      "rateLimitExpectation": "Invite-accept route plus IP and actor limiter.",
+      "secretColumnExposures": [
+        {
+          "tableId": "table-user",
+          "column": "passwordHash",
+          "justification": "Accepted only as a server-generated write value; never selected or returned."
+        },
+        {
+          "tableId": "table-invite",
+          "column": "tokenHash",
+          "justification": "Compared internally only; never returned."
+        }
+      ],
+      "externalResponseMode": "generic-invalid-or-expired-invite",
+      "returnsAccountExistenceToExternalCaller": false,
+      "roleCeiling": "Never writes User.role or tenant keys. A licensee/manufacturer invite cannot create or promote SUPER_ADMIN/PLATFORM_SUPER_ADMIN; any platform invite must already bind an operator-created matching platform user.",
+      "allowScenarios": [
+        "One matching unused invite activates only its pre-created, same-email, same-role, same-tenant account."
+      ],
+      "denyScenarios": [
+        "Role/tenant mismatch, missing user, attempted platform elevation, expired/used/ambiguous token, disabled/deleted account, or replay changes nothing."
+      ],
+      "p2TestRequirements": [
+        "single concurrent winner",
+        "role/org/licensee immutability",
+        "licensee invite platform ceiling",
+        "missing/disabled/deleted user denial",
+        "atomic invite/user rollback"
+      ]
+    },
+    {
+      "sqlSchema": "app_auth",
+      "fixedSearchPath": "pg_catalog",
+      "securityDefiner": true,
+      "dynamicSqlAllowed": false,
+      "genericQueryInputsAllowed": false,
+      "fullyQualifiedApplicationObjects": true,
+      "callerOwnedFunctionsAllowed": false,
+      "callerSetContextTrusted": false,
+      "ownerIdentity": "identity-auth-function-owner",
+      "executableRuntimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "publicExecutionDenied": true,
+      "restrictedReadExecutionDenied": true,
+      "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
+      "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
+      "implementationStatus": "contract-only; SQL not generated",
+      "id": "preauth-fn-consume-password-reset",
+      "sqlFunctionName": "consume_password_reset_token",
+      "arguments": [
+        {
+          "name": "token_hash_candidates",
+          "type": "text[]",
+          "nullable": false
+        },
+        {
+          "name": "new_password_hash",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "consumed_at",
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      ],
+      "returnColumns": [
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "role",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "licenseeId",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "orgId",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "purpose": "Atomically consume one valid reset token, activate/update its bound account password, and revoke existing sessions.",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
+      ],
+      "tablesRead": [
+        "table-password-reset",
+        "table-user",
+        "table-refresh-token"
+      ],
+      "tablesWritten": [
+        "table-password-reset",
+        "table-user",
+        "table-refresh-token"
+      ],
+      "exactAllowedColumns": [
+        {
+          "tableId": "table-password-reset",
+          "command": "SELECT",
+          "columns": [
+            "id",
+            "userId",
+            "tokenHash",
+            "usedAt",
+            "expiresAt"
+          ]
+        },
+        {
+          "tableId": "table-password-reset",
+          "command": "UPDATE",
+          "columns": [
+            "usedAt"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "command": "SELECT",
+          "columns": [
+            "id",
+            "email",
+            "name",
+            "role",
+            "licenseeId",
+            "orgId"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "command": "UPDATE",
+          "columns": [
+            "passwordHash",
+            "status",
+            "emailVerifiedAt",
+            "failedLoginAttempts",
+            "lockedUntil",
+            "updatedAt"
+          ]
+        },
+        {
+          "tableId": "table-refresh-token",
+          "command": "SELECT",
+          "columns": [
+            "userId",
+            "revokedAt"
+          ]
+        },
+        {
+          "tableId": "table-refresh-token",
+          "command": "UPDATE",
+          "columns": [
+            "revokedAt",
+            "revokedReason",
+            "lastUsedAt"
+          ]
+        }
+      ],
+      "inputNormalization": "Require 1..3 non-empty fixed-format server-derived hash candidates, one approved password hash format, and non-null consumed_at; reject raw tokens and duplicate candidate values.",
+      "duplicateStateBehavior": "Lock at most two matching reset rows and fail closed unless exactly one token row and one bound user exist.",
+      "tokenBindingRequirements": "Candidate hashes derive only from the supplied opaque token; matched PasswordReset.userId is the sole account authority.",
+      "expiryChecks": "Matched token expiresAt must be greater than consumed_at.",
+      "expiryRequired": true,
+      "oneTimeConsumptionBehavior": "Require usedAt IS NULL under row lock; set usedAt=consumed_at in the same transaction as password update and session revocation.",
+      "oneTimeToken": true,
+      "rowLockingRequirements": "SELECT matching PasswordReset FOR UPDATE, verify exactly one, and lock/update the bound User before mutation.",
+      "replayProtection": "Atomic usedAt transition and row lock; concurrent/replayed calls return no success.",
+      "volatility": "VOLATILE",
+      "parallelSafety": "UNSAFE",
+      "auditEventRequirement": "AUTH_PASSWORD_RESET_COMPLETED after commit; no token/hash/password in audit.",
+      "rateLimitExpectation": "Reset-completion IP/actor limiter plus bounded token attempts.",
+      "secretColumnExposures": [
+        {
+          "tableId": "table-user",
+          "column": "passwordHash",
+          "justification": "Accepted only as a server-generated write value; never selected or returned."
+        },
+        {
+          "tableId": "table-password-reset",
+          "column": "tokenHash",
+          "justification": "Compared internally to server-derived candidates; never returned."
+        }
+      ],
+      "externalResponseMode": "generic-invalid-or-expired-token",
+      "returnsAccountExistenceToExternalCaller": false,
+      "allowScenarios": [
+        "One unexpired unused token atomically changes only its bound account and revokes that account's live refresh tokens."
+      ],
+      "denyScenarios": [
+        "Unknown, ambiguous, expired, used, replayed, cross-account, raw-token, malformed-hash, or concurrent consumption changes nothing."
+      ],
+      "p2TestRequirements": [
+        "FOR UPDATE/concurrent single winner",
+        "expiry and usedAt denial",
+        "atomic rollback across three tables",
+        "all live sessions revoked",
+        "cross-account and duplicate hash denial"
+      ]
+    },
+    {
+      "sqlSchema": "app_auth",
+      "fixedSearchPath": "pg_catalog",
+      "securityDefiner": true,
+      "dynamicSqlAllowed": false,
+      "genericQueryInputsAllowed": false,
+      "fullyQualifiedApplicationObjects": true,
+      "callerOwnedFunctionsAllowed": false,
+      "callerSetContextTrusted": false,
+      "ownerIdentity": "identity-auth-function-owner",
+      "executableRuntimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "publicExecutionDenied": true,
+      "restrictedReadExecutionDenied": true,
+      "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
+      "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
+      "implementationStatus": "contract-only; SQL not generated",
+      "id": "preauth-fn-lookup-invitation",
+      "sqlFunctionName": "lookup_invitation_token",
+      "arguments": [
+        {
+          "name": "token_hash_candidates",
+          "type": "text[]",
+          "nullable": false
+        },
+        {
+          "name": "checked_at",
+          "type": "timestamp without time zone",
+          "nullable": false
+        }
+      ],
+      "returnColumns": [
+        {
+          "name": "email",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "role",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "expiresAt",
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        {
+          "name": "licenseeName",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "requiresConnector",
+          "type": "boolean",
+          "nullable": false
+        }
+      ],
+      "purpose": "Return the minimal preview for one valid invitation token without exposing its hash or unrelated tenant data.",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"
+      ],
+      "tablesRead": [
+        "table-invite",
+        "table-licensee"
+      ],
+      "tablesWritten": [],
+      "exactAllowedColumns": [
+        {
+          "tableId": "table-invite",
+          "command": "SELECT",
+          "columns": [
+            "tokenHash",
+            "email",
+            "role",
+            "expiresAt",
+            "usedAt",
+            "licenseeId"
+          ]
+        },
+        {
+          "tableId": "table-licensee",
+          "command": "SELECT",
+          "columns": [
+            "id",
+            "name"
+          ]
+        }
+      ],
+      "inputNormalization": "Require 1..3 unique fixed-format server-derived token hashes and non-null checked_at; raw token fragments are forbidden.",
+      "duplicateStateBehavior": "Return zero rows unless exactly one Invite matches all candidate hashes; duplicate/ambiguous state fails closed.",
+      "tokenBindingRequirements": "The preview is bound only to the exact invite hash, stored role, stored email, stored licensee, and optional matching Licensee.id.",
+      "expiryChecks": "Require usedAt IS NULL and expiresAt > checked_at.",
+      "expiryRequired": true,
+      "oneTimeConsumptionBehavior": "Read-only preview; rejects consumed tokens but does not consume a valid token.",
+      "oneTimeToken": true,
+      "rowLockingRequirements": "None for preview; consumption rechecks under lock.",
+      "replayProtection": "No state change; expiry, usedAt, bounded candidates, rate limiting, and minimal projection limit replay value.",
+      "volatility": "STABLE",
+      "parallelSafety": "SAFE",
+      "auditEventRequirement": "No token/hash logging; abnormal repeated preview attempts are security telemetry only.",
+      "rateLimitExpectation": "Invite-preview route plus IP and actor limiter.",
+      "secretColumnExposures": [
+        {
+          "tableId": "table-invite",
+          "column": "tokenHash",
+          "justification": "Compared internally only; never returned."
+        }
+      ],
+      "externalResponseMode": "generic-invalid-or-expired-invite",
+      "returnsAccountExistenceToExternalCaller": false,
+      "allowScenarios": [
+        "One unused unexpired token returns only its intended email, role, expiry, licensee display name, and connector requirement."
+      ],
+      "denyScenarios": [
+        "Unknown, malformed, ambiguous, expired, used, token-fragment, or cross-invite input returns no preview."
+      ],
+      "p2TestRequirements": [
+        "minimal projection",
+        "used/expired/duplicate denial",
+        "candidate bounds",
+        "no hash or unrelated Licensee columns returned"
+      ]
+    },
+    {
+      "sqlSchema": "app_auth",
+      "fixedSearchPath": "pg_catalog",
+      "securityDefiner": true,
+      "dynamicSqlAllowed": false,
+      "genericQueryInputsAllowed": false,
+      "fullyQualifiedApplicationObjects": true,
+      "callerOwnedFunctionsAllowed": false,
+      "callerSetContextTrusted": false,
+      "ownerIdentity": "identity-auth-function-owner",
+      "executableRuntimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "publicExecutionDenied": true,
+      "restrictedReadExecutionDenied": true,
+      "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
+      "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
+      "implementationStatus": "contract-only; SQL not generated",
+      "id": "preauth-fn-lookup-password-user",
+      "sqlFunctionName": "lookup_password_user",
+      "arguments": [
+        {
+          "name": "requested_email",
+          "type": "text",
+          "nullable": false
+        }
+      ],
+      "returnColumns": [
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "passwordHash",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "role",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "licenseeId",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "orgId",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "isActive",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "disabledAt",
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        {
+          "name": "deletedAt",
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        {
+          "name": "failedLoginAttempts",
+          "type": "integer",
+          "nullable": false
+        },
+        {
+          "name": "lockedUntil",
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        {
+          "name": "lastLoginAt",
+          "type": "timestamp without time zone",
+          "nullable": true
+        },
+        {
+          "name": "emailVerifiedAt",
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      ],
+      "purpose": "Find exactly one password-login candidate without actor context and return only password-verification/account-state/context bootstrap fields.",
+      "supportingWorkflowIds": [
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user"
+      ],
+      "tablesRead": [
+        "table-user"
+      ],
+      "tablesWritten": [],
+      "exactAllowedColumns": [
+        {
+          "tableId": "table-user",
+          "command": "SELECT",
+          "columns": [
+            "id",
+            "email",
+            "passwordHash",
+            "name",
+            "role",
+            "licenseeId",
+            "orgId",
+            "status",
+            "isActive",
+            "disabledAt",
+            "deletedAt",
+            "failedLoginAttempts",
+            "lockedUntil",
+            "lastLoginAt",
+            "emailVerifiedAt"
+          ]
+        }
+      ],
+      "inputNormalization": "Trim and lowercase exactly once; require 3..320 characters and a single local@domain.tld shape; reject non-normalized or malformed input.",
+      "duplicateStateBehavior": "Materialize at most two case-insensitive matches and return zero rows unless exactly one exists.",
+      "tokenBindingRequirements": "Not a token flow; requested email is the sole normalized lookup key and caller-set app.* variables are ignored.",
+      "expiryChecks": "not-applicable",
+      "expiryRequired": false,
+      "oneTimeConsumptionBehavior": "not-applicable",
+      "oneTimeToken": false,
+      "rowLockingRequirements": "None; read-only lookup.",
+      "replayProtection": "Read-only; endpoint rate limiting and generic credential errors prevent enumeration.",
+      "volatility": "STABLE",
+      "parallelSafety": "SAFE",
+      "auditEventRequirement": "Authentication service records a generic login outcome without password hash or existence disclosure.",
+      "rateLimitExpectation": "Shared login pre-auth limiter plus IP and actor limiter.",
+      "secretColumnExposures": [
+        {
+          "tableId": "table-user",
+          "column": "passwordHash",
+          "justification": "Required only for local password verification inside the trusted backend; never returned to the HTTP caller or logged."
+        }
+      ],
+      "externalResponseMode": "generic-invalid-credentials",
+      "returnsAccountExistenceToExternalCaller": false,
+      "allowScenarios": [
+        "One normalized active or inactive account candidate is returned for local password and account-state evaluation."
+      ],
+      "denyScenarios": [
+        "Malformed email, duplicate case-insensitive state, missing account, direct User enumeration, session-variable redirection, unrelated role, PUBLIC, or restricted-read execution returns no candidate or permission denial."
+      ],
+      "p2TestRequirements": [
+        "Exact signature/catalog security",
+        "normalization and malformed email denial",
+        "zero/one/duplicate matches",
+        "session-variable manipulation cannot redirect lookup",
+        "passwordHash is never exposed outside backend verification"
+      ]
+    },
+    {
+      "sqlSchema": "app_auth",
+      "fixedSearchPath": "pg_catalog",
+      "securityDefiner": true,
+      "dynamicSqlAllowed": false,
+      "genericQueryInputsAllowed": false,
+      "fullyQualifiedApplicationObjects": true,
+      "callerOwnedFunctionsAllowed": false,
+      "callerSetContextTrusted": false,
+      "ownerIdentity": "identity-auth-function-owner",
+      "executableRuntimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "publicExecutionDenied": true,
+      "restrictedReadExecutionDenied": true,
+      "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
+      "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
+      "implementationStatus": "contract-only; SQL not generated",
+      "id": "preauth-fn-record-password-failure",
+      "sqlFunctionName": "record_password_failure",
+      "arguments": [
+        {
+          "name": "requested_email",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "attempted_at",
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        {
+          "name": "max_attempts",
+          "type": "integer",
+          "nullable": false
+        },
+        {
+          "name": "lockout_minutes",
+          "type": "integer",
+          "nullable": false
+        }
+      ],
+      "returnColumns": [
+        {
+          "name": "failedLoginAttempts",
+          "type": "integer",
+          "nullable": false
+        },
+        {
+          "name": "lockedUntil",
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      ],
+      "purpose": "Atomically increment one normalized account's failed-login counter and establish bounded lockout state.",
+      "supportingWorkflowIds": [
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure"
+      ],
+      "tablesRead": [
+        "table-user"
+      ],
+      "tablesWritten": [
+        "table-user"
+      ],
+      "exactAllowedColumns": [
+        {
+          "tableId": "table-user",
+          "command": "SELECT",
+          "columns": [
+            "id",
+            "email",
+            "failedLoginAttempts",
+            "lockedUntil"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "command": "UPDATE",
+          "columns": [
+            "failedLoginAttempts",
+            "lockedUntil",
+            "updatedAt"
+          ]
+        }
+      ],
+      "inputNormalization": "Email must already be trimmed/lowercase and valid; attempted_at is required; max_attempts is 1..100; lockout_minutes is 1..1440.",
+      "duplicateStateBehavior": "Update zero rows unless exactly one case-insensitive email match exists.",
+      "tokenBindingRequirements": "Not a token flow; the normalized email and attempted_at bind the exact failure event.",
+      "expiryChecks": "not-applicable",
+      "expiryRequired": false,
+      "oneTimeConsumptionBehavior": "not-applicable",
+      "oneTimeToken": false,
+      "rowLockingRequirements": "Single UPDATE acquires the row lock and increments from the stored value; concurrent failures cannot lose increments.",
+      "replayProtection": "Each invocation is an auditable failed attempt; bounded inputs prevent arbitrary lockout duration and the function never clears an existing lock.",
+      "volatility": "VOLATILE",
+      "parallelSafety": "UNSAFE",
+      "auditEventRequirement": "Generic AUTH_LOGIN_FAIL/LOCKED event; no account-existence or credential detail.",
+      "rateLimitExpectation": "Shared login pre-auth limiter plus IP and actor limiter.",
+      "secretColumnExposures": [],
+      "externalResponseMode": "same-error-as-unknown-account",
+      "returnsAccountExistenceToExternalCaller": false,
+      "allowScenarios": [
+        "A valid failed attempt updates exactly one normalized account and returns only counter/lockout state."
+      ],
+      "denyScenarios": [
+        "Malformed/bounds-invalid input, duplicate state, unknown account, cross-account update, arbitrary columns, or caller-selected lockout outside bounds updates nothing."
+      ],
+      "p2TestRequirements": [
+        "parallel increment and threshold crossing",
+        "duplicate/unknown no-op",
+        "bounded inputs",
+        "existing lock preservation",
+        "exact returned columns"
+      ]
+    },
+    {
+      "sqlSchema": "app_auth",
+      "fixedSearchPath": "pg_catalog",
+      "securityDefiner": true,
+      "dynamicSqlAllowed": false,
+      "genericQueryInputsAllowed": false,
+      "fullyQualifiedApplicationObjects": true,
+      "callerOwnedFunctionsAllowed": false,
+      "callerSetContextTrusted": false,
+      "ownerIdentity": "identity-auth-function-owner",
+      "executableRuntimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "publicExecutionDenied": true,
+      "restrictedReadExecutionDenied": true,
+      "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
+      "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
+      "implementationStatus": "contract-only; SQL not generated",
+      "id": "preauth-fn-request-password-reset",
+      "sqlFunctionName": "request_password_reset",
+      "arguments": [
+        {
+          "name": "requested_email",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "reset_token_hash",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "expires_at",
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        {
+          "name": "requested_at",
+          "type": "timestamp without time zone",
+          "nullable": false
+        },
+        {
+          "name": "created_ip_hash",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "user_agent_hash",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "returnColumns": [
+        {
+          "name": "accepted",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "deliveryRequired",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "userId",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "licenseeId",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "orgId",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "expiresAt",
+          "type": "timestamp without time zone",
+          "nullable": true
+        }
+      ],
+      "purpose": "Issue a reset-token row for exactly one eligible account while preserving a constant-success external response.",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset"
+      ],
+      "tablesRead": [
+        "table-user"
+      ],
+      "tablesWritten": [
+        "table-password-reset"
+      ],
+      "exactAllowedColumns": [
+        {
+          "tableId": "table-user",
+          "command": "SELECT",
+          "columns": [
+            "id",
+            "email",
+            "isActive",
+            "deletedAt",
+            "licenseeId",
+            "orgId"
+          ]
+        },
+        {
+          "tableId": "table-password-reset",
+          "command": "INSERT",
+          "columns": [
+            "orgId",
+            "userId",
+            "tokenHash",
+            "expiresAt",
+            "createdIpHash",
+            "userAgentHash"
+          ]
+        }
+      ],
+      "inputNormalization": "Trim/lowercase and validate email; require a fixed-format server-generated token hash; requested_at is required; expires_at must be after requested_at and within configured reset TTL ceiling.",
+      "duplicateStateBehavior": "Ambiguous case-insensitive account state issues no token but returns the same accepted external outcome.",
+      "tokenBindingRequirements": "The server generates the opaque raw token, passes only its hash, and the inserted row binds it to exactly one User.id and orgId.",
+      "expiryChecks": "expires_at must be future, finite, and within the reviewed reset TTL ceiling.",
+      "expiryRequired": true,
+      "oneTimeConsumptionBehavior": "Issuance only; the token row is marked unused and may be consumed once by preauth-fn-consume-password-reset.",
+      "oneTimeToken": true,
+      "rowLockingRequirements": "No account mutation; unique tokenHash plus exact-one account match. Collision fails closed.",
+      "replayProtection": "Unique token hash, rate limiting, bounded TTL, and constant external response.",
+      "volatility": "VOLATILE",
+      "parallelSafety": "UNSAFE",
+      "auditEventRequirement": "Generic reset-request event and response; nullable internal delivery fields must never be serialized to the requester.",
+      "rateLimitExpectation": "Password-reset route, IP, normalized-email, and issuance-frequency limits.",
+      "secretColumnExposures": [],
+      "externalResponseMode": "constant-success",
+      "returnsAccountExistenceToExternalCaller": false,
+      "allowScenarios": [
+        "Eligible exact account gets one bound reset row; backend may use internal delivery fields to send the link while HTTP returns only accepted=true."
+      ],
+      "denyScenarios": [
+        "Malformed email/hash, duplicate account, inactive/deleted account, invalid expiry, token collision, or rate-limit violation issues no token and never reveals existence."
+      ],
+      "p2TestRequirements": [
+        "constant external response equivalence",
+        "duplicate/inactive/deleted no issuance",
+        "unique hash and bounded expiry",
+        "returned internal fields cannot cross the route response"
+      ]
+    }
+  ]
+}
