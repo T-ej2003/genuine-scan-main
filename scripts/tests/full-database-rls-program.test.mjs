@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildTableManifest, buildWorkflowManifest, decisionManifestPath, identityManifestPath, manifests, parseSchema, policyDependencyGraphPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validateRuntimeIdentities, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, parseSchema, policyDependencyGraphPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validateRuntimeIdentities, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 
-const snapshot = () => [tableManifestPath, workflowManifestPath, decisionManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
+const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
 
 test("all Prisma models and production access sites are represented exactly and deterministically", () => {
   const before = snapshot();
@@ -21,19 +21,72 @@ test("all Prisma models and production access sites are represented exactly and 
 });
 
 test("stable IDs and references are unique and valid", () => {
-  const { tables, workflows, identities, decisions } = manifests();
-  for (const items of [tables.tables, workflows.workflows, identities.identities, decisions.decisions]) assert.equal(new Set(items.map((item) => item.id)).size, items.length);
+  const { tables, workflows, identities, decisions, commandSemantics } = manifests();
+  for (const items of [tables.tables, workflows.workflows, identities.identities, decisions.decisions, commandSemantics.rules]) assert.equal(new Set(items.map((item) => item.id)).size, items.length);
   const tableIds = new Set(tables.tables.map((table) => table.id));
   const workflowIds = new Set(workflows.workflows.map((workflow) => workflow.id));
   const decisionIds = new Set(decisions.decisions.map((decision) => decision.id));
+  const ruleIds = new Set(commandSemantics.rules.map((rule) => rule.id));
   for (const workflow of workflows.workflows) {
     workflow.tablesTouched.forEach((id) => assert(tableIds.has(id), `${workflow.id} -> ${id}`));
     workflow.unresolvedDecisions.forEach((id) => assert(decisionIds.has(id), `${workflow.id} -> ${id}`));
+    workflow.commandRuleIds.forEach((id) => assert(ruleIds.has(id), `${workflow.id} -> ${id}`));
   }
   for (const table of tables.tables) {
     [...table.productionRuntimeReaders, ...table.productionRuntimeWriters].forEach((id) => assert(workflowIds.has(id), `${table.id} -> ${id}`));
     table.unresolvedDecisions.forEach((id) => assert(decisionIds.has(id), `${table.id} -> ${id}`));
+    (table.commandRuleIds || []).forEach((id) => assert(ruleIds.has(id), `${table.id} -> ${id}`));
   }
+});
+
+test("all FORCE-table commands and workflows have exact resolved semantics", () => {
+  const { tables, workflows, commandSemantics, decisions } = manifests();
+  const byId = new Map(commandSemantics.rules.map((rule) => [rule.id, rule]));
+  assert.equal(workflows.workflows.filter((workflow) => workflow.semanticStatus === "mapped").length, workflows.workflows.length);
+  for (const workflow of workflows.workflows) {
+    assert(workflow.commandRuleIds.length && workflow.requiredAssurance.length && workflow.commandActorClasses.length && workflow.runtimeIdentities.length, workflow.id);
+    for (const item of workflow.commandsPerTable) {
+      if (!tables.tables.find((table) => table.id === item.tableId).forceRlsTarget) continue;
+      for (const command of item.commands) assert(workflow.commandRuleIds.some((id) => byId.get(id)?.tableId === item.tableId && byId.get(id)?.command === command), `${workflow.id}:${item.tableId}:${command}`);
+    }
+  }
+  for (const table of tables.tables.filter((item) => item.forceRlsTarget)) assert(commandSemantics.rules.some((rule) => rule.tableId === table.id && rule.command === "DELETE" && rule.hardDeleteSemantics === "prohibited"), table.id);
+  assert.equal(decisions.decisions.find((decision) => decision.id === "decision-policy-command-semantics")?.status, "resolved");
+});
+
+test("command semantics mutation guards fail closed", () => {
+  const { tables, commandSemantics } = manifests();
+  const tableById = new Map(tables.tables.map((table) => [table.id, table]));
+  const verify = (candidate) => {
+    for (const rule of candidate.rules) {
+      const table = tableById.get(rule.tableId);
+      if (["INSERT", "UPDATE"].includes(rule.command)) for (const column of [...table.tenantKeyColumns, ...table.actorKeyColumns]) assert(rule.protectedColumns.includes(column), "ownership mutable");
+      if (table.primaryCategory === "security-sensitive" && rule.command === "SELECT") for (const column of table.sensitiveColumns) assert(!rule.allowedColumns.includes(column), "secret selectable");
+      assert(!(table.appendOnly && rule.command === "UPDATE" && rule.authorizationBoundary !== "prohibited"), "append-only update");
+      if (rule.actorClasses.includes("licensee-admin") && ["User", "Invite"].includes(table.prismaModel) && ["INSERT", "UPDATE"].includes(rule.command)) assert(rule.protectedColumns.includes("role"), "platform role assignable");
+      if (rule.actorClasses.includes("platform-admin")) assert(rule.minimumAssurance !== "none" && rule.requiresAuditEvent, "unconditional platform admin");
+      if (rule.requiresNamedFunction) assert.notEqual(rule.authorizationBoundary, "ordinary-rls", "named function degraded");
+      if (rule.requiresRestrictedWorkerBoundary) assert.equal(rule.authorizationBoundary, "restricted-worker", "worker boundary degraded");
+      if (rule.lifecycleColumns.length && rule.authorizationBoundary !== "prohibited") assert(rule.allowedLifecycleStates.length, "lifecycle omitted");
+    }
+    for (const table of tables.tables.filter((item) => item.forceRlsTarget)) assert(candidate.rules.some((rule) => rule.tableId === table.id && rule.command === "DELETE" && rule.hardDeleteSemantics === "prohibited"), "general hard delete enabled");
+  };
+  const rejects = (find, mutate, pattern) => {
+    const candidate = structuredClone(commandSemantics);
+    const rule = candidate.rules.find(find);
+    assert(rule, `missing mutation fixture ${pattern}`);
+    mutate(rule, candidate);
+    assert.throws(() => verify(candidate), pattern);
+  };
+  rejects((rule) => rule.command === "INSERT" && tableById.get(rule.tableId).tenantKeyColumns.length, (rule) => { rule.protectedColumns = rule.protectedColumns.filter((column) => !tableById.get(rule.tableId).tenantKeyColumns.includes(column)); }, /ownership mutable/);
+  rejects((rule) => rule.command === "SELECT" && tableById.get(rule.tableId).primaryCategory === "security-sensitive" && tableById.get(rule.tableId).sensitiveColumns.length, (rule) => { rule.allowedColumns.push(tableById.get(rule.tableId).sensitiveColumns[0]); }, /secret selectable/);
+  rejects((rule) => rule.command === "SELECT" && tableById.get(rule.tableId).appendOnly, (rule) => { rule.command = "UPDATE"; rule.authorizationBoundary = "ordinary-rls"; }, /append-only update/);
+  rejects((rule) => rule.actorClasses.includes("licensee-admin") && ["INSERT", "UPDATE"].includes(rule.command) && ["User", "Invite"].includes(tableById.get(rule.tableId).prismaModel), (rule) => { rule.protectedColumns = rule.protectedColumns.filter((column) => column !== "role"); }, /platform role assignable/);
+  rejects((rule) => rule.actorClasses.includes("platform-admin"), (rule) => { rule.minimumAssurance = "none"; }, /unconditional platform admin/);
+  rejects((rule) => rule.requiresNamedFunction && !rule.requiresRestrictedWorkerBoundary, (rule) => { rule.authorizationBoundary = "ordinary-rls"; }, /named function degraded/);
+  rejects((rule) => rule.requiresRestrictedWorkerBoundary, (rule) => { rule.authorizationBoundary = "ordinary-rls"; }, /worker boundary degraded/);
+  rejects((rule) => rule.lifecycleColumns.length && rule.authorizationBoundary !== "prohibited", (rule) => { rule.allowedLifecycleStates = []; }, /lifecycle omitted/);
+  rejects((rule) => rule.command === "DELETE" && rule.hardDeleteSemantics === "prohibited", (rule, candidate) => { candidate.rules.splice(candidate.rules.indexOf(rule), 1); }, /general hard delete enabled/);
 });
 
 test("tests do not inflate production totals and repeated technical calls remain one functional workflow", () => {
@@ -151,4 +204,6 @@ test("activation remains manual and the shared-table apply remains blocked", () 
 test("human manifests are present and parseable", () => {
   assert(JSON.parse(fs.readFileSync(identityManifestPath, "utf8")).identities.length >= 10);
   assert(JSON.parse(fs.readFileSync(decisionManifestPath, "utf8")).decisions.length > 0);
+  assert(JSON.parse(fs.readFileSync(commandSemanticsPath, "utf8")).rules.length > 0);
+  assert(fs.readFileSync(commandSemanticsReviewPath, "utf8").includes("Boundary and deletion summary"));
 });

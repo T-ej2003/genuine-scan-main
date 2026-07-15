@@ -4,7 +4,7 @@
 
 This directory is the machine-readable programme authority for taking every Prisma-backed production table and active database workflow toward PostgreSQL `ENABLE ROW LEVEL SECURITY` plus `FORCE ROW LEVEL SECURITY`. It is inventory and harness foundation only. It does not authorize or implement an application authorization change, policy, RLS enablement, database mutation, AWS action, staging action, or production action.
 
-`tables.json` owns table classification and readiness, `workflows.json` owns functional access, `runtime-identities.json` owns execution identities, and `decisions.json` owns unresolved rules. The scanners regenerate schema/access evidence while retaining human-maintained decisions and status. The shared-table apply at `documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql` remains blocked.
+`tables.json` owns table classification and readiness, `workflows.json` owns functional access, `command-semantics.json` owns command authorization, `runtime-identities.json` owns execution identities, and `decisions.json` owns unresolved rules. The scanners regenerate schema/access evidence while retaining human-maintained decisions and status. The shared-table apply at `documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql` remains blocked.
 
 ## Final database role model
 
@@ -31,7 +31,21 @@ Migration may perform required DDL only through an explicitly approved deploymen
 
 Authenticated database work occurs inside one transaction that validates and sets the six transaction-local settings already used by the prototype: actor/user ID, normalized role, licensee ID, organization ID, manufacturer ID, and platform-administrator boolean. Context is derived from authenticated server state, never accepted directly from request or queue payloads, and the transaction client cannot escape its callback. Missing, malformed, forged, stale, or cross-tenant context fails closed.
 
-Command-specific assurance, column and lifecycle rules remain `decision-policy-command-semantics`. Future changes should reuse the existing transaction-context primitive after it is promoted and certified; no second context implementation is needed.
+`decision-policy-command-semantics` is resolved by `command-semantics.json`. Future changes should reuse the existing transaction-context primitive after it is promoted and certified; no second context implementation is needed.
+
+## Command authorization semantics
+
+The 75 FORCE RLS targets have deterministic rules for each registered production workflow command plus one default-deny DELETE rule per table. `COUNT` is SELECT, `UPSERT` is INSERT plus UPDATE, and raw Prisma access is classified by the SQL execution primitive and statement verb; wildcard `ALL` is forbidden. Each rule binds the application actor class separately from the database runtime identity and records assurance, scope, allowed/protected columns, lifecycle conditions, `WITH CHECK`, special-function/worker/approval boundaries, audit, deletion consequences, allow/deny cases, evidence, confidence, and status.
+
+Canonical actors are `anonymous`, `authenticated-user`, `manufacturer`, `operator`, `checker`, `licensee-admin`, `platform-admin`, `restricted-read`, `pre-auth-runtime`, `worker`, `scheduled-job`, `migration`, `operator-admin`, and `break-glass`. Canonical assurance is `none`, `password-verified`, `mfa-bootstrap`, `mfa-verified`, `step-up-verified`, `system-verified`, `operator-approved`, or `dual-approved-break-glass`. Actor classes never imply database role membership, ownership, `SET ROLE`, superuser, or `BYPASSRLS`.
+
+INSERT and UPDATE rules split mutable columns from protected server-controlled columns. Tenant/actor ownership, platform role, audit actor, approval actor, immutable QR identity, print/release evidence, token/hash/secret, primary identity, timestamps, and lifecycle fields cannot be client assigned. A protected value may be written only by its exact trusted server context or named boundary and must pass the recorded `WITH CHECK`. Security-sensitive SELECT rules omit secret-bearing columns; secret material is available only through the named repository/function contract.
+
+Batch lifecycle writes preserve the existing `DRAFT`, `CODES_GENERATED`, `PRINT_ACKNOWLEDGED`, `PRINT_CONFIRMED`, `SAMPLE_VERIFIED`, and `RELEASED` ordering. `FAILED` and `VOIDED` are terminal, release cannot silently mutate, and release approval preserves a different maker/checker. Printing, account/authentication, incident, governance, job, and retention status fields require their canonical service transition; client-selected initial states and unvalidated terminal transitions are denied.
+
+Hard DELETE defaults to prohibited on all 75 protected tables. Exact registered exceptions are classified as actor self-delete, tenant-admin delete, retention delete, migration-only cleanup, or operator-approved deletion. Every exception remains scope-, lifecycle-, assurance-, dependent-data-, retention/legal-, and audit-bound; it does not create a general DELETE policy. Append-only evidence never permits UPDATE and permits DELETE only through its recorded retention/redaction command.
+
+Licensee administrators remain tenant-bound and cannot assign platform roles, move rows between tenants, rewrite ownership, or reset protected security state without the recorded MFA/audit boundary. Platform administration is route-guarded, scoped, assured, purpose-audited, and command-specific—never `USING (true)`. Operator administration and production break-glass remain ephemeral allowlists with approval, expiry, and immutable audit. Background commands use durable system verification and restricted worker/scheduled boundaries, never a human actor or queue-payload authority.
 
 ## Table categories
 
@@ -80,7 +94,7 @@ The generated `TABLE_OWNERSHIP_REVIEW.md` is the concise table-by-table review. 
 
 ## Unresolved semantic decisions
 
-Ownership classification itself has no unresolved table decision. Policy command/column/lifecycle semantics (`decision-policy-command-semantics`), exact pre-auth functions (`decision-pre-auth-boundary`), durable worker/job authority (`decision-worker-identity-model`), the executable object-transfer chain (`decision-object-ownership-chain`), and broker/operator implementation (`decision-operator-administration`) remain blocking implementation decisions. They do not reopen the approved category, owner, FORCE target, or parent DAG.
+Ownership and policy command semantics have no unresolved table or workflow decision. Exact pre-auth functions (`decision-pre-auth-boundary`), durable worker/job authority (`decision-worker-identity-model`), the executable object-transfer chain (`decision-object-ownership-chain`), and broker/operator implementation (`decision-operator-administration`) remain blocking implementation decisions. They do not reopen the approved category, owner, FORCE target, parent DAG, command contract, or administrator ceiling.
 
 ## Pre-authentication function rules
 
@@ -100,7 +114,7 @@ Inventory direct calls first, then move each canonical workflow—not each techn
 
 ## Policy generation strategy
 
-Policies are generated only from reviewed table ownership plus reviewed workflow command contracts. Generation must be deterministic, command-specific, role-specific, dependency-ordered and fail closed on unresolved decisions. Generated SQL, rollback and catalog verification are separate review artifacts; no Prisma migration, startup path, workflow, or harness automatically executes activation SQL.
+Policies are generated only from reviewed table ownership plus `command-semantics.json`. Generation must preserve exact actor/identity/assurance/scope/column/lifecycle boundaries, be deterministic, command-specific, role-specific and dependency-ordered, and fail closed on unresolved implementation decisions. Generated SQL, rollback and catalog verification are separate review artifacts; no Prisma migration, startup path, workflow, or harness automatically executes activation SQL.
 
 ## Full-database testing strategy
 

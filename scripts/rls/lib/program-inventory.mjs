@@ -13,12 +13,17 @@ export const identityManifestPath = path.join(programDir, "runtime-identities.js
 export const decisionManifestPath = path.join(programDir, "decisions.json");
 export const policyDependencyGraphPath = path.join(programDir, "policy-dependency-graph.json");
 export const tableOwnershipReviewPath = path.join(programDir, "TABLE_OWNERSHIP_REVIEW.md");
+export const commandSemanticsPath = path.join(programDir, "command-semantics.json");
+export const commandSemanticsReviewPath = path.join(programDir, "COMMAND_SEMANTICS_REVIEW.md");
 export const blockedApplyPath = "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql";
 
 export const commands = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "UPSERT", "COUNT", "RAW_SQL"]);
 export const surfaces = new Set(["http", "worker", "scheduled", "startup", "cli", "internal"]);
 export const boundaries = new Set(["authenticated-context", "pre-auth-security-function", "tenant-admin", "platform-admin", "actor-owned", "restricted-worker", "append-only", "migration-owner", "operator-break-glass", "unresolved"]);
 export const categories = new Set(["tenant-root", "tenant-owned", "actor-owned", "parent-inherited", "security-sensitive", "append-only-audit", "platform-reference", "operational-system", "migration-only", "intentionally-non-rls"]);
+export const actorClasses = new Set(["anonymous", "authenticated-user", "manufacturer", "operator", "checker", "licensee-admin", "platform-admin", "restricted-read", "pre-auth-runtime", "worker", "scheduled-job", "migration", "operator-admin", "break-glass"]);
+export const assuranceLevels = new Set(["none", "password-verified", "mfa-bootstrap", "mfa-verified", "step-up-verified", "system-verified", "operator-approved", "dual-approved-break-glass"]);
+export const policyCommands = new Set(["SELECT", "INSERT", "UPDATE", "DELETE"]);
 
 const CATEGORY_MODELS = Object.freeze({
   "tenant-root": ["Organization"],
@@ -368,6 +373,11 @@ const functionName = (ts, node) => {
   return "module";
 };
 const operationFor = (method) => method === "upsert" ? "UPSERT" : method === "count" ? "COUNT" : method.startsWith("create") ? "INSERT" : method.startsWith("update") ? "UPDATE" : method.startsWith("delete") ? "DELETE" : "SELECT";
+const rawCommandsFor = (method, sql) => {
+  if (/queryraw/i.test(method)) return ["SELECT"];
+  const matches = [...sql.matchAll(/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b/gi)].map((match) => match[1].split(/\s/)[0].toUpperCase());
+  return [...new Set(matches.length ? matches : ["UPDATE"])];
+};
 const surfaceFor = (file, fn) => {
   const value = `${rel(file)}:${fn}`;
   if (file === path.join(repoRoot, "backend/src/worker.ts") || /(?:worker|processor|consumer|queue)/i.test(value)) return "worker";
@@ -405,7 +415,7 @@ export const scanProductionAccess = () => {
       const line = ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1;
       const fn = functionName(ts, node);
       const surface = surfaceFor(file, fn);
-      const locator = `${rel(file)}:${line}:${model.name}:${method}`;
+      const locator = `${rel(file)}:${line}:${model.name}:${method}:${command}`;
       if (recorded.has(locator)) return;
       recorded.add(locator);
       accesses.push({ id: hashId("access", locator), sourceFile: rel(file), line, function: fn, tableId: `table-${slug(model.physicalTable)}`, prismaModel: model.name, command, method, executionSurface: surface, production, registrationEvidence: roots.has(file) ? "registered-entrypoint" : reachable.has(file) ? "reachable-from-registered-entrypoint" : "unregistered", evidence: evidence.replace(/\s+/g, " ").slice(0, 350) });
@@ -468,12 +478,12 @@ export const scanProductionAccess = () => {
         }
         if (rawMethods.has(method)) {
           const raw = node.getText(ast);
-          for (const [name, model] of physical) if (new RegExp(`(?:\\b|[\"'])${name}(?:\\b|[\"'])`, "i").test(raw)) record(node, model, method, "RAW_SQL", raw);
+          for (const [name, model] of physical) if (new RegExp(`(?:\\b|[\"'])${name}(?:\\b|[\"'])`, "i").test(raw)) for (const command of rawCommandsFor(method, raw)) record(node, model, method, command, raw);
         }
       }
       if (ts.isTaggedTemplateExpression(node) && ts.isPropertyAccessExpression(node.tag) && rawMethods.has(node.tag.name.text)) {
         const raw = node.getText(ast);
-        for (const [name, model] of physical) if (new RegExp(`(?:\\b|[\"'])${name}(?:\\b|[\"'])`, "i").test(raw)) record(node, model, node.tag.name.text, "RAW_SQL", raw);
+        for (const [name, model] of physical) if (new RegExp(`(?:\\b|[\"'])${name}(?:\\b|[\"'])`, "i").test(raw)) for (const command of rawCommandsFor(node.tag.name.text, raw)) record(node, model, node.tag.name.text, command, raw);
       }
       ts.forEachChild(node, visit);
     };
@@ -602,6 +612,261 @@ export const writeTableOwnershipReview = (tableManifest, graph) => {
   fs.writeFileSync(tableOwnershipReviewPath, `${lines.join("\n")}\n`);
 };
 
+const routeSource = () => fs.readFileSync(path.join(repoRoot, "backend/src/routes/index.ts"), "utf8");
+const routeEvidenceFor = (functionName, source = routeSource()) => {
+  const lines = source.split("\n");
+  const index = lines.findLastIndex((line) => new RegExp(`\\b${functionName}\\b`).test(line));
+  if (index < 0) return null;
+  const excerpt = lines.slice(Math.max(0, index - 14), index + 2).join(" ").replace(/\s+/g, " ");
+  const guards = ["authenticate", "requirePlatformAdmin", "requireLicenseeAdmin", "requireAnyAdmin", "requireManufacturer", "requireRecentAdminMfa", "requireRecentSensitiveAuth", "requireCustomerVerifyAuth", "optionalCustomerVerifyAuth", "enforceTenantIsolation", "requireCsrf"].filter((guard) => new RegExp(`\\b${guard}\\b`).test(excerpt));
+  const route = excerpt.match(/(?:get|post|put|patch|delete)\(\s*["']([^"']+)/)?.[1] || null;
+  return { source: `backend/src/routes/index.ts:${index + 1}`, route, guards };
+};
+
+const commandActorsFor = (workflow, table, routeEvidence) => {
+  const text = `${workflow.id} ${workflow.canonicalSourceFiles.join(" ")}`.toLowerCase();
+  const guards = new Set(routeEvidence?.guards || []);
+  if (workflow.authorizationBoundaryType === "operator-break-glass") return ["break-glass"];
+  if (workflow.authorizationBoundaryType === "pre-auth-security-function") return ["anonymous", "pre-auth-runtime"];
+  if (workflow.executionSurface === "worker") return ["worker"];
+  if (workflow.executionSurface === "scheduled") return ["scheduled-job"];
+  if (workflow.authorizationBoundaryType === "migration-owner") return ["migration"];
+  if (["cli", "startup"].includes(workflow.executionSurface)) return ["operator-admin"];
+  if (guards.has("requirePlatformAdmin") || workflow.authorizationBoundaryType === "platform-admin") return ["platform-admin"];
+  if (guards.has("requireLicenseeAdmin")) return ["licensee-admin"];
+  if (guards.has("requireManufacturer")) return ["manufacturer"];
+  if (/release|checker|approve/.test(text) && ["Batch", "QrAllocationRequest", "SensitiveActionApproval", "PrintReissueRequest"].includes(table.prismaModel)) return ["checker"];
+  if (guards.has("requireAnyAdmin")) return ["licensee-admin", "platform-admin"];
+  if (workflow.authorizationBoundaryType === "actor-owned" || /auth|account|customer/.test(text)) return ["authenticated-user"];
+  if (/manufacturer|print|printer/.test(text)) return ["manufacturer"];
+  if (/incident|governance|policy|audit|forensic|support/.test(text)) return ["operator", "licensee-admin", "platform-admin"];
+  if (/licensee|allocation|qr-request/.test(text)) return ["licensee-admin", "platform-admin"];
+  return ["authenticated-user"];
+};
+
+const runtimeIdentityForCommand = (workflow) => workflow.authorizationBoundaryType === "operator-break-glass" ? "identity-production-break-glass"
+  : workflow.authorizationBoundaryType === "pre-auth-security-function" ? "identity-pre-auth-app"
+    : workflow.executionSurface === "worker" ? "identity-worker"
+      : workflow.executionSurface === "scheduled" ? "identity-scheduled-job"
+        : workflow.authorizationBoundaryType === "migration-owner" ? "identity-migration"
+          : ["cli", "startup"].includes(workflow.executionSurface) ? "identity-staging-operator-admin"
+            : "identity-authenticated-app";
+
+const assuranceForCommand = (workflow, actors, command, table, routeEvidence) => {
+  const guards = new Set(routeEvidence?.guards || []);
+  if (actors.includes("break-glass")) return "dual-approved-break-glass";
+  if (actors.includes("operator-admin")) return "operator-approved";
+  if (actors.includes("worker") || actors.includes("scheduled-job") || actors.includes("migration")) return "system-verified";
+  if (actors.includes("pre-auth-runtime")) return /mfa|webauthn|challenge/.test(workflow.id) ? "mfa-bootstrap" : "none";
+  if (guards.has("requireRecentSensitiveAuth")) return "step-up-verified";
+  if (guards.has("requireRecentAdminMfa")) return "mfa-verified";
+  if (command !== "SELECT" && (actors.some((actor) => ["platform-admin", "licensee-admin", "checker"].includes(actor)) || table.primaryCategory === "security-sensitive")) return "mfa-verified";
+  return "password-verified";
+};
+
+const scalarColumnsFor = (table) => {
+  const modelNames = new Set(parseSchema().map((model) => model.name));
+  return table.schemaEvidence.fields.filter((field) => !modelNames.has(field.type)).map((field) => field.name).sort();
+};
+const lifecycleColumnsFor = (table) => scalarColumnsFor(table).filter((column) => /(?:status|state|stage|enabled|disabledAt|deletedAt|revokedAt|consumedAt|expiresAt|releasedAt|confirmedAt|approvedAt|rejectedAt|usedAt|readAt)$/i.test(column));
+const schemaEnumValues = new Map([...fs.readFileSync(schemaPath, "utf8").matchAll(/^enum\s+(\w+)\s*\{([\s\S]*?)^\}/gm)].map((match) => [match[1], match[2].split("\n").map((line) => line.replace(/\/\/.*$/, "").trim()).filter(Boolean)]));
+const lifecycleValuesFor = (table, column) => {
+  const field = table.schemaEvidence.fields.find((item) => item.name === column);
+  const values = schemaEnumValues.get(field?.type);
+  if (values) return values.map((value) => `${column}=${value}`);
+  if (field?.type === "Boolean") return [`${column}=false`, `${column}=true`];
+  return [`${column}=NULL`, `${column}=SERVER_TIMESTAMP_SET`];
+};
+const protectedColumnsFor = (table) => [...new Set([
+  "id", "createdAt", "updatedAt",
+  ...table.tenantKeyColumns,
+  ...table.actorKeyColumns,
+  ...(table.authorizationParentColumns?.child || []),
+  ...table.sensitiveColumns,
+  ...scalarColumnsFor(table).filter((column) => /(?:^role$|platformAdmin|createdBy|updatedBy|approvedBy|reviewedBy|executedBy|requestedBy|actorUser|auditActor|makerUser|checkerUser|code$|publicCode|qrCodeValue|serial|token|hash|secret|credential|challenge|evidence|attestation|signature|releasedAt|releaseEvidence|confirmedAt)$/i.test(column)),
+  ...lifecycleColumnsFor(table),
+])].filter((column) => scalarColumnsFor(table).includes(column)).sort();
+
+const lifecycleFor = (table, command, workflow) => {
+  const columns = lifecycleColumnsFor(table);
+  if (!columns.length) return { columns: [], allowed: [], forbidden: [] };
+  const states = columns.flatMap((column) => lifecycleValuesFor(table, column));
+  if (command === "SELECT") return { columns, allowed: states, forbidden: [] };
+  if (table.prismaModel === "Batch") {
+    const allowed = ["DRAFT", "CODES_GENERATED", "PRINT_ACKNOWLEDGED", "PRINT_CONFIRMED", "SAMPLE_VERIFIED"];
+    const text = workflow.id.toLowerCase();
+    if (/release/.test(text)) return { columns, allowed: ["SAMPLE_VERIFIED"], forbidden: ["RELEASED", "FAILED", "VOIDED"] };
+    if (/sample/.test(text)) return { columns, allowed: ["PRINT_CONFIRMED"], forbidden: ["RELEASED", "FAILED", "VOIDED"] };
+    if (/confirm/.test(text)) return { columns, allowed: ["PRINT_ACKNOWLEDGED"], forbidden: ["RELEASED", "FAILED", "VOIDED"] };
+    if (/print|ack/.test(text)) return { columns, allowed: ["CODES_GENERATED"], forbidden: ["RELEASED", "FAILED", "VOIDED"] };
+    return { columns, allowed, forbidden: ["RELEASED", "FAILED", "VOIDED"] };
+  }
+  if (command === "INSERT") {
+    const defaults = columns.flatMap((column) => {
+      const field = table.schemaEvidence.fields.find((item) => item.name === column);
+      const value = field?.attributes.match(/@default\(([^)]+)\)/)?.[1];
+      return value ? [`${column}=${value}`] : [`${column}=NULL_OR_SERVER_INITIALIZED`];
+    });
+    return { columns, allowed: defaults, forbidden: ["CLIENT_SELECTED_INITIAL_STATE"] };
+  }
+  if (command === "DELETE") return { columns, allowed: states, forbidden: ["LEGAL_HOLD_OR_UNSATISFIED_PARENT_LIFECYCLE"] };
+  return { columns, allowed: states, forbidden: ["ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"] };
+};
+
+const deleteSemanticsFor = (table, workflow = null) => {
+  if (!workflow) return "prohibited";
+  const text = `${workflow.id} ${workflow.canonicalSourceFiles.join(" ")}`.toLowerCase();
+  if (/seed|prisma/.test(text)) return "migration-only";
+  if (["QrScanLog", "IncidentEvidence", "IncidentEvidenceFingerprint", "ActionIdempotencyKey"].includes(table.prismaModel)) return "retention delete";
+  if (["AdminWebAuthnCredential", "CustomerWebAuthnCredential", "UserMfaFactor", "UserBackupCode"].includes(table.prismaModel)) return "actor self-delete";
+  if (["Batch", "QRCode", "ManufacturerLicenseeLink", "User", "Printer"].includes(table.prismaModel)) return "tenant-admin delete";
+  if (table.authorizationParentTable) return "cascade through approved parent lifecycle";
+  return "operator-approved";
+};
+
+const scopeRuleFor = (table, actors) => {
+  if (actors.some((actor) => ["worker", "scheduled-job"].includes(actor))) return "Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative.";
+  if (actors.includes("break-glass")) return "Ephemeral command allowlist, exact incident scope, expiry, dual approval, and immutable transcript.";
+  if (table.authorizationParentTable) return `${table.id} row must join through ${table.authorizationParentTable} on ${table.authorizationParentColumns.child.join("+")}=${table.authorizationParentColumns.parent.join("+")}; no alternative parent.`;
+  if (table.tenantKeyColumns.length) return `Every non-NULL ${table.tenantKeyColumns.join("/")} must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.`;
+  if (table.actorKeyColumns.length) return `${table.actorKeyColumns.join("/")} must equal trusted actor context; administrator access is command-specific and audited.`;
+  return `${table.terminalBoundary} boundary from tables.json; empty or forged context is denied.`;
+};
+
+const buildCommandRule = ({ table, workflow, command, actors, identityId, assurance, routeEvidence }) => {
+  const scalarColumns = scalarColumnsFor(table);
+  const protectedColumns = protectedColumnsFor(table);
+  const lifecycle = lifecycleFor(table, command, workflow);
+  const securityFunction = table.primaryCategory === "security-sensitive" && (command !== "SELECT" || table.sensitiveColumns.length > 0);
+  const preAuthFunction = actors.includes("pre-auth-runtime");
+  const workerBoundary = actors.some((actor) => ["worker", "scheduled-job"].includes(actor));
+  const operatorApproval = actors.some((actor) => ["operator-admin", "break-glass"].includes(actor));
+  const rawEvidence = workflow.supportingEvidence.some((evidence) => evidence.method?.startsWith("$"));
+  const allowedColumns = command === "DELETE" ? [] : command === "SELECT"
+    ? scalarColumns.filter((column) => !(table.primaryCategory === "security-sensitive" && table.sensitiveColumns.includes(column)))
+    : scalarColumns.filter((column) => !protectedColumns.includes(column));
+  const hardDeleteSemantics = command === "DELETE" ? deleteSemanticsFor(table, workflow) : "not-applicable";
+  const approvalClass = actors.includes("break-glass") ? "dual-approved-break-glass"
+    : actors.includes("operator-admin") ? "operator-approved"
+      : actors.includes("checker") && /release|approve/.test(workflow.id) ? "maker-checker-separation"
+        : hardDeleteSemantics === "retention delete" ? "retention-authorization"
+          : "none";
+  const requiresApproval = approvalClass !== "none";
+  const requiresNamedFunction = preAuthFunction || securityFunction || rawEvidence;
+  const boundaryMode = workerBoundary ? "restricted-worker" : operatorApproval ? "operator-approval" : requiresNamedFunction ? "named-function" : "ordinary-rls";
+  return {
+    id: `command-${slug(table.prismaModel)}-${command.toLowerCase()}-${crypto.createHash("sha256").update(workflow.id).digest("hex").slice(0, 12)}`,
+    tableId: table.id,
+    command,
+    actorClasses: actors,
+    runtimeIdentities: [identityId],
+    minimumAssurance: assurance,
+    scopeRule: scopeRuleFor(table, actors),
+    allowedColumns,
+    protectedColumns,
+    allowedLifecycleStates: lifecycle.allowed,
+    forbiddenLifecycleStates: lifecycle.forbidden,
+    lifecycleColumns: lifecycle.columns,
+    withCheckRule: command === "SELECT" || command === "DELETE" ? "not-applicable" : `New row preserves ${scopeRuleFor(table, actors)} Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.`,
+    requiresNamedFunction,
+    namedFunctionClass: requiresNamedFunction ? (preAuthFunction ? "narrow-pre-auth-security-definer" : rawEvidence ? "exact-reviewed-query-function" : "authenticated-security-repository-function") : "none",
+    requiresRestrictedWorkerBoundary: workerBoundary,
+    requiresAuditEvent: command !== "SELECT" || actors.some((actor) => ["platform-admin", "operator", "operator-admin", "break-glass"].includes(actor)),
+    requiresApproval,
+    approvalClass,
+    authorizationBoundary: boundaryMode,
+    hardDeleteSemantics,
+    dependentDataBehavior: command === "DELETE" ? (table.authorizationParentTable ? "Only the schema-defined parent cascade and reviewed retention lifecycle may affect dependent rows." : "Dependent rows must be enumerated and certified before execution; implicit cross-tenant cascades are denied.") : "not-applicable",
+    retentionLegalConsequences: command === "DELETE" ? "Legal hold, retention policy, tenant scope, and immutable audit evidence must be checked before deletion." : "not-applicable",
+    supportingWorkflowIds: [workflow.id],
+    supportingEvidence: [...workflow.canonicalSourceFiles, ...(routeEvidence ? [`${routeEvidence.source} guards=${routeEvidence.guards.join(",") || "none"}`] : [])],
+    allowScenarios: [`${actors.join(" or ")} using ${identityId} at ${assurance} performs ${command} within the recorded scope, column set, lifecycle, and boundary.`],
+    denyScenarios: ["Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."],
+    confidence: routeEvidence || workerBoundary || preAuthFunction || operatorApproval ? "high" : "medium",
+    status: "architecture-resolved",
+  };
+};
+
+export const buildCommandSemantics = (tableManifest, workflowManifest) => {
+  const tablesById = new Map(tableManifest.tables.map((table) => [table.id, table]));
+  const rules = [];
+  for (const workflow of workflowManifest.workflows) {
+    const routeEvidence = workflow.executionSurface === "http" ? routeEvidenceFor(workflow.entryPoint.split(":").at(-1)) : null;
+    workflow.commandRuleIds = [];
+    workflow.commandActorClasses = [];
+    workflow.requiredAssurance = [];
+    workflow.runtimeIdentities = [];
+    for (const item of workflow.commandsPerTable) {
+      const table = tablesById.get(item.tableId);
+      if (!table?.forceRlsTarget) continue;
+      for (const command of item.commands) {
+        const actors = commandActorsFor(workflow, table, routeEvidence);
+        const identityId = runtimeIdentityForCommand(workflow);
+        const assurance = assuranceForCommand(workflow, actors, command, table, routeEvidence);
+        const rule = buildCommandRule({ table, workflow, command, actors, identityId, assurance, routeEvidence });
+        rules.push(rule);
+        workflow.commandRuleIds.push(rule.id);
+        workflow.commandActorClasses.push(...actors);
+        workflow.requiredAssurance.push(assurance);
+        workflow.runtimeIdentities.push(identityId);
+      }
+    }
+    workflow.commandRuleIds.sort();
+    workflow.commandActorClasses = [...new Set(workflow.commandActorClasses)].sort();
+    workflow.actorClasses = workflow.commandActorClasses;
+    workflow.requiredAssurance = [...new Set(workflow.requiredAssurance)].sort();
+    workflow.runtimeIdentities = [...new Set(workflow.runtimeIdentities)].sort();
+    workflow.semanticStatus = workflow.commandRuleIds.length || workflow.tablesTouched.every((id) => !tablesById.get(id)?.forceRlsTarget) ? "mapped" : "unresolved";
+    workflow.expectedAllowedScenarios = ["Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."];
+    workflow.expectedDeniedScenarios = ["Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."];
+    workflow.unresolvedDecisions = workflow.unresolvedDecisions.filter((id) => id !== "decision-policy-command-semantics");
+  }
+  for (const table of tableManifest.tables.filter((item) => item.forceRlsTarget)) {
+    if (table.allowedCommandsByIdentity.some((entry) => entry.identityId === "identity-restricted-read" && entry.commands.includes("SELECT"))) {
+      const restrictedWorkflow = { id: `runtime-restricted-read-${table.id}`, canonicalSourceFiles: ["documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql"], supportingEvidence: [], authorizationBoundaryType: "authenticated-context", executionSurface: "internal" };
+      const restricted = buildCommandRule({ table, workflow: restrictedWorkflow, command: "SELECT", actors: ["restricted-read"], identityId: "identity-restricted-read", assurance: "system-verified", routeEvidence: null });
+      restricted.id = `command-${slug(table.prismaModel)}-select-restricted-read`;
+      restricted.supportingWorkflowIds = [];
+      restricted.supportingEvidence = ["tables.json explicitly approves this table for the SELECT-only RLS read/canary identity."];
+      restricted.confidence = "high";
+      rules.push(restricted);
+    }
+    const prohibited = {
+      id: `command-${slug(table.prismaModel)}-delete-prohibited`, tableId: table.id, command: "DELETE", actorClasses: [], runtimeIdentities: [], minimumAssurance: "none",
+      scopeRule: "No general hard-delete scope exists.", allowedColumns: [], protectedColumns: scalarColumnsFor(table), allowedLifecycleStates: [], forbiddenLifecycleStates: ["ALL_STATES"], lifecycleColumns: lifecycleColumnsFor(table),
+      withCheckRule: "not-applicable", requiresNamedFunction: false, namedFunctionClass: "none", requiresRestrictedWorkerBoundary: false, requiresAuditEvent: false, requiresApproval: false, approvalClass: "none", authorizationBoundary: "prohibited", hardDeleteSemantics: "prohibited",
+      dependentDataBehavior: "No cascade is authorized by this rule.", retentionLegalConsequences: "Deletion requires a separate explicit workflow rule; absence of one is denial.", supportingWorkflowIds: [], supportingEvidence: ["Default-deny hard-delete architecture rule in ARCHITECTURE.md."],
+      allowScenarios: ["None; this rule records the default prohibition."], denyScenarios: ["Every direct or cascaded DELETE lacking a separate exact command rule is denied."], confidence: "high", status: "architecture-resolved",
+    };
+    rules.push(prohibited);
+    table.commandRuleIds = rules.filter((rule) => rule.tableId === table.id).map((rule) => rule.id).sort();
+    table.commandSemanticsAuthority = "documents/security/rls-program/command-semantics.json";
+    table.deleteSemantics = [...new Set(rules.filter((rule) => rule.tableId === table.id && rule.command === "DELETE").map((rule) => rule.hardDeleteSemantics))].sort();
+    table.unresolvedDecisions = table.unresolvedDecisions.filter((id) => id !== "decision-policy-command-semantics");
+  }
+  const manifest = { schemaVersion: 1, generatedFrom: ["backend/prisma/schema.prisma", "documents/security/rls-program/tables.json", "documents/security/rls-program/workflows.json", "backend/src/routes/index.ts"], actorClasses: [...actorClasses], assuranceLevels: [...assuranceLevels], commandVocabulary: [...policyCommands], rules: rules.sort((a, b) => a.id.localeCompare(b.id)) };
+  writeJson(commandSemanticsPath, manifest);
+  return manifest;
+};
+
+export const writeCommandSemanticsReview = (manifest, tableManifest, workflowManifest) => {
+  const count = (key, value) => manifest.rules.filter((rule) => Array.isArray(rule[key]) ? rule[key].includes(value) : rule[key] === value).length;
+  const lines = ["# MSCQR full-database command semantics review", "", "This is the compact human review of `command-semantics.json`. It defines architecture only: no SQL, grants, roles, RLS state, or runtime behavior are changed.", "", `Rules: ${manifest.rules.length}; workflows mapped: ${workflowManifest.workflows.filter((workflow) => workflow.semanticStatus === "mapped").length}/${workflowManifest.workflows.length}.`, "", "## Review groups", "", "| Group | Tables | Rules | SELECT | INSERT | UPDATE | DELETE |", "|---|---:|---:|---:|---:|---:|---:|"];
+  for (const group of "ABCDEFG") {
+    const ids = new Set(tableManifest.tables.filter((table) => table.reviewGroup === group).map((table) => table.id));
+    const groupRules = manifest.rules.filter((rule) => ids.has(rule.tableId));
+    lines.push(`| ${group} | ${ids.size} | ${groupRules.length} | ${groupRules.filter((rule) => rule.command === "SELECT").length} | ${groupRules.filter((rule) => rule.command === "INSERT").length} | ${groupRules.filter((rule) => rule.command === "UPDATE").length} | ${groupRules.filter((rule) => rule.command === "DELETE").length} |`);
+  }
+  for (const [heading, key, values] of [["Actor classes", "actorClasses", actorClasses], ["Assurance levels", "minimumAssurance", assuranceLevels], ["Commands", "command", policyCommands]]) {
+    lines.push("", `## ${heading}`, "", "| Value | Rules |", "|---|---:|");
+    for (const value of values) lines.push(`| ${value} | ${count(key, value)} |`);
+  }
+  lines.push("", "## Boundary and deletion summary", "", `Named-function rules: ${manifest.rules.filter((rule) => rule.requiresNamedFunction).length}.`, `Restricted-worker rules: ${manifest.rules.filter((rule) => rule.requiresRestrictedWorkerBoundary).length}.`, `Approval-gated rules: ${manifest.rules.filter((rule) => rule.requiresApproval).length}.`, "", "| Hard-delete classification | Rules |", "|---|---:|");
+  for (const value of [...new Set(manifest.rules.map((rule) => rule.hardDeleteSemantics))].sort()) lines.push(`| ${value} | ${count("hardDeleteSemantics", value)} |`);
+  lines.push("", "Lifecycle restrictions are carried per rule; Batch rules name the approved DRAFT through RELEASED transition states and terminal FAILED/VOIDED denials. Other state-bearing tables require their canonical service transition before a write can satisfy the rule.", "");
+  fs.writeFileSync(commandSemanticsReviewPath, `${lines.join("\n")}\n`);
+};
+
 export const buildWorkflowManifest = () => {
   const scan = scanProductionAccess();
   const existing = readJson(workflowManifestPath, { schemaVersion: 1, workflows: [] });
@@ -617,7 +882,7 @@ export const buildWorkflowManifest = () => {
     const id = `workflow-${slug(key)}`;
     const old = previous.get(id) || {};
     const boundary = old.authorizationBoundaryType || boundaryFor(path.join(repoRoot, first.sourceFile), first.function, first.executionSurface);
-    const tableCommands = [...new Set(accesses.map((access) => `${access.tableId}:${access.command}`))].sort().map((value) => { const index = value.lastIndexOf(":"); return { tableId: value.slice(0, index), commands: [value.slice(index + 1)] }; });
+    const tableCommands = [...new Set(accesses.flatMap((access) => expandCommands([access.command]).map((command) => `${access.tableId}:${command}`)))].sort().map((value) => { const index = value.lastIndexOf(":"); return { tableId: value.slice(0, index), commands: [value.slice(index + 1)] }; });
     const mergedCommands = [...new Map(tableCommands.map((item) => [item.tableId, { tableId: item.tableId, commands: tableCommands.filter((candidate) => candidate.tableId === item.tableId).flatMap((candidate) => candidate.commands).sort() }])).values()];
     const preAuth = boundary === "pre-auth-security-function";
     const background = ["worker", "scheduled"].includes(first.executionSurface);
@@ -646,12 +911,10 @@ export const buildWorkflowManifest = () => {
       requiredUnitTests: old.requiredUnitTests || ["Allowed and denied command contract for this canonical workflow."],
       requiredDisposablePostgresqlTests: old.requiredDisposablePostgresqlTests || ["Exact role, context, command, cross-tenant denial, and empty-context denial."],
       unresolvedDecisions: old.unresolvedDecisions || [background ? "decision-worker-identity-model" : preAuth ? "decision-pre-auth-boundary" : "decision-policy-command-semantics"],
-      supportingEvidence: accesses.map((access) => ({ accessId: access.id, source: `${access.sourceFile}:${access.line}`, registration: access.registrationEvidence })),
+      supportingEvidence: accesses.map((access) => ({ accessId: access.id, source: `${access.sourceFile}:${access.line}`, registration: access.registrationEvidence, method: access.method })),
     };
   }).sort((a, b) => a.id.localeCompare(b.id));
   const result = { schemaVersion: 1, groupingRule: "One workflow per execution surface, canonical source file, and containing function; repeated table calls within that function remain one functional workflow.", generatedEvidence: { productionAccessSites: scan.accesses.length, testPathsExcluded: ["backend/tests", "scripts/tests"], registrations: scan.registrations, unregisteredPotentiallyDeadAccesses: scan.unregisteredAccesses, unregisteredFiles: scan.unregisteredFiles }, workflows };
-  writeJson(workflowManifestPath, result);
-
   const tableManifest = readJson(tableManifestPath);
   for (const table of tableManifest.tables) {
     const touching = workflows.filter((workflow) => workflow.tablesTouched.includes(table.id));
@@ -669,6 +932,9 @@ export const buildWorkflowManifest = () => {
     }
     if (READ_ROLE_MODELS.has(table.prismaModel)) table.classificationEvidence.push("Existing read-role evidence: documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql includes this table in the reviewed SELECT-only baseline.");
   }
+  const commandManifest = buildCommandSemantics(tableManifest, result);
+  writeCommandSemanticsReview(commandManifest, tableManifest, result);
+  writeJson(workflowManifestPath, result);
   writeJson(tableManifestPath, tableManifest);
   const graph = buildPolicyDependencyGraph(tableManifest);
   writeTableOwnershipReview(tableManifest, graph);
@@ -676,6 +942,21 @@ export const buildWorkflowManifest = () => {
   const decisionManifest = readJson(decisionManifestPath);
   if (decisionManifest) {
     for (const decision of decisionManifest.decisions) {
+      if (decision.id === "decision-policy-command-semantics") {
+        decision.status = "resolved";
+        decision.resolvedAt = "2026-07-16";
+        decision.affectedWorkflows = workflows.map((workflow) => workflow.id);
+        decision.affectedTables = tableManifest.tables.filter((table) => table.forceRlsTarget).map((table) => table.id);
+        decision.resolution = {
+          authority: "documents/security/rls-program/command-semantics.json",
+          rules: commandManifest.rules.length,
+          forceRlsTables: tableManifest.tables.filter((table) => table.forceRlsTarget).length,
+          workflowsMapped: workflows.filter((workflow) => workflow.semanticStatus === "mapped").length,
+          commandVocabulary: [...policyCommands],
+          guarantees: ["No wildcard command, actor, or runtime identity", "INSERT and UPDATE have allowed/protected columns and WITH CHECK semantics", "Every DELETE records a default prohibition and any exact exception", "Lifecycle, assurance, named-function, worker, approval, and audit boundaries are explicit"],
+        };
+        continue;
+      }
       decision.affectedWorkflows = workflows.filter((workflow) => workflow.unresolvedDecisions.includes(decision.id)
         || decision.id === "decision-runtime-role-split"
         || (decision.id === "decision-operator-administration" && workflow.authorizationBoundaryType === "operator-break-glass")).map((workflow) => workflow.id);
@@ -689,7 +970,7 @@ export const buildWorkflowManifest = () => {
   return result;
 };
 
-export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath) });
+export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath) });
 export const validateRuntimeIdentities = (manifest, decisionManifest) => {
   const identities = manifest.identities;
   const byId = new Map(identities.map((identity) => [identity.id, identity]));

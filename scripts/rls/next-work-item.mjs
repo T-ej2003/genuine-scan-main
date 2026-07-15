@@ -19,10 +19,16 @@ const priority = [
   ["policy-generation", () => tables.tables.find((table) => table.policyStatus !== "complete")],
   ["disposable-certification", () => tables.tables.find((table) => table.verificationStatus !== "certified")],
 ];
+const manifestSelectors = {
+  "decision-pre-auth-boundary": { commandRuleActor: "pre-auth-runtime", workflowBoundary: "pre-auth-security-function" },
+  "decision-worker-identity-model": { commandRuleBoundary: "restricted-worker", executionSurfaces: ["worker", "scheduled"] },
+  "decision-object-ownership-chain": { physicalOwnerRole: "identity-table-owner" },
+  "decision-operator-administration": { commandRuleActors: ["operator-admin", "break-glass"] },
+};
 for (const [phase, find] of priority) {
   const item = find();
   if (!item) continue;
   const isDecision = "question" in item;
-  console.log(JSON.stringify({ phase, id: item.id, objective: isDecision ? item.question : `Complete ${item.name || item.prismaModel}`, canonicalFiles: isDecision ? ["documents/security/rls-program/decisions.json", "documents/security/rls-program/ARCHITECTURE.md", "documents/security/rls-program/tables.json", "documents/security/rls-program/policy-dependency-graph.json"] : item.canonicalSourceFiles || ["documents/security/rls-program/tables.json"], architectureSections: isDecision ? decisionSections[item.id] || ["Completion definition"] : ["Completion definition"], requiredTests: isDecision ? ["scripts/tests/full-database-rls-program.test.mjs"] : item.requiredUnitTests || ["scripts/tests/full-database-rls-program.test.mjs"] }));
+  console.log(JSON.stringify({ phase, id: item.id, objective: isDecision ? item.question : `Complete ${item.name || item.prismaModel}`, canonicalFiles: isDecision ? ["documents/security/rls-program/decisions.json", "documents/security/rls-program/ARCHITECTURE.md", "documents/security/rls-program/command-semantics.json", "documents/security/rls-program/workflows.json"] : item.canonicalSourceFiles || ["documents/security/rls-program/tables.json"], manifestSelector: isDecision ? manifestSelectors[item.id] : undefined, architectureSections: isDecision ? decisionSections[item.id] || ["Completion definition"] : ["Completion definition"], requiredTests: isDecision ? ["scripts/tests/full-database-rls-program.test.mjs"] : item.requiredUnitTests || ["scripts/tests/full-database-rls-program.test.mjs"] }));
   break;
 }
