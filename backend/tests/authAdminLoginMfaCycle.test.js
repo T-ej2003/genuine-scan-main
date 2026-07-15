@@ -19,14 +19,28 @@ process.env.ADMIN_LOGIN_MFA_CYCLE_DAYS = "28";
 let prismaUser = null;
 let auditEvents = [];
 
-mockModule("config/database.js", {
-  __esModule: true,
-  default: {
+const prismaMock = {
+  user: {
+    findUnique: async () => prismaUser,
+    update: async () => prismaUser,
+  },
+  $transaction: async (callback) => callback({
     user: {
       findUnique: async () => prismaUser,
       update: async () => prismaUser,
     },
-  },
+    $executeRaw: async () => null,
+  }),
+};
+
+mockModule("config/database.js", {
+  __esModule: true,
+  default: prismaMock,
+});
+
+mockModule("services/auth/authBootstrapRepository.js", {
+  lookupPasswordBootstrapUser: async () => prismaUser,
+  recordPasswordLoginFailure: async () => null,
 });
 
 mockModule("services/auth/passwordService.js", {

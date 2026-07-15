@@ -19,6 +19,7 @@ import {
 const TOTP_STEP_SECONDS = 30;
 const TOTP_DIGITS = 6;
 const DEFAULT_TOTP_WINDOW = 1;
+type LoginMfaDbClient = NonNullable<Parameters<typeof getAdminMfaAdapterStatus>[1]>;
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = Number(String(process.env[key] || "").trim());
@@ -211,8 +212,8 @@ const normalizeRiskLevel = (level?: AuthRiskLevel | string | null): AuthRiskLeve
   return AuthRiskLevel.LOW;
 };
 
-export const getAdminMfaStatus = async (userId: string) => {
-  return getAdminMfaAdapterStatus(userId);
+export const getAdminMfaStatus = async (userId: string, db: LoginMfaDbClient = prisma) => {
+  return getAdminMfaAdapterStatus(userId, db);
 };
 
 export const beginAdminMfaSetup = async (params: { userId: string; email: string }) => {
@@ -247,9 +248,9 @@ export const createAdminMfaChallenge = async (params: {
   userAgent?: string | null;
   supersedeOpen?: boolean;
   maxAttempts?: number;
-}) => {
+}, db: LoginMfaDbClient = prisma) => {
   if (String(params.purpose || "admin_login").trim() === "admin_login") {
-    return createStableMfaLoginChallenge(params);
+    return createStableMfaLoginChallenge(params, db);
   }
 
   const rawTicket = randomOpaqueToken(36);

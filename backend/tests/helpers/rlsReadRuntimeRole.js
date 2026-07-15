@@ -44,6 +44,7 @@ const createRestrictedRlsReadRole = (databaseUrl, prefix) => {
   assert.match(prefix, /^[a-z0-9_]+$/i, "Unsafe PostgreSQL role prefix");
   const roleName = `${prefix}_${process.pid}_${Date.now()}`.toLowerCase();
   const role = quoteIdent(roleName);
+  const appRole = quoteIdent(`${roleName}_app`);
   const databaseName = quoteIdent(parseDatabaseName(databaseUrl));
   runPsql(databaseUrl, [
     "-c",
@@ -55,26 +56,46 @@ const createRestrictedRlsReadRole = (databaseUrl, prefix) => {
         NOCREATEDB
         NOCREATEROLE
         NOREPLICATION
-        NOBYPASSRLS;
-      GRANT CONNECT ON DATABASE ${databaseName} TO ${role};
-      GRANT USAGE ON SCHEMA public TO ${role};
+        NOBYPASSRLS
+        NOINHERIT;
+      CREATE ROLE ${appRole}
+        LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+      GRANT CONNECT ON DATABASE ${databaseName} TO ${role}, ${appRole};
+      GRANT USAGE ON SCHEMA public TO ${role}, ${appRole};
+      REVOKE CREATE ON SCHEMA public FROM ${role}, ${appRole};
+      GRANT SELECT ON TABLE "Organization", "Licensee", "User", "ManufacturerLicenseeLink", "Batch", "InventoryStatusRollup", "QRCode", "PrintJob", "PrintSession", "PrintItem", "PrinterRegistration", "Printer", "PrinterAttestation", "PrinterAgentSession", "PrinterProfile", "PrinterProfileSnapshot" TO ${role};
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${appRole};
     `,
   ]);
   return roleName;
 };
 
 const applyCandidateRls = (databaseUrl, runtimeRoleName) => {
-  runPsql(databaseUrl, ["-v", `mscqr_runtime_role=${runtimeRoleName}`, "-f", candidateSqlPath]);
+  runPsql(databaseUrl, [
+    "-v", `mscqr_app_role=${runtimeRoleName}_app`,
+    "-v", `mscqr_rls_read_role=${runtimeRoleName}`,
+    "-v", `mscqr_auth_owner_role=${runtimeRoleName}_auth_owner`,
+    "-v", "mscqr_enable_shared_force_rls=true",
+    "-v", "mscqr_enable_batch_force_rls=true",
+    "-v", "mscqr_enable_printer_force_rls=true",
+    "-f", candidateSqlPath,
+  ]);
 };
 
 const rollbackCandidateRls = (databaseUrl, runtimeRoleName) => {
-  runPsql(databaseUrl, ["-v", `mscqr_runtime_role=${runtimeRoleName}`, "-f", rollbackSqlPath]);
+  runPsql(databaseUrl, [
+    "-v", `mscqr_app_role=${runtimeRoleName}_app`,
+    "-v", `mscqr_rls_read_role=${runtimeRoleName}`,
+    "-v", `mscqr_auth_owner_role=${runtimeRoleName}_auth_owner`,
+    "-f", rollbackSqlPath,
+  ]);
 };
 
 const dropRestrictedRlsReadRole = (databaseUrl, roleName) => {
   if (!roleName) return;
   const role = quoteIdent(roleName);
-  runPsql(databaseUrl, ["-c", `DROP OWNED BY ${role}; DROP ROLE IF EXISTS ${role};`]);
+  const appRole = quoteIdent(`${roleName}_app`);
+  runPsql(databaseUrl, ["-c", `DROP OWNED BY ${appRole}; DROP OWNED BY ${role}; DROP ROLE IF EXISTS ${appRole}; DROP ROLE IF EXISTS ${role};`]);
 };
 
 module.exports = {

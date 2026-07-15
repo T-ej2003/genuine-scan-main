@@ -1,4 +1,4 @@
-import { AuthRiskLevel } from "@prisma/client";
+import { AuthRiskLevel, Prisma } from "@prisma/client";
 
 import prisma from "../../config/database";
 import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
@@ -46,6 +46,11 @@ export class MfaAdapterError extends Error {
     this.retryAfterSeconds = options?.retryAfterSeconds;
   }
 }
+
+type LoginMfaDbClient = Pick<
+  Prisma.TransactionClient,
+  "adminMfaCredential" | "adminWebAuthnCredential" | "userMfaFactor" | "userBackupCode" | "mfaLoginChallenge"
+>;
 
 const safeMfaErrorCategory = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error || "");
@@ -99,9 +104,9 @@ const auditMfaEvent = async (input: {
   await createAuditLogSafely(event).catch(() => undefined);
 };
 
-export const getAdminMfaAdapterStatus = async (userId: string) => {
+export const getAdminMfaAdapterStatus = async (userId: string, db: LoginMfaDbClient = prisma) => {
   const [legacyTotp, legacyWebAuthn, factors, backupCodesRemaining] = await Promise.all([
-    prisma.adminMfaCredential.findUnique({
+    db.adminMfaCredential.findUnique({
       where: { userId },
       select: {
         id: true,
@@ -113,12 +118,12 @@ export const getAdminMfaAdapterStatus = async (userId: string) => {
         updatedAt: true,
       },
     }),
-    prisma.adminWebAuthnCredential.findMany({
+    db.adminWebAuthnCredential.findMany({
       where: { userId },
       orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
       select: { id: true, label: true, transports: true, lastUsedAt: true, createdAt: true, updatedAt: true },
     }),
-    prisma.userMfaFactor.findMany({
+    db.userMfaFactor.findMany({
       where: { userId, disabledAt: null },
       orderBy: [{ lastUsedAt: "desc" }, { createdAt: "desc" }],
       select: {
@@ -131,7 +136,7 @@ export const getAdminMfaAdapterStatus = async (userId: string) => {
         updatedAt: true,
       },
     }),
-    prisma.userBackupCode.count({ where: { userId, usedAt: null } }),
+    db.userBackupCode.count({ where: { userId, usedAt: null } }),
   ]);
 
   const hasTotp = factors.some((factor) => factor.type === "TOTP") || Boolean(legacyTotp?.isEnabled);
@@ -443,14 +448,14 @@ export const createStableMfaLoginChallenge = async (params: {
   ipHash?: string | null;
   userAgent?: string | null;
   maxAttempts?: number;
-}) => {
+}, db: LoginMfaDbClient = prisma) => {
   const ticket = randomOpaqueToken(36);
   const now = new Date();
   const { expiresAt, config: ttlConfig } = buildAdminMfaChallengeExpiry(now);
   const purpose = String(params.purpose || "admin_login").trim() || "admin_login";
   const maxAttempts = Math.max(1, Math.min(10, params.maxAttempts || getMaxChallengeAttempts()));
 
-  const challenge = await prisma.mfaLoginChallenge.create({
+  const challenge = await db.mfaLoginChallenge.create({
     data: {
       userId: params.userId,
       ticketHash: hashToken(ticket),

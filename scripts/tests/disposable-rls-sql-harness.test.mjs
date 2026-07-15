@@ -54,7 +54,13 @@ test("accepts exact confirmation env", () => {
 });
 
 test("refuses PUBLIC as app role", () => {
-  assertRefused(() => assertSafeAppRole("PUBLIC"), /PUBLIC must not be used/);
+  assertRefused(() => assertSafeAppRole("public"), /public must not be used/);
+});
+
+test("refuses reserved and quoted role identifiers", () => {
+  for (const role of ["postgres", "current_user", "RoleName", 'role"injected', "role-name"]) {
+    assertRefused(() => assertSafeAppRole(role), /must not be used|unsafe characters/);
+  }
 });
 
 test("refuses unsafe app role characters", () => {
@@ -216,29 +222,39 @@ test("candidate and rollback SQL use exact function grants and never grant to PU
   assert.equal(/\bGRANT\s+EXECUTE\s+ON\s+ALL\s+FUNCTIONS\b/i.test(combined), false);
   assert.equal(/\bREVOKE\s+EXECUTE\s+ON\s+ALL\s+FUNCTIONS\b/i.test(combined), false);
   assert.equal(/\bGRANT\b[^;]+\bTO\s+PUBLIC\s*;/i.test(combined), false);
-  assert.equal(combined.match(/REVOKE ALL ON FUNCTION app_rls\.[^;]+ FROM PUBLIC;/g)?.length, 17);
+  assert.equal(combined.match(/REVOKE ALL ON FUNCTION app_(?:rls|auth)\.[^;]+ FROM PUBLIC;/g)?.length, 19);
 });
 
-test("candidate helper EXECUTE grants exactly match rollback revokes", () => {
+test("candidate helper grants and rollback revokes preserve the split role boundary", () => {
   const candidateSql = fs.readFileSync(candidateSqlPath, "utf8");
   const rollbackSql = fs.readFileSync(rollbackSqlPath, "utf8");
-  const grantRegex = /GRANT EXECUTE ON FUNCTION\s+(app_rls\.[^(]+\([^)]*\))\s+TO\s+:"mscqr_runtime_role";/g;
-  const revokeRegex = /REVOKE EXECUTE ON FUNCTION\s+(app_rls\.[^(]+\([^)]*\))\s+FROM\s+:"mscqr_runtime_role";/g;
-  const grants = [...candidateSql.matchAll(grantRegex)].map((match) => match[1]).sort();
-  const revokes = [...rollbackSql.matchAll(revokeRegex)].map((match) => match[1]).sort();
-
-  assert.equal(grants.length, 17);
-  assert.deepEqual(grants, revokes);
+  assert.match(candidateSql, /GRANT EXECUTE ON FUNCTION app_auth\.lookup_password_user\(text\) TO :"mscqr_app_role";/);
+  assert.match(candidateSql, /GRANT EXECUTE ON FUNCTION app_auth\.record_password_failure[\s\S]+TO :"mscqr_app_role";/);
+  assert.doesNotMatch(candidateSql, /GRANT EXECUTE ON FUNCTION app_auth\.[^;]+TO :"mscqr_rls_read_role";/s);
+  assert.match(candidateSql, /GRANT EXECUTE ON FUNCTION app_rls\.setting\(text\)[\s\S]+TO :"mscqr_rls_read_role", :"mscqr_app_role";/);
+  assert.match(rollbackSql, /REVOKE EXECUTE ON FUNCTION app_auth\.lookup_password_user\(text\) FROM :"mscqr_app_role";/);
+  assert.match(rollbackSql, /REVOKE EXECUTE ON FUNCTION app_rls\.setting\(text\) FROM :"mscqr_rls_read_role", :"mscqr_app_role";/);
 });
 
-test("candidate and rollback require explicit non-owner runtime role psql variable", () => {
+test("candidate and rollback require explicit split roles and nonzero missing-variable exits", () => {
   const candidateSql = fs.readFileSync(candidateSqlPath, "utf8");
   const rollbackSql = fs.readFileSync(rollbackSqlPath, "utf8");
 
-  assert.match(candidateSql, /\\if :\{\?mscqr_runtime_role\}/);
-  assert.match(rollbackSql, /\\if :\{\?mscqr_runtime_role\}/);
-  assert.match(candidateSql, /GRANT USAGE ON SCHEMA app_rls TO :"mscqr_runtime_role";/);
-  assert.match(rollbackSql, /REVOKE USAGE ON SCHEMA app_rls FROM %I/);
+  for (const variable of ["mscqr_app_role", "mscqr_rls_read_role", "mscqr_auth_owner_role"]) {
+    assert.match(candidateSql, new RegExp(`\\\\if :\\{\\?${variable}\\}`));
+    assert.match(rollbackSql, new RegExp(`\\\\if :\\{\\?${variable}\\}`));
+  }
+  for (const variable of ["mscqr_enable_shared_force_rls", "mscqr_enable_batch_force_rls", "mscqr_enable_printer_force_rls"]) {
+    assert.match(candidateSql, new RegExp(`\\\\if :\\{\\?${variable}\\}`));
+  }
+  assert.equal(candidateSql.match(/\\set mscqr_[a-z_]+ __mscqr_missing__/g)?.length, 6);
+  assert.equal(rollbackSql.match(/\\set mscqr_[a-z_]+ __mscqr_missing__/g)?.length, 3);
+  assert.match(candidateSql, /RAISE EXCEPTION 'Missing one or more required candidate psql variables'/);
+  assert.match(rollbackSql, /RAISE EXCEPTION 'Missing one or more required rollback psql variables'/);
+  assert.match(candidateSql, /mscqr-staging-auth-owner-v1/);
+  assert.match(rollbackSql, /mscqr-staging-auth-owner-v1/);
+  assert.doesNotMatch(candidateSql, /mscqr_runtime_role/);
+  assert.doesNotMatch(rollbackSql, /mscqr_runtime_role/);
 });
 
 const safeDiagnostics = () => ({
@@ -290,12 +306,19 @@ test("runtime diagnostic rejects CREATEDB and CREATEROLE", () => {
   }
 });
 
-test("candidate grants SELECT only and rollback reverses the table grant", () => {
+test("candidate and rollback do not reconstruct or broaden baseline table grants", () => {
   const candidateSql = fs.readFileSync(candidateSqlPath, "utf8");
   const rollbackSql = fs.readFileSync(rollbackSqlPath, "utf8");
-  assert.match(candidateSql, /GRANT SELECT ON TABLE[\s\S]+TO :"mscqr_runtime_role";/);
-  assert.doesNotMatch(candidateSql, /GRANT\s+(?:INSERT|UPDATE|DELETE)/i);
-  assert.match(rollbackSql, /REVOKE SELECT ON TABLE[\s\S]+FROM :"mscqr_runtime_role";/);
+  assert.doesNotMatch(candidateSql, /(?:GRANT|REVOKE) (?:SELECT|INSERT|UPDATE|DELETE) ON TABLE/);
+  assert.doesNotMatch(rollbackSql, /GRANT (?:SELECT|INSERT|UPDATE|DELETE) ON TABLE/);
+  assert.match(candidateSql, /Candidate apply never rewrites the application or read-role table baseline/);
+});
+
+test("candidate separates auth installation from explicit RLS table phases", () => {
+  const candidateSql = fs.readFileSync(candidateSqlPath, "utf8");
+  assert.match(candidateSql, /\\if :mscqr_enable_shared_force_rls[\s\S]+ALTER TABLE "User" ENABLE ROW LEVEL SECURITY/);
+  assert.match(candidateSql, /\\if :mscqr_enable_batch_force_rls[\s\S]+ALTER TABLE "Batch" ENABLE ROW LEVEL SECURITY/);
+  assert.match(candidateSql, /\\if :mscqr_enable_printer_force_rls[\s\S]+ALTER TABLE "Printer" ENABLE ROW LEVEL SECURITY/);
 });
 
 test("exact application roles gate platform, tenant, and manufacturer context", () => {
