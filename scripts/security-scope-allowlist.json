@@ -54,6 +54,16 @@
       "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
     },
     {
+      "path": "backend/src/services/auth/authBootstrapRepository.ts",
+      "model": "user",
+      "methods": [
+        "findMany"
+      ],
+      "reason": "Pre-candidate password bootstrap compatibility performs one exact normalized-email lookup and fails closed on duplicates.",
+      "cannotWidenAccess": "The fallback runs only when PostgreSQL reports the exact missing app_auth schema or function codes, remains subject to ordinary grants and RLS, selects the minimum login fields with take:2, and returns no row for duplicate case-insensitive matches. Permission and RLS errors never enter it.",
+      "followUp": "Security owner: platform/backend. Remove this exact exception when app_auth installation is mandatory before application rollout."
+    },
+    {
       "path": "backend/src/controllers/authSessionController.ts",
       "model": "user",
       "methods": [

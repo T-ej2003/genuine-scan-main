@@ -13,17 +13,73 @@
 -- Operator note:
 --   Run with the same reviewed non-owner staging runtime database role used for the
 --   candidate template:
---     -v mscqr_runtime_role=<reviewed_non_owner_staging_runtime_db_role>
+--     -v mscqr_app_role=<reviewed_staging_application_role>
+--     -v mscqr_rls_read_role=<reviewed_staging_rls_read_role>
+--     -v mscqr_auth_owner_role=<dedicated_nologin_auth_function_owner_role>
 --
 --   Do not use PUBLIC.
 
-\if :{?mscqr_runtime_role}
+\set ON_ERROR_STOP on
+
+\if :{?mscqr_app_role}
 \else
-\echo 'Missing required psql variable: -v mscqr_runtime_role=<reviewed_non_owner_staging_runtime_db_role>'
-\quit 3
+\echo 'Missing required psql variable: -v mscqr_app_role=<reviewed_staging_application_role>'
+\set mscqr_app_role __mscqr_missing__
+\endif
+\if :{?mscqr_rls_read_role}
+\else
+\echo 'Missing required psql variable: -v mscqr_rls_read_role=<reviewed_staging_rls_read_role>'
+\set mscqr_rls_read_role __mscqr_missing__
+\endif
+
+\if :{?mscqr_auth_owner_role}
+\else
+\echo 'Missing required psql variable: -v mscqr_auth_owner_role=<dedicated_nologin_auth_function_owner_role>'
+\set mscqr_auth_owner_role __mscqr_missing__
 \endif
 
 BEGIN;
+
+SELECT set_config('app_rls.rollback_app_role', :'mscqr_app_role', false);
+SELECT set_config('app_rls.rollback_read_role', :'mscqr_rls_read_role', false);
+SELECT set_config('app_rls.rollback_auth_owner_role', :'mscqr_auth_owner_role', false);
+
+DO $$
+DECLARE
+  auth_owner_role text := current_setting('app_rls.rollback_auth_owner_role', true);
+  app_role text := current_setting('app_rls.rollback_app_role', true);
+  read_role text := current_setting('app_rls.rollback_read_role', true);
+  auth_owner_oid oid;
+BEGIN
+  IF '__mscqr_missing__' = ANY(ARRAY[app_role, read_role, auth_owner_role]) THEN
+    RAISE EXCEPTION 'Missing one or more required rollback psql variables';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM unnest(ARRAY[app_role, read_role, auth_owner_role]) name
+    WHERE name !~ '^[a-z_][a-z0-9_]{0,62}$' OR name IN ('public', 'postgres', current_user)
+  ) OR cardinality(ARRAY(SELECT DISTINCT unnest(ARRAY[app_role, read_role, auth_owner_role]))) <> 3 THEN
+    RAISE EXCEPTION 'Rollback roles must be distinct safe non-reserved identifiers';
+  END IF;
+
+  SELECT oid INTO auth_owner_oid FROM pg_roles WHERE rolname = auth_owner_role;
+  IF auth_owner_oid IS NULL
+     OR COALESCE(shobj_description(auth_owner_oid, 'pg_authid'), '') <> 'mscqr-staging-auth-owner-v1'
+     OR to_regnamespace('app_auth') IS NULL
+     OR to_regprocedure('app_auth.lookup_password_user(text)') IS NULL
+     OR to_regprocedure('app_auth.record_password_failure(text,timestamp without time zone,integer,integer)') IS NULL
+     OR NOT has_function_privilege(app_role, 'app_auth.lookup_password_user(text)', 'EXECUTE')
+     OR has_function_privilege(read_role, 'app_auth.lookup_password_user(text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'Candidate auth boundary is absent or does not match the reviewed roles; rollback made no changes';
+  END IF;
+
+  EXECUTE format(
+    'GRANT %I TO %I WITH ADMIN FALSE, INHERIT FALSE, SET TRUE',
+    auth_owner_role,
+    current_user
+  );
+END
+$$;
 
 -- ---------------------------------------------------------------------------
 -- Drop candidate SELECT policies
@@ -43,6 +99,9 @@ DROP POLICY IF EXISTS rls_candidate_inventory_status_rollup_select ON "Inventory
 DROP POLICY IF EXISTS rls_candidate_batch_select ON "Batch";
 DROP POLICY IF EXISTS rls_candidate_manufacturer_licensee_link_select ON "ManufacturerLicenseeLink";
 DROP POLICY IF EXISTS rls_candidate_user_select ON "User";
+DROP POLICY IF EXISTS rls_candidate_user_auth_update ON "User";
+DROP POLICY IF EXISTS rls_candidate_user_auth_owner_read ON "User";
+DROP POLICY IF EXISTS rls_candidate_user_auth_owner_update ON "User";
 DROP POLICY IF EXISTS rls_candidate_licensee_select ON "Licensee";
 DROP POLICY IF EXISTS rls_candidate_organization_select ON "Organization";
 
@@ -87,32 +146,42 @@ ALTER TABLE "Organization" DISABLE ROW LEVEL SECURITY;
 -- Revoke candidate helper grants and drop helpers
 -- ---------------------------------------------------------------------------
 
-REVOKE SELECT ON TABLE
-  "Organization", "Licensee", "User", "ManufacturerLicenseeLink",
-  "Batch", "InventoryStatusRollup", "QRCode", "PrintJob", "PrintSession",
-  "PrintItem", "PrinterRegistration", "Printer", "PrinterAttestation",
-  "PrinterAgentSession", "PrinterProfile", "PrinterProfileSnapshot"
-FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_auth.record_password_failure(text, timestamp without time zone, integer, integer)
+  FROM :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_auth.lookup_password_user(text) FROM :"mscqr_app_role";
+REVOKE USAGE ON SCHEMA app_auth FROM :"mscqr_app_role";
+DROP FUNCTION IF EXISTS app_auth.record_password_failure(text, timestamp without time zone, integer, integer);
+DROP FUNCTION IF EXISTS app_auth.lookup_password_user(text);
+REVOKE SELECT (
+  "id", "email", "passwordHash", "name", "role", "licenseeId", "orgId",
+  "status", "isActive", "disabledAt", "deletedAt", "failedLoginAttempts",
+  "lockedUntil", "lastLoginAt", "emailVerifiedAt"
+) ON TABLE "User" FROM :"mscqr_auth_owner_role";
+REVOKE UPDATE ("failedLoginAttempts", "lockedUntil", "updatedAt")
+  ON TABLE "User" FROM :"mscqr_auth_owner_role";
+DROP SCHEMA IF EXISTS app_auth;
+REVOKE :"mscqr_auth_owner_role" FROM CURRENT_USER;
+DROP ROLE IF EXISTS :"mscqr_auth_owner_role";
 
 -- Exact reversals for the candidate helper signatures only. Do not use blanket
 -- function revokes: staging may have unrelated app_rls helpers.
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer_profile(text) FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_item(text) FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_session(text) FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_job(text) FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_qr(text) FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer(text) FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer_registration(text) FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_batch(text) FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_organization(text) FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.can_access_licensee(text) FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.is_platform_admin() FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.current_organization_id() FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.current_manufacturer_id() FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.current_licensee_id() FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.current_role() FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.current_user_id() FROM :"mscqr_runtime_role";
-REVOKE EXECUTE ON FUNCTION app_rls.setting(text) FROM :"mscqr_runtime_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer_profile(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_item(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_session(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_print_job(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_qr(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_printer_registration(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_batch(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_organization(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.can_access_licensee(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.is_platform_admin() FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_organization_id() FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_manufacturer_id() FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_licensee_id() FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_role() FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.current_user_id() FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+REVOKE EXECUTE ON FUNCTION app_rls.setting(text) FROM :"mscqr_rls_read_role", :"mscqr_app_role";
 
 DROP FUNCTION IF EXISTS app_rls.can_access_printer_profile(text);
 DROP FUNCTION IF EXISTS app_rls.can_access_print_item(text);
@@ -132,31 +201,7 @@ DROP FUNCTION IF EXISTS app_rls.current_role();
 DROP FUNCTION IF EXISTS app_rls.current_user_id();
 DROP FUNCTION IF EXISTS app_rls.setting(text);
 
--- Drop app_rls only if this rollback leaves it empty. If a reviewer has added
--- other staging-reviewed objects to the schema, leave the schema in place.
-SELECT set_config('app_rls.rollback_target_role', :'mscqr_runtime_role', false);
-
-DO $$
-DECLARE
-  target_role text := current_setting('app_rls.rollback_target_role', true);
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_namespace
-    WHERE nspname = 'app_rls'
-  ) AND NOT EXISTS (
-    SELECT 1
-    FROM pg_depend d
-    JOIN pg_namespace n ON n.oid = d.refobjid
-    WHERE n.nspname = 'app_rls'
-      AND d.deptype = 'n'
-  ) THEN
-    EXECUTE format('REVOKE USAGE ON SCHEMA app_rls FROM %I', target_role);
-    DROP SCHEMA app_rls;
-  END IF;
-END
-$$;
-
-SELECT set_config('app_rls.rollback_target_role', '', false);
+REVOKE USAGE ON SCHEMA app_rls FROM :"mscqr_rls_read_role", :"mscqr_app_role";
+DROP SCHEMA app_rls;
 
 COMMIT;

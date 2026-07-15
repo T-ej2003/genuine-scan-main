@@ -18,7 +18,7 @@ import {
   rotateAdminMfaBackupCodes,
   verifyAdminMfaCode,
 } from "../services/auth/mfaService";
-import { issueSessionForUser } from "../services/auth/authService";
+import { issueAdminMfaSessionFromClaims } from "../services/auth/authClaimsRlsContext";
 import { verifyPassword } from "../services/auth/passwordService";
 import { revokeRefreshTokenByRaw } from "../services/auth/refreshTokenService";
 import { createAuditLog } from "../services/auditService";
@@ -117,15 +117,7 @@ export const confirmAdminMfaSetupController = async (req: Request, res: Response
       const ipHash = hashIp(req.ip);
       const userAgent = normalizeUserAgent(req.get("user-agent"));
       const now = new Date();
-      const session = await issueSessionForUser({
-        userId: claims.userId,
-        ipHash,
-        userAgent,
-        authAssurance: "ADMIN_MFA",
-        authenticatedAt: now,
-        mfaVerifiedAt: now,
-        now,
-      });
+      const session = await issueAdminMfaSessionFromClaims(claims, { ipHash, userAgent, now });
 
       await createAuditLog({
         userId: claims.userId,
@@ -268,15 +260,7 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
       return res.status(403).json({ success: false, error: "MFA challenge does not match the active bootstrap session." });
     }
 
-    const session = await issueSessionForUser({
-      userId: claims.userId,
-      ipHash,
-      userAgent,
-      authAssurance: "ADMIN_MFA",
-      authenticatedAt: now,
-      mfaVerifiedAt: now,
-      now,
-    });
+    const session = await issueAdminMfaSessionFromClaims(claims, { ipHash, userAgent, now });
 
     await createAuditLog({
       userId: claims.userId,
@@ -341,15 +325,7 @@ export const completeAdminWebAuthnChallengeController = async (req: Request, res
     const ipHash = hashIp(req.ip);
     const userAgent = normalizeUserAgent(req.get("user-agent"));
     const now = new Date();
-    const session = await issueSessionForUser({
-      userId: claims.userId,
-      ipHash,
-      userAgent,
-      authAssurance: "ADMIN_MFA",
-      authenticatedAt: now,
-      mfaVerifiedAt: now,
-      now,
-    });
+    const session = await issueAdminMfaSessionFromClaims(claims, { ipHash, userAgent, now });
 
     const currentRefresh = getRefreshTokenFromRequest(req);
     if (currentRefresh) {

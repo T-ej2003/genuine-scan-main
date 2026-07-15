@@ -88,27 +88,30 @@ const userRows = {
   },
 };
 
-mockModule("config/database.js", {
-  __esModule: true,
-  default: {
-    user: {
-      findUnique: async ({ where }) => userRows[where.id] || null,
-    },
-    manufacturerLicenseeLink: {
-      findMany: async ({ where, select }) => {
-        if (where?.manufacturerId !== "manufacturer-a") return [];
-        if (select?.licenseeId) return [{ licenseeId: "lic-a" }];
-        return [
-          {
-            manufacturerId: "manufacturer-a",
-            licenseeId: "lic-a",
-            isPrimary: true,
-            licensee: { id: "lic-a", name: "Licensee A", prefix: "A", brandName: "A", orgId: "org-a", isActive: true },
-          },
-        ];
-      },
+const databaseMock = {
+  user: {
+    findUnique: async ({ where }) => userRows[where.id] || null,
+  },
+  manufacturerLicenseeLink: {
+    findMany: async ({ where, select }) => {
+      if (where?.manufacturerId !== "manufacturer-a") return [];
+      if (select?.licenseeId) return [{ licenseeId: "lic-a" }];
+      return [
+        {
+          manufacturerId: "manufacturer-a",
+          licenseeId: "lic-a",
+          isPrimary: true,
+          licensee: { id: "lic-a", name: "Licensee A", prefix: "A", brandName: "A", orgId: "org-a", isActive: true },
+        },
+      ];
     },
   },
+};
+databaseMock.$transaction = async (callback) => callback({ ...databaseMock, $executeRaw: async () => null });
+
+mockModule("config/database.js", {
+  __esModule: true,
+  default: databaseMock,
 });
 
 mockModule("services/auth/tokenService.js", {

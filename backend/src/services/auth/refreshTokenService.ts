@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client";
+
 import prisma from "../../config/database";
 import { buildTokenHashCandidates } from "../../utils/security";
 import { hashRefreshToken, getRefreshTokenTtlDays, newRefreshToken } from "./tokenService";
@@ -13,12 +15,12 @@ export const createRefreshToken = async (input: {
   authenticatedAt?: Date | null;
   mfaVerifiedAt?: Date | null;
   now?: Date;
-}) => {
+}, db: Pick<Prisma.TransactionClient, "refreshToken"> = prisma) => {
   const now = input.now || new Date();
   const expiresAt = addDays(now, getRefreshTokenTtlDays());
   const tokenHash = hashRefreshToken(input.rawToken);
 
-  const row = await prisma.refreshToken.create({
+  const row = await db.refreshToken.create({
     data: {
       userId: input.userId,
       orgId: input.orgId,

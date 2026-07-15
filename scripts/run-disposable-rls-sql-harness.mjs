@@ -17,7 +17,9 @@ export const CONFIRM_ENV = "MSCQR_DISPOSABLE_RLS_HARNESS_CONFIRM";
 export const CONFIRM_VALUE = "MSCQR_RUN_DISPOSABLE_RLS_HARNESS";
 export const DATABASE_URL_ENV = "MSCQR_DISPOSABLE_RLS_DATABASE_URL";
 export const RUNTIME_ROLE_ENV = "MSCQR_DISPOSABLE_RLS_RUNTIME_ROLE";
-export const PSQL_RUNTIME_ROLE_VARIABLE = "mscqr_runtime_role";
+export const PSQL_APP_ROLE_VARIABLE = "mscqr_app_role";
+export const PSQL_RLS_READ_ROLE_VARIABLE = "mscqr_rls_read_role";
+export const PSQL_AUTH_OWNER_ROLE_VARIABLE = "mscqr_auth_owner_role";
 
 export const defaultCandidateSqlPath = "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql";
 export const defaultRollbackSqlPath = "documents/security/mscqr_staging_rls_candidate_rollback_2026-07-09.sql";
@@ -45,6 +47,9 @@ export const expectedPolicies = [
   "rls_candidate_organization_select",
   "rls_candidate_licensee_select",
   "rls_candidate_user_select",
+  "rls_candidate_user_auth_update",
+  "rls_candidate_user_auth_owner_read",
+  "rls_candidate_user_auth_owner_update",
   "rls_candidate_manufacturer_licensee_link_select",
   "rls_candidate_batch_select",
   "rls_candidate_inventory_status_rollup_select",
@@ -78,6 +83,8 @@ export const expectedFunctions = [
   "can_access_print_session",
   "can_access_print_item",
   "can_access_printer_profile",
+  "lookup_password_user",
+  "record_password_failure",
 ];
 
 const urlEnvNames = ["DATABASE_URL", "TEST_DATABASE_URL", "P2_TEST_DATABASE_URL", DATABASE_URL_ENV];
@@ -192,8 +199,10 @@ export const assertHarnessConfirmation = (env = process.env) => {
 export const assertSafeAppRole = (roleValue) => {
   const role = String(roleValue || "").trim();
   if (!role) throw new HarnessSafetyError("Missing explicit non-owner runtime database role.");
-  if (role.toLowerCase() === "public") throw new HarnessSafetyError("PUBLIC must not be used as the RLS runtime role.");
-  if (!/^[A-Za-z_][A-Za-z0-9_$-]{0,62}$/.test(role)) {
+  if (["public", "postgres", "current_user"].includes(role)) {
+    throw new HarnessSafetyError(`${role} must not be used as the RLS runtime role.`);
+  }
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(role)) {
     throw new HarnessSafetyError("RLS helper grant role contains unsafe characters.");
   }
   return role;
@@ -281,15 +290,26 @@ const buildPsqlConnection = (databaseUrl) => {
 
 const runPsql = (databaseUrl, psqlArgs, options = {}) => {
   const connection = buildPsqlConnection(databaseUrl);
-  const runtimeRole = assertSafeAppRole(options.runtimeRole);
+  const readRole = assertSafeAppRole(options.runtimeRole);
+  const appRole = assertSafeAppRole(options.appRole || `${readRole}_app`);
+  const authOwnerRole = assertSafeAppRole(options.authOwnerRole || `${readRole}_auth_owner`);
+  const candidateVariables = options.candidateVariables === false
+    ? []
+    : [
+        "-v", `${PSQL_APP_ROLE_VARIABLE}=${appRole}`,
+        "-v", `${PSQL_RLS_READ_ROLE_VARIABLE}=${readRole}`,
+        "-v", `${PSQL_AUTH_OWNER_ROLE_VARIABLE}=${authOwnerRole}`,
+        "-v", `mscqr_enable_shared_force_rls=${options.sharedForceRls ?? "true"}`,
+        "-v", `mscqr_enable_batch_force_rls=${options.batchForceRls ?? "true"}`,
+        "-v", `mscqr_enable_printer_force_rls=${options.printerForceRls ?? "true"}`,
+      ];
   const result = spawnSync(
     "psql",
     [
       connection.connectionString,
       "-v",
       "ON_ERROR_STOP=1",
-      "-v",
-      `${PSQL_RUNTIME_ROLE_VARIABLE}=${runtimeRole}`,
+      ...candidateVariables,
       "-X",
       ...psqlArgs,
     ],
@@ -325,21 +345,24 @@ ROLLBACK;`;
   return JSON.parse(stdout.trim() || "[]");
 };
 
-const collectCandidateObjects = (databaseUrl, runtimeRole) => ({
+const collectCandidateObjects = (databaseUrl, runtimeRole) => {
+  const appRole = `${runtimeRole}_app`;
+  return ({
   schema: queryJson(
     databaseUrl,
-    "SELECT nspname FROM pg_namespace WHERE nspname = 'app_rls'",
-    "collect app_rls schema",
+    "SELECT nspname FROM pg_namespace WHERE nspname IN ('app_rls', 'app_auth') ORDER BY nspname",
+    "collect candidate schemas",
     runtimeRole,
   ),
   functions: queryJson(
     databaseUrl,
     `SELECT p.proname,
-            has_function_privilege('${runtimeRole.replace(/'/g, "''")}', p.oid, 'EXECUTE') AS runtime_execute,
+            has_function_privilege('${appRole.replace(/'/g, "''")}', p.oid, 'EXECUTE') AS app_execute,
+            has_function_privilege('${runtimeRole.replace(/'/g, "''")}', p.oid, 'EXECUTE') AS read_execute,
             has_function_privilege('public', p.oid, 'EXECUTE') AS public_execute
      FROM pg_proc p
      JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE n.nspname = 'app_rls'
+     WHERE n.nspname IN ('app_rls', 'app_auth')
        AND p.proname = ANY(${sqlArray(expectedFunctions)})
      ORDER BY p.proname`,
     "collect app_rls functions",
@@ -366,13 +389,14 @@ const collectCandidateObjects = (databaseUrl, runtimeRole) => ({
     "collect table RLS state",
     runtimeRole,
   ),
-});
+  });
+};
 
 const names = (rows, key) => new Set(rows.map((row) => row[key]));
 
 const assertNoPreexistingCandidateObjects = (objects) => {
   if (objects.schema.length || objects.functions.length || objects.policies.length) {
-    throw new Error("Refusing to run because candidate app_rls objects already exist. Run rollback or use a clean disposable DB.");
+    throw new Error("Refusing to run because candidate app_rls/app_auth objects already exist. Run rollback or use a clean disposable DB.");
   }
 };
 
@@ -388,7 +412,10 @@ const assertAppliedObjects = (objects) => {
     return row && (!row.relrowsecurity || !row.relforcerowsecurity);
   });
   const incorrectlyGrantedFunctions = objects.functions
-    .filter((row) => !row.runtime_execute || row.public_execute)
+    .filter((row) => {
+      const isAuth = row.proname === "lookup_password_user" || row.proname === "record_password_failure";
+      return row.public_execute || !row.app_execute || (isAuth ? row.read_execute : !row.read_execute);
+    })
     .map((row) => row.proname);
 
   if (
@@ -411,12 +438,26 @@ const assertAppliedObjects = (objects) => {
   }
 };
 
+const assertInstallOnlyObjects = (objects) => {
+  const functions = names(objects.functions, "proname");
+  const missingFunctions = expectedFunctions.filter((name) => !functions.has(name));
+  const unsafeFunctions = objects.functions.filter((row) => {
+    const isAuth = row.proname === "lookup_password_user" || row.proname === "record_password_failure";
+    return row.public_execute || !row.app_execute || (isAuth ? row.read_execute : !row.read_execute);
+  });
+  const enabledTables = objects.tableRls.filter((row) => row.relrowsecurity || row.relforcerowsecurity);
+  if (objects.schema.length !== 2 || missingFunctions.length || unsafeFunctions.length || objects.policies.length || enabledTables.length) {
+    throw new Error("Install-only candidate phase did not install exact helpers while leaving all table RLS disabled.");
+  }
+};
+
 const quoteIdentifier = (value) => `"${String(value).replace(/"/g, '""')}"`;
 
 const createRuntimeRole = (databaseUrl, runtimeRole) => {
+  const appRole = `${runtimeRole}_app`;
   const existing = queryJson(
     databaseUrl,
-    `SELECT rolname FROM pg_roles WHERE rolname = '${runtimeRole.replace(/'/g, "''")}'`,
+    `SELECT rolname FROM pg_roles WHERE rolname IN ('${runtimeRole.replace(/'/g, "''")}', '${appRole.replace(/'/g, "''")}')`,
     "check runtime role absence",
     runtimeRole,
   );
@@ -430,22 +471,30 @@ const createRuntimeRole = (databaseUrl, runtimeRole) => {
     [
       "-q",
       "-c",
-      `CREATE ROLE ${quoteIdentifier(runtimeRole)} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT;
+      `CREATE ROLE ${quoteIdentifier(runtimeRole)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+       CREATE ROLE ${quoteIdentifier(appRole)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
        GRANT ${quoteIdentifier(runtimeRole)} TO CURRENT_USER;
-       GRANT CONNECT ON DATABASE ${quoteIdentifier(databaseName)} TO ${quoteIdentifier(runtimeRole)};
-       GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(runtimeRole)};`,
+       GRANT ${quoteIdentifier(appRole)} TO CURRENT_USER;
+       GRANT CONNECT ON DATABASE ${quoteIdentifier(databaseName)} TO ${quoteIdentifier(runtimeRole)}, ${quoteIdentifier(appRole)};
+       REVOKE CREATE ON SCHEMA public FROM ${quoteIdentifier(runtimeRole)}, ${quoteIdentifier(appRole)};
+       GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(runtimeRole)}, ${quoteIdentifier(appRole)};
+       GRANT SELECT ON TABLE ${expectedTables.map(quoteIdentifier).join(", ")} TO ${quoteIdentifier(runtimeRole)};
+       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${quoteIdentifier(appRole)};`,
     ],
     { label: "create least-privileged runtime role", runtimeRole },
   );
 };
 
 const dropRuntimeRole = (databaseUrl, runtimeRole) => {
+  const appRole = `${runtimeRole}_app`;
   runPsql(
     databaseUrl,
     [
       "-q",
       "-c",
-      `DROP OWNED BY ${quoteIdentifier(runtimeRole)};
+      `DROP OWNED BY ${quoteIdentifier(appRole)};
+       DROP OWNED BY ${quoteIdentifier(runtimeRole)};
+       DROP ROLE IF EXISTS ${quoteIdentifier(appRole)};
        DROP ROLE IF EXISTS ${quoteIdentifier(runtimeRole)};`,
     ],
     { label: "drop disposable runtime role", runtimeRole },
@@ -694,20 +743,135 @@ const assertRollbackRemovedObjects = (objects) => {
   }
 };
 
-const assertRuntimeTableGrantsRemoved = (databaseUrl, runtimeRole) => {
-  const rows = queryJson(
-    databaseUrl,
-    `SELECT c.relname, has_table_privilege('${runtimeRole.replace(/'/g, "''")}', c.oid, 'SELECT') AS has_select
-     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public' AND c.relname = ANY(${sqlArray(expectedTables)})
-     ORDER BY c.relname`,
-    "verify rollback table grant removal",
-    runtimeRole,
-  );
-  const remaining = rows.filter((row) => row.has_select).map((row) => row.relname);
-  if (rows.length !== expectedTables.length || remaining.length) {
-    throw new Error(`Rollback left runtime SELECT grants: ${remaining.join(",") || "count_mismatch"}.`);
+const collectGrantBaseline = (databaseUrl, runtimeRole) => {
+  const appRole = `${runtimeRole}_app`;
+  const roles = [appRole, runtimeRole];
+  const roleList = sqlArray(roles);
+  return {
+    roleAttributes: queryJson(
+      databaseUrl,
+      `SELECT rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin,
+              rolreplication, rolbypassrls
+       FROM pg_roles WHERE rolname = ANY(${roleList}) ORDER BY rolname`,
+      "capture role attributes",
+      runtimeRole,
+    ),
+    memberships: queryJson(
+      databaseUrl,
+      `SELECT granted.rolname AS granted_role, member.rolname AS member_role,
+              m.admin_option, m.inherit_option, m.set_option
+       FROM pg_auth_members m
+       JOIN pg_roles granted ON granted.oid = m.roleid
+       JOIN pg_roles member ON member.oid = m.member
+       WHERE granted.rolname = ANY(${roleList}) OR member.rolname = ANY(${roleList})
+       ORDER BY granted.rolname, member.rolname`,
+      "capture role memberships",
+      runtimeRole,
+    ),
+    schemas: queryJson(
+      databaseUrl,
+      `SELECT role_name, n.nspname,
+              has_schema_privilege(role_name, n.oid, 'USAGE') AS has_usage,
+              has_schema_privilege(role_name, n.oid, 'CREATE') AS has_create
+       FROM unnest(${roleList}) role_name
+       CROSS JOIN pg_namespace n
+       WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
+       ORDER BY role_name, n.nspname`,
+      "capture schema privileges",
+      runtimeRole,
+    ),
+    tables: queryJson(
+      databaseUrl,
+      `SELECT role_name, n.nspname, c.relname, privilege,
+              has_table_privilege(role_name, c.oid, privilege) AS granted
+       FROM unnest(${roleList}) role_name
+       CROSS JOIN pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) privilege
+       WHERE c.relkind IN ('r','p','v','m','f')
+         AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
+       ORDER BY role_name, n.nspname, c.relname, privilege`,
+      "capture table privileges",
+      runtimeRole,
+    ),
+    sequences: queryJson(
+      databaseUrl,
+      `SELECT role_name, n.nspname, c.relname, privilege,
+              has_sequence_privilege(role_name, c.oid, privilege) AS granted
+       FROM unnest(${roleList}) role_name
+       CROSS JOIN pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       CROSS JOIN unnest(ARRAY['USAGE','SELECT','UPDATE']) privilege
+       WHERE c.relkind = 'S' AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
+       ORDER BY role_name, n.nspname, c.relname, privilege`,
+      "capture sequence privileges",
+      runtimeRole,
+    ),
+    functions: queryJson(
+      databaseUrl,
+      `SELECT role_name, n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) AS arguments,
+              has_function_privilege(role_name, p.oid, 'EXECUTE') AS can_execute
+       FROM unnest(${roleList}) role_name
+       CROSS JOIN pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
+       ORDER BY role_name, n.nspname, p.proname, arguments`,
+      "capture function privileges",
+      runtimeRole,
+    ),
+  };
+};
+
+const assertGrantBaselineEquivalent = (before, after) => {
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    throw new Error("Rollback grant-diff is non-empty for schema, table, sequence, function, membership, or role-attribute state.");
   }
+};
+
+const assertAppBaselineQueries = (databaseUrl, runtimeRole, label) => {
+  const appRole = `${runtimeRole}_app`;
+  const tablePrivileges = new Map([
+    ["User", ["select", "insert", "update", "delete"]],
+    ["Licensee", ["select", "insert", "update", "delete"]],
+    ["RefreshToken", ["select", "insert", "update"]],
+    ["ManufacturerLicenseeLink", ["select", "insert", "update", "delete"]],
+    ["Batch", ["select", "insert", "update", "delete"]],
+    ["Printer", ["select", "insert", "update", "delete"]],
+  ]);
+  const probes = [...tablePrivileges].flatMap(([table, privileges]) => {
+    const quoted = quoteIdentifier(table);
+    const updateColumn = queryJson(
+      databaseUrl,
+      `SELECT a.attname FROM pg_attribute a
+       JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public' AND c.relname = '${table}'
+         AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum LIMIT 1`,
+      `resolve ${table} baseline update column`,
+      runtimeRole,
+    )[0].attname;
+    const updateColumnIdentifier = quoteIdentifier(updateColumn);
+    return privileges.map((privilege) => ({
+      select: `PERFORM 1 FROM ${quoted} LIMIT 1`,
+      update: `UPDATE ${quoted} SET ${updateColumnIdentifier} = ${updateColumnIdentifier} WHERE false`,
+      insert: `INSERT INTO ${quoted} SELECT * FROM ${quoted} WHERE false`,
+      delete: `DELETE FROM ${quoted} WHERE false`,
+    })[privilege]);
+  });
+  runPsql(
+    databaseUrl,
+    ["-q", "-c", `BEGIN; SET LOCAL ROLE ${quoteIdentifier(appRole)}; DO $baseline$ BEGIN ${probes.join("; ")}; END $baseline$; ROLLBACK;`],
+    { label, runtimeRole },
+  );
+};
+
+const expectPsqlFailure = (databaseUrl, psqlArgs, options, expectedPattern) => {
+  try {
+    runPsql(databaseUrl, psqlArgs, options);
+  } catch (error) {
+    if (expectedPattern.test(error.message)) return;
+    throw error;
+  }
+  throw new Error(`${options.label} unexpectedly succeeded.`);
 };
 
 const runPrismaMigrateDeploy = (databaseUrl) => {
@@ -775,9 +939,11 @@ export const runHarness = async (args, env = process.env) => {
     rollbackSql: rollback.relative,
     roleModel: {
       migrationOwner: "database_url_username",
-      runtimeRole,
+      applicationRole: `${runtimeRole}_app`,
+      rlsReadRole: runtimeRole,
       runtimeRoleSource: args.runtimeRole ? "command_line" : "explicit_environment",
-      runtimeLogin: false,
+      runtimeLogin: true,
+      runtimeInherit: false,
     },
     prepareSchema: args.prepareSchema,
     routeRuntimeTests: args.runRouteTests ? "requested" : "skipped",
@@ -788,6 +954,7 @@ export const runHarness = async (args, env = process.env) => {
   let rollbackRan = false;
   let runtimeRoleCreated = false;
   let fixturesSeeded = false;
+  let grantBaseline;
 
   try {
     if (args.prepareSchema) {
@@ -804,11 +971,65 @@ export const runHarness = async (args, env = process.env) => {
 
     createRuntimeRole(databaseUrl, runtimeRole);
     runtimeRoleCreated = true;
-    evidence.checks.push("dedicated_non_owner_runtime_role_created");
+    evidence.checks.push("separate_non_owner_application_and_rls_read_roles_created");
+
+    assertAppBaselineQueries(databaseUrl, runtimeRole, "pre-candidate application baseline queries");
+    grantBaseline = collectGrantBaseline(databaseUrl, runtimeRole);
+    evidence.checks.push("pre_candidate_baseline_queries_and_complete_grant_snapshot_passed");
 
     const before = collectCandidateObjects(databaseUrl, runtimeRole);
     assertNoPreexistingCandidateObjects(before);
     evidence.checks.push("preexisting_candidate_objects_absent");
+
+    expectPsqlFailure(
+      databaseUrl,
+      ["-f", candidate.resolved],
+      { label: "candidate missing variables", runtimeRole, candidateVariables: false },
+      /Missing required psql variable/,
+    );
+    expectPsqlFailure(
+      databaseUrl,
+      ["-f", candidate.resolved],
+      { label: "candidate wrong application role", runtimeRole, appRole: "mscqr_missing_candidate_app" },
+      /does not exist/,
+    );
+    expectPsqlFailure(
+      databaseUrl,
+      ["-f", candidate.resolved],
+      {
+        label: "candidate wrong RLS read role",
+        runtimeRole: "mscqr_missing_candidate_read",
+        appRole: `${runtimeRole}_app`,
+      },
+      /does not exist/,
+    );
+    assertNoPreexistingCandidateObjects(collectCandidateObjects(databaseUrl, runtimeRole));
+    evidence.checks.push("missing_and_wrong_psql_variables_failed_nonzero_before_mutation");
+
+    runPsql(databaseUrl, ["-f", candidate.resolved], {
+      label: "install-only candidate SQL",
+      stdio: "inherit",
+      runtimeRole,
+      sharedForceRls: "false",
+      batchForceRls: "false",
+      printerForceRls: "false",
+    });
+    assertInstallOnlyObjects(collectCandidateObjects(databaseUrl, runtimeRole));
+    expectPsqlFailure(
+      databaseUrl,
+      ["-f", rollback.resolved],
+      { label: "rollback missing variables", runtimeRole, candidateVariables: false },
+      /Missing required psql variable/,
+    );
+    assertInstallOnlyObjects(collectCandidateObjects(databaseUrl, runtimeRole));
+    runPsql(databaseUrl, ["-f", rollback.resolved], {
+      label: "install-only rollback SQL",
+      stdio: "inherit",
+      runtimeRole,
+    });
+    assertRollbackRemovedObjects(collectCandidateObjects(databaseUrl, runtimeRole));
+    assertGrantBaselineEquivalent(grantBaseline, collectGrantBaseline(databaseUrl, runtimeRole));
+    evidence.checks.push("auth_helpers_install_only_phase_missing_rollback_vars_and_grant_equivalent_rollback_passed");
 
     runPsql(databaseUrl, ["-f", candidate.resolved], {
       label: "candidate SQL",
@@ -821,13 +1042,24 @@ export const runHarness = async (args, env = process.env) => {
     evidence.checks.push("candidate_sql_applied");
     evidence.checks.push("expected_helpers_policies_and_forced_rls_present");
 
+    expectPsqlFailure(
+      databaseUrl,
+      ["-f", candidate.resolved],
+      { label: "candidate second apply", runtimeRole },
+      /already exist|rollback before reapply/,
+    );
+    if (JSON.stringify(afterApply) !== JSON.stringify(collectCandidateObjects(databaseUrl, runtimeRole))) {
+      throw new Error("Rejected second candidate apply changed candidate state.");
+    }
+    evidence.checks.push("second_apply_failed_before_mutation_with_candidate_state_unchanged");
+
     const diagnostics = collectRuntimeDiagnostics(databaseUrl, runtimeRole);
     assertRuntimeRoleDiagnostics(diagnostics, runtimeRole);
     evidence.diagnostics = diagnostics;
     evidence.checks.push("runtime_identity_attributes_memberships_and_table_ownership_safe");
 
     assertDirectHelpersFailClosed(databaseUrl, runtimeRole);
-    evidence.checks.push("all_17_helpers_fail_closed_without_context");
+    evidence.checks.push("all_17_rls_helpers_fail_closed_without_context");
 
     evidence.contextMatrix = assertContextMatrix(databaseUrl, runtimeRole);
     evidence.checks.push("exact_id_context_matrix_passed");
@@ -849,9 +1081,19 @@ export const runHarness = async (args, env = process.env) => {
       rollbackRan = true;
       const afterRollback = collectCandidateObjects(databaseUrl, runtimeRole);
       assertRollbackRemovedObjects(afterRollback);
-      assertRuntimeTableGrantsRemoved(databaseUrl, runtimeRole);
+      assertAppBaselineQueries(databaseUrl, runtimeRole, "post-rollback application baseline queries");
+      assertGrantBaselineEquivalent(grantBaseline, collectGrantBaseline(databaseUrl, runtimeRole));
       evidence.checks.push("rollback_sql_ran");
-      evidence.checks.push("candidate_objects_and_runtime_grants_removed_after_rollback");
+      evidence.checks.push("candidate_objects_removed_and_complete_grant_diff_empty_after_rollback");
+
+      expectPsqlFailure(
+        databaseUrl,
+        ["-f", rollback.resolved],
+        { label: "second rollback", runtimeRole },
+        /absent or does not match/,
+      );
+      assertGrantBaselineEquivalent(grantBaseline, collectGrantBaseline(databaseUrl, runtimeRole));
+      evidence.checks.push("second_rollback_failed_clearly_without_partial_state");
     }
     if (fixturesSeeded) {
       runPsql(databaseUrl, ["-q", "-c", truncateFixtureSql], { label: "remove RLS matrix fixtures", runtimeRole });

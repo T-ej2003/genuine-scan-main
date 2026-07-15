@@ -57,3 +57,9 @@ test("Prisma scope scanner rejects broad or undocumented allowlist entries", () 
     fs.writeFileSync(allowlist, original);
   }
 });
+
+test("auth bootstrap exception permits only User.findMany", () => {
+  const allowlist = JSON.parse(fs.readFileSync(path.join(repoRoot, "scripts/security-scope-allowlist.json"), "utf8"));
+  const entry = allowlist.allowedFindings.find(({ path: file }) => file === "backend/src/services/auth/authBootstrapRepository.ts");
+  assert.deepEqual(entry && { model: entry.model, methods: entry.methods }, { model: "user", methods: ["findMany"] });
+});

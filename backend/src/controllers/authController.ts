@@ -1,10 +1,13 @@
 import { Request, Response } from "express";
+import { Prisma } from "@prisma/client";
 
 import { loginWithPassword, logoutSession, refreshSession } from "../services/auth/authService";
 import { acceptInvite, createInvite, getInvitePreview } from "../services/auth/inviteService";
 import { requestPasswordReset, resetPasswordWithToken } from "../services/auth/passwordResetService";
 import { confirmEmailVerification } from "../services/auth/emailVerificationService";
 import { listManufacturerLicenseeLinks, normalizeLinkedLicensees, isManufacturerRole } from "../services/manufacturerScopeService";
+// rls-prototype-approved-import: signed access claims establish auth/me context.
+import { withRlsPrototypeTransaction } from "../lib/rlsTransactionContextPrototype";
 import {
   acceptInviteSchema,
   authResponseData,
@@ -78,17 +81,31 @@ export const me = async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { licensee: true },
-    });
+    const { user, linkedLicensees } = await withRlsPrototypeTransaction(
+      prisma,
+      {
+        userId: claims.userId,
+        role: claims.role,
+        licenseeId: claims.licenseeId,
+        manufacturerId: isManufacturerRole(claims.role) ? claims.userId : null,
+        organizationId: claims.orgId,
+        // auth/me only needs actor-self visibility; do not elevate from a stale claim.
+        isPlatformAdmin: false,
+      },
+      async (tx: Prisma.TransactionClient) => {
+        const scopedUser = await tx.user.findUnique({
+          where: { id: userId },
+          include: { licensee: true },
+        });
+        const scopedLinks = scopedUser && isManufacturerRole(scopedUser.role)
+          ? normalizeLinkedLicensees(await listManufacturerLicenseeLinks(scopedUser.id, tx))
+          : [];
+        return { user: scopedUser, linkedLicensees: scopedLinks };
+      }
+    );
     if (!user) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
-
-    const linkedLicensees = isManufacturerRole(user.role)
-      ? normalizeLinkedLicensees(await listManufacturerLicenseeLinks(user.id, prisma))
-      : [];
     const primaryLicensee = user.licensee || linkedLicensees.find((row) => row.isPrimary) || linkedLicensees[0] || null;
 
     ensureCsrfCookie(req, res);

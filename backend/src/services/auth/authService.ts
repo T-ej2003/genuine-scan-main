@@ -1,5 +1,5 @@
 import prisma from "../../config/database";
-import { UserRole, UserStatus } from "@prisma/client";
+import { Prisma, UserRole, UserStatus } from "@prisma/client";
 import { verifyPassword, hashPassword, shouldRehashPassword } from "./passwordService";
 import {
   signAccessToken,
@@ -21,6 +21,9 @@ import { isVerifiedAccount } from "./emailVerificationService";
 import { createAdminMfaChallenge, getAdminMfaStatus } from "./mfaService";
 import { randomOpaqueToken } from "../../utils/security";
 import type { AuthAssuranceLevel, AuthSessionStage, StepUpMethod } from "../../types";
+// rls-prototype-approved-import: reviewed auth bootstrap context boundary.
+import { withRlsPrototypeTransaction } from "../../lib/rlsTransactionContextPrototype";
+import { lookupPasswordBootstrapUser, recordPasswordLoginFailure } from "./authBootstrapRepository";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = String(process.env[key] || "").trim();
@@ -87,8 +90,10 @@ export const buildJwtPayloadForUser = (u: {
   mfaVerifiedAt: u.mfaVerifiedAt?.toISOString?.() || null,
 });
 
-const mapLinkedLicenseesForSession = async (userId: string) => {
-  const links = await listManufacturerLicenseeLinks(userId, prisma).catch(() => []);
+type AuthDbClient = Prisma.TransactionClient;
+
+const mapLinkedLicenseesForSession = async (userId: string, db: AuthDbClient = prisma) => {
+  const links = await listManufacturerLicenseeLinks(userId, db).catch(() => []);
   const linkedLicensees = normalizeLinkedLicensees(links);
   const linkedLicenseeIds = linkedLicensees.map((row) => row.id);
   return { linkedLicensees, linkedLicenseeIds };
@@ -102,13 +107,13 @@ export const issueSessionForUser = async (input: {
   authenticatedAt?: Date | null;
   mfaVerifiedAt?: Date | null;
   now?: Date;
-}) => {
+}, db: AuthDbClient = prisma) => {
   const now = input.now || new Date();
   const authAssurance = input.authAssurance || "PASSWORD";
   const authenticatedAt = input.authenticatedAt || now;
   const mfaVerifiedAt = input.mfaVerifiedAt || null;
 
-  const user = await prisma.user.findUnique({
+  const user = await db.user.findUnique({
     where: { id: input.userId },
     include: { licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } } },
   });
@@ -119,9 +124,9 @@ export const issueSessionForUser = async (input: {
   }
 
   const linkedScope = isManufacturerRole(user.role)
-    ? await mapLinkedLicenseesForSession(user.id)
+    ? await mapLinkedLicenseesForSession(user.id, db)
     : { linkedLicensees: [], linkedLicenseeIds: [] as string[] };
-  const mfaStatus = isAdminMfaRequiredRole(user.role) ? await getAdminMfaStatus(user.id).catch(() => null) : null;
+  const mfaStatus = isAdminMfaRequiredRole(user.role) ? await getAdminMfaStatus(user.id, db).catch(() => null) : null;
   const primaryLicensee =
     user.licensee ||
     linkedScope.linkedLicensees.find((row) => row.isPrimary) ||
@@ -151,7 +156,7 @@ export const issueSessionForUser = async (input: {
     authenticatedAt,
     mfaVerifiedAt,
     now,
-  });
+  }, db);
 
   return {
     sessionStage: "ACTIVE" as AuthSessionStage,
@@ -245,11 +250,11 @@ const buildBootstrapSessionForUser = async (input: {
   riskScore?: number;
   riskLevel?: string | null;
   reasons?: string[];
-}) => {
+}, db: AuthDbClient = prisma) => {
   const linkedScope = isManufacturerRole(input.user.role)
-    ? await mapLinkedLicenseesForSession(input.user.id)
+    ? await mapLinkedLicenseesForSession(input.user.id, db)
     : { linkedLicensees: [], linkedLicenseeIds: [] as string[] };
-  const mfaStatus = await getAdminMfaStatus(input.user.id).catch(() => null);
+  const mfaStatus = await getAdminMfaStatus(input.user.id, db).catch(() => null);
   const primaryLicensee =
     input.user.licensee ||
     linkedScope.linkedLicensees.find((row) => row.isPrimary) ||
@@ -277,7 +282,7 @@ const buildBootstrapSessionForUser = async (input: {
         ipHash: input.ipHash,
         userAgent: input.userAgent,
         supersedeOpen: true,
-      })
+      }, db)
     : null;
 
   return {
@@ -335,10 +340,7 @@ export const loginWithPassword = async (input: {
   const email = String(input.email || "").trim().toLowerCase();
   const password = String(input.password || "");
 
-  const user = await prisma.user.findUnique({
-    where: { email },
-    include: { licensee: { select: { id: true, name: true, prefix: true } } },
-  });
+  const user = await lookupPasswordBootstrapUser(email);
 
   const now = new Date();
 
@@ -347,7 +349,7 @@ export const loginWithPassword = async (input: {
       action: "AUTH_LOGIN_FAIL",
       entityType: "User",
       entityId: null,
-      details: { email, reason: "USER_NOT_FOUND" },
+      details: { reason: "INVALID_CREDENTIALS" },
       ipHash: input.ipHash || undefined,
       userAgent: input.userAgent || undefined,
     } as any);
@@ -383,27 +385,18 @@ export const loginWithPassword = async (input: {
 
   const ok = await verifyPassword(user.passwordHash, password);
   if (!ok) {
-    const nextAttempts = (user.failedLoginAttempts || 0) + 1;
     const maxAttempts = getMaxLoginAttempts();
-
-    const lockout = nextAttempts >= maxAttempts ? addMinutes(now, getLockoutMinutes()) : null;
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        failedLoginAttempts: nextAttempts,
-        lockedUntil: lockout,
-      },
+    await recordPasswordLoginFailure({
+      normalizedEmail: email,
+      attemptedAt: now,
+      maxAttempts,
+      lockoutMinutes: getLockoutMinutes(),
     });
-
     await createAuditLog({
-      userId: user.id,
-      licenseeId: user.licenseeId || undefined,
-      orgId: user.orgId || undefined,
       action: "AUTH_LOGIN_FAIL",
       entityType: "User",
-      entityId: user.id,
-      details: { email, reason: "BAD_PASSWORD", failedLoginAttempts: nextAttempts, lockedUntil: lockout },
+      entityId: null,
+      details: { reason: "INVALID_CREDENTIALS" },
       ipHash: input.ipHash || undefined,
       userAgent: input.userAgent || undefined,
     } as any);
@@ -411,20 +404,27 @@ export const loginWithPassword = async (input: {
     throw new Error("Invalid email or password");
   }
 
-  // Opportunistic upgrade from legacy bcrypt.
-  if (shouldRehashPassword(user.passwordHash)) {
-    const upgraded = await hashPassword(password);
-    await prisma.user.update({ where: { id: user.id }, data: { passwordHash: upgraded } });
-  }
+  const rlsContext = {
+    userId: user.id,
+    role: user.role,
+    licenseeId: user.licenseeId,
+    manufacturerId: isManufacturerRole(user.role) ? user.id : null,
+    organizationId: user.orgId,
+    isPlatformAdmin: isPlatformSuperAdminRole(user.role),
+  };
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      failedLoginAttempts: 0,
-      lockedUntil: null,
-      lastLoginAt: now,
-    },
-  });
+  const upgradedPasswordHash = shouldRehashPassword(user.passwordHash) ? await hashPassword(password) : null;
+  await withRlsPrototypeTransaction(prisma, rlsContext, (tx) =>
+    tx.user.update({
+      where: { id: user.id },
+      data: {
+        ...(upgradedPasswordHash ? { passwordHash: upgradedPasswordHash } : {}),
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastLoginAt: now,
+      },
+    })
+  );
 
   const risk = await assessAuthSessionRisk({
     userId: user.id,
@@ -453,39 +453,73 @@ export const loginWithPassword = async (input: {
     throw new Error("High-risk login blocked. Try from a trusted network or contact administrator.");
   }
 
-  const mfaStatus: { enabled: boolean; lastUsedAt: Date | string | null } = isAdminMfaRequiredRole(user.role)
-    ? await getAdminMfaStatus(user.id).catch(() => ({ enabled: false, lastUsedAt: null }))
-    : { enabled: false, lastUsedAt: null };
+  return withRlsPrototypeTransaction(prisma, rlsContext, async (tx) => {
+    const mfaStatus: { enabled: boolean; lastUsedAt: Date | string | null } = isAdminMfaRequiredRole(user.role)
+      ? await getAdminMfaStatus(user.id, tx).catch(() => ({ enabled: false, lastUsedAt: null }))
+      : { enabled: false, lastUsedAt: null };
 
-  if (isAdminMfaRequiredRole(user.role)) {
-    const lastUsedAt = mfaStatus?.lastUsedAt ? new Date(mfaStatus.lastUsedAt) : null;
-    const hasValidLastUsedAt = Boolean(lastUsedAt && Number.isFinite(lastUsedAt.getTime()));
-    const loginCycleDays = Math.max(1, getAdminLoginMfaCycleDays());
-    const cycleThreshold = addDays(now, -loginCycleDays);
-    const mfaFreshForLogin = Boolean(
-      !isManufacturerRole(user.role) &&
-        mfaStatus?.enabled &&
-        hasValidLastUsedAt &&
-        (lastUsedAt as Date).getTime() >= cycleThreshold.getTime()
-    );
+    if (isAdminMfaRequiredRole(user.role)) {
+      const lastUsedAt = mfaStatus?.lastUsedAt ? new Date(mfaStatus.lastUsedAt) : null;
+      const hasValidLastUsedAt = Boolean(lastUsedAt && Number.isFinite(lastUsedAt.getTime()));
+      const loginCycleDays = Math.max(1, getAdminLoginMfaCycleDays());
+      const cycleThreshold = addDays(now, -loginCycleDays);
+      const mfaFreshForLogin = Boolean(
+        !isManufacturerRole(user.role) &&
+          mfaStatus?.enabled &&
+          hasValidLastUsedAt &&
+          (lastUsedAt as Date).getTime() >= cycleThreshold.getTime()
+      );
 
-    if (mfaFreshForLogin) {
-      const verifiedAt = (lastUsedAt as Date).getTime() > now.getTime() ? now : (lastUsedAt as Date);
-      const session = await issueSessionForUser({
-        userId: user.id,
+      if (mfaFreshForLogin) {
+        const verifiedAt = (lastUsedAt as Date).getTime() > now.getTime() ? now : (lastUsedAt as Date);
+        const session = await issueSessionForUser({
+          userId: user.id,
+          ipHash: input.ipHash,
+          userAgent: input.userAgent,
+          authAssurance: "ADMIN_MFA",
+          authenticatedAt: now,
+          mfaVerifiedAt: verifiedAt,
+          now,
+        }, tx);
+
+        await createAuditLog({
+          userId: user.id,
+          licenseeId: user.licenseeId || undefined,
+          orgId: user.orgId || undefined,
+          action: "AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA",
+          entityType: "User",
+          entityId: user.id,
+          details: {
+            role: user.role,
+            riskScore: risk.score,
+            riskLevel: risk.riskLevel,
+            mfaEnabled: Boolean(mfaStatus.enabled),
+            mfaVerifiedAt: verifiedAt.toISOString(),
+            loginMfaCycleDays: loginCycleDays,
+          },
+          ipHash: input.ipHash || undefined,
+          userAgent: input.userAgent || undefined,
+        } as any);
+
+        return session;
+      }
+
+      const bootstrapSession = await buildBootstrapSessionForUser({
+        user,
         ipHash: input.ipHash,
         userAgent: input.userAgent,
-        authAssurance: "ADMIN_MFA",
-        authenticatedAt: now,
-        mfaVerifiedAt: verifiedAt,
         now,
-      });
+        mfaEnrolled: Boolean(mfaStatus.enabled),
+        riskScore: risk.score,
+        riskLevel: risk.riskLevel,
+        reasons: risk.reasons,
+      }, tx);
 
       await createAuditLog({
         userId: user.id,
         licenseeId: user.licenseeId || undefined,
         orgId: user.orgId || undefined,
-        action: "AUTH_LOGIN_SUCCESS_RECENT_ADMIN_MFA",
+        action: mfaStatus.enabled ? "AUTH_LOGIN_MFA_CHALLENGE_REQUIRED" : "AUTH_LOGIN_MFA_SETUP_REQUIRED",
         entityType: "User",
         entityId: user.id,
         details: {
@@ -493,62 +527,29 @@ export const loginWithPassword = async (input: {
           riskScore: risk.score,
           riskLevel: risk.riskLevel,
           mfaEnabled: Boolean(mfaStatus.enabled),
-          mfaVerifiedAt: verifiedAt.toISOString(),
-          loginMfaCycleDays: loginCycleDays,
         },
         ipHash: input.ipHash || undefined,
         userAgent: input.userAgent || undefined,
       } as any);
 
-      return session;
+      return bootstrapSession;
     }
 
-    const bootstrapSession = await buildBootstrapSessionForUser({
-      user,
+    const session = await issueSessionForUser({
+      userId: user.id,
       ipHash: input.ipHash,
       userAgent: input.userAgent,
+      authAssurance: "PASSWORD",
+      authenticatedAt: now,
+      mfaVerifiedAt: null,
       now,
-      mfaEnrolled: Boolean(mfaStatus.enabled),
-      riskScore: risk.score,
-      riskLevel: risk.riskLevel,
-      reasons: risk.reasons,
-    });
+    }, tx);
 
     await createAuditLog({
       userId: user.id,
       licenseeId: user.licenseeId || undefined,
       orgId: user.orgId || undefined,
-      action: mfaStatus.enabled ? "AUTH_LOGIN_MFA_CHALLENGE_REQUIRED" : "AUTH_LOGIN_MFA_SETUP_REQUIRED",
-      entityType: "User",
-      entityId: user.id,
-      details: {
-        role: user.role,
-        riskScore: risk.score,
-        riskLevel: risk.riskLevel,
-        mfaEnabled: Boolean(mfaStatus.enabled),
-      },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
-
-    return bootstrapSession;
-  }
-
-  const session = await issueSessionForUser({
-    userId: user.id,
-    ipHash: input.ipHash,
-    userAgent: input.userAgent,
-    authAssurance: "PASSWORD",
-    authenticatedAt: now,
-    mfaVerifiedAt: null,
-    now,
-  });
-
-  await createAuditLog({
-    userId: user.id,
-    licenseeId: user.licenseeId || undefined,
-    orgId: user.orgId || undefined,
-    action: "AUTH_LOGIN_SUCCESS",
+      action: "AUTH_LOGIN_SUCCESS",
       entityType: "User",
       entityId: user.id,
       details: {
@@ -561,7 +562,8 @@ export const loginWithPassword = async (input: {
       userAgent: input.userAgent || undefined,
     } as any);
 
-  return session;
+    return session;
+  });
 };
 
 export const refreshSession = async (input: {

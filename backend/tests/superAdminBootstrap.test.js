@@ -81,6 +81,11 @@ mockModule("config/database.js", {
   default: prismaMock,
 });
 
+mockModule("services/auth/authBootstrapRepository.js", {
+  lookupPasswordBootstrapUser: async (email) => cloneUser(users.find((user) => user.email === email) || null),
+  recordPasswordLoginFailure: async () => null,
+});
+
 mockModule("services/auth/passwordService.js", {
   hashPassword: async (password) => `argon2:${password}`,
   verifyPassword: async (storedHash, password) => storedHash === `argon2:${password}` || storedHash === "hash",

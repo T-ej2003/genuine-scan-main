@@ -7,6 +7,8 @@ import { openCookieToken } from "../services/auth/cookieTokenProtectionService";
 import { isManufacturerRole, listManufacturerLinkedLicenseeIds } from "../services/manufacturerScopeService";
 import { isDisabledUserRecord } from "../services/accessControlService";
 import { readCookie } from "../utils/cookies";
+// rls-prototype-approved-import: verified signed claims establish hydration context.
+import { withRlsPrototypeTransaction } from "../lib/rlsTransactionContextPrototype";
 import {
   getAdminStepUpWindowMinutes,
   getPasswordReauthWindowMinutes,
@@ -33,28 +35,46 @@ const getCookieAccessToken = (req: Request) => {
 async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promise<AuthenticatedSessionClaims> {
   if (!payload?.userId || !payload?.role) return payload;
 
-  const u = await prisma.user.findUnique({
-    where: { id: payload.userId },
-    select: {
-      id: true,
-      email: true,
-      role: true,
-      licenseeId: true,
-      orgId: true,
-      isActive: true,
-      status: true,
-      deletedAt: true,
-      disabledAt: true,
+  const { user: u, linkedLicenseeIds } = await withRlsPrototypeTransaction(
+    prisma,
+    {
+      userId: payload.userId,
+      role: payload.role,
+      licenseeId: payload.licenseeId,
+      manufacturerId: isManufacturerRole(payload.role) ? payload.userId : null,
+      organizationId: payload.orgId,
+      // Hydration only needs actor-self visibility. Never elevate from a stale claim.
+      isPlatformAdmin: false,
     },
-  });
+    async (tx) => {
+      const user = await tx.user.findUnique({
+        where: { id: payload.userId },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          licenseeId: true,
+          orgId: true,
+          isActive: true,
+          status: true,
+          deletedAt: true,
+          disabledAt: true,
+        },
+      });
+      const linkedIds = user && isManufacturerRole(user.role)
+        ? await listManufacturerLinkedLicenseeIds(payload.userId, tx).catch(() => [])
+        : [];
+      return { user, linkedLicenseeIds: linkedIds };
+    }
+  );
 
   if (!u || isDisabledUserRecord(u)) {
     throw new Error("Account is disabled");
   }
 
   const effectiveRole = u.role || payload.role;
-  const linkedLicenseeIds = isManufacturerRole(effectiveRole)
-    ? await listManufacturerLinkedLicenseeIds(payload.userId, prisma).catch(() => [])
+  const effectiveLinkedLicenseeIds = isManufacturerRole(effectiveRole)
+    ? linkedLicenseeIds
     : Array.isArray(payload.linkedLicenseeIds)
       ? payload.linkedLicenseeIds
       : [];
@@ -63,9 +83,9 @@ async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promi
     ...payload,
     email: u.email || payload.email,
     role: effectiveRole,
-    licenseeId: u?.licenseeId ?? payload.licenseeId ?? linkedLicenseeIds?.[0] ?? null,
+    licenseeId: u?.licenseeId ?? payload.licenseeId ?? effectiveLinkedLicenseeIds?.[0] ?? null,
     orgId: u?.orgId ?? payload.orgId ?? null,
-    linkedLicenseeIds: linkedLicenseeIds.length ? linkedLicenseeIds : payload.linkedLicenseeIds ?? null,
+    linkedLicenseeIds: effectiveLinkedLicenseeIds.length ? effectiveLinkedLicenseeIds : payload.linkedLicenseeIds ?? null,
   };
 }
 
