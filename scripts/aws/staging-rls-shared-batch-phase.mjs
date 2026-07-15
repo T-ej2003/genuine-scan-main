@@ -16,8 +16,10 @@ const modes = Object.freeze({
   rollback: "rls-shared-rollback",
 });
 const helperArnPattern = new RegExp(`^arn:aws:ecs:${C.region}:${C.accountId}:task-definition/mscqr-staging-database-role-admin:[0-9]+$`);
+const helperImagePattern = new RegExp(`^${C.accountId}\\.dkr\\.ecr\\.${C.region}\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$`);
 const canaryArn = `arn:aws:ecs:${C.region}:${C.accountId}:task-definition/mscqr-staging-backend:9`;
 const brokerArn = `arn:aws:lambda:${C.region}:${C.accountId}:function:${C.brokerFunction}`;
+export const APPLY_BLOCK_REASON = "Shared RLS apply is blocked: stable revision 7 has contextless User access and the reviewed User policies do not support legacy admin INSERT, DELETE, or cross-user UPDATE.";
 
 const run = (args) => {
   const result = spawnSync("aws", [...args, "--region", C.region, "--output", "json"], {
@@ -44,12 +46,14 @@ export function validateLocalGate(mode, env = process.env) {
   if ((env.AWS_REGION || env.AWS_DEFAULT_REGION || C.region) !== C.region) throw new Error(`AWS region must be ${C.region}.`);
   if (env.MSCQR_STAGING_VPC_EXECUTOR !== "disposable-ecs-admin-task") throw new Error("Reviewed disposable ECS admin executor must be selected.");
   if (!helperArnPattern.test(env.MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN || "")) throw new Error("Exact reviewed staging database-role admin task definition ARN is required.");
+  if (!helperImagePattern.test(env.MSCQR_STAGING_RLS_HELPER_IMAGE_REF || "")) throw new Error("Exact immutable staging RLS helper image digest reference is required.");
   if (mode === "apply" && env.MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE !== "YES") throw new Error("Set MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE=YES.");
+  if (mode === "apply") throw new Error(APPLY_BLOCK_REASON);
   if (mode === "rollback" && env.MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK !== "YES") throw new Error("Set MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK=YES.");
   return modes[mode];
 }
 
-export function assertReviewedTopology({ service, stableDefinition, canaryDefinition, helperDefinition, helperArn }) {
+export function assertReviewedTopology({ service, stableDefinition, canaryDefinition, helperDefinition, helperArn, helperImageRef }) {
   if (service.taskDefinition !== `arn:aws:ecs:${C.region}:${C.accountId}:task-definition/mscqr-staging-backend:7`
       || service.desiredCount !== service.runningCount || service.runningCount < 1
       || (service.deployments || []).some((deployment) => deployment.status !== "PRIMARY" || deployment.taskDefinition !== service.taskDefinition)) {
@@ -68,6 +72,7 @@ export function assertReviewedTopology({ service, stableDefinition, canaryDefini
   }
   const container = helperDefinition.containerDefinitions[0];
   if (container.name !== "db-admin" || container.readonlyRootFilesystem !== true
+      || container.image !== helperImageRef
       || !(container.command || []).join(" ").includes("staging-database-role-vpc-executor.mjs")) {
     throw new Error("Helper task does not use the reviewed VPC executor entrypoint.");
   }
@@ -87,7 +92,54 @@ export function assertReviewedTopology({ service, stableDefinition, canaryDefini
   return true;
 }
 
-export function taskEvidence(mode, task, helperArn, helperDefinition) {
+const expectedSqlEvidence = Object.freeze({
+  apply: {
+    status: "staging_shared_batch_rls_applied",
+    protectedTableCount: 10,
+    candidateSelectPolicyCount: 10,
+    sharedPolicyCount: 7,
+    authFunctionCount: 2,
+    printerTablesChanged: false,
+    batchPoliciesChanged: false,
+  },
+  verify: {
+    status: "staging_shared_batch_rls_verified",
+    database: C.databaseName,
+    protectedTables: 10,
+    candidateSelectPolicies: 10,
+    sharedPolicies: 7,
+    authFunctions: 2,
+    emptyContextSharedQueries: "fail_closed",
+    rlsReadWrites: "denied",
+    appSharedCrud: "preserved",
+    printerProtectedTables: 0,
+  },
+  rollback: {
+    status: "staging_shared_batch_rls_rolled_back",
+    sharedProtectedTableCount: 0,
+    preservedBatchProtectedTableCount: 6,
+    preservedBatchPolicyCount: 6,
+    printerTablesChanged: false,
+    runtimeTableGrantsChanged: false,
+  },
+});
+
+export function parseSqlEvidence(mode, events) {
+  const expected = expectedSqlEvidence[mode];
+  const records = (events || []).flatMap(({ message = "" }) => String(message).split("\n")).flatMap((line) => {
+    try { return [JSON.parse(line)]; } catch { return []; }
+  });
+  const evidence = records.findLast((record) => record?.phase === "complete"
+    && record?.mechanism === "brokered-disposable-ecs-admin-psql-task"
+    && record?.status === expected?.status);
+  if (!evidence) throw new Error("CloudWatch did not contain the reviewed SQL completion evidence.");
+  for (const [key, value] of Object.entries(expected)) {
+    if (evidence[key] !== value) throw new Error(`SQL evidence has an unsafe ${key} value.`);
+  }
+  return evidence;
+}
+
+export function taskEvidence(mode, task, helperArn, helperDefinition, helperImageRef, loadLogEvents) {
   const container = task?.containers?.find(({ name }) => name === "db-admin");
   if (!task || task.lastStatus !== "STOPPED" || task.taskDefinitionArn !== helperArn || !container) {
     throw new Error("Reviewed shared RLS helper did not reach a corroborated stopped state.");
@@ -97,6 +149,10 @@ export function taskEvidence(mode, task, helperArn, helperDefinition) {
   const taskId = task.taskArn?.split("/").at(-1);
   const logStream = container.logStreamName || (logOptions["awslogs-stream-prefix"] && taskId
     ? `${logOptions["awslogs-stream-prefix"]}/db-admin/${taskId}` : null);
+  const expectedDigest = helperImageRef.split("@")[1];
+  if (!logOptions["awslogs-group"] || !logStream || container.imageDigest !== expectedDigest) {
+    throw new Error("Stopped helper task does not match the reviewed image digest or log destination.");
+  }
   const evidence = {
     status: container.exitCode === 0 ? `staging_shared_batch_rls_${mode}_task_passed` : "staging_shared_batch_rls_task_failed",
     mode,
@@ -110,11 +166,13 @@ export function taskEvidence(mode, task, helperArn, helperDefinition) {
     exitCode: container.exitCode,
     cloudWatchLogGroup: logOptions["awslogs-group"] || null,
     cloudWatchLogStream: logStream,
+    helperImageDigest: container.imageDigest,
     secretsPrinted: false,
     ecsServiceUpdated: false,
   };
   if (container.exitCode !== 0) throw Object.assign(new Error("Shared RLS SQL task exited non-zero; inspect the printed CloudWatch log stream."), { evidence });
-  return evidence;
+  const sqlEvidence = parseSqlEvidence(mode, loadLogEvents(logOptions["awslogs-group"], logStream));
+  return { ...evidence, sqlEvidenceValidated: true, ...sqlEvidence };
 }
 
 export function execute(mode = command) {
@@ -122,11 +180,12 @@ export function execute(mode = command) {
   const identity = run(["sts", "get-caller-identity"]);
   assertDatabaseRoleOperatorIdentity(identity, { ...process.env, AWS_REGION: C.region });
   const helperArn = process.env.MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN;
+  const helperImageRef = process.env.MSCQR_STAGING_RLS_HELPER_IMAGE_REF;
   const service = run(["ecs", "describe-services", "--cluster", C.cluster, "--services", C.service]).services?.[0];
   const stableDefinition = run(["ecs", "describe-task-definition", "--task-definition", service?.taskDefinition]).taskDefinition;
   const canaryDefinition = run(["ecs", "describe-task-definition", "--task-definition", canaryArn]).taskDefinition;
   const helperDefinition = run(["ecs", "describe-task-definition", "--task-definition", helperArn]).taskDefinition;
-  assertReviewedTopology({ service, stableDefinition, canaryDefinition, helperDefinition, helperArn });
+  assertReviewedTopology({ service, stableDefinition, canaryDefinition, helperDefinition, helperArn, helperImageRef });
 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-staging-shared-rls-"));
   fs.chmodSync(directory, 0o700);
@@ -149,7 +208,8 @@ export function execute(mode = command) {
     }
     run(["ecs", "wait", "tasks-stopped", "--cluster", C.cluster, "--tasks", started.taskArn]);
     const task = run(["ecs", "describe-tasks", "--cluster", C.cluster, "--tasks", started.taskArn]).tasks?.[0];
-    return taskEvidence(mode, task, helperArn, helperDefinition);
+    return taskEvidence(mode, task, helperArn, helperDefinition, helperImageRef, (logGroup, logStream) =>
+      run(["logs", "get-log-events", "--log-group-name", logGroup, "--log-stream-name", logStream, "--start-from-head"]).events || []);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

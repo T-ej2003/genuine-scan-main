@@ -69,7 +69,7 @@ if (assume) {
 if (role) {
   const allowedActions = new Set([
     "lambda:InvokeFunction", "ecs:DescribeTasks", "ecs:DescribeTaskDefinition", "ecs:DescribeServices", "ecs:ListTaskDefinitions", "ecs:ListServices",
-    "events:ListRules", "events:ListTargetsByRule",
+    "events:ListRules", "events:ListTargetsByRule", "logs:GetLogEvents",
   ]);
   const seenActions = new Set(role.Statement.flatMap((statement) => asArray(statement.Action)));
   for (const action of seenActions) if (!allowedActions.has(action) || action.includes("*")) failures.push(`Unapproved or wildcard action: ${action}.`);
@@ -82,6 +82,11 @@ if (role) {
   const invoke = requireStatement(role, "InvokeOnlyReviewedDatabaseRoleExecutorBroker");
   if (invoke && (!same(asArray(invoke.Action), ["lambda:InvokeFunction"]) || !same(asArray(invoke.Resource), [brokerFunctionArn]))) {
     failures.push("Human operator may invoke only the exact staging database-role executor broker Lambda.");
+  }
+  const logs = requireStatement(role, "ReadOnlyReviewedDatabaseRoleTaskLogs");
+  const logStreamArn = `arn:aws:logs:eu-west-2:${accountId}:log-group:/ecs/mscqr-staging-backend:log-stream:database-role-admin/db-admin/*`;
+  if (logs && (!same(asArray(logs.Action), ["logs:GetLogEvents"]) || !same(asArray(logs.Resource), [logStreamArn]))) {
+    failures.push("Human operator may read only the reviewed database-role helper log streams.");
   }
 
   if ([...seenActions].some((action) => action.startsWith("secretsmanager:"))) failures.push("Human operator policy must not allow Secrets Manager actions.");

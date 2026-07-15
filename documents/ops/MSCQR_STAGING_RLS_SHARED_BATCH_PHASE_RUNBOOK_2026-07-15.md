@@ -21,10 +21,29 @@ image must contain `psql`, the three shared-phase SQL files, and the updated VPC
 executor. The broker must accept only its fixed reviewed modes. Releasing those
 two operator components is not authorization to update the backend ECS service.
 
+## Review resolution: apply is blocked
+
+Do not execute the shared-table apply in the current revision-7/revision-9
+topology. The 2026-07-15 review proved that revision 7 performs `User` reads and
+writes after its authentication context transaction has ended. The reviewed
+`User` policy also permits only actor-self UPDATE and has no INSERT or DELETE
+policy, so merely adding request context to `requestPasswordReset` and
+`changeMyPassword` would still break user administration. RLS is database-wide;
+an isolated revision 9 task cannot shield the serving revision 7 tasks.
+
+The apply controller now refuses `apply` before any AWS call. This is the
+fail-closed resolution until a separate reviewed compatibility change proves
+all existing shared-table paths and either supplies the missing authorized
+admin mutation boundary or explicitly retires those operations. That future
+change must name an exact compatible service task-definition revision and
+remove the controller block in the same review. Verification and rollback stay
+available for catalog inspection and emergency recovery.
+
 ## Hard safety rules
 
 - Database: exactly `mscqr_staging`; executor: exactly `mscqr_staging_admin`.
-- Stable service revision 7 remains serving and is never updated by these scripts.
+- Stable service revision 7 remains serving and is never updated by these scripts;
+  therefore the shared-table apply remains prohibited.
 - Revision 9 remains a one-off canary until every gate below passes.
 - `MSCQR_STAGING_RLS_BATCHES_READ_ENABLED=true` exists only on revision 9.
 - `MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED=false` everywhere.
@@ -39,18 +58,27 @@ two operator components is not authorization to update the backend ECS service.
 1. Confirm the reviewed commit passed all local checks listed at the end of this document.
 2. Confirm a recent RDS snapshot or equivalent staging restore point and named rollback operator.
 3. Assume `mscqr-staging-database-role-operator`; it must have no secret-value access and no direct ECS `RunTask` authority.
-4. Obtain the exact active `mscqr-staging-database-role-admin:<revision>` ARN from the reviewed infrastructure release output.
-5. Confirm its single `db-admin` container uses the administrative `DATABASE_URL` secret, private subnets, the staging ECS security group, no public IP, a read-only root filesystem, and all three route flags `false`.
-6. Confirm the service is still exactly revision 7 with desired count equal to running count and no secondary deployment.
-7. Confirm revision 7 has all three route flags `false` and revision 9 has only batches-read `true`.
-8. Confirm the current catalog matches the state described above. Do not use the broad 2026-07-09 candidate template.
-9. Through the same ECS administrative helper, run a read-only/rolled-back
+4. Install the reviewed operator policy update that grants only
+   `logs:GetLogEvents` on
+   `/ecs/mscqr-staging-backend/database-role-admin/db-admin/*`; the controller
+   must validate the SQL evidence rather than trusting exit code alone.
+5. Obtain the exact active `mscqr-staging-database-role-admin:<revision>` ARN
+   and immutable `mscqr-backend@sha256:<digest>` image reference from the same
+   reviewed infrastructure release output.
+6. Confirm its single `db-admin` container uses that exact digest reference,
+   the administrative `DATABASE_URL` secret, private subnets, the staging ECS
+   security group, no public IP, a read-only root filesystem, and all three
+   route flags `false`.
+7. Confirm the service is still exactly revision 7 with desired count equal to running count and no secondary deployment.
+8. Confirm revision 7 has all three route flags `false` and revision 9 has only batches-read `true`.
+9. Confirm the current catalog matches the state described above. Do not use the broad 2026-07-09 candidate template.
+10. Through the same ECS administrative helper, run a read-only/rolled-back
    capability rehearsal that begins a transaction, grants
    `mscqr_staging_auth_owner` to `mscqr_staging_admin` with `ADMIN FALSE,
    INHERIT FALSE, SET TRUE`, revokes it, and rolls back. PostgreSQL 18 requires
    the executor to hold ADMIN OPTION (or equivalent managed administrative
    authority); `CREATEROLE` alone is insufficient. No membership may remain.
-10. Create a private evidence directory and disable shell tracing:
+11. Create a private evidence directory and disable shell tracing:
 
 ```bash
 set +x
@@ -61,24 +89,28 @@ mkdir -p "$MSCQR_SHARED_RLS_EVIDENCE_DIR"
 chmod 700 "$MSCQR_SHARED_RLS_EVIDENCE_DIR"
 ```
 
-## Exact apply command
+## Exact apply command — intentionally blocked
 
 Replace only the helper revision placeholder with the exact reviewed ARN. The
 controller independently proves stable revision 7, canary revision 9 flags,
-helper topology, and the administrative secret reference before invoking the
-fixed-input broker.
+helper topology, immutable helper image, and the administrative secret reference.
+In the current reviewed code the final command exits with status 2 before an
+AWS call and reports the revision-7 `User` compatibility block.
 
 ```bash
 export AWS_PROFILE='mscqr-staging-database-role-operator'
 export AWS_REGION='eu-west-2'
 export MSCQR_STAGING_VPC_EXECUTOR='disposable-ecs-admin-task'
 export MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN='arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-database-role-admin:<reviewed-revision>'
+export MSCQR_STAGING_RLS_HELPER_IMAGE_REF='368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:<reviewed-digest>'
 export MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE='YES'
 scripts/aws/apply-staging-rls-shared-batch-phase.sh 2>&1 | tee "$MSCQR_SHARED_RLS_EVIDENCE_DIR/apply-task.json"
 unset MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE
 ```
 
-Success requires exit code zero and JSON with `protectedTableCount: 10`,
+Do not treat this expected refusal as an apply failure to retry. After the
+separate compatibility review removes the hard block, success will require
+exit code zero and controller-validated CloudWatch SQL JSON with `protectedTableCount: 10`,
 `candidateSelectPolicyCount: 10`, `sharedPolicyCount: 7`,
 `printerTablesChanged: false`, `batchPoliciesChanged: false`, and a non-empty
 CloudWatch log stream. A non-zero helper exit means PostgreSQL rolled back the
@@ -97,8 +129,9 @@ preserved app CRUD, and zero protected printer tables.
 
 ## Immediate password-login and MFA smoke
 
-Run these against the still-serving revision 7 staging origin immediately after
-catalog verification. Use an existing enrolled staging admin test account. Do
+This sequence is retained for the future compatible rollout; it is not
+authorized while apply is blocked. Run it against the reviewed compatible
+staging service immediately after catalog verification. Use an existing enrolled staging admin test account. Do
 not place passwords, TOTP codes, cookies, tickets, tokens, or raw response bodies
 in the evidence directory. Shell tracing stays disabled.
 
@@ -124,8 +157,10 @@ failure is an immediate rollback trigger. Do not start revision 9.
 
 ## Exact revision 9 canary sequence
 
-Use a deploy-capable staging operator only after apply, verification, and auth
-smoke pass. This starts one isolated task; it does not update the service or
+This historical revision 9 sequence is not safe to run after shared-table apply
+until the compatibility prerequisite is resolved. A future deploy-capable
+staging operator may use it only after apply, verification, and auth smoke pass.
+It starts one isolated task; it does not update the service or
 register a task definition. The network configuration is copied read-only from
 the stable service.
 
@@ -183,6 +218,8 @@ authority, restore revision 7 and drain revision 9 before database rollback.
 export AWS_PROFILE='mscqr-staging-database-role-operator'
 export AWS_REGION='eu-west-2'
 export MSCQR_STAGING_VPC_EXECUTOR='disposable-ecs-admin-task'
+export MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN='arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-database-role-admin:<same-reviewed-revision-used-for-apply>'
+export MSCQR_STAGING_RLS_HELPER_IMAGE_REF='368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:<same-reviewed-digest-used-for-apply>'
 export MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK='YES'
 scripts/aws/rollback-staging-rls-shared-batch-phase.sh 2>&1 | tee "$MSCQR_SHARED_RLS_EVIDENCE_DIR/rollback-task.json"
 unset MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK
@@ -194,7 +231,8 @@ no printer changes. Re-run the auth smoke against revision 7 after rollback.
 
 ## Expected final posture and evidence
 
-After successful apply and before service cutover: ten batch-read tables have
+This posture is a future target, not the current authorized state. After a
+future compatible apply and before service cutover: ten batch-read tables have
 ENABLE and FORCE RLS; ten candidate SELECT policies exist; shared SELECT
 policies target app plus read roles; the six batch SELECT policies still target
 only the read role; two exact `app_auth` functions are owned by the NOLOGIN auth
@@ -208,8 +246,10 @@ Keep only sanitized artifacts under the private directory created above:
 - `auth-smoke-safe-summary.json`
 - `revision-9-canary-task.json`
 
-CloudWatch is the authoritative task log; the apply/verify JSON records its
-group and stream. Never copy raw database URLs, ECS secret values, passwords,
+CloudWatch is the authoritative task log; the controller reads the exact helper
+stream, validates the mode-specific SQL evidence fields, and merges them into
+the apply/verify/rollback JSON alongside the group, stream, and image digest.
+Never copy raw database URLs, ECS secret values, passwords,
 cookies, access/refresh tokens, MFA tickets/codes, or raw auth bodies into repo
 evidence.
 
@@ -226,10 +266,14 @@ git diff --check
 
 ## CTO recommendations after this phase
 
-1. Add a brokered, credential-safe canary route probe before any future service
+1. First design a separately reviewed shared-table compatibility phase covering
+   authenticated request context, password-reset token context, background jobs,
+   and admin INSERT/DELETE/cross-user UPDATE authorization. Do not weaken the
+   current candidate predicates ad hoc.
+2. Add a brokered, credential-safe canary route probe before any future service
    cutover; the current one-off canary proves startup/readiness but not ALB route
    selection.
-2. Add staged latency and RLS-denial metrics for the batch read pool before
+3. Add staged latency and RLS-denial metrics for the batch read pool before
    enabling another route; expand only after measured p95 and denial rates are stable.
-3. Keep allocation-map and printer rollout as separate, independently reversible
+4. Keep allocation-map and printer rollout as separate, independently reversible
    phases with their own table graph, policies, canary proof, and rollback.

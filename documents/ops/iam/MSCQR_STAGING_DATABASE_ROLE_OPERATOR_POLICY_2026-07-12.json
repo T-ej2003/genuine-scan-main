@@ -26,6 +26,12 @@
       "Resource": "*"
     },
     {
+      "Sid": "ReadOnlyReviewedDatabaseRoleTaskLogs",
+      "Effect": "Allow",
+      "Action": "logs:GetLogEvents",
+      "Resource": "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-staging-backend:log-stream:database-role-admin/db-admin/*"
+    },
+    {
       "Sid": "ListReviewedStagingServices",
       "Effect": "Allow",
       "Action": "ecs:ListServices",

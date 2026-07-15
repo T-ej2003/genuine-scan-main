@@ -5,7 +5,9 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { runRlsSharedPhase } from "../../backend/scripts/staging-database-role-vpc-executor.mjs";
 import {
+  APPLY_BLOCK_REASON,
   assertReviewedTopology,
+  parseSqlEvidence,
   taskEvidence,
   validateLocalGate,
 } from "../aws/staging-rls-shared-batch-phase.mjs";
@@ -81,6 +83,15 @@ test("apply is staging-only, atomic, locked, timed, and postconditioned", () => 
   assert.doesNotMatch(source.apply, /CREATE POLICY rls_candidate_printer/);
 });
 
+test("apply fails closed until legacy User operations have a reviewed compatibility boundary", () => {
+  const transaction = source.apply.indexOf("BEGIN;");
+  assert(source.apply.indexOf("stable revision 7 has contextless User access") < transaction);
+  assert(source.apply.indexOf("RAISE EXCEPTION 'Shared batch RLS apply blocked") < transaction);
+  const appUpdate = extractPolicy(source.apply, "rls_candidate_user_auth_update");
+  assert.match(appUpdate, /"id" = app_rls\.current_user_id\(\)/);
+  assert.doesNotMatch(source.apply, /CREATE POLICY .*User[\s\S]*?FOR (?:INSERT|DELETE)/);
+});
+
 test("auth boundary is fixed-search-path SECURITY DEFINER and least privilege", () => {
   assert.equal((source.apply.match(/SECURITY DEFINER/g) || []).length, 2);
   assert.equal((source.apply.match(/SET search_path = pg_catalog/g) || []).length, 2);
@@ -137,6 +148,10 @@ test("AWS wrappers and controller are broker-only, confirmation-gated, and secre
   assert.match(source.controller, /"lambda", "invoke"/);
   assert.doesNotMatch(source.controller, /"ecs", "run-task"|get-secret-value|GetSecretValue|postgres(?:ql)?:\/\//i);
   assert.match(source.controller, /cloudWatchLogStream/);
+  assert.match(source.controller, /logs", "get-log-events/);
+  assert.match(source.controller, /SQL evidence has an unsafe/);
+  assert.match(source.controller, /stable revision 7 has contextless User access/);
+  assert.match(source.executor, /failureReason: error\.safeReason/);
   for (const role of ["mscqr_staging_app", "mscqr_staging_rls_read", "mscqr_staging_auth_owner"]) assert(source.executor.includes(role));
   assert.match(source.executor, /"-v", `mscqr_app_role=\$\{ROLES\.app\}`/);
   assert.match(source.executor, /PGPASSWORD/);
@@ -167,9 +182,48 @@ test("psql receives exact roles without a database URL argument", () => {
   assert.equal(call.options.env.DATABASE_URL, undefined);
 });
 
+test("psql failures retain only safe assertion or error classifications", () => {
+  const url = "postgresql://mscqr_staging_admin:fixture-password@mscqr-staging-db.example.internal:5432/mscqr_staging?sslmode=require";
+  assert.throws(
+    () => runRlsSharedPhase("rls-shared-verify", url, () => ({
+      status: 3,
+      stdout: "",
+      stderr: "psql:/app/file.sql:99: ERROR: Verification failed: candidate policy counts are not exact\n",
+    })),
+    (error) => error.code === "RLS_SQL_ASSERTION_FAILED"
+      && error.safeReason === "Verification failed: candidate policy counts are not exact"
+      && !JSON.stringify(error).includes("fixture-password"),
+  );
+  assert.throws(
+    () => runRlsSharedPhase("rls-shared-apply", url, () => ({
+      status: 3,
+      stdout: "",
+      stderr: "psql:/app/file.sql:49: ERROR: Shared batch RLS phase may run only against mscqr_staging password=do-not-log postgresql://user:secret@host/db\n",
+    })),
+    (error) => error.code === "RLS_SQL_ASSERTION_FAILED"
+      && error.safeReason.includes("Shared batch RLS phase may run only")
+      && error.safeReason.includes("password=[REDACTED]")
+      && error.safeReason.includes("[REDACTED_DATABASE_URL]")
+      && !error.safeReason.includes("do-not-log")
+      && !error.safeReason.includes("user:secret"),
+  );
+  assert.throws(
+    () => runRlsSharedPhase("rls-shared-verify", url, () => ({
+      status: 2,
+      stdout: "",
+      stderr: "psql: error: connection to server at mscqr-staging-db.example.internal failed: FATAL: password authentication failed for user mscqr_staging_admin",
+    })),
+    (error) => error.code === "RLS_DATABASE_CONNECTION_FAILED"
+      && error.safeReason === "PostgreSQL connection failed; endpoint details suppressed."
+      && !error.safeReason.includes("mscqr-staging-db"),
+  );
+});
+
 const account = "368992683803";
 const region = "eu-west-2";
 const helperArn = `arn:aws:ecs:${region}:${account}:task-definition/mscqr-staging-database-role-admin:3`;
+const helperDigest = `sha256:${"a".repeat(64)}`;
+const helperImageRef = `${account}.dkr.ecr.${region}.amazonaws.com/mscqr-backend@${helperDigest}`;
 const flags = (batches = "false") => [
   { name: "MSCQR_STAGING_RLS_BATCHES_READ_ENABLED", value: batches },
   { name: "MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED", value: "false" },
@@ -186,23 +240,39 @@ const topology = () => ({
   helperArn,
   helperDefinition: {
     taskDefinitionArn: helperArn, family: "mscqr-staging-database-role-admin", networkMode: "awsvpc",
-    containerDefinitions: [{ name: "db-admin", command: ["node", "scripts/staging-database-role-vpc-executor.mjs"], readonlyRootFilesystem: true, environment: flags(), secrets: [{ name: "DATABASE_URL", valueFrom: `arn:aws:secretsmanager:${region}:${account}:secret:mscqr/staging/database-url-AbCd` }], logConfiguration: { logDriver: "awslogs", options: { "awslogs-group": "/ecs/mscqr-staging-backend", "awslogs-stream-prefix": "database-role-admin" } } }],
+    containerDefinitions: [{ name: "db-admin", image: helperImageRef, command: ["node", "scripts/staging-database-role-vpc-executor.mjs"], readonlyRootFilesystem: true, environment: flags(), secrets: [{ name: "DATABASE_URL", valueFrom: `arn:aws:secretsmanager:${region}:${account}:secret:mscqr/staging/database-url-AbCd` }], logConfiguration: { logDriver: "awslogs", options: { "awslogs-group": "/ecs/mscqr-staging-backend", "awslogs-stream-prefix": "database-role-admin" } } }],
   },
 });
 
 test("controller locks stable revision 7 and canary revision 9 flag posture", () => {
-  assert.equal(assertReviewedTopology(topology()), true);
+  assert.equal(assertReviewedTopology({ ...topology(), helperImageRef }), true);
   const wrong = topology();
   wrong.canaryDefinition.containerDefinitions[0].environment[1].value = "true";
-  assert.throws(() => assertReviewedTopology(wrong), /unsafe/);
+  assert.throws(() => assertReviewedTopology({ ...wrong, helperImageRef }), /unsafe/);
 });
 
-test("controller gates mutation and emits stopped-task evidence", () => {
-  const env = { AWS_REGION: region, MSCQR_STAGING_VPC_EXECUTOR: "disposable-ecs-admin-task", MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN: helperArn };
+test("controller blocks unsafe apply and validates stopped-task SQL evidence", () => {
+  const env = { AWS_REGION: region, MSCQR_STAGING_VPC_EXECUTOR: "disposable-ecs-admin-task", MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN: helperArn, MSCQR_STAGING_RLS_HELPER_IMAGE_REF: helperImageRef };
   assert.throws(() => validateLocalGate("apply", env), /Set MSCQR_CONFIRM/);
-  assert.equal(validateLocalGate("apply", { ...env, MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE: "YES" }), "rls-shared-apply");
-  assert.equal(taskEvidence("verify", { lastStatus: "STOPPED", taskDefinitionArn: helperArn, taskArn: `arn:aws:ecs:${region}:${account}:task/cluster/task-id`, containers: [{ name: "db-admin", exitCode: 0 }] }, helperArn, topology().helperDefinition).cloudWatchLogStream, "database-role-admin/db-admin/task-id");
-  assert.throws(() => taskEvidence("verify", { lastStatus: "STOPPED", taskDefinitionArn: helperArn, containers: [{ name: "db-admin", exitCode: 2 }] }, helperArn), /non-zero/);
+  assert.throws(
+    () => validateLocalGate("apply", { ...env, MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE: "YES" }),
+    (error) => error.message === APPLY_BLOCK_REASON,
+  );
+  assert.equal(validateLocalGate("verify", env), "rls-shared-verify");
+  const sqlEvidence = {
+    status: "staging_shared_batch_rls_verified", database: "mscqr_staging", protectedTables: 10,
+    candidateSelectPolicies: 10, sharedPolicies: 7, authFunctions: 2,
+    emptyContextSharedQueries: "fail_closed", rlsReadWrites: "denied", appSharedCrud: "preserved",
+    printerProtectedTables: 0, mechanism: "brokered-disposable-ecs-admin-psql-task", phase: "complete",
+  };
+  const task = { lastStatus: "STOPPED", taskDefinitionArn: helperArn, taskArn: `arn:aws:ecs:${region}:${account}:task/cluster/task-id`, containers: [{ name: "db-admin", exitCode: 0, imageDigest: helperDigest }] };
+  const evidence = taskEvidence("verify", task, helperArn, topology().helperDefinition, helperImageRef, () => [{ message: JSON.stringify(sqlEvidence) }]);
+  assert.equal(evidence.cloudWatchLogStream, "database-role-admin/db-admin/task-id");
+  assert.equal(evidence.sqlEvidenceValidated, true);
+  assert.deepEqual(parseSqlEvidence("verify", [{ message: JSON.stringify(sqlEvidence) }]), sqlEvidence);
+  assert.throws(() => taskEvidence("verify", { ...task, containers: [{ name: "db-admin", exitCode: 0, imageDigest: `sha256:${"b".repeat(64)}` }] }, helperArn, topology().helperDefinition, helperImageRef, () => []), /image digest/);
+  assert.throws(() => taskEvidence("verify", task, helperArn, topology().helperDefinition, helperImageRef, () => []), /SQL completion evidence/);
+  assert.throws(() => taskEvidence("verify", { ...task, containers: [{ name: "db-admin", exitCode: 2, imageDigest: helperDigest }] }, helperArn, topology().helperDefinition, helperImageRef, () => []), /non-zero/);
 });
 
 test("shell wrappers are syntax valid", () => {

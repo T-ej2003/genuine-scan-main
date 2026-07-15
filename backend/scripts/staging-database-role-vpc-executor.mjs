@@ -62,6 +62,40 @@ const RLS_SHARED_MODES = Object.freeze({
   "rls-shared-verify": "mscqr_staging_rls_shared_batch_phase_verify_2026-07-15.sql",
   "rls-shared-rollback": "mscqr_staging_rls_shared_batch_phase_rollback_2026-07-15.sql",
 });
+const rlsSqlError = (result, mode) => {
+  if (result.error) {
+    return Object.assign(new Error(`Shared RLS ${mode} could not start psql.`), {
+      code: "RLS_PSQL_LAUNCH_FAILED",
+      safeReason: "psql could not be started inside the helper container.",
+    });
+  }
+  const stderr = String(result.stderr || "").replaceAll(/\x1b\[[0-9;]*m/g, "");
+  const infrastructureFailure = /timeout|canceling statement/i.test(stderr)
+    ? ["RLS_DATABASE_TIMEOUT", "PostgreSQL timed out; connection details suppressed."]
+    : /permission denied|must be owner|insufficient privilege/i.test(stderr)
+      ? ["RLS_DATABASE_PERMISSION_DENIED", "PostgreSQL denied the administrative SQL operation."]
+      : /FATAL:|could not connect|connection (?:refused|failed)|no pg_hba/i.test(stderr)
+        ? ["RLS_DATABASE_CONNECTION_FAILED", "PostgreSQL connection failed; endpoint details suppressed."]
+        : null;
+  if (infrastructureFailure) {
+    const [code, safeReason] = infrastructureFailure;
+    return Object.assign(new Error(`Shared RLS ${mode} SQL task failed.`), { code, safeReason });
+  }
+  const assertion = stderr.match(/\bERROR:\s*([^\r\n]*)/i)?.[1]
+    ?.replaceAll(/postgres(?:ql)?:\/\/\S+/gi, "[REDACTED_DATABASE_URL]")
+    .replaceAll(/\bpassword\s*=\s*\S+/gi, "password=[REDACTED]")
+    .slice(0, 500);
+  if (assertion) {
+    return Object.assign(new Error(`Shared RLS ${mode} SQL assertion failed.`), {
+      code: "RLS_SQL_ASSERTION_FAILED",
+      safeReason: assertion,
+    });
+  }
+  return Object.assign(new Error(`Shared RLS ${mode} SQL task failed.`), {
+    code: "RLS_SQL_EXECUTION_FAILED",
+    safeReason: "PostgreSQL rejected the shared RLS SQL; sensitive details suppressed.",
+  });
+};
 export function runRlsSharedPhase(mode, rawDatabaseUrl = process.env.DATABASE_URL, spawn = spawnSync) {
   const file = RLS_SHARED_MODES[mode];
   if (!file) throw new Error("Unsupported shared RLS executor mode.");
@@ -100,7 +134,7 @@ export function runRlsSharedPhase(mode, rawDatabaseUrl = process.env.DATABASE_UR
     maxBuffer: 4 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  if (result.error || result.status !== 0) throw new Error(`Shared RLS ${mode} SQL task failed.`);
+  if (result.error || result.status !== 0) throw rlsSqlError(result, mode);
   const evidenceLine = String(result.stdout || "").trim().split("\n").reverse().find((line) => line.trim().startsWith("{"));
   try { return JSON.parse(evidenceLine); } catch { throw new Error("Shared RLS SQL task returned invalid evidence."); }
 }
@@ -420,7 +454,14 @@ export async function executeExecutor() {
   } catch (error) {
     let rollbackResult = "not_required";
     if (MODE === "provision" && !compensating && ["normalize-placeholders", "password-transaction", "pending-versions", "role-verification", "promote-versions"].includes(phase)) rollbackResult = await compensate(admin, provisionMode, previousUrls, pending, before);
-    safe({ status: "blocked", phase, failureClassification: error.code || error.name || "EXECUTOR_FAILURE", rollbackResult, recoveryRequired: rollbackResult === "operator_recovery_required" });
+    safe({
+      status: "blocked",
+      phase,
+      failureClassification: error.code || error.name || "EXECUTOR_FAILURE",
+      ...(error.safeReason ? { failureReason: error.safeReason } : {}),
+      rollbackResult,
+      recoveryRequired: rollbackResult === "operator_recovery_required",
+    });
     process.exitCode = 2;
   } finally { await admin.$disconnect(); }
 }

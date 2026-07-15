@@ -7,6 +7,14 @@
 
 \set ON_ERROR_STOP on
 
+\echo 'BLOCKED: stable revision 7 has contextless User access, while the reviewed User policies do not authorize legacy admin INSERT, DELETE, or cross-user UPDATE.'
+\echo 'A separately reviewed shared-table compatibility revision is required before this apply may be enabled.'
+DO $$
+BEGIN
+  RAISE EXCEPTION 'Shared batch RLS apply blocked pending a reviewed shared-table compatibility revision';
+END
+$$;
+
 \if :{?mscqr_app_role}
 \else
 \echo 'Missing required psql variable: mscqr_app_role'
