@@ -35,6 +35,7 @@ Command-specific assurance, column and lifecycle rules remain `decision-policy-c
 
 ## Table categories
 
+- `tenant-root`: the top-level tenant boundary. `Organization.id` is canonical; ordinary tenant actors cannot create or delete roots.
 - `tenant-owned`: a proven direct tenant column is authoritative.
 - `actor-owned`: an actor ownership column controls self-scoped access.
 - `parent-inherited`: authorization follows a reviewed parent relationship.
@@ -45,11 +46,41 @@ Command-specific assurance, column and lifecycle rules remain `decision-policy-c
 - `migration-only`: runtime receives no table command.
 - `intentionally-non-rls`: permitted only with a written security justification and compensating controls.
 
-Scanner classifications are conservative starting points. A table with unresolved ownership remains blocked by `decision-table-ownership-classification`; absence of a direct tenant column is never proof of platform-wide access.
+`decision-table-ownership-classification` is resolved. The deterministic catalogue contains 1 tenant root, 10 tenant-owned, 2 actor-owned, 15 parent-inherited, 27 security-sensitive, 11 append-only audit, 9 operational-system, 2 migration-only, 0 platform-reference, and 0 intentionally non-RLS tables. Seventy-five tables target FORCE RLS. `BatchPrintPackToken` and `PrintRenderToken` are migration-only because the registration-aware production scanner finds no active reader or writer; they receive no runtime commands and do not target FORCE RLS unless a future registered workflow reactivates them.
+
+## Physical ownership and row-ownership taxonomy
+
+Every protected application table is logically owned by `identity-table-owner`, the environment-specific `*_owner` NOLOGIN role. Runtime LOGIN roles, migration, operator, and break-glass identities own no protected table. Migration may create reviewed objects only if the deployment transfers protected tables/policies to `*_owner` and approved authentication functions/schema to `*_auth_owner` before completion. This document changes no current database owner.
+
+Row authorization stops at one of five terminal boundaries: direct tenant root/key, direct actor key, exact security/public function or repository, approved restricted system job, or migration-only denial. Nullable tenant fields have table-specific NULL semantics in `tables.json`; NULL never means all tenants. Security-sensitive tables require named pre-auth/public functions, actor-owned repositories, restricted worker functions, or operator-only commands rather than ordinary broad authenticated access. Append-only tables permit scoped reads and inserts; UPDATE is denied, and DELETE exists only for the explicitly recorded retention lifecycle.
 
 ## Policy inheritance and non-recursive parent chains
 
 Policies use the shortest approved ownership path. Direct tenant or actor columns take precedence over parent joins. Parent-inherited policies may depend only on a reviewed acyclic dependency DAG, and policy predicates must not query a table that can reach the original table through another policy. Stable helper functions may expose validated transaction settings but must not become generic table readers. Every dependency is covered by catalog inspection, recursion/timeout tests, and `EXPLAIN` evidence.
+
+The approved graph in `policy-dependency-graph.json` has 77 nodes and 38 explicit edges. Evaluation layers are: layer 0 terminal boundaries (39 tables), layer 1 (28), layer 2 (8), layer 3 (1), and layer 4 (1). Every edge contains one join key, future source-index requirement, reason, protected-dependency status, and an explicit no-hidden-helper assertion. The graph is acyclic, has no self-edge, no planner-sensitive hidden dependency, and no dependency on a runtime-owned object. The deepest path is the print evidence chain and remains one-directional toward `Batch`.
+
+## Exception policy
+
+An intentionally non-RLS classification requires proof that cross-tenant/actor data cannot exist, exact GRANT-only controls, all runtime readers/writers, and a written security justification. No current table meets or needs that exception. Migration-only is separate: the two runtime-unused token tables have registration/import evidence showing no active workflow and the validator rejects any future production access until they are reclassified.
+
+## Approved ownership review groups
+
+| Group | Scope | Tables | Resolved | Edges | Confidence high/medium/low |
+|---|---|---:|---:|---:|---:|
+| A | Security-sensitive and identity | 21 | 21 | 15 | 18/3/0 |
+| B | Tenant roots and membership | 3 | 3 | 0 | 3/0/0 |
+| C | Batch and QR lifecycle | 15 | 15 | 5 | 14/1/0 |
+| D | Printing and printers | 13 | 13 | 11 | 11/2/0 |
+| E | Audit, incident and governance | 18 | 18 | 7 | 10/8/0 |
+| F | Operational/system | 7 | 7 | 0 | 0/7/0 |
+| G | Reference and remaining | 0 | 0 | 0 | 0/0/0 |
+
+The generated `TABLE_OWNERSHIP_REVIEW.md` is the concise table-by-table review. `tables.json` remains authoritative if summary counts drift.
+
+## Unresolved semantic decisions
+
+Ownership classification itself has no unresolved table decision. Policy command/column/lifecycle semantics (`decision-policy-command-semantics`), exact pre-auth functions (`decision-pre-auth-boundary`), durable worker/job authority (`decision-worker-identity-model`), the executable object-transfer chain (`decision-object-ownership-chain`), and broker/operator implementation (`decision-operator-administration`) remain blocking implementation decisions. They do not reopen the approved category, owner, FORCE target, or parent DAG.
 
 ## Pre-authentication function rules
 

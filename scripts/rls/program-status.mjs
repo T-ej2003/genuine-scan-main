@@ -1,16 +1,28 @@
 #!/usr/bin/env node
-import { manifests } from "./lib/program-inventory.mjs";
+import fs from "node:fs";
+import { manifests, policyDependencyGraphPath } from "./lib/program-inventory.mjs";
 
 const { tables, workflows, decisions } = manifests();
+const graph = JSON.parse(fs.readFileSync(policyDependencyGraphPath, "utf8"));
 const bySurface = Object.fromEntries([...new Set(workflows.workflows.map((workflow) => workflow.executionSurface))].sort().map((surface) => [surface, workflows.workflows.filter((workflow) => workflow.executionSurface === surface).length]));
+const byCategory = Object.fromEntries([...new Set(tables.tables.map((table) => table.primaryCategory))].sort().map((category) => [category, tables.tables.filter((table) => table.primaryCategory === category).length]));
+const byReviewGroup = Object.fromEntries("ABCDEFG".split("").map((group) => [group, tables.tables.filter((table) => table.reviewGroup === group).length]));
+const confidence = Object.fromEntries(["high", "medium", "low"].map((level) => [level, tables.tables.filter((table) => table.ownershipConfidence === level).length]));
 const compatible = workflows.workflows.filter((workflow) => workflow.currentCompatibilityStatus === "compatible").length;
-const unresolvedTables = tables.tables.filter((table) => table.unresolvedDecisions.length).length;
+const unresolvedTables = tables.tables.filter((table) => table.classificationStatus !== "resolved" || table.unresolvedDecisionIds.length).length;
 const completed = tables.tables.filter((table) => table.implementationStatus === "complete" && table.verificationStatus === "certified").length + workflows.workflows.filter((workflow) => workflow.implementationStatus === "complete").length;
 const denominator = tables.tables.length + workflows.workflows.length;
 console.log(JSON.stringify({
   tablesTotal: tables.tables.length,
   tablesClassified: tables.tables.filter((table) => table.category).length,
   tablesUnresolved: unresolvedTables,
+  tablesByCategory: byCategory,
+  forceRlsTargets: tables.tables.filter((table) => table.forceRlsTarget).length,
+  intentionallyNonRlsTables: tables.tables.filter((table) => table.primaryCategory === "intentionally-non-rls").map((table) => table.id),
+  dependencyEdges: graph.edges.length,
+  recursionRisks: graph.edges.filter((edge) => edge.recursionRisk !== "none").length,
+  tablesByReviewGroup: byReviewGroup,
+  ownershipConfidenceTotals: confidence,
   workflowsTotal: workflows.workflows.length,
   workflowsByExecutionSurface: bySurface,
   workflowsCompatible: compatible,

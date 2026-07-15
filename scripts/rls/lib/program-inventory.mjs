@@ -11,12 +11,110 @@ export const tableManifestPath = path.join(programDir, "tables.json");
 export const workflowManifestPath = path.join(programDir, "workflows.json");
 export const identityManifestPath = path.join(programDir, "runtime-identities.json");
 export const decisionManifestPath = path.join(programDir, "decisions.json");
+export const policyDependencyGraphPath = path.join(programDir, "policy-dependency-graph.json");
+export const tableOwnershipReviewPath = path.join(programDir, "TABLE_OWNERSHIP_REVIEW.md");
 export const blockedApplyPath = "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql";
 
 export const commands = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "UPSERT", "COUNT", "RAW_SQL"]);
 export const surfaces = new Set(["http", "worker", "scheduled", "startup", "cli", "internal"]);
 export const boundaries = new Set(["authenticated-context", "pre-auth-security-function", "tenant-admin", "platform-admin", "actor-owned", "restricted-worker", "append-only", "migration-owner", "operator-break-glass", "unresolved"]);
-export const categories = new Set(["tenant-owned", "actor-owned", "parent-inherited", "platform-reference", "security-sensitive", "append-only-audit", "operational-system", "migration-only", "intentionally-non-rls"]);
+export const categories = new Set(["tenant-root", "tenant-owned", "actor-owned", "parent-inherited", "security-sensitive", "append-only-audit", "platform-reference", "operational-system", "migration-only", "intentionally-non-rls"]);
+
+const CATEGORY_MODELS = Object.freeze({
+  "tenant-root": ["Organization"],
+  "tenant-owned": ["Licensee", "ManufacturerLicenseeLink", "QRRange", "Batch", "InventoryStatusRollup", "QRCode", "QrAllocationRequest", "PolicyAlert", "TenantFeatureFlag", "EvidenceRetentionPolicy"],
+  "actor-owned": ["PrinterRegistration", "Notification"],
+  "parent-inherited": ["PrintJob", "PrintSession", "PrinterAgentSession", "PrintJobChunk", "PrintItem", "PrinterProfile", "PrinterProfileSnapshot", "PrintReissueRequest", "PrinterAttestation", "Ownership", "OwnershipTransfer", "ReplacementChain", "IncidentHandoff", "SupportTicket", "SupportTicketMessage"],
+  "security-sensitive": ["User", "Printer", "VerificationDecision", "VerificationEvidenceSnapshot", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerTrustIntake", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval", "SecurityPolicy", "PolicyRule", "Incident", "RequestAccess", "SupportIssueReport"],
+  "append-only-audit": ["PrintItemEvent", "PrintAuditEvent", "QrScanLog", "AuditLog", "AllocationEvent", "TraceEvent", "IncidentEvent", "IncidentCommunication", "IncidentEvidence", "ForensicEventChain", "RouteTransitionMetric"],
+  "platform-reference": [],
+  "operational-system": ["ScanMetricsHourlyRollup", "AuditLogOutbox", "SystemCheckpoint", "SecurityEventOutbox", "CompliancePackJob", "EvidenceRetentionJob", "IncidentEvidenceFingerprint", "ActionIdempotencyKey", "DegradationEvent"],
+  "migration-only": ["PrintRenderToken", "BatchPrintPackToken"],
+  "intentionally-non-rls": [],
+});
+const CATEGORY_BY_MODEL = new Map(Object.entries(CATEGORY_MODELS).flatMap(([category, models]) => models.map((model) => [model, category])));
+
+const REVIEW_GROUP_MODELS = Object.freeze({
+  A: ["User", "PrintRenderToken", "BatchPrintPackToken", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerTrustIntake", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval"],
+  B: ["Organization", "Licensee", "ManufacturerLicenseeLink"],
+  C: ["QRRange", "Batch", "InventoryStatusRollup", "QRCode", "Ownership", "OwnershipTransfer", "QrScanLog", "VerificationDecision", "VerificationEvidenceSnapshot", "ReplacementChain", "DegradationEvent", "QrAllocationRequest", "AllocationEvent", "TraceEvent", "ScanMetricsHourlyRollup"],
+  D: ["PrintJob", "PrintSession", "PrinterAgentSession", "PrintJobChunk", "PrintItem", "PrintItemEvent", "PrintAuditEvent", "PrinterRegistration", "Printer", "PrinterProfile", "PrinterProfileSnapshot", "PrintReissueRequest", "PrinterAttestation"],
+  E: ["AuditLog", "SecurityPolicy", "PolicyRule", "PolicyAlert", "Incident", "IncidentEvent", "IncidentCommunication", "IncidentEvidence", "IncidentHandoff", "SupportTicket", "SupportTicketMessage", "RequestAccess", "SupportIssueReport", "Notification", "TenantFeatureFlag", "EvidenceRetentionPolicy", "IncidentEvidenceFingerprint", "ForensicEventChain"],
+  F: ["AuditLogOutbox", "SystemCheckpoint", "SecurityEventOutbox", "CompliancePackJob", "EvidenceRetentionJob", "ActionIdempotencyKey", "RouteTransitionMetric"],
+  G: [],
+});
+const REVIEW_GROUP_BY_MODEL = new Map(Object.entries(REVIEW_GROUP_MODELS).flatMap(([group, models]) => models.map((model) => [model, group])));
+
+const DEPENDENCY_RULES = Object.freeze({
+  PrintJob: ["Batch", ["batchId"], ["id"]],
+  PrintSession: ["PrintJob", ["printJobId"], ["id"]],
+  PrinterAgentSession: ["PrinterRegistration", ["registrationId"], ["id"]],
+  PrintJobChunk: ["PrintJob", ["printJobId"], ["id"]],
+  PrintItem: ["PrintSession", ["printSessionId"], ["id"]],
+  PrintItemEvent: ["PrintItem", ["printItemId"], ["id"]],
+  PrintAuditEvent: ["Batch", ["batchId"], ["id"]],
+  PrinterProfile: ["Printer", ["printerId"], ["id"]],
+  PrinterProfileSnapshot: ["PrinterProfile", ["printerProfileId"], ["id"]],
+  PrintReissueRequest: ["PrintJob", ["originalPrintJobId"], ["id"]],
+  PrinterAttestation: ["PrinterRegistration", ["printerRegistrationId"], ["id"]],
+  Ownership: ["QRCode", ["qrCodeId"], ["id"]],
+  OwnershipTransfer: ["Ownership", ["ownershipId"], ["id"]],
+  VerificationEvidenceSnapshot: ["VerificationDecision", ["verificationDecisionId"], ["id"]],
+  ReplacementChain: ["QRCode", ["originalQrCodeId"], ["id"]],
+  DegradationEvent: ["QRCode", ["code"], ["code"]],
+  CustomerTrustCredential: ["QRCode", ["qrCodeId"], ["id"]],
+  CustomerVerificationSession: ["VerificationDecision", ["verificationDecisionId"], ["id"]],
+  CustomerTrustIntake: ["CustomerVerificationSession", ["sessionId"], ["id"]],
+  Invite: ["Organization", ["orgId"], ["id"]],
+  PasswordReset: ["User", ["userId"], ["id"]],
+  EmailVerificationToken: ["User", ["userId"], ["id"]],
+  RefreshToken: ["User", ["userId"], ["id"]],
+  AdminMfaCredential: ["User", ["userId"], ["id"]],
+  AdminWebAuthnCredential: ["User", ["userId"], ["id"]],
+  UserMfaFactor: ["User", ["userId"], ["id"]],
+  UserBackupCode: ["User", ["userId"], ["id"]],
+  MfaLoginChallenge: ["User", ["userId"], ["id"]],
+  AuthMfaChallenge: ["User", ["userId"], ["id"]],
+  AuthWebAuthnChallenge: ["User", ["userId"], ["id"]],
+  AuthSessionRiskSignal: ["User", ["userId"], ["id"]],
+  IncidentEvent: ["Incident", ["incidentId"], ["id"]],
+  IncidentCommunication: ["Incident", ["incidentId"], ["id"]],
+  IncidentEvidence: ["Incident", ["incidentId"], ["id"]],
+  IncidentHandoff: ["Incident", ["incidentId"], ["id"]],
+  SupportTicket: ["Incident", ["incidentId"], ["id"]],
+  SupportTicketMessage: ["SupportTicket", ["ticketId"], ["id"]],
+  IncidentEvidenceFingerprint: ["IncidentEvidence", ["incidentEvidenceId"], ["id"]],
+});
+
+const NULL_SEMANTICS = Object.freeze({
+  User: "orgId/licenseeId NULL denotes a platform user; NULL never grants tenant-wide access and only actor-self or explicit platform-admin commands may reach the row.",
+  PrinterRegistration: "orgId/licenseeId may be NULL during actor-owned connector setup; userId remains authoritative and NULL never makes a registration globally readable.",
+  Printer: "orgId/licenseeId may be NULL for discovery or unassigned gateway records; access then requires the printer-trust repository using registration/assigned-actor proof, never a NULL-is-global policy.",
+  AuditLog: "NULL tenant keys denote platform/system audit evidence and require the restricted audit/platform boundary; tenant projections require a matching non-NULL key.",
+  VerificationDecision: "licenseeId may be NULL for not-found or public verification outcomes; access remains inside the public-verification/review boundary and NULL is not a wildcard.",
+  CustomerTrustCredential: "customerUserId may be NULL for device-bound anonymous trust; the QR parent plus hashed device proof is authoritative and no broad anonymous table access is allowed.",
+  CustomerVerificationSession: "customerUserId/qrCodeId may be NULL during staged public verification; the non-NULL verificationDecisionId and proof-binding boundary remain authoritative.",
+  CustomerTrustIntake: "customerUserId may be NULL for anonymous intake; the non-NULL sessionId parent is authoritative.",
+  Invite: "licenseeId may be NULL for an organization-wide invite; non-NULL orgId remains authoritative and NULL never grants cross-organization access.",
+  PasswordReset: "orgId may be NULL for platform users; non-NULL userId is authoritative and access is only through the named recovery boundary.",
+  RefreshToken: "orgId may be NULL for platform users; non-NULL userId is authoritative and actor/session commands remain required.",
+  SensitiveActionApproval: "orgId/licenseeId may be NULL only for platform-scoped commands; requestedByUserId and the exact approval command remain authoritative.",
+  SecurityPolicy: "licenseeId NULL is the single platform-default policy row; only the restricted policy engine and platform-admin command may use it.",
+  PolicyRule: "Nullable orgId/licenseeId/manufacturerId encode an explicitly reviewed rule scope; an all-NULL row is platform-scoped and never ordinary tenant access.",
+  Incident: "licenseeId may be NULL for public intake before product-to-tenant resolution; the incident repository restricts that row until a tenant is resolved.",
+  SupportTicket: "licenseeId may be NULL when inherited from a public incident; incidentId remains authoritative.",
+  SupportIssueReport: "licenseeId/reporterUserId may be NULL for public support intake; access is restricted to the intake token/reporter or platform support boundary.",
+  Notification: "userId/orgId/licenseeId are selected by the audience discriminator; all NULL is an explicit system broadcast, not an unrestricted tenant row.",
+  CompliancePackJob: "licenseeId NULL is allowed only for an explicitly approved platform-wide compliance job under the scheduled/operator boundary.",
+  EvidenceRetentionJob: "licenseeId NULL is allowed only for an explicitly approved platform-wide retention job under the scheduled/operator boundary.",
+  ForensicEventChain: "licenseeId NULL denotes platform audit evidence and requires the restricted forensic/system boundary.",
+  RouteTransitionMetric: "userId/licenseeId NULL denotes anonymous platform telemetry; only append and aggregated system reads are permitted.",
+});
+
+const PREAUTH_NAMED_FUNCTION_MODELS = new Set(["User", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal"]);
+const PUBLIC_BOUNDARY_MODELS = new Set(["VerificationDecision", "VerificationEvidenceSnapshot", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerTrustIntake", "Incident", "IncidentEvent", "IncidentCommunication", "IncidentEvidence", "SupportTicket", "SupportTicketMessage", "RequestAccess", "SupportIssueReport", "Ownership", "OwnershipTransfer"]);
+const READ_ROLE_MODELS = new Set(["Organization", "Licensee", "User", "ManufacturerLicenseeLink", "Batch", "InventoryStatusRollup", "QRCode", "PrintJob", "PrintSession", "PrintItem", "PrinterRegistration", "Printer", "PrinterAttestation", "PrinterAgentSession", "PrinterProfile", "PrinterProfileSnapshot"]);
+const RETENTION_DELETE_MODELS = new Set(["QrScanLog", "IncidentEvidence"]);
 
 export const readJson = (file, fallback = null) => fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : fallback;
 export const writeJson = (file, value) => {
@@ -50,29 +148,66 @@ export const parseSchema = (source = fs.readFileSync(schemaPath, "utf8")) => {
   return models;
 };
 
-const scalarTypes = new Set(["String", "Int", "BigInt", "Float", "Decimal", "Boolean", "DateTime", "Json", "Bytes"]);
-const securityNames = /(?:User|Credential|Challenge|Token|Invite|Password|Approval|Security|Access|SessionRisk)/;
-const auditNames = /(?:Audit|Event|Log|Evidence|Trace|Forensic)/;
-const operationalNames = /(?:Job|Checkpoint|Metric|Rollup|Notification|Outbox)/;
-
-const categoryFor = (model) => {
-  const names = new Set(model.fields.map((field) => field.name));
-  if (securityNames.test(model.name)) return "security-sensitive";
-  if (auditNames.test(model.name)) return "append-only-audit";
-  if (names.has("userId") && !names.has("licenseeId") && !names.has("orgId")) return "actor-owned";
-  if (names.has("licenseeId") || names.has("orgId")) return "tenant-owned";
-  if (model.fields.some((field) => field.relation && !field.list)) return "parent-inherited";
-  if (operationalNames.test(model.name)) return "operational-system";
-  return "platform-reference";
-};
 const sensitivityFor = (model, category) => category === "security-sensitive" ? "restricted"
   : category === "append-only-audit" ? "high"
     : model.fields.some((field) => /email|phone|ip|address|secret|token|hash|credential/i.test(field.name)) ? "high" : "internal";
+
+const ACTOR_KEYS = Object.freeze({
+  User: ["id"], ManufacturerLicenseeLink: ["manufacturerId"], Batch: ["manufacturerId"], InventoryStatusRollup: ["manufacturerId"], PrinterRegistration: ["userId"], Printer: ["assignedUserId"], Notification: ["userId"], Ownership: ["userId"], PolicyRule: ["manufacturerId"], PolicyAlert: ["manufacturerId"],
+  CustomerTrustCredential: ["customerUserId"], CustomerWebAuthnCredential: ["customerUserId"], CustomerWebAuthnChallenge: ["customerUserId"], CustomerVerificationSession: ["customerUserId"], CustomerTrustIntake: ["customerUserId"],
+  PasswordReset: ["userId"], EmailVerificationToken: ["userId"], RefreshToken: ["userId"], AdminMfaCredential: ["userId"], AdminWebAuthnCredential: ["userId"], UserMfaFactor: ["userId"], UserBackupCode: ["userId"], MfaLoginChallenge: ["userId"], AuthMfaChallenge: ["userId"], AuthWebAuthnChallenge: ["userId"], AuthSessionRiskSignal: ["userId"], SensitiveActionApproval: ["requestedByUserId"], SupportIssueReport: ["reporterUserId"],
+});
+
+const TENANT_KEYS = Object.freeze({
+  User: ["orgId", "licenseeId"], Licensee: ["orgId"], ManufacturerLicenseeLink: ["licenseeId"], QRRange: ["licenseeId"], Batch: ["licenseeId"], InventoryStatusRollup: ["licenseeId"], QRCode: ["licenseeId"],
+  PrinterRegistration: ["orgId", "licenseeId"], Printer: ["orgId", "licenseeId"], QrScanLog: ["licenseeId"], AuditLog: ["orgId", "licenseeId"], Invite: ["orgId", "licenseeId"], SensitiveActionApproval: ["orgId", "licenseeId"],
+  QrAllocationRequest: ["licenseeId"], AllocationEvent: ["licenseeId"], TraceEvent: ["licenseeId"], ScanMetricsHourlyRollup: ["licenseeId"], SecurityPolicy: ["licenseeId"], PolicyRule: ["orgId", "licenseeId"], PolicyAlert: ["licenseeId"], Incident: ["licenseeId"], SupportIssueReport: ["licenseeId"], Notification: ["orgId", "licenseeId"], TenantFeatureFlag: ["licenseeId"], EvidenceRetentionPolicy: ["licenseeId"], EvidenceRetentionJob: ["licenseeId"], CompliancePackJob: ["licenseeId"], ForensicEventChain: ["licenseeId"], RouteTransitionMetric: ["licenseeId"],
+});
+
+const rowOwnershipModelFor = (model, category, tenantKeys, actorKeys, dependency) => {
+  if (category === "tenant-root") return "Organization.id is the canonical tenant identifier; ordinary actors may read only app.organization_id, while create/update/delete require explicit platform-admin commands.";
+  if (category === "tenant-owned") return `Direct transaction-context scope using ${tenantKeys.join(" + ")}; platform-admin access remains command-specific.`;
+  if (category === "actor-owned") return `Direct actor scope using ${actorKeys.join(" + ")}; tenant/platform administration requires an explicit reviewed command boundary.`;
+  if (category === "parent-inherited") return `Single-parent authorization inherited from ${dependency[0]} through ${dependency[1].join("+")}=${dependency[2].join("+")}.`;
+  if (category === "append-only-audit") return dependency
+    ? `Append-only evidence inherits read scope from ${dependency[0]} through ${dependency[1].join("+")}=${dependency[2].join("+")}; writes use the append boundary.`
+    : tenantKeys.length ? `Append-only evidence is scoped directly by ${tenantKeys.join(" + ")}; NULL/platform events require the restricted audit boundary.` : "Append-only evidence is written and read only through its approved audit/system boundary.";
+  if (category === "operational-system") return tenantKeys.length ? `Restricted worker/scheduled coordination scoped by ${tenantKeys.join(" + ")}; no platform-global bypass.` : dependency ? `Restricted system coordination inherited from ${dependency[0]}.` : "Restricted system coordination boundary with no human broad-table access.";
+  if (category === "security-sensitive") {
+    if (dependency) return `Special repository/function boundary with row scope inherited from ${dependency[0]} through ${dependency[1].join("+")}=${dependency[2].join("+")}.`;
+    if (actorKeys.length) return `Special actor-owned repository/function boundary using ${actorKeys.join(" + ")}; administrator access is command-specific and audited.`;
+    if (tenantKeys.length) return `Special security repository using explicit ${tenantKeys.join(" + ")} scope and command-specific platform administration.`;
+    return "Special named function, restricted repository, or operator boundary; ordinary authenticated broad-table access is forbidden.";
+  }
+  if (category === "platform-reference") return "Read-only global low-sensitivity reference data; writes are migration/operator controlled.";
+  if (category === "migration-only") return "No production runtime row access; migration identity only.";
+  return "No tenant or actor data is possible; GRANT-only exception documented separately.";
+};
+
+const terminalBoundaryFor = (modelName, category, dependency, tenantKeys, actorKeys) => {
+  if (dependency) return null;
+  if (category === "tenant-root") return "tenant-root";
+  if (tenantKeys.length) return "tenant-key";
+  if (actorKeys.length) return "actor-key";
+  if (category === "operational-system") return "approved-system";
+  if (category === "platform-reference") return "approved-platform-reference";
+  if (category === "migration-only") return "migration-only";
+  if (category === "intentionally-non-rls") return "grant-only-exception";
+  return "approved-special-boundary";
+};
+
+const preAuthModeFor = (modelName) => PREAUTH_NAMED_FUNCTION_MODELS.has(modelName) ? "exact-named-security-definer-function-only"
+  : PUBLIC_BOUNDARY_MODELS.has(modelName) ? "restricted-public-service-boundary; no direct preauth table grants"
+    : "denied; actor or system context required";
+
+const sensitiveColumnsFor = (model) => model.fields.filter((field) => !field.relation && /(?:password|secret|token|hash|credential|challenge|email|phone|ipAddress|ipHash|userAgent|publicKey|privateKey|payload|metadata|details|evidence|screenshot|diagnostic|photos|location|internalNote|bodyPreview)/i.test(field.name)).map((field) => field.name).sort();
 
 export const buildTableManifest = () => {
   const existing = readJson(tableManifestPath, { schemaVersion: 1, tables: [] });
   const previous = new Map(existing.tables.map((table) => [table.id, table]));
   const models = parseSchema();
+  assert.equal(CATEGORY_BY_MODEL.size, models.length, "classification catalogue must contain every Prisma model exactly once");
+  assert.equal(REVIEW_GROUP_BY_MODEL.size, models.length, "review groups must contain every Prisma model exactly once");
   const modelNames = new Set(models.map((model) => model.name));
   const tables = models.map((model) => {
     const id = `table-${slug(model.physicalTable)}`;
@@ -80,36 +215,77 @@ export const buildTableManifest = () => {
     const fieldNames = new Set(model.fields.map((field) => field.name));
     const relations = model.fields.filter((field) => field.relation && modelNames.has(field.type)).map((field) => ({ field: field.name, model: field.type }));
     const likelyParents = relations.filter((relation) => !model.fields.find((field) => field.name === relation.field)?.list).map((relation) => `table-${slug(models.find((item) => item.name === relation.model)?.physicalTable || relation.model)}`);
-    const category = old.category || categoryFor(model);
-    const tenantColumns = ["orgId", "licenseeId", "manufacturerId"].filter((name) => fieldNames.has(name));
-    const uncertainOwnership = tenantColumns.length === 0 && !["actor-owned", "append-only-audit", "security-sensitive"].includes(category);
+    const category = CATEGORY_BY_MODEL.get(model.name);
+    assert(category, `${model.name} lacks a primary category`);
+    const dependency = DEPENDENCY_RULES[model.name] || null;
+    const parentModel = dependency ? models.find((item) => item.name === dependency[0]) : null;
+    assert(!dependency || parentModel, `${model.name} has an unknown authorization parent`);
+    const parentTableId = parentModel ? `table-${slug(parentModel.physicalTable)}` : null;
+    const tenantColumns = (TENANT_KEYS[model.name] || []).filter((name) => fieldNames.has(name) && category !== "parent-inherited");
+    const actorColumns = (ACTOR_KEYS[model.name] || []).filter((name) => fieldNames.has(name) || (model.name === "User" && name === "id"));
+    const nullableTenantColumns = tenantColumns.filter((name) => model.fields.find((field) => field.name === name)?.optional);
+    assert(!nullableTenantColumns.length || NULL_SEMANTICS[model.name], `${model.name} nullable tenant keys require explicit NULL semantics`);
+    const sensitiveColumns = sensitiveColumnsFor(model);
+    const forceRlsTarget = !["migration-only", "intentionally-non-rls"].includes(category);
+    const terminalBoundary = terminalBoundaryFor(model.name, category, dependency, tenantColumns, actorColumns);
     return {
       ...old,
       id,
       prismaModel: model.name,
       physicalTable: model.physicalTable,
       category,
-      sensitivity: old.sensitivity || sensitivityFor(model, category),
-      tenantOwnershipColumns: old.tenantOwnershipColumns || tenantColumns,
-      parentAuthorizationTable: old.parentAuthorizationTable ?? (category === "parent-inherited" && likelyParents.length === 1 ? likelyParents[0] : null),
-      actorOwnershipColumn: old.actorOwnershipColumn ?? (["userId", "actorId", "ownerUserId"].find((name) => fieldNames.has(name)) || null),
+      primaryCategory: category,
+      reviewGroup: REVIEW_GROUP_BY_MODEL.get(model.name),
+      physicalOwnerRole: "identity-table-owner",
+      rowOwnershipModel: rowOwnershipModelFor(model, category, tenantColumns, actorColumns, dependency),
+      tenantKeyColumns: tenantColumns,
+      actorKeyColumns: actorColumns,
+      tenantKeyNullSemantics: nullableTenantColumns.length ? NULL_SEMANTICS[model.name] : null,
+      authorizationParentTable: parentTableId,
+      authorizationParentColumns: dependency ? { child: dependency[1], parent: dependency[2] } : null,
+      policyDependencyTables: parentTableId ? [parentTableId] : [],
+      forceRlsTarget,
+      allowedRuntimeReaders: old.allowedRuntimeReaders || [],
+      allowedRuntimeWriters: old.allowedRuntimeWriters || [],
+      allowedCommandsByIdentity: old.allowedCommandsByIdentity || [],
+      preAuthAccessMode: preAuthModeFor(model.name),
+      workerAccessMode: category === "operational-system" ? "restricted worker/scheduled identity with durable job and tenant scope; no queue-payload-only trust" : "transaction-local tenant/actor scope or exact approved function; no global bypass",
+      appendOnly: category === "append-only-audit",
+      hardDeleteAllowed: RETENTION_DELETE_MODELS.has(model.name) ? "retention-only" : "never",
+      sensitiveColumns,
+      policyRecursionRisk: "none",
+      policyRecursionReason: dependency ? `Single directed dependency to ${dependency[0]}; the generated DAG validator proves no path returns to ${model.name}.` : "Terminal context/function/system boundary; policy performs no table-reading dependency.",
+      nonRlsJustification: category === "intentionally-non-rls" ? old.nonRlsJustification || "" : null,
+      ownershipConfidence: nullableTenantColumns.length || ["security-sensitive", "operational-system"].includes(category) && !dependency && !tenantColumns.length && !actorColumns.length ? "medium" : "high",
+      terminalBoundary,
+      unresolvedDecisionIds: [],
+      classificationEvidence: [
+        `backend/prisma/schema.prisma model ${model.name}: ${tenantColumns.length ? `tenant keys ${tenantColumns.join(", ")}` : "no direct tenant key"}; ${actorColumns.length ? `actor keys ${actorColumns.join(", ")}` : "no direct actor key"}.`,
+        dependency ? `Schema/access lineage uses one parent ${dependency[0]} on ${dependency[1].join("+")}=${dependency[2].join("+")}.` : `No table-reading parent dependency; terminal boundary is ${terminalBoundary}.`,
+        `Production commands and canonical workflows are regenerated by scripts/rls/scan-production-access.mjs.`,
+      ],
+      classificationStatus: "resolved",
+      sensitivity: sensitivityFor(model, category),
+      tenantOwnershipColumns: tenantColumns,
+      parentAuthorizationTable: parentTableId,
+      actorOwnershipColumn: actorColumns[0] || null,
       productionRuntimeReaders: old.productionRuntimeReaders || [],
       productionRuntimeWriters: old.productionRuntimeWriters || [],
       requiredCommands: old.requiredCommands || [],
       intendedDatabaseRoles: old.intendedDatabaseRoles || [],
-      rlsApplicability: old.rlsApplicability || (category === "intentionally-non-rls" ? "not-applicable" : "candidate-unresolved"),
+      rlsApplicability: forceRlsTarget ? "force-rls-target" : "not-applicable",
       currentRlsState: old.currentRlsState || "not-verified-for-production",
       currentForceRlsState: old.currentForceRlsState || "not-verified-for-production",
       policyStatus: old.policyStatus || "not-designed",
-      recursionDependencies: old.recursionDependencies || likelyParents,
-      unresolvedDecisions: old.unresolvedDecisions || (uncertainOwnership ? ["decision-table-ownership-classification"] : ["decision-policy-command-semantics"]),
+      recursionDependencies: parentTableId ? [parentTableId] : [],
+      unresolvedDecisions: [...new Set((old.unresolvedDecisions || ["decision-policy-command-semantics"]).filter((decisionId) => decisionId !== "decision-table-ownership-classification"))],
       implementationStatus: old.implementationStatus || "inventory-only",
       verificationStatus: old.verificationStatus || "schema-represented-only",
-      nonRlsSecurityJustification: category === "intentionally-non-rls" ? (old.nonRlsSecurityJustification || "") : null,
+      nonRlsSecurityJustification: category === "intentionally-non-rls" ? old.nonRlsSecurityJustification || "" : null,
       schemaEvidence: { fields: model.fields, likelyParentChains: likelyParents },
     };
   }).sort((a, b) => a.id.localeCompare(b.id));
-  const result = { schemaVersion: 1, generatedFrom: "backend/prisma/schema.prisma", generatedModelCount: models.length, tables };
+  const result = { schemaVersion: 2, generatedFrom: "backend/prisma/schema.prisma", generatedModelCount: models.length, classificationAuthority: "scripts/rls/lib/program-inventory.mjs", tables };
   writeJson(tableManifestPath, result);
   return result;
 };
@@ -152,7 +328,7 @@ const scriptEntrypoints = () => {
   return entries;
 };
 const reachableSourceFiles = () => {
-  const all = walk(path.join(repoRoot, "backend/src"));
+  const all = [...walk(path.join(repoRoot, "backend/src")), ...walk(path.join(repoRoot, "backend/scripts")), path.join(repoRoot, "backend/prisma/seed.ts")];
   const allowed = new Set(all);
   const roots = [path.join(repoRoot, "backend/src/index.ts"), path.join(repoRoot, "backend/src/worker.ts"), ...scriptEntrypoints()];
   const reachable = new Set();
@@ -160,7 +336,7 @@ const reachableSourceFiles = () => {
     if (!file || reachable.has(file) || !fs.existsSync(file)) return;
     reachable.add(file);
     const source = fs.readFileSync(file, "utf8");
-    for (const match of source.matchAll(/(?:import[\s\S]*?from\s*|import\s*\(|require\s*\()\s*["']([^"']+)["']/g)) {
+    for (const match of source.matchAll(/(?:import\s+(?:[^"'()]*?\s+from\s+)?|export\s+(?:\*|\{[^}]*\})\s+from\s+|import\s*\(|require\s*\()\s*["']([^"']+)["']/g)) {
       const resolved = resolveImport(file, match[1]);
       if (resolved && (allowed.has(resolved) || scriptEntrypoints().has(resolved))) visit(resolved);
     }
@@ -224,18 +400,72 @@ export const scanProductionAccess = () => {
   const scanFile = (file, production) => {
     const source = fs.readFileSync(file, "utf8");
     const ast = ts.createSourceFile(rel(file), source, ts.ScriptTarget.Latest, true);
+    const recorded = new Set();
     const record = (node, model, method, command, evidence) => {
       const line = ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1;
       const fn = functionName(ts, node);
       const surface = surfaceFor(file, fn);
       const locator = `${rel(file)}:${line}:${model.name}:${method}`;
+      if (recorded.has(locator)) return;
+      recorded.add(locator);
       accesses.push({ id: hashId("access", locator), sourceFile: rel(file), line, function: fn, tableId: `table-${slug(model.physicalTable)}`, prismaModel: model.name, command, method, executionSurface: surface, production, registrationEvidence: roots.has(file) ? "registered-entrypoint" : reachable.has(file) ? "reachable-from-registered-entrypoint" : "unregistered", evidence: evidence.replace(/\s+/g, " ").slice(0, 350) });
     };
+    const delegateCandidates = (node, result = new Set()) => {
+      if (ts.isPropertyAccessExpression(node) && delegates.has(node.name.text)) result.add(delegates.get(node.name.text));
+      ts.forEachChild(node, (child) => delegateCandidates(child, result));
+      return result;
+    };
+    const callableAliases = new Map();
+    const collectCallables = (node) => {
+      let name = null;
+      let body = null;
+      if (ts.isFunctionDeclaration(node) && node.name) { name = node.name.text; body = node.body; }
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) { name = node.name.text; body = node.initializer.body; }
+      if (name && body) {
+        const candidates = [...delegateCandidates(body)];
+        if (candidates.length === 1) callableAliases.set(name, candidates[0]);
+      }
+      ts.forEachChild(node, collectCallables);
+    };
+    collectCallables(ast);
+    const variableAliases = [];
+    const containingScope = (node) => {
+      for (let current = node.parent; current; current = current.parent) if (ts.isFunctionLike(current)) return current;
+      return ast;
+    };
+    const resolveVariable = (name, position) => variableAliases.filter((alias) => alias.name === name && alias.start < position && alias.scopeStart <= position && alias.scopeEnd >= position).sort((a, b) => b.start - a.start)[0]?.model || null;
+    const modelForExpression = (expression, position) => {
+      if (!expression) return null;
+      const candidates = [...delegateCandidates(expression)];
+      if (candidates.length === 1) return candidates[0];
+      if (ts.isIdentifier(expression)) return resolveVariable(expression.text, position);
+      if (ts.isCallExpression(expression)) {
+        const callee = expression.expression;
+        if (ts.isIdentifier(callee)) return callableAliases.get(callee.text) || resolveVariable(callee.text, position);
+      }
+      return null;
+    };
+    const declarations = [];
+    const collectDeclarations = (node) => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && !ts.isArrowFunction(node.initializer) && !ts.isFunctionExpression(node.initializer)) declarations.push(node);
+      ts.forEachChild(node, collectDeclarations);
+    };
+    collectDeclarations(ast);
+    for (const declaration of declarations.sort((a, b) => a.getStart(ast) - b.getStart(ast))) {
+      const model = modelForExpression(declaration.initializer, declaration.getStart(ast));
+      if (!model) continue;
+      const scope = containingScope(declaration);
+      variableAliases.push({ name: declaration.name.text, model, start: declaration.getStart(ast), scopeStart: scope.getStart(ast), scopeEnd: scope.getEnd() });
+    }
     const visit = (node) => {
       if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
         const method = node.expression.name.text;
         const target = node.expression.expression;
         if (methodNames.has(method) && ts.isPropertyAccessExpression(target) && delegates.has(target.name.text)) record(node, delegates.get(target.name.text), method, operationFor(method), node.getText(ast));
+        else if (methodNames.has(method)) {
+          const aliasModel = modelForExpression(target, node.getStart(ast));
+          if (aliasModel) record(node, aliasModel, method, operationFor(method), node.getText(ast));
+        }
         if (rawMethods.has(method)) {
           const raw = node.getText(ast);
           for (const [name, model] of physical) if (new RegExp(`(?:\\b|[\"'])${name}(?:\\b|[\"'])`, "i").test(raw)) record(node, model, method, "RAW_SQL", raw);
@@ -256,6 +486,122 @@ export const scanProductionAccess = () => {
 };
 
 const displayName = (fn) => fn === "module" ? "Module database access" : fn.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase());
+const identityForWorkflow = (workflow) => workflow.authorizationBoundaryType === "pre-auth-security-function" ? "identity-pre-auth-app"
+  : workflow.executionSurface === "worker" ? "identity-worker"
+    : workflow.executionSurface === "scheduled" ? "identity-scheduled-job"
+      : ["cli", "startup"].includes(workflow.executionSurface) ? "identity-staging-operator-admin"
+        : "identity-authenticated-app";
+const expandCommands = (commandsToExpand) => [...new Set(commandsToExpand.flatMap((command) => command === "COUNT" ? ["SELECT"] : command === "UPSERT" ? ["INSERT", "UPDATE"] : [command]))].sort();
+const commandCondition = (identityId, table) => identityId === "identity-pre-auth-app" ? "EXECUTE only an exact named function signature; no direct table grant"
+  : identityId === "identity-auth-function-owner" ? "Exact function-required column privileges only; NOLOGIN owner"
+    : identityId === "identity-worker" ? "Durably verified job and tenant scope; queue payload is not authority"
+      : identityId === "identity-scheduled-job" ? "Approved schedule and durable tenant/job scope"
+        : identityId === "identity-staging-operator-admin" ? "Broker-controlled command allowlist with immutable audit"
+          : table.appendOnly ? "Scoped projection or append command; mutation of existing evidence is denied" : "Reviewed canonical workflow with transaction-local actor/tenant context";
+
+const applyRuntimeCommandMatrix = (table, workflows) => {
+  const touching = workflows.filter((workflow) => workflow.tablesTouched.includes(table.id));
+  const entries = new Map();
+  const readers = new Set();
+  const writers = new Set();
+  const add = (identityId, commandsToAdd, condition = commandCondition(identityId, table)) => {
+    if (!entries.has(identityId)) entries.set(identityId, { identityId, commands: new Set(), conditions: new Set() });
+    const entry = entries.get(identityId);
+    for (const command of expandCommands(commandsToAdd)) entry.commands.add(command);
+    entry.conditions.add(condition);
+  };
+  for (const workflow of touching) {
+    const commandsForTable = workflow.commandsPerTable.find((item) => item.tableId === table.id)?.commands || [];
+    const identityId = identityForWorkflow(workflow);
+    const hasRead = commandsForTable.some((command) => ["SELECT", "COUNT", "RAW_SQL"].includes(command));
+    const hasWrite = commandsForTable.some((command) => ["INSERT", "UPDATE", "DELETE", "UPSERT", "RAW_SQL"].includes(command));
+    if (identityId === "identity-pre-auth-app") {
+      add(identityId, ["EXECUTE"]);
+      add("identity-auth-function-owner", commandsForTable, "Exact named function-required column privileges only; no generic query authority");
+    } else add(identityId, commandsForTable);
+    if (hasRead) readers.add(identityId);
+    if (hasWrite) writers.add(identityId);
+  }
+  if (READ_ROLE_MODELS.has(table.prismaModel)) {
+    add("identity-restricted-read", ["SELECT"], "Explicitly approved read-only RLS projection/canary table");
+    readers.add("identity-restricted-read");
+  }
+  if (table.appendOnly) {
+    for (const entry of entries.values()) {
+      if (entry.commands.has("UPDATE")) entry.commands.delete("UPDATE");
+      if (entry.commands.has("DELETE") && !RETENTION_DELETE_MODELS.has(table.prismaModel)) entry.commands.delete("DELETE");
+      if (entry.commands.has("DELETE")) entry.conditions.add("DELETE is limited to the approved retention lifecycle; ordinary callers are denied");
+    }
+  }
+  table.allowedCommandsByIdentity = [...entries.values()].map((entry) => ({ identityId: entry.identityId, commands: [...entry.commands].sort(), conditions: [...entry.conditions].sort() })).filter((entry) => entry.commands.length).sort((a, b) => a.identityId.localeCompare(b.identityId));
+  table.allowedRuntimeReaders = [...readers].sort();
+  table.allowedRuntimeWriters = [...writers].sort();
+  table.intendedDatabaseRoles = [...new Set(table.allowedCommandsByIdentity.map((entry) => entry.identityId))].sort();
+};
+
+export const buildPolicyDependencyGraph = (tableManifest) => {
+  const tablesById = new Map(tableManifest.tables.map((table) => [table.id, table]));
+  const edges = [];
+  for (const table of tableManifest.tables) {
+    if (!table.authorizationParentTable) continue;
+    const dependency = tablesById.get(table.authorizationParentTable);
+    const join = table.authorizationParentColumns;
+    edges.push({
+      sourceTable: table.id,
+      dependencyTable: dependency.id,
+      reason: `${table.prismaModel} authorization inherits from ${dependency.prismaModel}; no alternative parent is evaluated.`,
+      helperFunctionUsed: "none; direct equality join in the future generated predicate",
+      dependencyRlsProtected: dependency.forceRlsTarget,
+      recursionRisk: "none",
+      requiredIndexOrJoinKey: `${table.prismaModel}.${join.child.join("+")} -> ${dependency.prismaModel}.${join.parent.join("+")}; referenced key must be unique/indexed and the child key must be indexed before policy certification`,
+      joinKey: { sourceColumns: join.child, dependencyColumns: join.parent },
+      plannerSensitiveHiddenDependency: false,
+      unrestrictedRuntimeOwnedDependency: false,
+    });
+  }
+  const visiting = new Set();
+  const depths = new Map();
+  const depth = (id) => {
+    if (depths.has(id)) return depths.get(id);
+    assert(!visiting.has(id), `policy dependency cycle includes ${id}`);
+    visiting.add(id);
+    const dependencies = edges.filter((edge) => edge.sourceTable === id);
+    const value = dependencies.length ? 1 + Math.max(...dependencies.map((edge) => depth(edge.dependencyTable))) : 0;
+    visiting.delete(id);
+    depths.set(id, value);
+    return value;
+  };
+  tableManifest.tables.forEach((table) => depth(table.id));
+  const nodes = tableManifest.tables.map((table) => ({ id: table.id, prismaModel: table.prismaModel, primaryCategory: table.primaryCategory, reviewGroup: table.reviewGroup, physicalOwnerRole: table.physicalOwnerRole, forceRlsTarget: table.forceRlsTarget, terminalBoundary: table.terminalBoundary, dependencyLayer: depths.get(table.id) })).sort((a, b) => a.id.localeCompare(b.id));
+  const reviewGroups = Object.fromEntries(Object.keys(REVIEW_GROUP_MODELS).map((group) => {
+    const groupTables = tableManifest.tables.filter((table) => table.reviewGroup === group);
+    return [group, { tableCount: groupTables.length, resolvedCount: groupTables.filter((table) => table.classificationStatus === "resolved").length, unresolvedCount: groupTables.filter((table) => table.classificationStatus !== "resolved").length, dependencyEdges: edges.filter((edge) => groupTables.some((table) => table.id === edge.sourceTable)).length, blockingDecisions: [...new Set(groupTables.flatMap((table) => table.unresolvedDecisionIds))], ownershipConfidence: Object.fromEntries(["high", "medium", "low"].map((confidence) => [confidence, groupTables.filter((table) => table.ownershipConfidence === confidence).length])) }];
+  }));
+  const graph = { schemaVersion: 1, generatedFrom: "documents/security/rls-program/tables.json", direction: "source policy table -> table read by its authorization predicate", nodes, edges: edges.sort((a, b) => a.sourceTable.localeCompare(b.sourceTable)), acyclic: true, selfRecursivePolicies: 0, plannerSensitiveHiddenDependencies: 0, unrestrictedRuntimeOwnedDependencies: 0, reviewGroups };
+  writeJson(policyDependencyGraphPath, graph);
+  return graph;
+};
+
+const markdownCell = (value) => String(value ?? "—").replaceAll("|", "\\|").replaceAll("\n", " ");
+export const writeTableOwnershipReview = (tableManifest, graph) => {
+  const lines = [
+    "# MSCQR full-database table ownership review",
+    "",
+    "This is the compact human review of the machine-readable classification in `tables.json`. It changes no policy, database owner, role, runtime behavior, or RLS state. All 77 Prisma tables remain policy-generation candidates owned logically by `identity-table-owner`; implementation and disposable PostgreSQL proof are separate work.",
+    "",
+    `Dependency graph: ${graph.nodes.length} nodes, ${graph.edges.length} directed edges, acyclic=${graph.acyclic}, recursion risks=${graph.edges.filter((edge) => edge.recursionRisk !== "none").length}.`,
+    "",
+  ];
+  for (const [group, names] of Object.entries({ A: "Security-sensitive and identity", B: "Tenant roots and membership", C: "Batch and QR lifecycle", D: "Printing and printers", E: "Audit, incident and governance", F: "Operational/system", G: "Reference and remaining" })) {
+    const tables = tableManifest.tables.filter((table) => table.reviewGroup === group).sort((a, b) => a.prismaModel.localeCompare(b.prismaModel));
+    const summary = graph.reviewGroups[group];
+    lines.push(`## Group ${group} — ${names}`, "", `Tables: ${summary.tableCount}; resolved: ${summary.resolvedCount}; unresolved: ${summary.unresolvedCount}; dependency edges: ${summary.dependencyEdges}; confidence high/medium/low: ${summary.ownershipConfidence.high}/${summary.ownershipConfidence.medium}/${summary.ownershipConfidence.low}; blockers: ${summary.blockingDecisions.join(", ") || "none"}.`, "", "| Table | Category | Row scope | Parent | FORCE RLS | Readers | Writers | Confidence | Blocker |", "|---|---|---|---|---:|---|---|---|---|");
+    for (const table of tables) lines.push(`| ${[table.prismaModel, table.primaryCategory, table.rowOwnershipModel, table.authorizationParentTable || "—", table.forceRlsTarget ? "yes" : "no", table.allowedRuntimeReaders.join(", ") || "none", table.allowedRuntimeWriters.join(", ") || "none", table.ownershipConfidence, table.unresolvedDecisionIds.join(", ") || "none"].map(markdownCell).join(" | ")} |`);
+    lines.push("");
+  }
+  fs.writeFileSync(tableOwnershipReviewPath, `${lines.join("\n")}\n`);
+};
+
 export const buildWorkflowManifest = () => {
   const scan = scanProductionAccess();
   const existing = readJson(workflowManifestPath, { schemaVersion: 1, workflows: [] });
@@ -312,8 +658,20 @@ export const buildWorkflowManifest = () => {
     table.productionRuntimeReaders = touching.filter((workflow) => workflow.commandsPerTable.find((item) => item.tableId === table.id)?.commands.some((command) => ["SELECT", "COUNT", "RAW_SQL"].includes(command))).map((workflow) => workflow.id);
     table.productionRuntimeWriters = touching.filter((workflow) => workflow.commandsPerTable.find((item) => item.tableId === table.id)?.commands.some((command) => ["INSERT", "UPDATE", "DELETE", "UPSERT", "RAW_SQL"].includes(command))).map((workflow) => workflow.id);
     table.requiredCommands = [...new Set(touching.flatMap((workflow) => workflow.commandsPerTable.find((item) => item.tableId === table.id)?.commands || []))].sort();
+    applyRuntimeCommandMatrix(table, workflows);
+    table.classificationEvidence = table.classificationEvidence.filter((evidence) => !evidence.startsWith("Production inventory:") && !evidence.startsWith("Canonical production sources:") && !evidence.startsWith("Registration proof:") && !evidence.startsWith("Existing read-role evidence:"));
+    table.classificationEvidence.push(`Production inventory: ${touching.length} canonical workflows, ${table.productionRuntimeReaders.length} reader workflows, ${table.productionRuntimeWriters.length} writer workflows, commands ${table.requiredCommands.join(", ") || "none"}.`);
+    const canonicalSources = [...new Set(touching.flatMap((workflow) => workflow.canonicalSourceFiles))].sort();
+    if (canonicalSources.length) table.classificationEvidence.push(`Canonical production sources: ${canonicalSources.slice(0, 8).join(", ")}${canonicalSources.length > 8 ? ` (+${canonicalSources.length - 8} more in workflows.json)` : ""}.`);
+    else {
+      const unregistered = scan.unregisteredAccesses.filter((access) => access.tableId === table.id);
+      table.classificationEvidence.push(`Registration proof: no active production workflow or registered package/startup entry accesses this table; ${unregistered.length} unregistered access site(s) are retained separately in workflows.json.`);
+    }
+    if (READ_ROLE_MODELS.has(table.prismaModel)) table.classificationEvidence.push("Existing read-role evidence: documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql includes this table in the reviewed SELECT-only baseline.");
   }
   writeJson(tableManifestPath, tableManifest);
+  const graph = buildPolicyDependencyGraph(tableManifest);
+  writeTableOwnershipReview(tableManifest, graph);
 
   const decisionManifest = readJson(decisionManifestPath);
   if (decisionManifest) {
@@ -322,6 +680,7 @@ export const buildWorkflowManifest = () => {
         || decision.id === "decision-runtime-role-split"
         || (decision.id === "decision-operator-administration" && workflow.authorizationBoundaryType === "operator-break-glass")).map((workflow) => workflow.id);
       decision.affectedTables = tableManifest.tables.filter((table) => table.unresolvedDecisions.includes(decision.id)
+        || decision.id === "decision-table-ownership-classification"
         || decision.id === "decision-object-ownership-chain"
         || decision.affectedWorkflows.some((workflowId) => table.productionRuntimeReaders.includes(workflowId) || table.productionRuntimeWriters.includes(workflowId))).map((table) => table.id);
     }

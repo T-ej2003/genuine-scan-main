@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildTableManifest, buildWorkflowManifest, decisionManifestPath, identityManifestPath, manifests, parseSchema, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, validateRuntimeIdentities, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { buildTableManifest, buildWorkflowManifest, decisionManifestPath, identityManifestPath, manifests, parseSchema, policyDependencyGraphPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validateRuntimeIdentities, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 
-const snapshot = () => [tableManifestPath, workflowManifestPath, decisionManifestPath].map((file) => fs.readFileSync(file, "utf8"));
+const snapshot = () => [tableManifestPath, workflowManifestPath, decisionManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
 
 test("all Prisma models and production access sites are represented exactly and deterministically", () => {
   const before = snapshot();
@@ -43,6 +43,7 @@ test("tests do not inflate production totals and repeated technical calls remain
   const keys = workflows.map((workflow) => `${workflow.executionSurface}:${workflow.canonicalSourceFiles.join(",")}:${workflow.entryPoint}`);
   assert.equal(new Set(keys).size, keys.length, "duplicate canonical workflows exist");
   assert(workflows.some((workflow) => workflow.supportingEvidence.length > workflow.tablesTouched.length), "technical call sites were not deduplicated");
+  for (const model of ["PrintReissueRequest", "OwnershipTransfer", "AuthWebAuthnChallenge", "VerificationDecision", "CustomerTrustCredential"]) assert(accesses.some((access) => access.prismaModel === model), `${model} barrel/alias access was not detected`);
 });
 
 test("unregistered or legacy classifications require import and registration evidence", () => {
@@ -58,7 +59,8 @@ test("unregistered or legacy classifications require import and registration evi
 test("security-sensitive tables and runtime identities fail closed", () => {
   const { tables, identities, decisions } = manifests();
   for (const table of tables.tables.filter((item) => item.category === "security-sensitive")) {
-    assert(table.unresolvedDecisions.length || table.policyStatus === "special-boundary-designed");
+    assert.match(table.rowOwnershipModel, /^Special /);
+    assert(table.preAuthAccessMode && !/^direct/i.test(table.preAuthAccessMode));
     assert.notEqual(table.policyStatus, "ordinary-tenant-access");
   }
   for (const identity of identities.identities) {
@@ -66,6 +68,55 @@ test("security-sensitive tables and runtime identities fail closed", () => {
     assert.equal(identity.superuser, false);
   }
   validateRuntimeIdentities(identities, decisions);
+});
+
+test("all tables have resolved ownership, command, FORCE, and exception classifications", () => {
+  const { tables, identities, decisions } = manifests();
+  const identityById = new Map(identities.identities.map((identity) => [identity.id, identity]));
+  assert.equal(tables.tables.length, 77);
+  assert.equal(tables.tables.filter((table) => table.forceRlsTarget).length, 75);
+  assert.deepEqual(tables.tables.filter((table) => table.primaryCategory === "migration-only").map((table) => table.prismaModel).sort(), ["BatchPrintPackToken", "PrintRenderToken"]);
+  assert.equal(tables.tables.filter((table) => table.primaryCategory === "intentionally-non-rls").length, 0);
+  for (const table of tables.tables) {
+    assert.equal(table.classificationStatus, "resolved", table.id);
+    assert(table.primaryCategory && table.physicalOwnerRole && table.rowOwnershipModel, table.id);
+    assert.equal(identityById.get(table.physicalOwnerRole)?.loginExpectation, "NOLOGIN", table.id);
+    assert.equal(table.primaryCategory !== "parent-inherited" || Boolean(table.authorizationParentTable), true, table.id);
+    assert.equal(table.schemaEvidence.fields.some((field) => table.tenantKeyColumns.includes(field.name) && field.optional) && !table.tenantKeyNullSemantics, false, table.id);
+    if (table.productionRuntimeWriters.length) assert(table.allowedCommandsByIdentity.length, `${table.id} writers lack a command matrix`);
+    for (const identityId of [...table.allowedRuntimeReaders, ...table.allowedRuntimeWriters, ...table.allowedCommandsByIdentity.map((entry) => entry.identityId)]) assert(identityById.has(identityId), `${table.id} -> ${identityId}`);
+    if (table.appendOnly) for (const entry of table.allowedCommandsByIdentity) {
+      assert(!entry.commands.includes("UPDATE"), table.id);
+      assert(!entry.commands.includes("DELETE") || entry.conditions.some((condition) => /retention|redaction/i.test(condition)), table.id);
+    }
+    if (table.primaryCategory === "migration-only") assert.equal(table.productionRuntimeReaders.length + table.productionRuntimeWriters.length + table.allowedCommandsByIdentity.length, 0, table.id);
+  }
+  assert.equal(decisions.decisions.find((decision) => decision.id === "decision-table-ownership-classification")?.status, "resolved");
+});
+
+test("policy dependency graph is complete, explicit, and acyclic", () => {
+  const graph = JSON.parse(fs.readFileSync(policyDependencyGraphPath, "utf8"));
+  const tableIds = new Set(manifests().tables.tables.map((table) => table.id));
+  assert.deepEqual(new Set(graph.nodes.map((node) => node.id)), tableIds);
+  assert.equal(graph.edges.length, 38);
+  const dependencies = new Map([...tableIds].map((id) => [id, graph.edges.filter((edge) => edge.sourceTable === id).map((edge) => edge.dependencyTable)]));
+  const tableById = new Map(manifests().tables.tables.map((table) => [table.id, table]));
+  const visit = (id, stack = new Set()) => {
+    assert(!stack.has(id), `cycle at ${id}`);
+    stack.add(id);
+    for (const dependency of dependencies.get(id)) visit(dependency, new Set(stack));
+  };
+  for (const id of tableIds) visit(id);
+  const terminal = (id) => dependencies.get(id).length ? terminal(dependencies.get(id)[0]) : tableById.get(id).terminalBoundary;
+  for (const table of tableById.values()) if (table.primaryCategory === "parent-inherited") assert(["tenant-root", "tenant-key", "actor-key"].includes(terminal(table.id)), table.id);
+  for (const edge of graph.edges) {
+    assert.notEqual(edge.sourceTable, edge.dependencyTable);
+    assert(edge.reason && edge.requiredIndexOrJoinKey && edge.joinKey.sourceColumns.length && edge.joinKey.dependencyColumns.length);
+    assert.equal(edge.plannerSensitiveHiddenDependency, false);
+    assert.equal(edge.unrestrictedRuntimeOwnedDependency, false);
+  }
+  assert.equal(graph.acyclic, true);
+  assert.equal(graph.selfRecursivePolicies, 0);
 });
 
 test("runtime-role validator rejects unsafe ownership, privilege, credential, and break-glass designs", () => {
