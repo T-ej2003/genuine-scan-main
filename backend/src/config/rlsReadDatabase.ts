@@ -12,6 +12,13 @@ const stagedRlsReadFlags = [
   STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG,
 ] as const;
 
+const sharedTenantRlsTables = [
+  "Organization",
+  "Licensee",
+  "User",
+  "ManufacturerLicenseeLink",
+] as const;
+
 const batchDomainRlsTables = [
   "Batch",
   "InventoryStatusRollup",
@@ -22,10 +29,6 @@ const batchDomainRlsTables = [
 ] as const;
 
 const manufacturerPrinterRlsTables = [
-  "Organization",
-  "Licensee",
-  "User",
-  "ManufacturerLicenseeLink",
   "PrinterRegistration",
   "Printer",
   "PrinterAttestation",
@@ -37,14 +40,24 @@ const manufacturerPrinterRlsTables = [
 const resolveRequiredRlsTables = (env = process.env) => {
   const required = new Set<string>();
 
-  if (
+  const batchesEnabled =
     isStagedRlsReadFlagEnabled(STAGING_RLS_BATCHES_READ_FLAG, env) ||
-    isStagedRlsReadFlagEnabled(STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG, env)
-  ) {
+    isStagedRlsReadFlagEnabled(STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG, env);
+
+  const manufacturerPrintersEnabled = isStagedRlsReadFlagEnabled(
+    STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG,
+    env
+  );
+
+  if (batchesEnabled || manufacturerPrintersEnabled) {
+    sharedTenantRlsTables.forEach((table) => required.add(table));
+  }
+
+  if (batchesEnabled) {
     batchDomainRlsTables.forEach((table) => required.add(table));
   }
 
-  if (isStagedRlsReadFlagEnabled(STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG, env)) {
+  if (manufacturerPrintersEnabled) {
     manufacturerPrinterRlsTables.forEach((table) => required.add(table));
   }
 

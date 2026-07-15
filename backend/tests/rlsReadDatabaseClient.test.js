@@ -45,14 +45,14 @@ const safePosture = () => ({
   row_security_on: true,
   role_attributes_safe: true,
   no_inherited_roles: true,
-  protected_table_count: 6,
+  protected_table_count: 10,
   all_tables_protected: true,
   all_tables_selectable: true,
   no_table_write_privileges: true,
   no_sequence_privileges: true,
   no_schema_create_privileges: true,
   no_owned_tables: true,
-  candidate_policy_count: 6,
+  candidate_policy_count: 10,
   helper_function_count: 17,
   all_helpers_executable: true,
 });
@@ -229,8 +229,8 @@ const expectConfigurationError = (env, code) => {
   const wrongPhaseCount = makeFactory({
     posture: {
       ...safePosture(),
-      protected_table_count: 16,
-      candidate_policy_count: 16,
+      protected_table_count: 6,
+      candidate_policy_count: 6,
     },
   });
   await setRlsReadPrismaFactoryForTests(wrongPhaseCount.factory);
