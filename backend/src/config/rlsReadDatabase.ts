@@ -12,6 +12,45 @@ const stagedRlsReadFlags = [
   STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG,
 ] as const;
 
+const batchDomainRlsTables = [
+  "Batch",
+  "InventoryStatusRollup",
+  "QRCode",
+  "PrintJob",
+  "PrintSession",
+  "PrintItem",
+] as const;
+
+const manufacturerPrinterRlsTables = [
+  "Organization",
+  "Licensee",
+  "User",
+  "ManufacturerLicenseeLink",
+  "PrinterRegistration",
+  "Printer",
+  "PrinterAttestation",
+  "PrinterAgentSession",
+  "PrinterProfile",
+  "PrinterProfileSnapshot",
+] as const;
+
+const resolveRequiredRlsTables = (env = process.env) => {
+  const required = new Set<string>();
+
+  if (
+    isStagedRlsReadFlagEnabled(STAGING_RLS_BATCHES_READ_FLAG, env) ||
+    isStagedRlsReadFlagEnabled(STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG, env)
+  ) {
+    batchDomainRlsTables.forEach((table) => required.add(table));
+  }
+
+  if (isStagedRlsReadFlagEnabled(STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG, env)) {
+    manufacturerPrinterRlsTables.forEach((table) => required.add(table));
+  }
+
+  return [...required];
+};
+
 export type RlsReadTransactionClient = Pick<Prisma.TransactionClient, "$executeRaw" | "$queryRaw"> & {
   batch: Pick<Prisma.TransactionClient["batch"], "findFirst" | "findMany" | "count">;
   inventoryStatusRollup: Pick<Prisma.TransactionClient["inventoryStatusRollup"], "findMany">;
@@ -188,15 +227,17 @@ export const getRlsReadPrisma = (env = process.env): RlsReadTransactionRunner =>
   return rlsReadTransactionRunner;
 };
 
-const loadRuntimePosture = async (client: ManagedRlsReadPrisma) => {
+const loadRuntimePosture = async (client: ManagedRlsReadPrisma, env = process.env) => {
+  const requiredTables = resolveRequiredRlsTables(env);
+  if (requiredTables.length === 0) throw new RlsReadInitializationError();
+
+  const targetTableValues = Prisma.join(
+    requiredTables.map((tableName) => Prisma.sql`(${tableName})`)
+  );
+
   const rows = await client.$queryRaw<RlsRuntimePosture[]>`
     WITH target_tables(name) AS (
-      VALUES
-        ('Organization'), ('Licensee'), ('User'), ('ManufacturerLicenseeLink'),
-        ('Batch'), ('InventoryStatusRollup'), ('QRCode'), ('PrintJob'),
-        ('PrintSession'), ('PrintItem'), ('PrinterRegistration'), ('Printer'),
-        ('PrinterAttestation'), ('PrinterAgentSession'), ('PrinterProfile'),
-        ('PrinterProfileSnapshot')
+      VALUES ${targetTableValues}
     ), target_relations AS (
       SELECT c.oid, c.relowner, c.relrowsecurity, c.relforcerowsecurity
       FROM target_tables t
@@ -253,8 +294,13 @@ const loadRuntimePosture = async (client: ManagedRlsReadPrisma) => {
         AS no_schema_create_privileges,
       NOT EXISTS (SELECT 1 FROM target_relations WHERE pg_has_role(r.oid, relowner, 'USAGE'))
         AS no_owned_tables,
-      (SELECT count(*)::integer FROM pg_policies WHERE schemaname = 'public'
-        AND policyname LIKE 'rls_candidate_%_select') AS candidate_policy_count,
+      (
+        SELECT count(*)::integer
+        FROM pg_policies p
+        JOIN target_tables t ON t.name = p.tablename
+        WHERE p.schemaname = 'public'
+          AND p.policyname LIKE 'rls_candidate_%_select'
+      ) AS candidate_policy_count,
       (SELECT count(*)::integer FROM helper_functions) AS helper_function_count,
       COALESCE((SELECT bool_and(has_function_privilege(current_user, oid, 'EXECUTE')) FROM helper_functions), false)
         AS all_helpers_executable
@@ -264,20 +310,23 @@ const loadRuntimePosture = async (client: ManagedRlsReadPrisma) => {
   return rows[0] || null;
 };
 
-const assertRuntimePosture = (posture: RlsRuntimePosture | null) => {
+const assertRuntimePosture = (
+  posture: RlsRuntimePosture | null,
+  expectedProtectedTableCount: number
+) => {
   if (
     !posture ||
     !posture.row_security_on ||
     !posture.role_attributes_safe ||
     !posture.no_inherited_roles ||
-    posture.protected_table_count !== 16 ||
+    posture.protected_table_count !== expectedProtectedTableCount ||
     !posture.all_tables_protected ||
     !posture.all_tables_selectable ||
     !posture.no_table_write_privileges ||
     !posture.no_sequence_privileges ||
     !posture.no_schema_create_privileges ||
     !posture.no_owned_tables ||
-    posture.candidate_policy_count !== 16 ||
+    posture.candidate_policy_count !== expectedProtectedTableCount ||
     posture.helper_function_count !== 17 ||
     !posture.all_helpers_executable
   ) {
@@ -295,7 +344,11 @@ const initializeRlsReadPrismaClient = async (env = process.env) => {
   initializationPromise = (async () => {
     try {
       await client.$connect();
-      assertRuntimePosture(await loadRuntimePosture(client));
+      const requiredTables = resolveRequiredRlsTables(env);
+      assertRuntimePosture(
+        await loadRuntimePosture(client, env),
+        requiredTables.length
+      );
       initializedRlsReadPrisma = client;
       return client;
     } catch (error) {
