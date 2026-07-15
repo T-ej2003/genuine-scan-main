@@ -9,6 +9,8 @@ const {
   RlsReadConfigurationError,
   RlsReadInitializationError,
   STAGING_RLS_BATCHES_READ_FLAG,
+  STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG,
+  STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG,
   disconnectRlsReadPrisma,
   getRlsReadDatabaseHealth,
   getRlsReadPrisma,
@@ -43,14 +45,14 @@ const safePosture = () => ({
   row_security_on: true,
   role_attributes_safe: true,
   no_inherited_roles: true,
-  protected_table_count: 16,
+  protected_table_count: 10,
   all_tables_protected: true,
   all_tables_selectable: true,
   no_table_write_privileges: true,
   no_sequence_privileges: true,
   no_schema_create_privileges: true,
   no_owned_tables: true,
-  candidate_policy_count: 16,
+  candidate_policy_count: 10,
   helper_function_count: 17,
   all_helpers_executable: true,
 });
@@ -130,6 +132,19 @@ const expectConfigurationError = (env, code) => {
   );
   assert.equal(validateRlsReadDatabaseConfiguration(enabledEnv()).enabled, true);
 
+  const allocationOnlyEnv = enabledEnv({
+    [STAGING_RLS_BATCHES_READ_FLAG]: "false",
+    [STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG]: "true",
+  });
+  const manufacturerPrintersOnlyEnv = enabledEnv({
+    [STAGING_RLS_BATCHES_READ_FLAG]: "false",
+    [STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG]: "true",
+  });
+  const allRoutesEnv = enabledEnv({
+    [STAGING_RLS_BATCH_ALLOCATION_MAP_FLAG]: "true",
+    [STAGING_RLS_MANUFACTURER_PRINTERS_READ_FLAG]: "true",
+  });
+
   const startupFailure = spawnSync(process.execPath, [path.resolve(__dirname, "../dist/index.js")], {
     cwd: path.resolve(__dirname, ".."),
     env: {
@@ -186,6 +201,43 @@ const expectConfigurationError = (env, code) => {
 
   await disconnectRlsReadPrisma();
   assert.equal(lifecycle.state.disconnected, 1, "clean shutdown must disconnect the cached RLS client once");
+
+  const allocationOnly = makeFactory();
+  await setRlsReadPrismaFactoryForTests(allocationOnly.factory);
+  assert.equal(await initializeRlsReadPrisma(allocationOnlyEnv), true);
+
+  const manufacturerPrintersOnly = makeFactory({
+    posture: {
+      ...safePosture(),
+      protected_table_count: 10,
+      candidate_policy_count: 10,
+    },
+  });
+  await setRlsReadPrismaFactoryForTests(manufacturerPrintersOnly.factory);
+  assert.equal(await initializeRlsReadPrisma(manufacturerPrintersOnlyEnv), true);
+
+  const allRoutes = makeFactory({
+    posture: {
+      ...safePosture(),
+      protected_table_count: 16,
+      candidate_policy_count: 16,
+    },
+  });
+  await setRlsReadPrismaFactoryForTests(allRoutes.factory);
+  assert.equal(await initializeRlsReadPrisma(allRoutesEnv), true);
+
+  const wrongPhaseCount = makeFactory({
+    posture: {
+      ...safePosture(),
+      protected_table_count: 6,
+      candidate_policy_count: 6,
+    },
+  });
+  await setRlsReadPrismaFactoryForTests(wrongPhaseCount.factory);
+  await assert.rejects(
+    initializeRlsReadPrisma(enabledEnv()),
+    RlsReadInitializationError
+  );
 
   const secret = "do-not-print-this-password";
   const failing = makeFactory({ connectError: new Error(`connection failed for ${["postgresql:", `//runtime:${secret}@host/db`].join("")}`) });
