@@ -1,0 +1,165 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+import { spawnSync } from "node:child_process";
+import {
+  STAGING_DATABASE_ROLE_CONTEXT as C,
+  assertDatabaseRoleOperatorIdentity,
+} from "../lib/staging-database-role-credentials-core.mjs";
+
+const command = process.argv[2];
+const modes = Object.freeze({
+  apply: "rls-shared-apply",
+  verify: "rls-shared-verify",
+  rollback: "rls-shared-rollback",
+});
+const helperArnPattern = new RegExp(`^arn:aws:ecs:${C.region}:${C.accountId}:task-definition/mscqr-staging-database-role-admin:[0-9]+$`);
+const canaryArn = `arn:aws:ecs:${C.region}:${C.accountId}:task-definition/mscqr-staging-backend:9`;
+const brokerArn = `arn:aws:lambda:${C.region}:${C.accountId}:function:${C.brokerFunction}`;
+
+const run = (args) => {
+  const result = spawnSync("aws", [...args, "--region", C.region, "--output", "json"], {
+    encoding: "utf8",
+    env: { ...process.env, AWS_REGION: C.region, AWS_DEFAULT_REGION: C.region },
+    maxBuffer: 8 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error || result.status !== 0) throw new Error(`AWS ${args[0]} ${args[1]} failed; output suppressed.`);
+  try { return result.stdout ? JSON.parse(result.stdout) : {}; }
+  catch { throw new Error(`AWS ${args[0]} ${args[1]} returned invalid JSON.`); }
+};
+const routeFlags = (definition) => Object.fromEntries(
+  (definition.containerDefinitions?.[0]?.environment || [])
+    .filter(({ name }) => C.routeFlags.includes(name))
+    .map(({ name, value }) => [name, value])
+);
+const assertFlags = (actual, expected, label) => {
+  for (const name of C.routeFlags) if (actual[name] !== expected[name]) throw new Error(`${label} has an unsafe ${name} value.`);
+};
+
+export function validateLocalGate(mode, env = process.env) {
+  if (!Object.hasOwn(modes, mode)) throw new Error("Command must be apply, verify, or rollback.");
+  if ((env.AWS_REGION || env.AWS_DEFAULT_REGION || C.region) !== C.region) throw new Error(`AWS region must be ${C.region}.`);
+  if (env.MSCQR_STAGING_VPC_EXECUTOR !== "disposable-ecs-admin-task") throw new Error("Reviewed disposable ECS admin executor must be selected.");
+  if (!helperArnPattern.test(env.MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN || "")) throw new Error("Exact reviewed staging database-role admin task definition ARN is required.");
+  if (mode === "apply" && env.MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE !== "YES") throw new Error("Set MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE=YES.");
+  if (mode === "rollback" && env.MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK !== "YES") throw new Error("Set MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK=YES.");
+  return modes[mode];
+}
+
+export function assertReviewedTopology({ service, stableDefinition, canaryDefinition, helperDefinition, helperArn }) {
+  if (service.taskDefinition !== `arn:aws:ecs:${C.region}:${C.accountId}:task-definition/mscqr-staging-backend:7`
+      || service.desiredCount !== service.runningCount || service.runningCount < 1
+      || (service.deployments || []).some((deployment) => deployment.status !== "PRIMARY" || deployment.taskDefinition !== service.taskDefinition)) {
+    throw new Error("Stable ECS revision 7 must remain the only serving deployment.");
+  }
+  const allFalse = Object.fromEntries(C.routeFlags.map((name) => [name, "false"]));
+  assertFlags(routeFlags(stableDefinition), allFalse, "Stable revision 7");
+  assertFlags(routeFlags(canaryDefinition), {
+    MSCQR_STAGING_RLS_BATCHES_READ_ENABLED: "true",
+    MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED: "false",
+    MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED: "false",
+  }, "Canary revision 9");
+  if (helperDefinition.taskDefinitionArn !== helperArn || helperDefinition.family !== "mscqr-staging-database-role-admin"
+      || helperDefinition.networkMode !== "awsvpc" || helperDefinition.containerDefinitions?.length !== 1) {
+    throw new Error("Helper task definition is outside the reviewed staging admin family.");
+  }
+  const container = helperDefinition.containerDefinitions[0];
+  if (container.name !== "db-admin" || container.readonlyRootFilesystem !== true
+      || !(container.command || []).join(" ").includes("staging-database-role-vpc-executor.mjs")) {
+    throw new Error("Helper task does not use the reviewed VPC executor entrypoint.");
+  }
+  const logOptions = container.logConfiguration?.options || {};
+  if (container.logConfiguration?.logDriver !== "awslogs"
+      || logOptions["awslogs-group"] !== "/ecs/mscqr-staging-backend"
+      || logOptions["awslogs-stream-prefix"] !== "database-role-admin") {
+    throw new Error("Helper task does not use the reviewed CloudWatch log destination.");
+  }
+  assertFlags(routeFlags(helperDefinition), allFalse, "Database admin helper");
+  const dbSecrets = (container.secrets || []).filter(({ name }) => name === "DATABASE_URL");
+  if (dbSecrets.length !== 1
+      || !/:secret:mscqr\/staging\/database-url-[A-Za-z0-9]+$/.test(dbSecrets[0].valueFrom || "")
+      || /\/app-|\/rls-read-|\/migrator-/i.test(dbSecrets[0].valueFrom || "")) {
+    throw new Error("Helper must receive only the staging administrative DATABASE_URL secret.");
+  }
+  return true;
+}
+
+export function taskEvidence(mode, task, helperArn, helperDefinition) {
+  const container = task?.containers?.find(({ name }) => name === "db-admin");
+  if (!task || task.lastStatus !== "STOPPED" || task.taskDefinitionArn !== helperArn || !container) {
+    throw new Error("Reviewed shared RLS helper did not reach a corroborated stopped state.");
+  }
+  const definition = helperDefinition?.containerDefinitions?.find(({ name }) => name === "db-admin");
+  const logOptions = definition?.logConfiguration?.options || {};
+  const taskId = task.taskArn?.split("/").at(-1);
+  const logStream = container.logStreamName || (logOptions["awslogs-stream-prefix"] && taskId
+    ? `${logOptions["awslogs-stream-prefix"]}/db-admin/${taskId}` : null);
+  const evidence = {
+    status: container.exitCode === 0 ? `staging_shared_batch_rls_${mode}_task_passed` : "staging_shared_batch_rls_task_failed",
+    mode,
+    database: C.databaseName,
+    region: C.region,
+    cluster: C.cluster,
+    serviceTaskDefinitionRevision: 7,
+    canaryTaskDefinitionRevision: 9,
+    helperTaskDefinitionArn: helperArn,
+    taskArn: task.taskArn,
+    exitCode: container.exitCode,
+    cloudWatchLogGroup: logOptions["awslogs-group"] || null,
+    cloudWatchLogStream: logStream,
+    secretsPrinted: false,
+    ecsServiceUpdated: false,
+  };
+  if (container.exitCode !== 0) throw Object.assign(new Error("Shared RLS SQL task exited non-zero; inspect the printed CloudWatch log stream."), { evidence });
+  return evidence;
+}
+
+export function execute(mode = command) {
+  const brokerMode = validateLocalGate(mode);
+  const identity = run(["sts", "get-caller-identity"]);
+  assertDatabaseRoleOperatorIdentity(identity, { ...process.env, AWS_REGION: C.region });
+  const helperArn = process.env.MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN;
+  const service = run(["ecs", "describe-services", "--cluster", C.cluster, "--services", C.service]).services?.[0];
+  const stableDefinition = run(["ecs", "describe-task-definition", "--task-definition", service?.taskDefinition]).taskDefinition;
+  const canaryDefinition = run(["ecs", "describe-task-definition", "--task-definition", canaryArn]).taskDefinition;
+  const helperDefinition = run(["ecs", "describe-task-definition", "--task-definition", helperArn]).taskDefinition;
+  assertReviewedTopology({ service, stableDefinition, canaryDefinition, helperDefinition, helperArn });
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-staging-shared-rls-"));
+  fs.chmodSync(directory, 0o700);
+  try {
+    const request = path.join(directory, "broker-request.json");
+    const response = path.join(directory, "broker-response.json");
+    const payload = { mode: brokerMode, ...(["apply", "rollback"].includes(mode) ? { confirmation: "YES" } : {}) };
+    fs.writeFileSync(request, JSON.stringify(payload), { mode: 0o600, flag: "wx" });
+    const metadata = run([
+      "lambda", "invoke", "--function-name", brokerArn,
+      "--cli-binary-format", "raw-in-base64-out", "--payload", `fileb://${request}`, response,
+    ]);
+    if (metadata.FunctionError || metadata.StatusCode !== 200) throw new Error("Broker refused the reviewed shared RLS helper request.");
+    let started;
+    try { started = JSON.parse(fs.readFileSync(response, "utf8")); }
+    catch { throw new Error("Broker returned invalid task metadata."); }
+    const taskArnPrefix = `arn:aws:ecs:${C.region}:${C.accountId}:task/${C.cluster}/`;
+    if (started.status !== "started" || typeof started.taskArn !== "string" || !started.taskArn.startsWith(taskArnPrefix)) {
+      throw new Error("Broker returned a task outside the reviewed staging cluster.");
+    }
+    run(["ecs", "wait", "tasks-stopped", "--cluster", C.cluster, "--tasks", started.taskArn]);
+    const task = run(["ecs", "describe-tasks", "--cluster", C.cluster, "--tasks", started.taskArn]).tasks?.[0];
+    return taskEvidence(mode, task, helperArn, helperDefinition);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
+  try { console.log(JSON.stringify(execute(), null, 2)); }
+  catch (error) {
+    if (error.evidence) console.error(JSON.stringify(error.evidence, null, 2));
+    else console.error(JSON.stringify({ status: "blocked", reason: error.message, secretsPrinted: false }, null, 2));
+    process.exitCode = 2;
+  }
+}

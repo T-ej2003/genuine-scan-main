@@ -1,15 +1,22 @@
-const ALLOWED_MODES = new Set(["probe", "provision", "verify"]);
+const ALLOWED_MODES = new Set([
+  "probe", "provision", "verify",
+  "rls-shared-apply", "rls-shared-verify", "rls-shared-rollback",
+]);
+const MUTATING_RLS_MODES = new Set(["rls-shared-apply", "rls-shared-rollback"]);
 
 export function validateBrokerEvent(event) {
-  if (!event || typeof event !== "object" || Array.isArray(event) || Object.keys(event).length !== 1 || !Object.hasOwn(event, "mode")) {
-    throw new Error("Request must contain exactly one field: mode.");
+  if (!event || typeof event !== "object" || Array.isArray(event) || !Object.hasOwn(event, "mode")) {
+    throw new Error("Request must contain the reviewed mode fields.");
   }
-  if (typeof event.mode !== "string" || !ALLOWED_MODES.has(event.mode)) throw new Error("Mode must be probe, provision, or verify.");
+  if (typeof event.mode !== "string" || !ALLOWED_MODES.has(event.mode)) throw new Error("Mode is outside the reviewed executor set.");
+  const expectedKeys = MUTATING_RLS_MODES.has(event.mode) ? ["confirmation", "mode"] : ["mode"];
+  if (Object.keys(event).sort().join(",") !== expectedKeys.join(",")) throw new Error("Request contains unreviewed fields.");
+  if (MUTATING_RLS_MODES.has(event.mode) && event.confirmation !== "YES") throw new Error("Mutating shared RLS mode requires exact confirmation.");
   return event.mode;
 }
 
-export function fixedRunTaskRequest(mode, config) {
-  validateBrokerEvent({ mode });
+export function fixedRunTaskRequest(mode, config, confirmation) {
+  validateBrokerEvent({ mode, ...(confirmation === undefined ? {} : { confirmation }) });
   return {
     cluster: config.clusterArn,
     taskDefinition: config.taskDefinitionArn,
@@ -31,7 +38,7 @@ export function fixedRunTaskRequest(mode, config) {
 export function createBrokerHandler({ runTask, config }) {
   return async (event) => {
     const mode = validateBrokerEvent(event);
-    const response = await runTask(fixedRunTaskRequest(mode, config));
+    const response = await runTask(fixedRunTaskRequest(mode, config, event.confirmation));
     if ((response?.failures || []).length || response?.tasks?.length !== 1) throw new Error("Reviewed disposable task did not start exactly once.");
     const taskArn = response.tasks[0]?.taskArn;
     const prefix = `${config.clusterArn.replace(":cluster/", ":task/")}/`;

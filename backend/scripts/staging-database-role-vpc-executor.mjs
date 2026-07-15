@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
+import path from "node:path";
 import process from "node:process";
+import { spawnSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import {
   CreateSecretCommand,
@@ -55,6 +57,53 @@ const secretUrl = (raw) => {
     return typeof parsed === "string" ? parsed : parsed.DATABASE_URL || parsed.databaseUrl || parsed.url;
   } catch { return raw; }
 };
+const RLS_SHARED_MODES = Object.freeze({
+  "rls-shared-apply": "mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql",
+  "rls-shared-verify": "mscqr_staging_rls_shared_batch_phase_verify_2026-07-15.sql",
+  "rls-shared-rollback": "mscqr_staging_rls_shared_batch_phase_rollback_2026-07-15.sql",
+});
+export function runRlsSharedPhase(mode, rawDatabaseUrl = process.env.DATABASE_URL, spawn = spawnSync) {
+  const file = RLS_SHARED_MODES[mode];
+  if (!file) throw new Error("Unsupported shared RLS executor mode.");
+  const databaseUrl = secretUrl(rawDatabaseUrl);
+  let url;
+  try { url = new URL(databaseUrl); } catch { throw new Error("Admin DATABASE_URL has an invalid shape."); }
+  const database = decodeURIComponent(url.pathname.slice(1));
+  if (!["postgres:", "postgresql:"].includes(url.protocol)
+      || database !== DATABASE || decodeURIComponent(url.username) !== "mscqr_staging_admin"
+      || !/(?:staging|stg)/i.test(url.hostname) || /prod|production|live/i.test(url.hostname)) {
+    throw new Error("Shared RLS executor refused a non-staging admin database endpoint.");
+  }
+  const sslmode = url.searchParams.get("sslmode") || "require";
+  if (!new Set(["require", "verify-ca", "verify-full"]).has(sslmode)) {
+    throw new Error("Shared RLS executor requires PostgreSQL TLS verification mode.");
+  }
+  const { DATABASE_URL: _databaseUrl, ...baseEnv } = process.env;
+  const result = spawn("psql", [
+    "-X", "--no-psqlrc", "-qAt", "-v", "ON_ERROR_STOP=1",
+    "-v", `mscqr_app_role=${ROLES.app}`,
+    "-v", `mscqr_rls_read_role=${ROLES.rlsRead}`,
+    "-v", "mscqr_auth_owner_role=mscqr_staging_auth_owner",
+    "-f", path.join("/app/documents/security", file),
+  ], {
+    encoding: "utf8",
+    env: {
+      ...baseEnv,
+      PGAPPNAME: `mscqr-${mode}`,
+      PGHOST: url.hostname,
+      PGPORT: url.port || "5432",
+      PGDATABASE: database,
+      PGUSER: decodeURIComponent(url.username),
+      PGPASSWORD: decodeURIComponent(url.password),
+      PGSSLMODE: sslmode,
+    },
+    maxBuffer: 4 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error || result.status !== 0) throw new Error(`Shared RLS ${mode} SQL task failed.`);
+  const evidenceLine = String(result.stdout || "").trim().split("\n").reverse().find((line) => line.trim().startsWith("{"));
+  try { return JSON.parse(evidenceLine); } catch { throw new Error("Shared RLS SQL task returned invalid evidence."); }
+}
 const client = (url) => new PrismaClient({ datasources: { db: { url } }, log: [] });
 const password = () => crypto.randomBytes(48).toString("base64url");
 const roleUrl = (adminUrl, username, generatedPassword) => {
@@ -294,6 +343,13 @@ export async function executeExecutor() {
     phase = "reachability";
     const reachability = await admin.$queryRawUnsafe("SELECT current_database() AS database_name, current_user AS database_user");
     if (reachability[0]?.database_name !== DATABASE || reachability[0]?.database_user !== "mscqr_staging_admin") throw new Error("Staging admin reachability/identity proof failed.");
+    if (Object.hasOwn(RLS_SHARED_MODES, MODE)) {
+      assertRouteFlagsFalse();
+      phase = MODE;
+      const evidence = runRlsSharedPhase(MODE, adminUrl);
+      safe({ ...evidence, mechanism: "brokered-disposable-ecs-admin-psql-task", phase: "complete" });
+      return;
+    }
     phase = "capture-secret-metadata";
     for (const key of Object.keys(ROLES)) before[key] = await metadata(key);
     const existingKeys = Object.keys(ROLES).filter((key) => before[key].exists);
