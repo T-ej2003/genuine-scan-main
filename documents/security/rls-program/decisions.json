@@ -127,10 +127,15 @@
       "question": "May licensee administrators read policy alerts, or is the route platform-admin only as the command contract currently states?",
       "recommendedOption": "Choose one actor ceiling and align route, tenant scope, MFA and read attribution before implementation.",
       "affectedWorkflows": [
-        "workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller"
+        "workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller",
+        "workflow-http-backend-src-controllers-trace-policy-controller-ts-acknowledge-policy-alert-controller",
+        "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts",
+        "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert",
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
       ],
       "affectedTables": [
-        "table-policy-alert"
+        "table-policy-alert",
+        "table-security-event-outbox"
       ],
       "securityConsequence": "Implementing without this decision could authorize public disclosure, cross-tenant platform access, actor elevation or a blank-scope fallback.",
       "availableOptions": [
@@ -140,7 +145,38 @@
       ],
       "blockingStatus": "blocking",
       "owner": "Product authorization owner, application security, and domain engineering",
-      "status": "unresolved"
+      "status": "resolved",
+      "resolvedAt": "2026-07-16",
+      "selectedBoundary": "policy-alert-actor-ceiling-v1",
+      "resolution": {
+        "authority": "documents/security/rls-program/policy-alert-actor-ceiling.json",
+        "boundaryId": "policy-alert-actor-ceiling-v1",
+        "alertClasses": [
+          "tenant-security-alert-read",
+          "manufacturer-alert-read",
+          "platform-alert-triage",
+          "incident-response-alert-read",
+          "alert-acknowledgement",
+          "alert-assignment",
+          "alert-resolution",
+          "alert-suppression",
+          "alert-escalation",
+          "worker-alert-delivery",
+          "operator-alert-procedure",
+          "public-alert-status",
+          "prohibited-alert-access"
+        ],
+        "affectedWorkflows": 5,
+        "runtimeImplementationPending": true,
+        "postgresqlCertificationPending": true,
+        "guarantees": [
+          "No generic alert administrator or platform role wildcard",
+          "Licensee and manufacturer visibility is bounded by authoritative tenant and actor rows",
+          "Platform and incident access requires bounded scope, fresh assurance, purpose and attribution",
+          "Only acknowledgement and one-way incident escalation have approved PolicyAlert transitions",
+          "Assignment, resolution, suppression, public access, human worker impersonation and direct operator table access are prohibited"
+        ]
+      }
     },
     {
       "id": "decision-context-public-read-contract",

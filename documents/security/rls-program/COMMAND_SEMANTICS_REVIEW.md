@@ -25,8 +25,8 @@ Rules: 988; workflows mapped: 428/428.
 | manufacturer | 239 |
 | operator | 100 |
 | checker | 10 |
-| licensee-admin | 139 |
-| platform-admin | 232 |
+| licensee-admin | 140 |
+| platform-admin | 229 |
 | restricted-read | 16 |
 | pre-auth-runtime | 19 |
 | worker | 5 |
@@ -42,8 +42,8 @@ Rules: 988; workflows mapped: 428/428.
 | none | 94 |
 | password-verified | 507 |
 | mfa-bootstrap | 3 |
-| mfa-verified | 248 |
-| step-up-verified | 15 |
+| mfa-verified | 246 |
+| step-up-verified | 17 |
 | system-verified | 33 |
 | operator-approved | 81 |
 | dual-approved-break-glass | 7 |

@@ -28,6 +28,8 @@ export const manufacturerBootstrapBoundaryPath = path.join(programDir, "manufact
 export const manufacturerBootstrapReviewPath = path.join(programDir, "MANUFACTURER_BOOTSTRAP_REVIEW.md");
 export const platformReadScopeBoundaryPath = path.join(programDir, "platform-read-scope-boundary.json");
 export const platformReadScopeReviewPath = path.join(programDir, "PLATFORM_READ_SCOPE_REVIEW.md");
+export const policyAlertActorCeilingPath = path.join(programDir, "policy-alert-actor-ceiling.json");
+export const policyAlertActorCeilingReviewPath = path.join(programDir, "POLICY_ALERT_ACTOR_CEILING_REVIEW.md");
 export const blockedApplyPath = "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql";
 
 export const commands = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "UPSERT", "COUNT", "RAW_SQL"]);
@@ -691,6 +693,7 @@ const AUDIT_LOGS_WORKFLOW_ID = "workflow-http-backend-src-controllers-audit-cont
 const FRAUD_REPORTS_WORKFLOW_ID = "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports";
 const MANUFACTURER_BOOTSTRAP_BOUNDARY_ID = "manufacturer-bootstrap-post-password-actor";
 const PLATFORM_READ_SCOPE_BOUNDARY_ID = "platform-read-scope-v1";
+const POLICY_ALERT_ACTOR_CEILING_ID = "policy-alert-actor-ceiling-v1";
 
 const runtimeIdentityForCommand = (workflow) => workflow.authorizationBoundaryType === "operator-break-glass" ? "identity-production-break-glass"
   : workflow.authorizationBoundaryType === "pre-auth-security-function" ? "identity-pre-auth-app"
@@ -794,6 +797,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   const fraudReportsRead = workflow.id === FRAUD_REPORTS_WORKFLOW_ID;
   const manufacturerBootstrap = workflow.manufacturerBootstrapBoundaryId === MANUFACTURER_BOOTSTRAP_BOUNDARY_ID;
   const platformReadScope = workflow.platformReadScopeBoundaryId === PLATFORM_READ_SCOPE_BOUNDARY_ID;
+  const policyAlertActorCeiling = workflow.policyAlertActorCeilingBoundaryId === POLICY_ALERT_ACTOR_CEILING_ID;
   const securityFunction = table.primaryCategory === "security-sensitive" && (command !== "SELECT" || table.sensitiveColumns.length > 0) && !auditCsvExport && !auditLogsRead && !fraudReportsRead;
   const preAuthFunction = actors.includes("pre-auth-runtime");
   const workerBoundary = actors.some((actor) => ["worker", "scheduled-job"].includes(actor));
@@ -809,6 +813,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   if (fraudReportsRead && table.prismaModel === "AuditLog" && command === "SELECT") allowedColumns = ["id", "createdAt", "userId", "licenseeId", "details", "ipAddress"];
   if (manufacturerBootstrap && table.prismaModel === "ManufacturerLicenseeLink" && command === "SELECT") allowedColumns = ["manufacturerId", "licenseeId", "isPrimary", "createdAt", "updatedAt"];
   if (platformReadScope && command === "SELECT") allowedColumns = workflow.platformReadAllowedColumnsByTable?.[table.id] || [];
+  if (policyAlertActorCeiling) allowedColumns = workflow.policyAlertAllowedColumnsByTableAndCommand?.[table.id]?.[command] || [];
   const hardDeleteSemantics = command === "DELETE" ? deleteSemanticsFor(table, workflow) : "not-applicable";
   const approvalClass = actors.includes("break-glass") ? "dual-approved-break-glass"
     : actors.includes("operator-admin") ? "operator-approved"
@@ -828,7 +833,9 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
     actorClasses: actors,
     runtimeIdentities: [identityId],
     minimumAssurance: assurance,
-    scopeRule: platformReadScope
+    scopeRule: policyAlertActorCeiling
+      ? workflow.tenantScopeRule
+      : platformReadScope
       ? workflow.tenantScopeRule
       : auditLogsRead
       ? "Tenant administrators require their canonical licensee; manufacturers require their own actor plus an approved linked licensee; platform administrators require fresh MFA, one explicit licensee and purpose. Every filter only narrows that boundary."
@@ -854,7 +861,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
     requiresNamedFunction,
     namedFunctionClass: requiresNamedFunction ? (dedicatedPlatformProjection ? `exact-${workflow.platformReadExecutionBoundary}` : preAuthFunction ? "narrow-pre-auth-security-definer" : rawEvidence ? "exact-reviewed-query-function" : "authenticated-security-repository-function") : "none",
     requiresRestrictedWorkerBoundary: workerBoundary,
-    requiresAuditEvent: manufacturerBootstrap || command !== "SELECT" || actors.some((actor) => ["platform-admin", "operator", "operator-admin", "break-glass"].includes(actor)),
+    requiresAuditEvent: manufacturerBootstrap || policyAlertActorCeiling || command !== "SELECT" || actors.some((actor) => ["platform-admin", "operator", "operator-admin", "break-glass"].includes(actor)),
     requiresApproval,
     approvalClass,
     authorizationBoundary: boundaryMode,
@@ -863,19 +870,24 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
     retentionLegalConsequences: command === "DELETE" ? "Legal hold, retention policy, tenant scope, and immutable audit evidence must be checked before deletion." : "not-applicable",
     supportingWorkflowIds: [workflow.id],
     supportingEvidence: [...workflow.canonicalSourceFiles, ...(routeEvidence ? [`${routeEvidence.source} guards=${routeEvidence.guards.join(",") || "none"}`] : [])],
-    allowScenarios: platformReadScope
+    allowScenarios: policyAlertActorCeiling
+      ? workflow.expectedAllowedScenarios
+      : platformReadScope
       ? workflow.expectedAllowedScenarios
       : manufacturerBootstrap
       ? ["A password-verified manufacturer reads only rows whose manufacturerId equals the database-verified actor; one client value may narrow but never establish the eligible licensee set."]
       : [`${actors.join(" or ")} using ${identityId} at ${assurance} performs ${command} within the recorded scope, column set, lifecycle, and boundary.`],
-    denyScenarios: platformReadScope
+    denyScenarios: policyAlertActorCeiling
+      ? workflow.expectedDeniedScenarios
+      : platformReadScope
       ? workflow.expectedDeniedScenarios
       : manufacturerBootstrap
       ? ["Caller role or tenant claims, blank scope, foreign/revoked/disabled membership, ambiguous primary membership, missing request attribution, secret projection or platform-admin fallback is denied."]
       : ["Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."],
     ...(manufacturerBootstrap ? { manufacturerBootstrapBoundaryId: MANUFACTURER_BOOTSTRAP_BOUNDARY_ID } : {}),
     ...(platformReadScope ? { platformReadScopeBoundaryId: PLATFORM_READ_SCOPE_BOUNDARY_ID, platformReadScopeClass: workflow.platformReadScopeClass } : {}),
-    confidence: routeEvidence || workerBoundary || preAuthFunction || operatorApproval || manufacturerBootstrap || platformReadScope ? "high" : "medium",
+    ...(policyAlertActorCeiling ? { policyAlertActorCeilingBoundaryId: POLICY_ALERT_ACTOR_CEILING_ID, policyAlertClass: workflow.policyAlertClass } : {}),
+    confidence: routeEvidence || workerBoundary || preAuthFunction || operatorApproval || manufacturerBootstrap || platformReadScope || policyAlertActorCeiling ? "high" : "medium",
     status: "architecture-resolved",
   };
 };
@@ -893,9 +905,9 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
       const table = tablesById.get(item.tableId);
       if (!table?.forceRlsTarget) continue;
       for (const command of item.commands) {
-        const actors = workflow.platformReadActorClasses || commandActorsFor(workflow, table, routeEvidence);
+        const actors = workflow.policyAlertActorClasses || workflow.platformReadActorClasses || commandActorsFor(workflow, table, routeEvidence);
         const identityId = runtimeIdentityForCommand(workflow);
-        const assurance = assuranceForCommand(workflow, actors, command, table, routeEvidence);
+        const assurance = workflow.policyAlertRequiredAssurance || assuranceForCommand(workflow, actors, command, table, routeEvidence);
         const rule = buildCommandRule({ table, workflow, command, actors, identityId, assurance, routeEvidence });
         rules.push(rule);
         workflow.commandRuleIds.push(rule.id);
@@ -910,7 +922,7 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
     workflow.requiredAssurance = [...new Set(workflow.requiredAssurance)].sort();
     workflow.runtimeIdentities = [...new Set(workflow.runtimeIdentities)].sort();
     workflow.semanticStatus = workflow.commandRuleIds.length || workflow.tablesTouched.every((id) => !tablesById.get(id)?.forceRlsTarget) ? "mapped" : "unresolved";
-    if (workflow.contextBoundaryStatus !== "implemented" && !workflow.systemBoundaryId && !workflow.manufacturerBootstrapBoundaryId && !workflow.platformReadScopeBoundaryId) {
+    if (workflow.contextBoundaryStatus !== "implemented" && !workflow.systemBoundaryId && !workflow.manufacturerBootstrapBoundaryId && !workflow.platformReadScopeBoundaryId && !workflow.policyAlertActorCeilingBoundaryId) {
       workflow.expectedAllowedScenarios = ["Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."];
       workflow.expectedDeniedScenarios = ["Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."];
     }
@@ -1827,6 +1839,62 @@ const applyPlatformReadScopeAuthority = (workflowManifest) => {
   return boundary;
 };
 
+const applyPolicyAlertActorCeilingAuthority = (workflowManifest) => {
+  const boundary = readJson(policyAlertActorCeilingPath);
+  assert.equal(boundary.id, POLICY_ALERT_ACTOR_CEILING_ID, "policy alert actor-ceiling boundary ID drifted");
+  assert.deepEqual(boundary.affectedWorkflows, boundary.workflowClassifications.map((item) => item.workflowId), "policy alert workflow ordering drifted");
+  const workflows = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
+  for (const classification of boundary.workflowClassifications) {
+    const workflow = workflows.get(classification.workflowId);
+    assert(workflow, `policy alert actor ceiling references missing workflow ${classification.workflowId}`);
+    workflow.policyAlertActorCeilingBoundaryId = boundary.id;
+    workflow.policyAlertClass = classification.primaryClass;
+    workflow.policyAlertRequiredAssurance = classification.requiredAssurance;
+    workflow.policyAlertActorClasses = classification.actorClasses;
+    workflow.policyAlertExecutionBoundary = classification.executionBoundary;
+    workflow.policyAlertPurposeCodes = classification.purposeCodes;
+    workflow.policyAlertAllowedColumnsByTableAndCommand = Object.fromEntries(
+      classification.tableCommandProjections.map((projection) => [projection.tableId, projection.commands])
+    );
+    workflow.authorizationBoundaryType = classification.inventoryBoundaryType;
+    workflow.authenticationStage = classification.inventoryBoundaryType === "restricted-worker" ? "system" : "authenticated";
+    workflow.tenantScopeRule = classification.scopeRule;
+    workflow.contextRequirementsSource = "human-reviewed";
+    workflow.contextRequirements = classification.inventoryBoundaryType === "restricted-worker"
+      ? ["approved restricted system identity", "durable outbox row authority", "no human actor context"]
+      : [
+          "database-verified actor ceiling",
+          `${classification.requiredAssurance} within the approved freshness window`,
+          "allowlisted purpose and immutable request attribution",
+          "transaction-local canonical scope from authoritative rows",
+        ];
+    workflow.expectedAllowedScenarios = boundary.allowScenarios;
+    workflow.expectedDeniedScenarios = boundary.denyScenarios;
+    workflow.unresolvedDecisions = workflow.unresolvedDecisions.filter((id) => id !== boundary.decisionId);
+    if (!workflow.workerBoundaryId) {
+      const code = classification.implementationStatus === "blocked-product-state-missing"
+        ? "alert-product-state-missing"
+        : classification.primaryClass === "alert-acknowledgement"
+          ? "alert-concurrency-contract-pending"
+          : "alert-runtime-contract-pending";
+      workflow.contextBoundaryBlockers = [{
+        code,
+        reason: classification.blockers.join(" "),
+        remediation: "Implement only the exact actor, scope, assurance, projection, lifecycle, concurrency and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+      }];
+    }
+    workflow.contextBoundaryPlanningEvidence = {
+      reviewedAt: "2026-07-16",
+      registeredRootCallChainVerified: true,
+      protectedQueryTraceComplete: false,
+      sameTransactionFeasible: true,
+      focusedTestsDeterministic: true,
+      databaseConcurrencyVerified: false,
+    };
+  }
+  return boundary;
+};
+
 export const buildWorkflowManifest = () => {
   const scan = scanProductionAccess();
   const existing = readJson(workflowManifestPath, { schemaVersion: 1, workflows: [] });
@@ -1910,6 +1978,7 @@ export const buildWorkflowManifest = () => {
   }
   const manufacturerBootstrapBoundary = applyManufacturerBootstrapAuthority(result);
   const platformReadScopeBoundary = applyPlatformReadScopeAuthority(result);
+  const policyAlertActorCeiling = applyPolicyAlertActorCeilingAuthority(result);
   const commandManifest = buildCommandSemantics(tableManifest, result);
   const preAuthManifest = buildPreAuthBoundary(result, commandManifest, tableManifest);
   const workerManifest = buildWorkerBoundaryManifest(result, commandManifest, tableManifest);
@@ -2009,6 +2078,29 @@ export const buildWorkflowManifest = () => {
         };
         continue;
       }
+      if (decision.id === policyAlertActorCeiling.decisionId) {
+        decision.status = "resolved";
+        decision.resolvedAt = "2026-07-16";
+        decision.selectedBoundary = policyAlertActorCeiling.id;
+        decision.affectedWorkflows = [...policyAlertActorCeiling.affectedWorkflows];
+        decision.affectedTables = [...new Set(policyAlertActorCeiling.workflowClassifications.flatMap((classification) => classification.tableCommandProjections.map((projection) => projection.tableId)))].sort();
+        decision.resolution = {
+          authority: "documents/security/rls-program/policy-alert-actor-ceiling.json",
+          boundaryId: policyAlertActorCeiling.id,
+          alertClasses: policyAlertActorCeiling.alertClasses.map((item) => item.class),
+          affectedWorkflows: policyAlertActorCeiling.affectedWorkflows.length,
+          runtimeImplementationPending: true,
+          postgresqlCertificationPending: true,
+          guarantees: [
+            "No generic alert administrator or platform role wildcard",
+            "Licensee and manufacturer visibility is bounded by authoritative tenant and actor rows",
+            "Platform and incident access requires bounded scope, fresh assurance, purpose and attribution",
+            "Only acknowledgement and one-way incident escalation have approved PolicyAlert transitions",
+            "Assignment, resolution, suppression, public access, human worker impersonation and direct operator table access are prohibited",
+          ],
+        };
+        continue;
+      }
       decision.affectedWorkflows = workflows.filter((workflow) => workflow.unresolvedDecisions.includes(decision.id)
         || decision.id === "decision-runtime-role-split"
         || (decision.id === "decision-operator-administration" && workflow.authorizationBoundaryType === "operator-break-glass")).map((workflow) => workflow.id);
@@ -2035,7 +2127,7 @@ export const buildWorkflowManifest = () => {
   return result;
 };
 
-export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath), workerBoundaries: readJson(workerBoundariesPath), objectOwnershipChain: readJson(objectOwnershipChainPath), operatorBoundaries: readJson(operatorBoundariesPath), systemBoundaries: readJson(systemBoundariesPath), manufacturerBootstrapBoundary: readJson(manufacturerBootstrapBoundaryPath), platformReadScopeBoundary: readJson(platformReadScopeBoundaryPath) });
+export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath), workerBoundaries: readJson(workerBoundariesPath), objectOwnershipChain: readJson(objectOwnershipChainPath), operatorBoundaries: readJson(operatorBoundariesPath), systemBoundaries: readJson(systemBoundariesPath), manufacturerBootstrapBoundary: readJson(manufacturerBootstrapBoundaryPath), platformReadScopeBoundary: readJson(platformReadScopeBoundaryPath), policyAlertActorCeiling: readJson(policyAlertActorCeilingPath) });
 
 export const validateManufacturerBootstrapBoundary = (boundary, workflowManifest, commandManifest, tableManifest, decisionManifest) => {
   assert.equal(boundary?.schemaVersion, 1, "manufacturer bootstrap schema version");
@@ -2216,6 +2308,112 @@ export const validatePlatformReadScopeBoundary = (boundary, workflowManifest, co
   assert.equal(decision.selectedBoundary, boundary.id, "platform read-scope decision boundary drifted");
   assert.equal(decision.resolution?.authority, "documents/security/rls-program/platform-read-scope-boundary.json", "platform read-scope decision lacks authority");
   assert.deepEqual(decision.affectedWorkflows, boundary.affectedWorkflows, "platform decision workflow coverage drifted");
+  return true;
+};
+
+export const validatePolicyAlertActorCeiling = (boundary, workflowManifest, commandManifest, tableManifest, decisionManifest, operatorManifest, workerManifest) => {
+  assert.equal(boundary?.schemaVersion, 1, "policy alert actor-ceiling schema version");
+  assert.equal(boundary.id, POLICY_ALERT_ACTOR_CEILING_ID, "policy alert actor-ceiling boundary ID");
+  assert.equal(boundary.decisionId, "decision-context-policy-alert-actor-ceiling", "policy alert actor-ceiling decision ID");
+  const classNames = ["tenant-security-alert-read", "manufacturer-alert-read", "platform-alert-triage", "incident-response-alert-read", "alert-acknowledgement", "alert-assignment", "alert-resolution", "alert-suppression", "alert-escalation", "worker-alert-delivery", "operator-alert-procedure", "public-alert-status", "prohibited-alert-access"];
+  assert.deepEqual(boundary.alertClasses.map((item) => item.class), classNames, "policy alert classes are incomplete");
+  assert(!boundary.alertClasses.flatMap((item) => item.actorClasses).some((actor) => /^(?:admin|generic-admin|alert-admin)$/i.test(actor)), "actor class is generic admin");
+  assert.equal(boundary.actorCeilings.licenseeAdmin.foreignTenantAccess, false, "tenant admin gains cross-tenant alert access");
+  assert.equal(boundary.actorCeilings.manufacturer.wholeLicenseeVisibility, false, "manufacturer gains whole-licensee alert visibility");
+  assert.equal(boundary.actorCeilings.platformAdmin.roleAloneAuthorizesAccess, false, "platform role alone grants access");
+  assert.equal(boundary.actorCeilings.platformAdmin.purposeRequired, true, "platform alert purpose is absent");
+  assert.equal(boundary.actorCeilings.incidentResponse.authorizationExpiryRequired, true, "incident alert access lacks expiry");
+  assert.equal(boundary.scopeModels.nullScopeBecomesGlobal, false, "alert scope becomes nullable wildcard");
+  assert.equal(boundary.purposeRules.required, true, "alert purpose is absent");
+  assert.equal(boundary.purposeRules.allowlistedCodesOnly, true, "alert purpose is unrestricted");
+  assert.equal(boundary.purposeRules.freeTextEstablishesAuthority, false, "free-text alert purpose establishes authority");
+
+  const acknowledgement = boundary.lifecycleTransitions.find((item) => item.class === "alert-acknowledgement");
+  assert(acknowledgement?.sourceState.includes("acknowledgedAt IS NULL") && acknowledgement.targetState.includes("acknowledgedAt IS NOT NULL"), "acknowledgement lacks state transition");
+  assert(/compare-and-set/i.test(acknowledgement.concurrency), "acknowledgement lacks compare-and-set or lock");
+  assert.deepEqual(acknowledgement.allowedColumns, ["acknowledgedAt", "acknowledgedByUserId"], "acknowledgement mutates protected ownership columns");
+  const assignment = boundary.lifecycleTransitions.find((item) => item.class === "alert-assignment");
+  assert.equal(assignment?.targetState, "unsupported", "assignment changes tenant ownership");
+  assert.equal(assignment?.allowedColumns.length, 0, "assignment changes tenant ownership");
+  const resolution = boundary.lifecycleTransitions.find((item) => item.class === "alert-resolution");
+  assert.equal(resolution?.sourceState, "unsupported", "resolution can occur from an invalid state");
+  assert.equal(resolution?.targetState, "unsupported", "resolution can occur from an invalid state");
+  const suppression = boundary.lifecycleTransitions.find((item) => item.class === "alert-suppression");
+  assert.equal(suppression?.requiredReason, true, "suppression lacks reason or audit");
+  assert(suppression?.auditEvent?.trim(), "suppression lacks reason or audit");
+  assert.equal(boundary.concurrencyRules.applicationPrecheckAloneSufficient, false, "alert mutation relies on application pre-check");
+  assert.equal(boundary.idempotencyReplaySemantics.conflictingReplayDenied, true, "alert mutation permits conflicting replay");
+
+  assert.equal(boundary.publicAccessDisposition.allowed, false, "public alert access lacks proof binding");
+  assert.equal(boundary.publicAccessDisposition.proofBindingRequiredIfReconsidered, true, "public alert access lacks proof binding");
+  assert.equal(boundary.publicAccessDisposition.enumerationProtectionRequiredIfReconsidered, true, "public alert access lacks enumeration protection");
+  assert.equal(boundary.actorCeilings.worker.humanImpersonationAllowed, false, "worker becomes human-attributed");
+  assert.equal(boundary.actorCeilings.operator.directAlertTableAccess, false, "operator boundary is replaced by direct table access");
+  assert(boundary.auditRequirements.required && boundary.auditRequirements.immutable && boundary.auditRequirements.sameTransactionAsReadOrMutation, "alert audit attribution is missing");
+
+  const secretPattern = /details|rawDetection|secret|password|token|credential|privateKey|fingerprint|rawAudit|siemWebhook|customerPersonal/i;
+  for (const [projectionName, columns] of Object.entries(boundary.allowedProjections)) {
+    assert(!columns.some((column) => secretPattern.test(column)), `${projectionName} secret detection payload entered projection`);
+  }
+  assert(boundary.prohibitedFields.some((field) => field === "PolicyAlert.details") && boundary.prohibitedFields.some((field) => /siemWebhookSecret/.test(field)), "policy alert prohibited fields are incomplete");
+  assert.equal(boundary.nestedProjectionRules.rawJsonReturned, false, "secret detection payload entered projection");
+
+  const operatorIds = new Set(operatorManifest.boundaries.map((item) => item.id));
+  const workerIds = new Set(workerManifest.boundaries.map((item) => item.id));
+  for (const mapping of boundary.workerOperatorMappings) {
+    if (mapping.alertClass === "worker-alert-delivery") assert(workerIds.has(mapping.boundaryId), `policy alert references unknown worker boundary ${mapping.boundaryId}`);
+    else assert(operatorIds.has(mapping.boundaryId), `policy alert references unknown operator boundary ${mapping.boundaryId}`);
+    assert.equal(mapping.ordinaryHumanContext, false, "worker becomes human-attributed");
+    assert.equal(mapping.directHumanTableAccess, false, "operator boundary is replaced by direct table access");
+  }
+
+  const tableIds = new Set(tableManifest.tables.map((item) => item.id));
+  const workflows = new Map(workflowManifest.workflows.map((item) => [item.id, item]));
+  assert.deepEqual(boundary.affectedWorkflows, boundary.workflowClassifications.map((item) => item.workflowId), "policy alert affected workflow coverage drifted");
+  assert.equal(new Set(boundary.affectedWorkflows).size, boundary.affectedWorkflows.length, "policy alert affected workflows are duplicated");
+  for (const classification of boundary.workflowClassifications) {
+    assert(classNames.includes(classification.primaryClass), `${classification.workflowId} has an invalid alert class`);
+    assert(classification.actorClasses.length && !classification.actorClasses.some((actor) => /^(?:admin|generic-admin|alert-admin)$/i.test(actor)), `${classification.workflowId} actor class is generic admin`);
+    assert(["mfa-verified", "step-up-verified", "system-verified"].includes(classification.requiredAssurance), `${classification.workflowId} lacks required alert assurance`);
+    assert(classification.purposeCodes.length && classification.purposeCodes.every((code) => boundary.purposeCodes.some((item) => item.code === code)), `${classification.workflowId} alert purpose is absent`);
+    assert(classification.requiredSelectors.length && classification.scopeRule?.trim(), `${classification.workflowId} alert scope is missing`);
+    assert(classification.tableCommandProjections.length && classification.tableCommandProjections.every((projection) => tableIds.has(projection.tableId)), `${classification.workflowId} lacks exact alert projection`);
+    for (const projection of classification.tableCommandProjections) {
+      for (const columns of Object.values(projection.commands)) {
+        assert.equal(new Set(columns).size, columns.length, `${classification.workflowId} alert projection contains duplicates`);
+        if (projection.tableId === "table-policy-alert") assert(!columns.some((column) => secretPattern.test(column)), `${classification.workflowId} secret detection payload entered projection`);
+      }
+      for (const columns of Object.entries(projection.commands).filter(([command]) => command === "UPDATE").map(([, columns]) => columns)) {
+        assert(!columns.some((column) => ["id", "licenseeId", "manufacturerId", "batchId", "qrCodeId", "policyRuleId", "createdAt"].includes(column)), `${classification.workflowId} mutation changes protected ownership columns`);
+      }
+    }
+    const workflow = workflows.get(classification.workflowId);
+    assert(workflow, `policy alert boundary references missing workflow ${classification.workflowId}`);
+    assert.equal(workflow.policyAlertActorCeilingBoundaryId, boundary.id, `${classification.workflowId} lacks policy alert boundary ID`);
+    assert.equal(workflow.policyAlertClass, classification.primaryClass, `${classification.workflowId} alert class drifted`);
+    assert.equal(workflow.policyAlertRequiredAssurance, classification.requiredAssurance, `${classification.workflowId} alert assurance drifted`);
+    assert(!workflow.unresolvedDecisions.includes(boundary.decisionId), `${classification.workflowId} retains resolved policy alert decision`);
+    assert.notEqual(workflow.contextBoundaryStatus, "implemented", `${classification.workflowId} is falsely context-boundary implemented`);
+    for (const ruleId of workflow.commandRuleIds) {
+      const rule = commandManifest.rules.find((item) => item.id === ruleId);
+      assert.equal(rule?.policyAlertActorCeilingBoundaryId, boundary.id, `${ruleId} lacks policy alert boundary ID`);
+      assert.equal(rule.minimumAssurance, classification.requiredAssurance, `${ruleId} alert assurance drifted`);
+      assert.equal(rule.requiresAuditEvent, true, `${ruleId} alert attribution is missing`);
+      const projection = classification.tableCommandProjections.find((item) => item.tableId === rule.tableId);
+      assert.deepEqual(rule.allowedColumns, projection?.commands?.[rule.command] || [], `${ruleId} alert projection drifted`);
+      if (classification.primaryClass === "worker-alert-delivery") {
+        assert.equal(rule.authorizationBoundary, "restricted-worker", `${ruleId} worker alert delivery is ordinary human access`);
+        assert(rule.actorClasses.every((actor) => actor === "worker"), `${ruleId} worker becomes human-attributed`);
+      }
+    }
+  }
+
+  const decision = decisionManifest.decisions.find((item) => item.id === boundary.decisionId);
+  assert.equal(decision?.status, "resolved", "policy alert actor-ceiling decision is unresolved");
+  assert.equal(decision.selectedBoundary, boundary.id, "policy alert decision boundary drifted");
+  assert.equal(decision.resolution?.authority, "documents/security/rls-program/policy-alert-actor-ceiling.json", "policy alert decision lacks authority");
+  assert.deepEqual(decision.affectedWorkflows, boundary.affectedWorkflows, "policy alert decision workflow coverage drifted");
+  assert(boundary.implementationStatus?.trim() && boundary.postgresqlCertificationRequirements?.length >= 8, "policy alert decision is resolved with missing semantics");
   return true;
 };
 export const validatePreAuthFunctions = (manifest, workflowManifest, commandManifest, identityManifest, tableManifest) => {

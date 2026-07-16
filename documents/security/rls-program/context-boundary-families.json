@@ -11,6 +11,7 @@
     "documents/security/rls-program/system-boundaries.json",
     "documents/security/rls-program/manufacturer-bootstrap-boundary.json",
     "documents/security/rls-program/platform-read-scope-boundary.json",
+    "documents/security/rls-program/policy-alert-actor-ceiling.json",
     "documents/security/rls-program/policy-dependency-graph.json",
     "documents/security/rls-program/ARCHITECTURE.md",
     "backend/prisma/schema.prisma"
@@ -28,7 +29,8 @@
     "operatorBoundaries": 29,
     "systemBoundaries": 2,
     "manufacturerBootstrapBoundaries": 1,
-    "platformReadScopeBoundaries": 1
+    "platformReadScopeBoundaries": 1,
+    "policyAlertActorCeilings": 1
   },
   "systemBoundaryContracts": [
     {
@@ -1259,7 +1261,7 @@
       }
     },
     {
-      "id": "family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827",
+      "id": "family-simple-tenant-scoped-reads-tracepolicycontroller-c2ecdef3b3",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
         "workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller"
@@ -1277,7 +1279,7 @@
         "table-policy-alert"
       ],
       "actorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
@@ -1297,22 +1299,25 @@
         "command-policy-alert-select-72caff430120"
       ],
       "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "PolicyAlert.licenseeId must equal the active LICENSEE_ADMIN or ORG_ADMIN actor's database-verified canonical licensee. Platform and manufacturer actors are denied on this route."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
       "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
       "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
       "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "medium",
+      "riskLevel": "low",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "policy-alert-actor-ceiling-v1"
+      ],
       "blockers": [
         {
-          "code": "actor-command-contract",
-          "reason": "The registered route actor ceiling and assurance do not match the reviewed command rule.",
-          "remediation": "Choose the product actor ceiling and require matching tenant scope, assurance, purpose and immutable read attribution.",
-          "id": "blocker-family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827-actor-command-contract"
+          "code": "alert-runtime-contract-pending",
+          "reason": "The current route lacks recent MFA, fixed purpose, request attribution, date/keyset bounds, transaction-client-only access, explicit select, and same-snapshot count/list; platform role currently reaches a blank-scope fallback.",
+          "remediation": "Implement only the exact actor, scope, assurance, projection, lifecycle, concurrency and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-simple-tenant-scoped-reads-tracepolicycontroller-c2ecdef3b3-alert-runtime-contract-pending"
         }
       ],
       "implementationStatus": "blocked",
@@ -1743,7 +1748,7 @@
       }
     },
     {
-      "id": "family-platform-admin-bounded-reads-iralertcontroller-57de0c27cd",
+      "id": "family-platform-admin-bounded-reads-iralertcontroller-0cf5698bdc",
       "category": "platform-admin bounded reads",
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts"
@@ -1781,7 +1786,7 @@
         "command-policy-alert-select-4456be80d295"
       ],
       "tenantScopeModel": [
-        "Every alert must match the active incident authorization and its derived tenant scope; optional licensee or manufacturer selectors may only narrow that set."
+        "Every alert must match an active unexpired incident authorization and its exact licensee; optional alert, batch, QR, manufacturer, rule, type, severity, or acknowledgement filters only narrow that set."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
@@ -1792,14 +1797,15 @@
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
       "approvedBoundaryIds": [
-        "platform-read-scope-v1"
+        "platform-read-scope-v1",
+        "policy-alert-actor-ceiling-v1"
       ],
       "blockers": [
         {
-          "code": "incident-authorization-model-missing",
-          "reason": "No durable incident-read authorization, bounded target set, or expiry exists; the current route allows broad optional filters and rich nested personal data.",
-          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
-          "id": "blocker-family-platform-admin-bounded-reads-iralertcontroller-57de0c27cd-incident-authorization-model-missing"
+          "code": "alert-product-state-missing",
+          "reason": "The product has no durable expiring incident-read authorization. The current route lacks recent MFA, incident binding, purpose, attribution, explicit select, keyset/date bounds, same transaction, and redacts neither nested emails nor raw alert details.",
+          "remediation": "Implement only the exact actor, scope, assurance, projection, lifecycle, concurrency and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-platform-admin-bounded-reads-iralertcontroller-0cf5698bdc-alert-product-state-missing"
         }
       ],
       "implementationStatus": "blocked",
@@ -4834,7 +4840,7 @@
       }
     },
     {
-      "id": "family-multi-table-atomic-mutations-iralertcontroller-bd2deb7410",
+      "id": "family-multi-table-atomic-mutations-iralertcontroller-212fd714f3",
       "category": "multi-table atomic mutations",
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert"
@@ -4856,7 +4862,7 @@
       ],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "mfa-verified"
+        "step-up-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -4873,7 +4879,7 @@
         "command-policy-alert-update-22558db54d93"
       ],
       "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "The exact alert and exact active incident must share one licensee and fall under one unexpired incident authorization; acknowledgement, unlinking, reassignment, and mixed-field patch requests are denied on this workflow."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
@@ -4883,24 +4889,15 @@
       "riskLevel": "high",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "policy-alert-actor-ceiling-v1"
+      ],
       "blockers": [
         {
-          "code": "mutation-concurrency-proof",
-          "reason": "The mutation lacks family-level database concurrency and replay proof.",
-          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
-          "id": "blocker-family-multi-table-atomic-mutations-iralertcontroller-bd2deb7410-mutation-concurrency-proof"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-multi-table-atomic-mutations-iralertcontroller-bd2deb7410-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-multi-table-atomic-mutations-iralertcontroller-bd2deb7410-unverified-execution-path"
+          "code": "alert-product-state-missing",
+          "reason": "The current generic patch accepts acknowledgement toggles and incident unlinking, does not validate incident tenant/authorization, lacks reason, request ID, purpose, CAS/idempotency, and atomic audit/outbox behavior. Split or narrow the route before implementation.",
+          "remediation": "Implement only the exact actor, scope, assurance, projection, lifecycle, concurrency and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-multi-table-atomic-mutations-iralertcontroller-212fd714f3-alert-product-state-missing"
         }
       ],
       "implementationStatus": "blocked",
@@ -39298,7 +39295,7 @@
       }
     },
     {
-      "id": "family-incident-governance-workflows-tracepolicycontroller-e3498294c8",
+      "id": "family-incident-governance-workflows-tracepolicycontroller-07820d4e64",
       "category": "incident/governance workflows",
       "workflowIds": [
         "workflow-http-backend-src-controllers-trace-policy-controller-ts-acknowledge-policy-alert-controller"
@@ -39316,8 +39313,7 @@
         "table-policy-alert"
       ],
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "licensee-admin"
       ],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
@@ -39338,7 +39334,7 @@
         "command-policy-alert-update-5de5738ca783"
       ],
       "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "The exact alert ID must resolve under the active tenant administrator's canonical licensee; platform and manufacturer actors are denied on this route."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
@@ -39348,24 +39344,15 @@
       "riskLevel": "medium",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "policy-alert-actor-ceiling-v1"
+      ],
       "blockers": [
         {
-          "code": "mutation-concurrency-proof",
-          "reason": "The mutation lacks family-level database concurrency and replay proof.",
-          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
-          "id": "blocker-family-incident-governance-workflows-tracepolicycontroller-e3498294c8-mutation-concurrency-proof"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-incident-governance-workflows-tracepolicycontroller-e3498294c8-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-incident-governance-workflows-tracepolicycontroller-e3498294c8-unverified-execution-path"
+          "code": "alert-concurrency-contract-pending",
+          "reason": "The current controller performs a pre-check plus unconditional update, has no database CAS/idempotency record, returns the full row, and writes audit/notifications outside one canonical transaction.",
+          "remediation": "Implement only the exact actor, scope, assurance, projection, lifecycle, concurrency and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-incident-governance-workflows-tracepolicycontroller-07820d4e64-alert-concurrency-contract-pending"
         }
       ],
       "implementationStatus": "blocked",
@@ -40615,6 +40602,9 @@
       "automationEligibility": "contract-only",
       "governingBoundaryIds": [
         "worker-boundary-siem-outbox-delivery"
+      ],
+      "approvedBoundaryIds": [
+        "policy-alert-actor-ceiling-v1"
       ],
       "blockers": [],
       "implementationStatus": "contract-ready",

@@ -26824,24 +26824,12 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "minimumAssurance": "step-up-verified",
+      "scopeRule": "The exact alert and exact active incident must share one licensee and fall under one unexpired incident authorization; acknowledgement, unlinking, reassignment, and mixed-field patch requests are denied on this workflow.",
       "allowedColumns": [
-        "acknowledgedAt",
-        "acknowledgedByUserId",
-        "alertType",
-        "batchId",
-        "createdAt",
-        "details",
         "id",
-        "incidentId",
         "licenseeId",
-        "manufacturerId",
-        "message",
-        "policyRuleId",
-        "qrCodeId",
-        "score",
-        "severity"
+        "incidentId"
       ],
       "protectedColumns": [
         "createdAt",
@@ -26872,11 +26860,22 @@
         "backend/src/routes/index.ts:2357 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
       ],
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "alert-escalation",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -26891,7 +26890,7 @@
         "identity-authenticated-app"
       ],
       "minimumAssurance": "step-up-verified",
-      "scopeRule": "Every alert must match the active incident authorization and its derived tenant scope; optional licensee or manufacturer selectors may only narrow that set.",
+      "scopeRule": "Every alert must match an active unexpired incident authorization and its exact licensee; optional alert, batch, QR, manufacturer, rule, type, severity, or acknowledgement filters only narrow that set.",
       "allowedColumns": [
         "id",
         "licenseeId",
@@ -26936,17 +26935,24 @@
         "backend/src/routes/index.ts:2356 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
-        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
-        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
-        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
+        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
       ],
       "denyScenarios": [
-        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
-        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
-        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
+        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
       ],
       "platformReadScopeBoundaryId": "platform-read-scope-v1",
       "platformReadScopeClass": "incident-response-read",
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "incident-response-alert-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -27020,30 +27026,18 @@
       "tableId": "table-policy-alert",
       "command": "SELECT",
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "licensee-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "The exact alert ID must resolve under the active tenant administrator's canonical licensee; platform and manufacturer actors are denied on this route.",
       "allowedColumns": [
-        "acknowledgedAt",
-        "acknowledgedByUserId",
-        "alertType",
-        "batchId",
-        "createdAt",
-        "details",
         "id",
-        "incidentId",
         "licenseeId",
-        "manufacturerId",
-        "message",
-        "policyRuleId",
-        "qrCodeId",
-        "score",
-        "severity"
+        "acknowledgedAt",
+        "acknowledgedByUserId"
       ],
       "protectedColumns": [
         "createdAt",
@@ -27074,11 +27068,22 @@
         "backend/src/routes/index.ts:2142 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
       ],
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "alert-acknowledgement",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -27087,29 +27092,24 @@
       "tableId": "table-policy-alert",
       "command": "SELECT",
       "actorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "PolicyAlert.licenseeId must equal the active LICENSEE_ADMIN or ORG_ADMIN actor's database-verified canonical licensee. Platform and manufacturer actors are denied on this route.",
       "allowedColumns": [
-        "acknowledgedAt",
-        "acknowledgedByUserId",
-        "alertType",
-        "batchId",
-        "createdAt",
-        "details",
         "id",
-        "incidentId",
-        "licenseeId",
-        "manufacturerId",
+        "alertType",
+        "severity",
         "message",
-        "policyRuleId",
+        "incidentId",
+        "batchId",
         "qrCodeId",
-        "score",
-        "severity"
+        "manufacturerId",
+        "acknowledgedAt",
+        "createdAt"
       ],
       "protectedColumns": [
         "createdAt",
@@ -27140,11 +27140,22 @@
         "backend/src/routes/index.ts:2131 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
       ],
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "tenant-security-alert-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -27419,19 +27430,10 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "minimumAssurance": "step-up-verified",
+      "scopeRule": "The exact alert and exact active incident must share one licensee and fall under one unexpired incident authorization; acknowledgement, unlinking, reassignment, and mixed-field patch requests are denied on this workflow.",
       "allowedColumns": [
-        "acknowledgedAt",
-        "acknowledgedByUserId",
-        "alertType",
-        "batchId",
-        "incidentId",
-        "message",
-        "policyRuleId",
-        "qrCodeId",
-        "score",
-        "severity"
+        "incidentId"
       ],
       "protectedColumns": [
         "createdAt",
@@ -27462,11 +27464,22 @@
         "backend/src/routes/index.ts:2357 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
       ],
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "alert-escalation",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -27537,25 +27550,16 @@
       "tableId": "table-policy-alert",
       "command": "UPDATE",
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "licensee-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "The exact alert ID must resolve under the active tenant administrator's canonical licensee; platform and manufacturer actors are denied on this route.",
       "allowedColumns": [
         "acknowledgedAt",
-        "acknowledgedByUserId",
-        "alertType",
-        "batchId",
-        "incidentId",
-        "message",
-        "policyRuleId",
-        "qrCodeId",
-        "score",
-        "severity"
+        "acknowledgedByUserId"
       ],
       "protectedColumns": [
         "createdAt",
@@ -27586,11 +27590,22 @@
         "backend/src/routes/index.ts:2142 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
       ],
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "alert-acknowledgement",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -65167,16 +65182,13 @@
       "minimumAssurance": "system-verified",
       "scopeRule": "Load the durable outbox row, validate its allowlisted event type and canonical digest, and resolve any tenant/actor references from authoritative tables; JSON claims never grant authority.",
       "allowedColumns": [
-        "attempts",
-        "createdAt",
-        "eventType",
         "id",
-        "lastError",
-        "nextAttemptAt",
+        "eventType",
         "payload",
-        "sentAt",
         "status",
-        "updatedAt"
+        "attempts",
+        "nextAttemptAt",
+        "createdAt"
       ],
       "protectedColumns": [
         "createdAt",
@@ -65198,7 +65210,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": true,
-      "requiresAuditEvent": false,
+      "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "restricted-worker",
@@ -65217,6 +65229,8 @@
       "denyScenarios": [
         "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
       ],
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "worker-alert-delivery",
       "confidence": "high",
       "status": "architecture-resolved",
       "workerBoundaryId": "worker-boundary-siem-outbox-delivery"
@@ -65234,11 +65248,12 @@
       "minimumAssurance": "system-verified",
       "scopeRule": "Load the durable outbox row, validate its allowlisted event type and canonical digest, and resolve any tenant/actor references from authoritative tables; JSON claims never grant authority.",
       "allowedColumns": [
+        "status",
         "attempts",
-        "eventType",
-        "lastError",
         "nextAttemptAt",
-        "sentAt"
+        "lastError",
+        "sentAt",
+        "updatedAt"
       ],
       "protectedColumns": [
         "createdAt",
@@ -65281,6 +65296,8 @@
       "denyScenarios": [
         "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
       ],
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "worker-alert-delivery",
       "confidence": "high",
       "status": "architecture-resolved",
       "workerBoundaryId": "worker-boundary-siem-outbox-delivery"

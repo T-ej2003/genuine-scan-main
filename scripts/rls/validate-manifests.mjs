@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
+import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
 import { contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch, validateSystemBoundaryContracts } from "./context-boundary-plan.mjs";
 
-const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries, objectOwnershipChain, operatorBoundaries, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary } = manifests();
-assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries && objectOwnershipChain && operatorBoundaries && systemBoundaries && manufacturerBootstrapBoundary && platformReadScopeBoundary, "all programme manifests must exist");
+const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries, objectOwnershipChain, operatorBoundaries, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling } = manifests();
+assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries && objectOwnershipChain && operatorBoundaries && systemBoundaries && manufacturerBootstrapBoundary && platformReadScopeBoundary && policyAlertActorCeiling, "all programme manifests must exist");
 const modelNames = parseSchema().map((model) => model.name);
 assert.deepEqual([...tables.tables.map((table) => table.prismaModel)].sort(), [...modelNames].sort(), "every Prisma model must appear exactly once");
 assert.equal(new Set(tables.tables.map((table) => table.id)).size, tables.tables.length, "table IDs must be unique");
@@ -180,9 +180,10 @@ validateObjectOwnershipChain(objectOwnershipChain, tables, identities, preAuthFu
 validateOperatorBoundaries(operatorBoundaries, workflows, commandSemantics, identities);
 validateManufacturerBootstrapBoundary(manufacturerBootstrapBoundary, workflows, commandSemantics, tables, decisions);
 validatePlatformReadScopeBoundary(platformReadScopeBoundary, workflows, commandSemantics, tables, decisions, operatorBoundaries);
+validatePolicyAlertActorCeiling(policyAlertActorCeiling, workflows, commandSemantics, tables, decisions, operatorBoundaries, workerBoundaries);
 const contextBoundaryFamilies = JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8"));
 validateSystemBoundaryContracts(systemBoundaries, workflows);
-validateContextBoundaryPlan(contextBoundaryFamilies, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary);
+validateContextBoundaryPlan(contextBoundaryFamilies, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling);
 validateContextBoundaryReadBatch(JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8")), contextBoundaryFamilies, workflows, commandSemantics, tables);
 assert(sharedApplyIsBlocked(), "existing shared-table apply must remain blocked before BEGIN");
 console.log(JSON.stringify({ valid: true, tables: tables.tables.length, workflows: workflows.workflows.length, productionAccessSites: mappedAccessIds.size }));

@@ -516,7 +516,7 @@
       "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827"
+        "family-simple-tenant-scoped-reads-tracepolicycontroller-c2ecdef3b3"
       ],
       "canonicalFiles": [
         "backend/src/controllers/tracePolicyController.ts",
@@ -635,7 +635,7 @@
       "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-platform-admin-bounded-reads-iralertcontroller-57de0c27cd"
+        "family-platform-admin-bounded-reads-iralertcontroller-0cf5698bdc"
       ],
       "canonicalFiles": [
         "backend/src/controllers/irAlertController.ts",

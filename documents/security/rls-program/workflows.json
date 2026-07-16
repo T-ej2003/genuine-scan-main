@@ -6461,23 +6461,28 @@
           ]
         }
       ],
-      "tenantScopeRule": "Every alert must match the active incident authorization and its derived tenant scope; optional licensee or manufacturer selectors may only narrow that set.",
+      "tenantScopeRule": "Every alert must match an active unexpired incident authorization and its exact licensee; optional alert, batch, QR, manufacturer, rule, type, severity, or acknowledgement filters only narrow that set.",
       "contextRequirements": [
-        "database-verified active platform actor and database role",
+        "database-verified actor ceiling",
         "step-up-verified within the approved freshness window",
         "allowlisted purpose and immutable request attribution",
-        "transaction-local canonical scope from server-validated selectors"
+        "transaction-local canonical scope from authoritative rows"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
-        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
-        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
+        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
       ],
       "expectedDeniedScenarios": [
-        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
-        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
-        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
+        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -6526,13 +6531,14 @@
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
         "sameTransactionFeasible": true,
-        "focusedTestsDeterministic": true
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
       },
       "contextBoundaryBlockers": [
         {
-          "code": "incident-authorization-model-missing",
-          "reason": "No durable incident-read authorization, bounded target set, or expiry exists; the current route allows broad optional filters and rich nested personal data.",
-          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
+          "code": "alert-product-state-missing",
+          "reason": "The product has no durable expiring incident-read authorization. The current route lacks recent MFA, incident binding, purpose, attribution, explicit select, keyset/date bounds, same transaction, and redacts neither nested emails nor raw alert details.",
+          "remediation": "Implement only the exact actor, scope, assurance, projection, lifecycle, concurrency and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
       ],
       "platformReadScopeBoundaryId": "platform-read-scope-v1",
@@ -6565,7 +6571,36 @@
       "platformReadResponseProjection": [
         "alert identifiers and severity",
         "approved rule/batch/licensee display names without email, QR payload, or details"
-      ]
+      ],
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "incident-response-alert-read",
+      "policyAlertRequiredAssurance": "step-up-verified",
+      "policyAlertActorClasses": [
+        "platform-admin"
+      ],
+      "policyAlertExecutionBoundary": "incident-bound-actor-context-or-approved-operator-boundary",
+      "policyAlertPurposeCodes": [
+        "incident-response-alert-triage"
+      ],
+      "policyAlertAllowedColumnsByTableAndCommand": {
+        "table-policy-alert": {
+          "SELECT": [
+            "id",
+            "licenseeId",
+            "alertType",
+            "severity",
+            "message",
+            "score",
+            "policyRuleId",
+            "incidentId",
+            "batchId",
+            "qrCodeId",
+            "manufacturerId",
+            "acknowledgedAt",
+            "createdAt"
+          ]
+        }
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert",
@@ -6591,16 +6626,28 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "The exact alert and exact active incident must share one licensee and fall under one unexpired incident authorization; acknowledgement, unlinking, reassignment, and mixed-field patch requests are denied on this workflow.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified actor ceiling",
+        "step-up-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from authoritative rows"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -6630,7 +6677,7 @@
           "method": "findUnique"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-policy-alert-select-22558db54d93",
         "command-policy-alert-update-22558db54d93"
@@ -6639,12 +6686,49 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "step-up-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "alert-escalation",
+      "policyAlertRequiredAssurance": "step-up-verified",
+      "policyAlertActorClasses": [
+        "platform-admin"
+      ],
+      "policyAlertExecutionBoundary": "incident-bound-actor-context-or-approved-operator-boundary",
+      "policyAlertPurposeCodes": [
+        "alert-escalation"
+      ],
+      "policyAlertAllowedColumnsByTableAndCommand": {
+        "table-policy-alert": {
+          "SELECT": [
+            "id",
+            "licenseeId",
+            "incidentId"
+          ],
+          "UPDATE": [
+            "incidentId"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "alert-product-state-missing",
+          "reason": "The current generic patch accepts acknowledgement toggles and incident unlinking, does not validate incident tenant/authorization, lacks reason, request ID, purpose, CAS/idempotency, and atomic audit/outbox behavior. Split or narrow the route before implementation.",
+          "remediation": "Implement only the exact actor, scope, assurance, projection, lifecycle, concurrency and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-ir-incident-controller-ts-add-ir-incident-event",
@@ -12549,8 +12633,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "licensee-admin"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/tracePolicyController.ts"
@@ -12567,16 +12650,28 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "The exact alert ID must resolve under the active tenant administrator's canonical licensee; platform and manufacturer actors are denied on this route.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified actor ceiling",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from authoritative rows"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -12606,14 +12701,13 @@
           "method": "findFirst"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-policy-alert-select-5de5738ca783",
         "command-policy-alert-update-5de5738ca783"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "licensee-admin"
       ],
       "requiredAssurance": [
         "mfa-verified"
@@ -12621,7 +12715,46 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "alert-acknowledgement",
+      "policyAlertRequiredAssurance": "mfa-verified",
+      "policyAlertActorClasses": [
+        "licensee-admin"
+      ],
+      "policyAlertExecutionBoundary": "normal-actor-context",
+      "policyAlertPurposeCodes": [
+        "alert-acknowledgement"
+      ],
+      "policyAlertAllowedColumnsByTableAndCommand": {
+        "table-policy-alert": {
+          "SELECT": [
+            "id",
+            "licenseeId",
+            "acknowledgedAt",
+            "acknowledgedByUserId"
+          ],
+          "UPDATE": [
+            "acknowledgedAt",
+            "acknowledgedByUserId"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "alert-concurrency-contract-pending",
+          "reason": "The current controller performs a pre-check plus unconditional update, has no database CAS/idempotency record, returns the full row, and writes audit/notifications outside one canonical transaction.",
+          "remediation": "Implement only the exact actor, scope, assurance, projection, lifecycle, concurrency and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-trace-policy-controller-ts-export-batch-audit-package-controller",
@@ -12702,7 +12835,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/tracePolicyController.ts"
@@ -12718,16 +12851,28 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "PolicyAlert.licenseeId must equal the active LICENSEE_ADMIN or ORG_ADMIN actor's database-verified canonical licensee. Platform and manufacturer actors are denied on this route.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified actor ceiling",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from authoritative rows"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
+        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
+        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
+        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
+        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
+        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
+        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
+        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
+        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
+        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -12742,9 +12887,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-policy-alert-actor-ceiling"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-9aba912d4d4e84ac",
@@ -12764,7 +12907,7 @@
         "command-policy-alert-select-72caff430120"
       ],
       "commandActorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "requiredAssurance": [
         "mfa-verified"
@@ -12777,16 +12920,43 @@
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
-        "focusedTestsDeterministic": true
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
       },
       "contextBoundaryBlockers": [
         {
-          "code": "actor-command-contract",
-          "reason": "The registered route actor ceiling and assurance do not match the reviewed command rule.",
-          "remediation": "Choose the product actor ceiling and require matching tenant scope, assurance, purpose and immutable read attribution."
+          "code": "alert-runtime-contract-pending",
+          "reason": "The current route lacks recent MFA, fixed purpose, request attribution, date/keyset bounds, transaction-client-only access, explicit select, and same-snapshot count/list; platform role currently reaches a blank-scope fallback.",
+          "remediation": "Implement only the exact actor, scope, assurance, projection, lifecycle, concurrency and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
-      ]
+      ],
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "tenant-security-alert-read",
+      "policyAlertRequiredAssurance": "mfa-verified",
+      "policyAlertActorClasses": [
+        "licensee-admin"
+      ],
+      "policyAlertExecutionBoundary": "normal-actor-context",
+      "policyAlertPurposeCodes": [
+        "tenant-alert-review"
+      ],
+      "policyAlertAllowedColumnsByTableAndCommand": {
+        "table-policy-alert": {
+          "SELECT": [
+            "id",
+            "alertType",
+            "severity",
+            "message",
+            "incidentId",
+            "batchId",
+            "qrCodeId",
+            "manufacturerId",
+            "acknowledgedAt",
+            "createdAt"
+          ]
+        }
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-trace-policy-controller-ts-update-policy-config-controller",
@@ -40653,12 +40823,13 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "The identity-worker runtime may claim only an allowlisted durable SecurityEventOutbox row under worker-boundary-siem-outbox-delivery; JSON scope never establishes tenant or human authority.",
       "contextRequirements": [
         "approved restricted system identity",
-        "job-bound tenant scope"
+        "durable outbox row authority",
+        "no human actor context"
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "authorizationBoundaryType": "restricted-worker",
       "expectedAllowedScenarios": [
         "worker-boundary-siem-outbox-delivery executes only an allowlisted job with verified durable scope, system identity and exact commands."
@@ -40737,6 +40908,45 @@
         "conflictBehavior": "reject the same row ID with a different digest",
         "replayResult": "return/retain the existing SENT result; never send a second logical event",
         "conflictingPayloadDenied": true
+      },
+      "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
+      "policyAlertClass": "worker-alert-delivery",
+      "policyAlertRequiredAssurance": "system-verified",
+      "policyAlertActorClasses": [
+        "worker"
+      ],
+      "policyAlertExecutionBoundary": "worker-boundary-siem-outbox-delivery",
+      "policyAlertPurposeCodes": [
+        "siem-alert-delivery"
+      ],
+      "policyAlertAllowedColumnsByTableAndCommand": {
+        "table-security-event-outbox": {
+          "SELECT": [
+            "id",
+            "eventType",
+            "payload",
+            "status",
+            "attempts",
+            "nextAttemptAt",
+            "createdAt"
+          ],
+          "UPDATE": [
+            "status",
+            "attempts",
+            "nextAttemptAt",
+            "lastError",
+            "sentAt",
+            "updatedAt"
+          ]
+        }
+      },
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
       }
     }
   ]

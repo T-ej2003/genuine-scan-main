@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "id": "platform-read-scope-v1",
   "decisionId": "decision-context-platform-read-scope",
+  "relatedBoundaryIds": ["policy-alert-actor-ceiling-v1"],
   "actorClass": "platform-admin",
   "actorVerification": {
     "authoritativeSource": "A unique active User row reloaded by authenticated session middleware with role SUPER_ADMIN or PLATFORM_SUPER_ADMIN, sessionStage ACTIVE, and a non-stale MFA verification timestamp.",
@@ -228,6 +229,7 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts",
+      "governingAlertBoundaryId": "policy-alert-actor-ceiling-v1",
       "primaryClass": "incident-response-read",
       "inventoryBoundaryType": "authenticated-context",
       "actorClasses": ["platform-admin"],

@@ -69,11 +69,11 @@ Each child is uniform by actor ceiling, scope model, assurance/command contract,
 
 | Metric | Before | After |
 |---|---:|---:|
-| Workflow families | 316 | 320 |
+| Workflow families | 316 | 321 |
 | Implemented workflows | 4 | 4 |
 | Contract-only workflows | 38 | 40 |
 | Blocked workflows | 386 | 384 |
-| Blocked families | 295 | 297 |
+| Blocked families | 295 | 298 |
 | PostgreSQL certifications pending | 4 | 4 |
 
 ## Implementation and validation boundary
