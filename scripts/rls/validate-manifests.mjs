@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateObjectOwnershipChain, validateOperatorBoundaries, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
+import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
 import { contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch, validateSystemBoundaryContracts } from "./context-boundary-plan.mjs";
 
-const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries, objectOwnershipChain, operatorBoundaries, systemBoundaries } = manifests();
-assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries && objectOwnershipChain && operatorBoundaries && systemBoundaries, "all programme manifests must exist");
+const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries, objectOwnershipChain, operatorBoundaries, systemBoundaries, manufacturerBootstrapBoundary } = manifests();
+assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries && objectOwnershipChain && operatorBoundaries && systemBoundaries && manufacturerBootstrapBoundary, "all programme manifests must exist");
 const modelNames = parseSchema().map((model) => model.name);
 assert.deepEqual([...tables.tables.map((table) => table.prismaModel)].sort(), [...modelNames].sort(), "every Prisma model must appear exactly once");
 assert.equal(new Set(tables.tables.map((table) => table.id)).size, tables.tables.length, "table IDs must be unique");
@@ -178,9 +178,10 @@ validatePreAuthFunctions(preAuthFunctions, workflows, commandSemantics, identiti
 validateWorkerBoundaries(workerBoundaries, workflows, commandSemantics, identities, tables);
 validateObjectOwnershipChain(objectOwnershipChain, tables, identities, preAuthFunctions, workerBoundaries);
 validateOperatorBoundaries(operatorBoundaries, workflows, commandSemantics, identities);
+validateManufacturerBootstrapBoundary(manufacturerBootstrapBoundary, workflows, commandSemantics, tables, decisions);
 const contextBoundaryFamilies = JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8"));
 validateSystemBoundaryContracts(systemBoundaries, workflows);
-validateContextBoundaryPlan(contextBoundaryFamilies, workflows, commandSemantics, tables, systemBoundaries);
+validateContextBoundaryPlan(contextBoundaryFamilies, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary);
 validateContextBoundaryReadBatch(JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8")), contextBoundaryFamilies, workflows, commandSemantics, tables);
 assert(sharedApplyIsBlocked(), "existing shared-table apply must remain blocked before BEGIN");
 console.log(JSON.stringify({ valid: true, tables: tables.tables.length, workflows: workflows.workflows.length, productionAccessSites: mappedAccessIds.size }));

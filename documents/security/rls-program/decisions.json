@@ -10,7 +10,11 @@
         "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids"
       ],
       "affectedTables": [
-        "table-manufacturer-licensee-link"
+        "table-user",
+        "table-manufacturer-licensee-link",
+        "table-licensee",
+        "table-organization",
+        "table-refresh-token"
       ],
       "securityConsequence": "Implementing without this decision could authorize public disclosure, cross-tenant platform access, actor elevation or a blank-scope fallback.",
       "availableOptions": [
@@ -20,7 +24,30 @@
       ],
       "blockingStatus": "blocking",
       "owner": "Product authorization owner, application security, and domain engineering",
-      "status": "unresolved"
+      "status": "resolved",
+      "resolvedAt": "2026-07-16",
+      "selectedBoundary": "post-password-actor-bootstrap",
+      "resolution": {
+        "authority": "documents/security/rls-program/manufacturer-bootstrap-boundary.json",
+        "boundaryId": "manufacturer-bootstrap-post-password-actor",
+        "boundaryType": "post-password-actor-bootstrap",
+        "implementationForm": "actor-context-repository",
+        "requiredAssurance": {
+          "bootstrapRead": "password-verified",
+          "activeApplicationSession": "mfa-verified",
+          "scopeSwitch": "mfa-verified"
+        },
+        "runtimeImplementationPending": true,
+        "postgresqlCertificationPending": true,
+        "guarantees": [
+          "User.id and User.role are verified before membership reads",
+          "Client licensee input only narrows a freshly verified membership set",
+          "Blank scope never means all",
+          "Multiple memberships use deterministic fail-closed selection",
+          "No secret, platform-admin or full-tenant projection",
+          "Scope switching requires MFA, request attribution, fresh transaction and audit"
+        ]
+      }
     },
     {
       "id": "decision-context-platform-read-scope",

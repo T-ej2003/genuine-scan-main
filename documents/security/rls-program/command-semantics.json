@@ -4,6 +4,7 @@
     "backend/prisma/schema.prisma",
     "documents/security/rls-program/tables.json",
     "documents/security/rls-program/workflows.json",
+    "documents/security/rls-program/manufacturer-bootstrap-boundary.json",
     "backend/src/routes/index.ts"
   ],
   "actorClasses": [
@@ -22888,12 +22889,12 @@
         "identity-authenticated-app"
       ],
       "minimumAssurance": "password-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "Verified User.id must equal app.user_id and app.manufacturer_id before the read; ManufacturerLicenseeLink.manufacturerId must equal that actor. requestedLicenseeId may only narrow the freshly verified membership set, blank scope never means all, and active Licensee/Organization checks are mandatory.",
       "allowedColumns": [
-        "createdAt",
-        "isPrimary",
-        "licenseeId",
         "manufacturerId",
+        "licenseeId",
+        "isPrimary",
+        "createdAt",
         "updatedAt"
       ],
       "protectedColumns": [
@@ -22909,7 +22910,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
+      "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "ordinary-rls",
@@ -22923,12 +22924,13 @@
         "backend/src/services/manufacturerScopeService.ts"
       ],
       "allowScenarios": [
-        "manufacturer using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A password-verified manufacturer reads only rows whose manufacturerId equals the database-verified actor; one client value may narrow but never establish the eligible licensee set."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Caller role or tenant claims, blank scope, foreign/revoked/disabled membership, ambiguous primary membership, missing request attribution, secret projection or platform-admin fallback is denied."
       ],
-      "confidence": "medium",
+      "manufacturerBootstrapBoundaryId": "manufacturer-bootstrap-post-password-actor",
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {
@@ -23051,12 +23053,12 @@
         "identity-authenticated-app"
       ],
       "minimumAssurance": "password-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "Verified User.id must equal app.user_id and app.manufacturer_id before the read; ManufacturerLicenseeLink.manufacturerId must equal that actor. requestedLicenseeId may only narrow the freshly verified membership set, blank scope never means all, and active Licensee/Organization checks are mandatory.",
       "allowedColumns": [
-        "createdAt",
-        "isPrimary",
-        "licenseeId",
         "manufacturerId",
+        "licenseeId",
+        "isPrimary",
+        "createdAt",
         "updatedAt"
       ],
       "protectedColumns": [
@@ -23072,7 +23074,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
+      "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "ordinary-rls",
@@ -23086,12 +23088,13 @@
         "backend/src/services/manufacturerScopeService.ts"
       ],
       "allowScenarios": [
-        "manufacturer using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A password-verified manufacturer reads only rows whose manufacturerId equals the database-verified actor; one client value may narrow but never establish the eligible licensee set."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Caller role or tenant claims, blank scope, foreign/revoked/disabled membership, ambiguous primary membership, missing request attribution, secret projection or platform-admin fallback is denied."
       ],
-      "confidence": "medium",
+      "manufacturerBootstrapBoundaryId": "manufacturer-bootstrap-post-password-actor",
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {

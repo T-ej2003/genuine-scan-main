@@ -165,9 +165,12 @@ const decisionDefinitions = [
 
 const updateManifests = () => {
   const workflowManifest = readJson(workflowManifestPath);
+  const decisions = readJson(decisionManifestPath);
+  const manufacturerBootstrapResolved = decisions.decisions.some((decision) => decision.id === "decision-context-manufacturer-bootstrap" && decision.status === "resolved");
   const byId = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
   assert.equal(workflowReviews.size, 24, "review must cover exactly 24 workflows");
   for (const [workflowId, review] of workflowReviews) {
+    if (manufacturerBootstrapResolved && review.decisions?.includes("decision-context-manufacturer-bootstrap")) continue;
     const workflow = byId.get(workflowId);
     assert(workflow, `missing reviewed workflow ${workflowId}`);
     workflow.contextRequirementsSource = "human-reviewed";
@@ -200,9 +203,9 @@ const updateManifests = () => {
   }
   writeJson(workflowManifestPath, workflowManifest);
 
-  const decisions = readJson(decisionManifestPath);
-  decisions.decisions = decisions.decisions.filter((decision) => !decision.id.startsWith("decision-context-"));
+  decisions.decisions = decisions.decisions.filter((decision) => !decision.id.startsWith("decision-context-") || (manufacturerBootstrapResolved && decision.id === "decision-context-manufacturer-bootstrap"));
   for (const definition of decisionDefinitions) {
+    if (manufacturerBootstrapResolved && definition.id === "decision-context-manufacturer-bootstrap") continue;
     const affectedWorkflows = [...workflowReviews].filter(([, review]) => review.decisions?.includes(definition.id)).map(([workflowId]) => workflowId).sort();
     decisions.decisions.push({
       ...definition,

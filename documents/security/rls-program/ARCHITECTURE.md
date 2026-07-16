@@ -108,7 +108,7 @@ The generated `TABLE_OWNERSHIP_REVIEW.md` is the concise table-by-table review. 
 
 ## Unresolved semantic decisions
 
-Ownership classification, policy command semantics, pre-authentication boundaries, worker/job authority, the object-transfer chain, and operator administration have no unresolved architecture decision. Implementation and certification remain incomplete; no resolved contract authorizes role, procedure, policy, grant, RLS, infrastructure or database changes.
+Ownership classification, policy command semantics, pre-authentication boundaries, worker/job authority, the object-transfer chain, operator administration, and manufacturer authentication/bootstrap now have resolved architecture contracts. The remaining product decisions are bounded platform-read scope, policy-alert actor ceiling, and public-read proof/projection. Implementation and certification remain incomplete; no resolved contract authorizes role, procedure, policy, grant, RLS, infrastructure or database changes.
 
 ## Pre-authentication function rules
 
@@ -119,6 +119,14 @@ Four workflows move behind canonical actor context because identity is already p
 All seven functions use typed fixed arguments/returns, `SECURITY DEFINER`, `SET search_path=pg_catalog`, fully qualified application objects, no dynamic SQL, no caller-owned functions, and no caller-set `app.*` authority. The owner is `identity-auth-function-owner` (`NOLOGIN`); only `identity-pre-auth-app` may execute. PUBLIC, restricted-read and authenticated-app EXECUTE are denied after the role split. The pre-auth runtime has CONNECT, `app_auth` USAGE and exact EXECUTE only—no table privileges, public CREATE, ownership, `SET ROLE`, restricted-read helpers, superuser or `BYPASSRLS`.
 
 Password lookup normalizes once, validates shape, returns the minimum current verification/context projection, and fails closed on case-insensitive duplicates. Failed-login recording can change only counter, lockout and update timestamp with bounded inputs and atomic increments. Reset request keeps a constant-success external response. Reset, invite and email consumption lock exactly one token/account binding, enforce expiry/unused state, consume once atomically, and revoke sessions where current product semantics require it. Invitation consumption never creates a user or writes role/tenant keys; licensee/manufacturer invitations cannot promote platform administrators. Exact tests and secret-column justifications are in the function manifest.
+
+## Manufacturer actor bootstrap
+
+`decision-context-manufacturer-bootstrap` is resolved by `manufacturer-bootstrap-boundary.json` as `post-password-actor-bootstrap`, not a pre-auth function. Exact password verification or a revalidated signed session establishes `User.id`; the database User row supplies role and active-state authority. The actor-bootstrap transaction may then read only `ManufacturerLicenseeLink` rows whose `manufacturerId` equals that verified actor, joined to active, unsuspended Licensee and active Organization rows. Email, JWT role/tenant claims, request fields, legacy User tenant fields, blank scope and platform-role strings are never membership authority.
+
+The bounded projection returns only manufacturer user ID, database role, licensee ID, organization ID, computed active relationship status, primary flag, licensee display name and link update time as scope version. At most 100 eligible memberships may be returned, ordered by primary descending, creation time ascending and licensee ID ascending; overflow and multiple-primary state fail closed. One link or one unambiguous primary may be selected automatically. Otherwise an actor may select only from the freshly verified set. Manufacturers require password assurance for this bootstrap and MFA assurance before active application access or scope switching.
+
+Actor bootstrap installs transaction-local user, role, manufacturer, assurance, request and purpose keys. Licensee and organization keys are installed only in a fresh transaction after one relationship is verified; blank keys never mean all. Scope switching re-reads membership and scope version, requires MFA, request attribution and the fixed switch purpose, and appends audit evidence without logging the membership list. The future implementation is one transaction-client-only actor-context repository with explicit projections and no global Prisma or catch-to-empty authority fallback. SQL and PostgreSQL certification remain pending.
 
 ## Worker authorization rules
 

@@ -1,0 +1,405 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": [
+    "backend/prisma/schema.prisma",
+    "backend/src/services/auth/authBootstrapRepository.ts",
+    "backend/src/services/auth/authService.ts",
+    "backend/src/services/auth/inviteService.ts",
+    "backend/src/services/manufacturerScopeService.ts",
+    "backend/src/middleware/auth.ts",
+    "backend/src/middleware/tenantIsolation.ts",
+    "backend/src/controllers/authController.ts",
+    "backend/src/routes/modules/authRoutes.ts",
+    "backend/tests/authBootstrapRepository.test.js",
+    "backend/tests/authRlsBootstrap.test.js",
+    "backend/tests/authLoginWithoutMfa.test.js",
+    "backend/tests/tenantIsolationExtended.test.js"
+  ],
+  "id": "manufacturer-bootstrap-post-password-actor",
+  "decisionId": "decision-context-manufacturer-bootstrap",
+  "boundaryType": "post-password-actor-bootstrap",
+  "supportingWorkflows": [
+    "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-licensee-links",
+    "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids"
+  ],
+  "registeredRoots": [
+    "POST /auth/login -> loginWithPassword -> password verification -> manufacturer bootstrap",
+    "POST /auth/refresh -> verified non-revoked refresh session -> manufacturer bootstrap",
+    "signed access or MFA-bootstrap token -> authenticate/authenticateAnySession -> manufacturer bootstrap",
+    "GET /auth/me -> verified session claims -> manufacturer bootstrap"
+  ],
+  "authoritativeTables": [
+    {
+      "tableId": "table-user",
+      "columns": [
+        "id",
+        "role",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt",
+        "passwordHash",
+        "emailVerifiedAt",
+        "licenseeId",
+        "orgId"
+      ],
+      "purpose": "Prove the password-authenticated manufacturer actor, activation state and manufacturer-role ceiling."
+    },
+    {
+      "tableId": "table-manufacturer-licensee-link",
+      "columns": [
+        "manufacturerId",
+        "licenseeId",
+        "isPrimary",
+        "createdAt",
+        "updatedAt"
+      ],
+      "purpose": "Prove the exact manufacturer-to-licensee membership set and deterministic primary ordering."
+    },
+    {
+      "tableId": "table-licensee",
+      "columns": [
+        "id",
+        "orgId",
+        "name",
+        "isActive",
+        "suspendedAt"
+      ],
+      "purpose": "Prove the selected licensee and its organization, active state and approved display label."
+    },
+    {
+      "tableId": "table-organization",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "purpose": "Prove that the selected licensee organization remains active."
+    },
+    {
+      "tableId": "table-refresh-token",
+      "columns": [
+        "id",
+        "userId",
+        "expiresAt",
+        "revokedAt",
+        "authenticatedAt",
+        "mfaVerifiedAt"
+      ],
+      "purpose": "For refresh/session roots only, prove the actor session is current and not revoked."
+    }
+  ],
+  "identityProofChain": {
+    "verificationPoint": "After lookup_password_user returns exactly one active account and the supplied password verifies; session roots instead require a valid signed token whose userId is revalidated against the User row and, for refresh, a non-expired non-revoked RefreshToken.",
+    "authoritativeManufacturerUserId": "User.id from the verified account row; email, request fields and token role or tenant claims are never manufacturer identity authority.",
+    "authoritativeRelationship": "ManufacturerLicenseeLink where manufacturerId equals the verified User.id and licenseeId joins one active Licensee whose Organization is active.",
+    "activeRelationshipRule": "The link row must exist; User must be ACTIVE/isActive with no disabledAt/deletedAt; Licensee must be active with no suspendedAt; Organization must be active. ManufacturerLicenseeLink has no expiry or revocation fields, so link deletion is the current revocation operation and temporal membership is not implied.",
+    "intendedRoleCeiling": [
+      "MANUFACTURER",
+      "MANUFACTURER_ADMIN",
+      "MANUFACTURER_USER"
+    ],
+    "organizationLicenseeScope": "licenseeId and organizationId come only from the verified link -> Licensee.orgId relationship. User.licenseeId and User.orgId are legacy consistency hints, never scope authority.",
+    "manufacturerSpecificIdentifier": "User.id",
+    "uniquenessExpectations": [
+      "Password lookup fails closed unless normalized email identifies exactly one User.",
+      "ManufacturerLicenseeLink composite primary key prevents duplicate manufacturerId/licenseeId pairs.",
+      "At most one eligible link may have isPrimary=true; multiple primaries are an ambiguity failure.",
+      "Licensee.orgId is unique, so one organization cannot resolve to multiple Licensee rows."
+    ]
+  },
+  "requiredAssurance": {
+    "bootstrapRead": "password-verified",
+    "activeApplicationSession": "mfa-verified",
+    "scopeSwitch": "mfa-verified"
+  },
+  "inputFields": [
+    {
+      "name": "verifiedUserId",
+      "required": true,
+      "trustedSource": "password-verification result or revalidated signed session",
+      "establishesAuthority": true
+    },
+    {
+      "name": "requestedLicenseeId",
+      "required": false,
+      "trustedSource": "untrusted client narrowing input",
+      "establishesAuthority": false
+    },
+    {
+      "name": "requestId",
+      "required": true,
+      "trustedSource": "server request-attribution middleware",
+      "establishesAuthority": false
+    },
+    {
+      "name": "purpose",
+      "required": true,
+      "trustedSource": "server constant manufacturer-bootstrap or manufacturer-scope-switch",
+      "establishesAuthority": false
+    }
+  ],
+  "trustedInputSources": {
+    "userId": "verified password result or revalidated signed session plus User.id",
+    "role": "User.role",
+    "manufacturerId": "User.id after manufacturer-role validation",
+    "licenseeId": "ManufacturerLicenseeLink.licenseeId selected only from the verified membership set",
+    "organizationId": "Licensee.orgId joined from the selected verified membership",
+    "assurance": "server authentication state",
+    "requestId": "server request-attribution middleware",
+    "purpose": "server allowlisted constant",
+    "callerClaimsTrustedForAuthority": false
+  },
+  "verificationOnlyColumns": [
+    "User.status",
+    "User.isActive",
+    "User.disabledAt",
+    "User.deletedAt",
+    "User.passwordHash",
+    "User.emailVerifiedAt",
+    "User.licenseeId",
+    "User.orgId",
+    "Licensee.isActive",
+    "Licensee.suspendedAt",
+    "Organization.isActive",
+    "RefreshToken.expiresAt",
+    "RefreshToken.revokedAt"
+  ],
+  "exactReturnedColumns": [
+    {
+      "name": "manufacturerUserId",
+      "source": "User.id",
+      "reason": "Bind the projection to the verified actor."
+    },
+    {
+      "name": "accountRole",
+      "source": "User.role",
+      "reason": "Install the database-authoritative manufacturer role ceiling."
+    },
+    {
+      "name": "licenseeId",
+      "source": "ManufacturerLicenseeLink.licenseeId",
+      "reason": "Identify an eligible membership and allow server-verified narrowing."
+    },
+    {
+      "name": "organizationId",
+      "source": "Licensee.orgId",
+      "reason": "Install the organization paired with the selected licensee."
+    },
+    {
+      "name": "relationshipStatus",
+      "source": "computed ACTIVE only after all active-state predicates pass",
+      "reason": "Expose no disabled or revoked relationship row."
+    },
+    {
+      "name": "isPrimary",
+      "source": "ManufacturerLicenseeLink.isPrimary",
+      "reason": "Support deterministic initial-scope selection."
+    },
+    {
+      "name": "displayName",
+      "source": "Licensee.name",
+      "reason": "Render the minimum human-readable scope selector."
+    },
+    {
+      "name": "scopeVersion",
+      "source": "ManufacturerLicenseeLink.updatedAt",
+      "reason": "Detect stale membership selection and bind scope-switch audit evidence."
+    }
+  ],
+  "prohibitedReturnedColumns": [
+    "User.email",
+    "User.passwordHash",
+    "User.metadata",
+    "User.failedLoginAttempts",
+    "User.lockedUntil",
+    "User.pendingEmail",
+    "Invite.tokenHash",
+    "PasswordReset.tokenHash",
+    "EmailVerificationToken.tokenHash",
+    "RefreshToken.tokenHash",
+    "AdminMfaCredential.secretCiphertext",
+    "AdminMfaCredential.secretIv",
+    "AdminMfaCredential.secretTag",
+    "AdminMfaCredential.backupCodesHash",
+    "UserMfaFactor.secretCiphertext",
+    "UserBackupCode.codeHash",
+    "AdminWebAuthnCredential.credentialId",
+    "AdminWebAuthnCredential.publicKey",
+    "Licensee.metadata",
+    "Licensee.supportEmail",
+    "Licensee.supportPhone",
+    "platformAdmin",
+    "isPlatformAdmin",
+    "unrelatedUsers",
+    "fullLicenseeRecord",
+    "auditRecords"
+  ],
+  "membershipSelectionRules": {
+    "maximumEligibleLinks": 100,
+    "overflowBehavior": "Fetch at most 101; if more than 100 eligible links exist, fail closed with MEMBERSHIP_SET_TOO_LARGE and require administrative correction.",
+    "deterministicOrdering": [
+      "isPrimary DESC",
+      "createdAt ASC",
+      "licenseeId ASC"
+    ],
+    "blankLicenseeMeansAll": false,
+    "clientInputEstablishesAuthority": false,
+    "requestedLicenseeMustMatchVerifiedMembership": true,
+    "foreignMembershipDenied": true,
+    "initialSelection": "One eligible link is selected automatically. With several links, exactly one primary is selected; with no primary, no active scope is installed and the verified actor must select from the returned bounded set; multiple primaries fail closed.",
+    "legacyUserTenantFieldsEstablishAuthority": false
+  },
+  "multiLicenseeBehavior": {
+    "multipleLicenseesAllowed": true,
+    "returns": "All eligible links up to maximumEligibleLinks using exactReturnedColumns.",
+    "activeScopeCount": 1,
+    "clientMayRequestScope": true,
+    "selectionProof": "The request carries a password-verified MFA-bootstrap token or active mfa-verified session, and requestedLicenseeId must exactly match the freshly re-read verified membership set and scopeVersion.",
+    "switchRequiresFreshTransaction": true,
+    "switchRequiresAssurance": "mfa-verified",
+    "switchAuditRequired": true
+  },
+  "duplicateHandling": {
+    "normalizedUserDuplicates": "Deny with the same external response as no user match.",
+    "duplicateMembershipPair": "Prevented by the composite primary key; any database inconsistency fails closed.",
+    "multiplePrimaryMemberships": "Deny bootstrap and active-scope installation; do not choose by row order.",
+    "nondeterministicSelectionAllowed": false
+  },
+  "disabledRevokedBehavior": {
+    "disabledUserAccepted": false,
+    "revokedMembershipAccepted": false,
+    "disabledLicenseeAccepted": false,
+    "suspendedLicenseeAccepted": false,
+    "disabledOrganizationAccepted": false,
+    "expiredMembershipAccepted": false,
+    "expiryModel": "ManufacturerLicenseeLink has no expiry field; no temporal membership is inferred. If expiry is added later, expired rows must be excluded before this contract can be certified.",
+    "revocationModel": "Absence of the link row is the current revocation state.",
+    "inconsistentLegacyTenantFields": "If non-null User.licenseeId is not eligible, or non-null User.orgId matches no eligible linked licensee, deny and require repair. Never use either field as fallback authority."
+  },
+  "contextKeysInstalled": {
+    "actorBootstrap": [
+      "app.user_id",
+      "app.role",
+      "app.manufacturer_id",
+      "app.auth_assurance",
+      "app.request_id",
+      "app.purpose"
+    ],
+    "selectedScopeFreshTransaction": [
+      "app.user_id",
+      "app.role",
+      "app.organization_id",
+      "app.licensee_id",
+      "app.manufacturer_id",
+      "app.auth_assurance",
+      "app.request_id",
+      "app.purpose"
+    ],
+    "blankTenantValuesAccepted": false,
+    "clientValuesInstalledDirectly": false,
+    "transactionLocal": true,
+    "contextClearsAtTransactionEnd": true,
+    "tenantKeysBeforeSelection": "app.licensee_id and app.organization_id are not authority and may not authorize any tenant read before an eligible membership is selected."
+  },
+  "scopeSwitchRules": {
+    "activeSessionRequired": true,
+    "requiredAssurance": "mfa-verified",
+    "requestIdRequired": true,
+    "purpose": "manufacturer-scope-switch",
+    "freshMembershipReadRequired": true,
+    "scopeVersionMatchRequired": true,
+    "freshTransactionRequired": true,
+    "auditRequired": true,
+    "auditEvent": "MANUFACTURER_SCOPE_SWITCH",
+    "queryOrBodyAuthority": false
+  },
+  "auditRequirements": {
+    "required": true,
+    "sameTransactionAsMembershipReadOrSwitch": true,
+    "events": [
+      "MANUFACTURER_BOOTSTRAP_READ",
+      "MANUFACTURER_BOOTSTRAP_DENIED",
+      "MANUFACTURER_SCOPE_SWITCH"
+    ],
+    "fields": [
+      "request_id",
+      "manufacturer_user_id",
+      "selected_licensee_id",
+      "selected_organization_id",
+      "scope_version",
+      "assurance",
+      "purpose",
+      "outcome"
+    ],
+    "membershipListLogged": false,
+    "displayNamesLogged": false,
+    "failureResponseLeaksMembership": false
+  },
+  "failureSemantics": {
+    "noUserMatch": "AUTHENTICATION_FAILED; identical external response to duplicate normalized user and invalid password.",
+    "duplicateNormalizedUsers": "AUTHENTICATION_FAILED; no actor context or membership read.",
+    "disabledUser": "AUTHENTICATION_FAILED before actor bootstrap; do not expose membership state.",
+    "wrongRole": "AUTHENTICATION_FAILED; only the three manufacturer roles are accepted.",
+    "noActiveRelationship": "MANUFACTURER_MEMBERSHIP_REQUIRED after password verification; issue no active session or tenant context and return no membership identifiers.",
+    "multipleInconsistentRelationships": "MANUFACTURER_MEMBERSHIP_AMBIGUOUS; install no tenant context.",
+    "requestedForeignLicensee": "MANUFACTURER_SCOPE_DENIED with no foreign membership detail.",
+    "revokedRelationship": "MANUFACTURER_SCOPE_DENIED after the fresh membership read.",
+    "disabledTenant": "MANUFACTURER_SCOPE_DENIED; active Licensee and Organization are mandatory.",
+    "userRelationshipTenantMismatch": "MANUFACTURER_MEMBERSHIP_INCONSISTENT; install no tenant context.",
+    "unsupportedAssurance": "AUTH_ASSURANCE_REQUIRED; password-verified for bootstrap and mfa-verified for active/switch operations.",
+    "staleSession": "INVALID_OR_EXPIRED_SESSION; perform no membership read after session validation fails.",
+    "missingRequestId": "REQUEST_ATTRIBUTION_REQUIRED; perform no protected membership read.",
+    "blankScope": "Never means all. Auto-select only the sole eligible link or sole primary; otherwise SCOPE_SELECTION_REQUIRED.",
+    "invitationNotFullyConsumed": "AUTHENTICATION_FAILED while User is INVITED, lacks passwordHash/emailVerifiedAt, or is inactive. Invite fields are not read by bootstrap and are not post-activation authority."
+  },
+  "implementationForm": {
+    "type": "actor-context-repository",
+    "actorIdentityVerifiedBeforeRead": true,
+    "transactionClientOnly": true,
+    "globalPrismaAllowed": false,
+    "explicitProjectionRequired": true,
+    "namedFunctionRequired": false,
+    "genericPreAuthFunctionAllowed": false,
+    "protectedReadsAfterActorContext": true,
+    "implementationStatus": "contract-approved-runtime-pending"
+  },
+  "namedFunctionContract": null,
+  "allowScenarios": [
+    "One password-verified active manufacturer reads only its own eligible memberships with actor-only transaction context and server request attribution.",
+    "A requested licensee narrows scope only after exact membership and scopeVersion verification.",
+    "One eligible membership or exactly one primary membership becomes the initial scope in a fresh transaction.",
+    "An mfa-verified active manufacturer switches to another freshly verified eligible membership with audit attribution."
+  ],
+  "denyScenarios": [
+    "Email, JWT tenant claims, query/body role or licensee fields, blank scope, platform role strings or legacy User tenant fields establish authority.",
+    "Foreign, missing, revoked, disabled, suspended, expired, excessive, duplicate-primary or inconsistent membership sets produce context.",
+    "Secret-bearing, platform-admin, unrelated-user, full-tenant or broad-audit fields enter the projection.",
+    "Bootstrap executes before actor verification or scope switching occurs without mfa-verified assurance, request attribution, a fresh transaction and audit."
+  ],
+  "implementationStatus": "architecture-resolved-runtime-pending",
+  "postgresqlCertificationRequirements": [
+    "Actor-only context can select ManufacturerLicenseeLink rows only where manufacturerId equals verified app.manufacturer_id.",
+    "Empty, forged, foreign and caller-selected tenant context is denied and never becomes a wildcard.",
+    "Disabled User, Licensee or Organization and missing/revoked link rows are denied.",
+    "Exact projection excludes every prohibited column and uses the same transaction client after context installation.",
+    "Scope selection and switching re-read membership, install exact tenant keys in a fresh transaction and append required audit attribution.",
+    "Multiple-primary, overflow, stale scopeVersion, missing requestId and insufficient assurance cases fail closed."
+  ],
+  "unlockAnalysis": [
+    {
+      "familyId": "family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46",
+      "effect": "Semantic decision resolved; eligible for a later focused runtime implementation after the actor-context repository and deterministic tests exist.",
+      "remainingBlockers": [
+        "manufacturer-bootstrap-runtime-pending"
+      ]
+    },
+    {
+      "familyId": "family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef",
+      "effect": "Only the authentication/bootstrap slice is approved.",
+      "remainingBlockers": [
+        "incompatible-shared-auth-roots",
+        "invitation mutation must be separated from actor bootstrap"
+      ]
+    }
+  ]
+}

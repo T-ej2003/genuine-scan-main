@@ -27597,16 +27597,25 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "Verified User.id establishes manufacturer actor scope; a ManufacturerLicenseeLink row plus active Licensee and Organization establishes one licensee scope. Client input only narrows the freshly verified set and blank never means all.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "post-password actor context with database User role",
+        "transaction-local request attribution and purpose",
+        "verified manufacturerId before membership read",
+        "fresh relationship verification before tenant context"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "One password-verified active manufacturer reads only its own eligible memberships with actor-only transaction context and server request attribution.",
+        "A requested licensee narrows scope only after exact membership and scopeVersion verification.",
+        "One eligible membership or exactly one primary membership becomes the initial scope in a fresh transaction.",
+        "An mfa-verified active manufacturer switches to another freshly verified eligible membership with audit attribution."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Email, JWT tenant claims, query/body role or licensee fields, blank scope, platform role strings or legacy User tenant fields establish authority.",
+        "Foreign, missing, revoked, disabled, suspended, expired, excessive, duplicate-primary or inconsistent membership sets produce context.",
+        "Secret-bearing, platform-admin, unrelated-user, full-tenant or broad-audit fields enter the projection.",
+        "Bootstrap executes before actor verification or scope switching occurs without mfa-verified assurance, request attribution, a fresh transaction and audit."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -27620,9 +27629,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-manufacturer-bootstrap"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-a5b5f9c3c97f13d4",
@@ -27655,8 +27662,8 @@
       "contextBoundaryBlockers": [
         {
           "code": "incompatible-shared-auth-roots",
-          "reason": "The helper is shared by login, session projection and invitation mutation roots with different assurance and transaction ownership.",
-          "remediation": "Split or parameterize the owning roots so each supplies its verified actor, assurance and transaction client."
+          "reason": "The boundary approves the authentication/bootstrap slice, but the helper remains shared with invitation mutation roots that have different actor, assurance and transaction ownership.",
+          "remediation": "Separate the invitation mutation lookup from the actor-bootstrap repository before runtime implementation."
         }
       ],
       "contextBoundaryFamilySplit": {
@@ -27673,11 +27680,12 @@
           "manufacturer",
           "platform-admin"
         ],
-        "scopeModel": "Exact manufacturer actor or operator-approved invitation target; each owning root must supply the transaction.",
+        "scopeModel": "Only the verified manufacturer actor bootstrap may use this boundary; invitation creation/link mutation requires its own admin transaction and cannot borrow manufacturer context.",
         "executionSurface": "internal",
         "protectedTableBoundary": "ManufacturerLicenseeLink plus bounded Licensee display projection",
-        "commandSemantics": "SELECT link and minimal licensee display fields across incompatible auth/mutation roots."
-      }
+        "commandSemantics": "Actor-bootstrap SELECT is approved; the shared invitation mutation caller remains blocked until separated."
+      },
+      "manufacturerBootstrapBoundaryId": "manufacturer-bootstrap-post-password-actor"
     },
     {
       "id": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids",
@@ -27702,16 +27710,25 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "Verified User.id establishes manufacturer actor scope; a ManufacturerLicenseeLink row plus active Licensee and Organization establishes one licensee scope. Client input only narrows the freshly verified set and blank never means all.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "post-password actor context with database User role",
+        "transaction-local request attribution and purpose",
+        "verified manufacturerId before membership read",
+        "fresh relationship verification before tenant context"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "One password-verified active manufacturer reads only its own eligible memberships with actor-only transaction context and server request attribution.",
+        "A requested licensee narrows scope only after exact membership and scopeVersion verification.",
+        "One eligible membership or exactly one primary membership becomes the initial scope in a fresh transaction.",
+        "An mfa-verified active manufacturer switches to another freshly verified eligible membership with audit attribution."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Email, JWT tenant claims, query/body role or licensee fields, blank scope, platform role strings or legacy User tenant fields establish authority.",
+        "Foreign, missing, revoked, disabled, suspended, expired, excessive, duplicate-primary or inconsistent membership sets produce context.",
+        "Secret-bearing, platform-admin, unrelated-user, full-tenant or broad-audit fields enter the projection.",
+        "Bootstrap executes before actor verification or scope switching occurs without mfa-verified assurance, request attribution, a fresh transaction and audit."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -27725,9 +27742,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-manufacturer-bootstrap"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-091fc2603fab3b2c",
@@ -27759,9 +27774,9 @@
       },
       "contextBoundaryBlockers": [
         {
-          "code": "authentication-bootstrap-scope-model",
-          "reason": "Authentication hydration must enumerate manufacturer links before a single licensee scope exists, while the command rule requires one non-null tenant scope.",
-          "remediation": "Approve an actor-bound authentication-bootstrap lookup and propagate one supplied transaction client; no blank tenant wildcard."
+          "code": "manufacturer-bootstrap-runtime-pending",
+          "reason": "The actor bootstrap contract is resolved, but the current helper still permits global Prisma, catch-to-empty fallback and claim-carried membership reuse.",
+          "remediation": "Implement the transaction-client-only actor-context repository and its deterministic membership, projection, attribution and denial tests in a focused runtime batch."
         }
       ],
       "contextBoundaryFamilySplit": {
@@ -27777,11 +27792,12 @@
         "actorClasses": [
           "manufacturer"
         ],
-        "scopeModel": "Manufacturer actor ID is authoritative; linked licensee IDs are the result and cannot be prerequisite tenant context.",
+        "scopeModel": "Database-verified manufacturer User.id is actor authority; eligible link rows are the bounded result, and licensee/organization context is installed only after server verification selects one link.",
         "executionSurface": "internal",
         "protectedTableBoundary": "ManufacturerLicenseeLink actor-bound ID projection",
-        "commandSemantics": "SELECT licenseeId only; no licensee wildcard."
-      }
+        "commandSemantics": "Password-verified actor-only SELECT with explicit projection, maximum 100 eligible links, deterministic ordering and same-transaction attribution; no blank tenant wildcard."
+      },
+      "manufacturerBootstrapBoundaryId": "manufacturer-bootstrap-post-password-actor"
     },
     {
       "id": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-upsert-manufacturer-licensee-link",

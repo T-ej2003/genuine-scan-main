@@ -20,9 +20,9 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 | Blocker code | Affected workflows | Required remediation |
 |---|---:|---|
 | actor-command-contract | 1 | Choose the product actor ceiling and require matching tenant scope, assurance, purpose and immutable read attribution. |
-| authentication-bootstrap-scope-model | 1 | Approve an actor-bound authentication-bootstrap lookup and propagate one supplied transaction client; no blank tenant wildcard. |
-| incompatible-shared-auth-roots | 1 | Split or parameterize the owning roots so each supplies its verified actor, assurance and transaction client. |
+| incompatible-shared-auth-roots | 1 | Separate the invitation mutation lookup from the actor-bootstrap repository before runtime implementation. |
 | incomplete-root-transaction | 1 | Move every protected snapshot query for each compatible root into one canonical transaction before implementing this leaf read. |
+| manufacturer-bootstrap-runtime-pending | 1 | Implement the transaction-client-only actor-context repository and its deterministic membership, projection, attribution and denial tests in a focused runtime batch. |
 | mutation-concurrency-proof | 204 | Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation. |
 | named-function-prerequisite | 179 | Implement and certify the exact approved function contract before replacing ordinary Prisma access. |
 | out-of-scope-mutation-root | 1 | Review the complete message mutation, idempotency, audit and transaction boundary in a later high-risk batch. |
@@ -57,7 +57,7 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 | family-split-auditservice-unregistered-audit-reader-bfe36f6eba | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-split-auditservice-unregistered-audit-reader-bfe36f6eba-unregistered-dead-path |
 | family-split-governanceservice-platform-feature-flag-administration-7bb4b15607 | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-split-governanceservice-platform-feature-flag-administration-7bb4b15607-platform-admin-scope-contract |
 | family-split-governanceservice-public-verification-policy-80f0c95935 | simple tenant-scoped reads | 2 | medium | blocked | blocked | blocker-family-split-governanceservice-public-verification-policy-80f0c95935-public-command-contract |
-| family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46 | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46-authentication-bootstrap-scope-model |
+| family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46 | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46-manufacturer-bootstrap-runtime-pending |
 | family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef-incompatible-shared-auth-roots |
 | family-platform-admin-bounded-reads-iralertcontroller-791acbf282 | platform-admin bounded reads | 1 | medium | blocked | blocked | blocker-family-platform-admin-bounded-reads-iralertcontroller-791acbf282-unbounded-platform-scope |
 | family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba | platform-admin bounded reads | 1 | medium | blocked | blocked | blocker-family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba-unbounded-platform-scope |

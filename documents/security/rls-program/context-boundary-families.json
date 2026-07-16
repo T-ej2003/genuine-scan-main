@@ -9,6 +9,7 @@
     "documents/security/rls-program/worker-boundaries.json",
     "documents/security/rls-program/operator-boundaries.json",
     "documents/security/rls-program/system-boundaries.json",
+    "documents/security/rls-program/manufacturer-bootstrap-boundary.json",
     "documents/security/rls-program/policy-dependency-graph.json",
     "documents/security/rls-program/ARCHITECTURE.md",
     "backend/prisma/schema.prisma"
@@ -24,7 +25,8 @@
     "preAuthFunctions": 7,
     "workerBoundaries": 3,
     "operatorBoundaries": 29,
-    "systemBoundaries": 2
+    "systemBoundaries": 2,
+    "manufacturerBootstrapBoundaries": 1
   },
   "systemBoundaryContracts": [
     {
@@ -1587,7 +1589,7 @@
         "hydrateTenantIfNeeded supplies its transaction client after JWT verification; fallback application callers may not."
       ],
       "protectedTableBoundary": "ManufacturerLicenseeLink actor-bound ID projection",
-      "commandSemantics": "SELECT licenseeId only; no licensee wildcard.",
+      "commandSemantics": "Password-verified actor-only SELECT with explicit projection, maximum 100 eligible links, deterministic ordering and same-transaction attribution; no blank tenant wildcard.",
       "executionSurfaces": [
         "internal"
       ],
@@ -1620,7 +1622,7 @@
         "command-manufacturer-licensee-link-select-1d1bc0babd5d"
       ],
       "tenantScopeModel": [
-        "Manufacturer actor ID is authoritative; linked licensee IDs are the result and cannot be prerequisite tenant context."
+        "Database-verified manufacturer User.id is actor authority; eligible link rows are the bounded result, and licensee/organization context is installed only after server verification selects one link."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
@@ -1630,12 +1632,15 @@
       "riskLevel": "low",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "manufacturer-bootstrap-post-password-actor"
+      ],
       "blockers": [
         {
-          "code": "authentication-bootstrap-scope-model",
-          "reason": "Authentication hydration must enumerate manufacturer links before a single licensee scope exists, while the command rule requires one non-null tenant scope.",
-          "remediation": "Approve an actor-bound authentication-bootstrap lookup and propagate one supplied transaction client; no blank tenant wildcard.",
-          "id": "blocker-family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46-authentication-bootstrap-scope-model"
+          "code": "manufacturer-bootstrap-runtime-pending",
+          "reason": "The actor bootstrap contract is resolved, but the current helper still permits global Prisma, catch-to-empty fallback and claim-carried membership reuse.",
+          "remediation": "Implement the transaction-client-only actor-context repository and its deterministic membership, projection, attribution and denial tests in a focused runtime batch.",
+          "id": "blocker-family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46-manufacturer-bootstrap-runtime-pending"
         }
       ],
       "implementationStatus": "blocked",
@@ -1661,7 +1666,7 @@
         "Callers include authService, authController and inviteService with different transaction ownership."
       ],
       "protectedTableBoundary": "ManufacturerLicenseeLink plus bounded Licensee display projection",
-      "commandSemantics": "SELECT link and minimal licensee display fields across incompatible auth/mutation roots.",
+      "commandSemantics": "Actor-bootstrap SELECT is approved; the shared invitation mutation caller remains blocked until separated.",
       "executionSurfaces": [
         "internal"
       ],
@@ -1695,7 +1700,7 @@
         "command-manufacturer-licensee-link-select-8a5527dcca57"
       ],
       "tenantScopeModel": [
-        "Exact manufacturer actor or operator-approved invitation target; each owning root must supply the transaction."
+        "Only the verified manufacturer actor bootstrap may use this boundary; invitation creation/link mutation requires its own admin transaction and cannot borrow manufacturer context."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
@@ -1705,11 +1710,14 @@
       "riskLevel": "low",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "manufacturer-bootstrap-post-password-actor"
+      ],
       "blockers": [
         {
           "code": "incompatible-shared-auth-roots",
-          "reason": "The helper is shared by login, session projection and invitation mutation roots with different assurance and transaction ownership.",
-          "remediation": "Split or parameterize the owning roots so each supplies its verified actor, assurance and transaction client.",
+          "reason": "The boundary approves the authentication/bootstrap slice, but the helper remains shared with invitation mutation roots that have different actor, assurance and transaction ownership.",
+          "remediation": "Separate the invitation mutation lookup from the actor-bootstrap repository before runtime implementation.",
           "id": "blocker-family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef-incompatible-shared-auth-roots"
         }
       ],
