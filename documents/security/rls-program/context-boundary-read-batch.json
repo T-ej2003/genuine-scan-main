@@ -1,507 +1,751 @@
 {
-  "schemaVersion": 1,
-  "batchId": "context-read-batch-2026-07-16-01",
+  "schemaVersion": 2,
+  "batchId": "context-boundary-blocker-resolution-2026-07-16",
   "generatedFrom": [
     "documents/security/rls-program/context-boundary-families.json",
     "documents/security/rls-program/workflows.json",
-    "documents/security/rls-program/command-semantics.json",
-    "backend/src/routes/index.ts",
-    "backend/src/routes/auditRoutes.ts",
-    "backend/src/routes/modules/governanceRoutes.ts"
+    "documents/security/rls-program/system-boundaries.json",
+    "documents/security/rls-program/decisions.json",
+    "backend/src"
   ],
   "limits": {
-    "maximumFamilies": 25,
-    "maximumWorkflows": 60,
-    "maximumProductionFiles": 20,
-    "maximumTestFiles": 15,
-    "maximumNetProductionTestLines": 4000
+    "maximumFamilies": 20,
+    "maximumWorkflows": 40,
+    "maximumProductionFiles": 12,
+    "maximumTestFiles": 12,
+    "maximumNetProductionTestLines": 3000
   },
   "selectionTotals": {
-    "families": 23,
-    "workflows": 31,
-    "canonicalEvidenceFiles": 29,
-    "implementedFamilies": 1,
-    "implementedWorkflows": 1,
-    "blockedFamilies": 22,
-    "blockedWorkflows": 30
-  },
-  "actualChanges": {
-    "productionFiles": 2,
-    "testFiles": 2,
-    "netProductionTestChangedLines": 401
+    "familiesConsidered": 17,
+    "workflowsConsidered": 24,
+    "reclassifiedFamilies": 2,
+    "splitFamilies": 4,
+    "childFamiliesCreated": 8,
+    "contractOnlyWorkflows": 2,
+    "newlyImplementedWorkflows": 0,
+    "blockedWorkflows": 22
   },
   "blockerCountsBefore": {
-    "unresolved-boundary": 17,
-    "unreviewed-scope": 31,
-    "unverified-execution-path": 31,
-    "unverified-root-call-chain": 17
+    "unresolved-boundary": 12,
+    "unreviewed-scope": 24,
+    "unverified-execution-path": 24,
+    "unverified-root-call-chain": 12
   },
   "blockerCountsAfter": {
-    "unresolved-boundary": 16,
-    "unreviewed-scope": 30,
-    "unverified-execution-path": 30,
-    "unverified-root-call-chain": 16
+    "unregistered-dead-path": 1,
+    "out-of-scope-shared-mutation-root": 1,
+    "platform-admin-scope-contract": 2,
+    "public-command-contract": 5,
+    "authentication-bootstrap-scope-model": 1,
+    "incompatible-shared-auth-roots": 1,
+    "unbounded-platform-scope": 8,
+    "out-of-scope-mutation-root": 1,
+    "incomplete-root-transaction": 1,
+    "actor-command-contract": 1
+  },
+  "actualChanges": {
+    "productionFiles": 0,
+    "testFiles": 1,
+    "netProductionTestChangedLines": 3
   },
   "selectedFamilies": [
     {
       "familyId": "family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f",
-      "workflowIds": ["workflow-internal-backend-src-services-analytics-rollup-service-ts-get-checkpoint-date"],
-      "category": "simple tenant-scoped reads",
-      "risk": "low",
-      "canonicalFiles": ["backend/src/services/analyticsRollupService.ts"],
-      "routeRoots": ["backend/src/index.ts:startAnalyticsRollupWorker", "backend/src/worker.ts:startAnalyticsRollupWorker"],
-      "actorClasses": ["authenticated-user"],
-      "commandRuleIds": ["command-system-checkpoint-select-412dbf5b8acb"],
-      "protectedTables": ["table-system-checkpoint"],
+      "workflowIds": [
+        "workflow-internal-backend-src-services-analytics-rollup-service-ts-get-checkpoint-date"
+      ],
+      "reviewedRisk": "low",
+      "resolution": "reclassified-contract-only",
+      "resultingFamilyIds": [
+        "family-contract-system-boundary-analytics-rollup-worker"
+      ],
+      "canonicalFiles": [
+        "backend/src/services/analyticsRollupService.ts"
+      ],
+      "routeRoots": [
+        "backend/src/index.ts:startAnalyticsRollupWorker",
+        "backend/src/worker.ts:startAnalyticsRollupWorker"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "commandRuleIds": [
+        "command-system-checkpoint-select-412dbf5b8acb"
+      ],
+      "protectedTables": [
+        "table-system-checkpoint"
+      ],
       "scopeSource": "No human tenant scope exists; SystemCheckpoint is platform-global operational state.",
       "assuranceSource": "The actual roots are startup and worker identities, not the generated authenticated-user rule.",
-      "rootCallChainEvidence": ["getCheckpointDate is private and is called only by refreshInventoryStatusRollups and refreshScanMetricsHourlyRollups under the registered rollup worker."],
+      "rootCallChainEvidence": [
+        "getCheckpointDate is private and is called only by refreshInventoryStatusRollups and refreshScanMetricsHourlyRollups under the registered rollup worker."
+      ],
       "transactionStrategy": "Use the approved worker/scheduled system boundary; never synthesize authenticated HTTP context.",
-      "reusableImplementationPattern": "worker-boundary contract",
-      "testPlan": ["Prove durable worker identity, lease ownership, checkpoint isolation and retry behavior."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Planner classification conflicts with the registered non-interactive root; reclassify only with worker-boundary authority."],
-      "implementationStatus": "blocked-noninteractive-system-boundary"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-analyticsservice-2c20deef24",
-      "workflowIds": ["workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"],
-      "category": "simple tenant-scoped reads",
-      "risk": "low",
-      "canonicalFiles": ["backend/src/services/analyticsService.ts", "backend/src/controllers/tracePolicyController.ts", "backend/src/routes/index.ts"],
-      "routeRoots": ["GET /analytics/risk-scores"],
-      "actorClasses": ["authenticated-user"],
-      "commandRuleIds": ["command-batch-select-509547f03abe", "command-policy-alert-select-509547f03abe", "command-qr-scan-log-select-509547f03abe", "command-qrcode-select-509547f03abe"],
-      "protectedTables": ["table-batch", "table-policy-alert", "table-qr-scan-log", "table-qrcode"],
-      "scopeSource": "authenticate, requireAnyAdmin and enforceTenantIsolation provide a potential licensee root.",
-      "assuranceSource": "The command rules require password verification; bounded platform semantics require stronger evidence.",
-      "rootCallChainEvidence": ["getRiskAnalyticsController is the only production caller."],
-      "transactionStrategy": "Not eligible: loadPolicyForScope calls getOrCreateSecurityPolicy, which performs an upsert inside the read path.",
-      "reusableImplementationPattern": "split read-only policy lookup from policy creation before canonical transaction migration",
-      "testPlan": ["Prove an absent policy cannot mutate during GET and foreign rows cannot influence rollups."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["The execution path mutates SecurityPolicy and therefore is not a read-only family."],
-      "implementationStatus": "blocked-hidden-mutation"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-auditcontroller-627bac35ff",
-      "workflowIds": ["workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report"],
-      "category": "simple tenant-scoped reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/controllers/auditController.ts", "backend/src/routes/auditRoutes.ts"],
-      "routeRoots": ["POST /audit/fraud-reports/:id/respond"],
-      "actorClasses": ["licensee-admin", "operator", "platform-admin"],
-      "commandRuleIds": ["command-audit-log-select-92ebfd6a1d0d"],
-      "protectedTables": ["table-audit-log"],
-      "scopeSource": "The mutation route has fraud-response authorization distinct from read listing.",
-      "assuranceSource": "The registered route requires recent admin MFA.",
-      "rootCallChainEvidence": ["respondToFraudReport reads one report and then creates response audit/email side effects."],
-      "transactionStrategy": "Move to a later mutation family with atomic response attribution.",
-      "reusableImplementationPattern": "fraud response mutation boundary",
-      "testPlan": ["Prove one response transition, tenant scope, delivery replay safety and atomic attribution."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Business-state and delivery side effects exclude this workflow from a read-only batch."],
-      "implementationStatus": "blocked-mutation-path"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-auditservice-964272fbb7",
-      "workflowIds": ["workflow-internal-backend-src-services-audit-service-ts-get-audit-logs", "workflow-internal-backend-src-services-audit-service-ts-resolve-org-id"],
-      "category": "simple tenant-scoped reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/services/auditService.ts"],
-      "routeRoots": [],
-      "actorClasses": ["licensee-admin", "operator", "platform-admin"],
-      "commandRuleIds": ["command-audit-log-select-2708ba0e0ee8", "command-licensee-select-fc757fc42aee"],
-      "protectedTables": ["table-audit-log", "table-licensee"],
-      "scopeSource": "No registered production caller is proven by import evidence.",
-      "assuranceSource": "Generated internal actor semantics only.",
-      "rootCallChainEvidence": ["Repository search finds definitions but no production caller for getAuditLogs."],
-      "transactionStrategy": "Do not authorize potentially legacy helpers; retire or attach to a registered root with evidence.",
-      "reusableImplementationPattern": "existing auditLogQueryService for any confirmed replacement",
-      "testPlan": ["Prove registration or retirement before compatibility status changes."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Reachability metadata is insufficient to establish an active root and same transaction."],
-      "implementationStatus": "blocked-unverified-registration"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f",
-      "workflowIds": ["workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"],
-      "category": "simple tenant-scoped reads",
-      "risk": "low",
-      "canonicalFiles": ["backend/src/services/compliancePackService.ts", "backend/src/controllers/governanceController.ts", "backend/src/routes/modules/governanceRoutes.ts"],
-      "routeRoots": ["GET /governance/compliance/pack/jobs"],
-      "actorClasses": ["authenticated-user"],
-      "commandRuleIds": ["command-compliance-pack-job-select-4ef0f20c1c1d"],
-      "protectedTables": ["table-compliance-pack-job"],
-      "scopeSource": "The root is platform-admin-only but currently permits omitted licenseeId to mean all tenants.",
-      "assuranceSource": "The generated password-verified actor rule conflicts with the platform-admin route ceiling.",
-      "rootCallChainEvidence": ["listCompliancePackJobsController is the sole production caller."],
-      "transactionStrategy": "Require a reviewed bounded platform scope, purpose and assurance contract before migration.",
-      "reusableImplementationPattern": "bounded platform read",
-      "testPlan": ["Prove mandatory tenant scope, read attribution and list/count snapshot."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Command actor/assurance semantics do not match the registered platform-only root."],
-      "implementationStatus": "blocked-command-root-conflict"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887",
-      "workflowIds": ["workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"],
-      "category": "simple tenant-scoped reads",
-      "risk": "low",
-      "canonicalFiles": ["backend/src/services/dashboardSnapshotService.ts", "backend/src/controllers/dashboardController.ts", "backend/src/controllers/eventsController.ts"],
-      "routeRoots": ["dashboard HTTP controller", "authenticated events/SSE controller"],
-      "actorClasses": ["authenticated-user"],
-      "commandRuleIds": ["command-inventory-status-rollup-select-f64d10600903"],
-      "protectedTables": ["table-inventory-status-rollup"],
-      "scopeSource": "getDashboardSnapshot derives multiple tenant/manufacturer/platform variants.",
-      "assuranceSource": "The helper inherits two materially different registered roots.",
-      "rootCallChainEvidence": ["loadInventoryAggregate is only one of many protected global queries in computeDashboardSnapshot."],
-      "transactionStrategy": "Split the full dashboard snapshot by root and move all of its protected queries together.",
-      "reusableImplementationPattern": "bounded dashboard snapshot transaction",
-      "testPlan": ["Prove HTTP and SSE roots share exact scope and snapshot semantics."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Migrating only the aggregate helper would leave protected sibling queries outside context."],
-      "implementationStatus": "blocked-partial-path"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e",
-      "workflowIds": ["workflow-http-backend-src-controllers-verify-feedback-handlers-ts-submit-product-feedback"],
-      "category": "simple tenant-scoped reads",
-      "risk": "low",
-      "canonicalFiles": ["backend/src/controllers/verify/feedbackHandlers.ts", "backend/src/routes/index.ts"],
-      "routeRoots": ["POST /verify/feedback"],
-      "actorClasses": ["authenticated-user"],
-      "commandRuleIds": ["command-qrcode-select-0ab7268a79d3"],
-      "protectedTables": ["table-qrcode"],
-      "scopeSource": "The registered route is public and derives QR identity from request data.",
-      "assuranceSource": "The command rule requires password verification, but the route has no authenticated actor.",
-      "rootCallChainEvidence": ["submitProductFeedback is directly registered on publicMutationRouter."],
-      "transactionStrategy": "Requires an approved public verification boundary or named function, not authenticated context.",
-      "reusableImplementationPattern": "public non-sensitive verification contract",
-      "testPlan": ["Prove exact QR lookup disclosure and abuse limits without tenant-private access."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Public route and authenticated command semantics conflict."],
-      "implementationStatus": "blocked-public-contract"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-governancecontroller-96e2eb4bcd",
-      "workflowIds": ["workflow-http-backend-src-controllers-governance-controller-ts-download-compliance-pack-job-controller"],
-      "category": "simple tenant-scoped reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/controllers/governanceController.ts", "backend/src/services/compliancePackService.ts", "backend/src/routes/modules/governanceRoutes.ts"],
-      "routeRoots": ["GET /governance/compliance/pack/jobs/:id/download"],
-      "actorClasses": ["licensee-admin", "operator", "platform-admin"],
-      "commandRuleIds": ["command-compliance-pack-job-select-5cfef776b686"],
-      "protectedTables": ["table-compliance-pack-job"],
-      "scopeSource": "Platform-only route currently selects a job by ID without bounded tenant context.",
-      "assuranceSource": "No exact read-purpose/assurance contract is installed at this root.",
-      "rootCallChainEvidence": ["A missing object triggers rebuildCompliancePackArtifactForJob and the path appends download audit evidence."],
-      "transactionStrategy": "Treat rebuild and attribution as a mutation/export family.",
-      "reusableImplementationPattern": "bounded export with post-commit materialization",
-      "testPlan": ["Prove bounded job lookup, rebuild idempotency and atomic attribution."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["The apparent read can rebuild protected state and is not read-only."],
-      "implementationStatus": "blocked-hidden-mutation"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-governanceservice-e3aa1df885",
-      "workflowIds": ["workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags", "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile", "workflow-internal-backend-src-services-governance-service-ts-resolve-verify-ux-policy"],
-      "category": "simple tenant-scoped reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/services/governanceService.ts"],
-      "routeRoots": ["governance administration routes", "public verification handlers"],
-      "actorClasses": ["licensee-admin", "operator", "platform-admin"],
-      "commandRuleIds": ["command-tenant-feature-flag-select-70594dbe9cf8", "command-tenant-feature-flag-select-84b23ee1039f", "command-tenant-feature-flag-select-c90ec6c2be94"],
-      "protectedTables": ["table-tenant-feature-flag"],
-      "scopeSource": "Methods accept nullable licensee IDs and serve both authenticated administration and public verification.",
-      "assuranceSource": "The generated admin rule cannot authorize public verification callers.",
-      "rootCallChainEvidence": ["resolveVerifyUxPolicy and resolveDuplicateRiskProfile have multiple public and authenticated callers."],
-      "transactionStrategy": "Split public default policy reads from tenant-admin feature-flag reads.",
-      "reusableImplementationPattern": "separate public reference and tenant context boundaries",
-      "testPlan": ["Prove null licensee never becomes global tenant access."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["One family currently contains materially different authorization roots."],
-      "implementationStatus": "blocked-family-split-required"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-idempotencyservice-555b944311",
-      "workflowIds": ["workflow-internal-backend-src-services-idempotency-service-ts-load-existing"],
-      "category": "simple tenant-scoped reads",
-      "risk": "low",
-      "canonicalFiles": ["backend/src/services/idempotencyService.ts"],
-      "routeRoots": ["printer and licensee mutation controllers"],
-      "actorClasses": ["authenticated-user"],
-      "commandRuleIds": ["command-action-idempotency-key-select-af982a9464b8"],
-      "protectedTables": ["table-action-idempotency-key"],
-      "scopeSource": "The hashed key read is an internal step of write-bearing idempotency workflows.",
-      "assuranceSource": "It inherits multiple mutation roots and action scopes.",
-      "rootCallChainEvidence": ["loadExisting is private and called only by beginIdempotentAction."],
-      "transactionStrategy": "Migrate with the owning mutation and its create/delete/update operations.",
-      "reusableImplementationPattern": "atomic idempotency claim boundary",
-      "testPlan": ["Prove conflicting replay denial and one transaction for read/claim/complete."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["A technical read helper is not an independent functional read workflow."],
-      "implementationStatus": "blocked-mutation-path"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014",
-      "workflowIds": ["workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"],
-      "category": "simple tenant-scoped reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/controllers/incidentController.ts", "backend/src/routes/index.ts"],
-      "routeRoots": ["GET /incidents/evidence-files/:fileName"],
-      "actorClasses": ["licensee-admin", "platform-admin"],
-      "commandRuleIds": ["command-incident-evidence-select-00b44dd2511d"],
-      "protectedTables": ["table-incident-evidence"],
-      "scopeSource": "Tenant admins use incident parent scope; platform admins currently select only by filename without bounded tenant context.",
-      "assuranceSource": "The route does not define platform purpose or immutable read attribution.",
-      "rootCallChainEvidence": ["The controller performs one protected lookup before object/local file delivery."],
-      "transactionStrategy": "Add a reviewed platform scope and audit contract before wrapping the lookup.",
-      "reusableImplementationPattern": "bounded evidence lookup then post-commit file delivery",
-      "testPlan": ["Prove tenant parent scope, path containment and platform attribution."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["The platform branch is an unbounded filename lookup and the required audit event is undefined."],
-      "implementationStatus": "blocked-platform-scope"
+      "testPlan": [
+        "Prove durable worker identity, lease ownership, checkpoint isolation and retry behavior."
+      ],
+      "blockerResolutionEvidence": [
+        "Planner classification conflicts with the registered non-interactive root; reclassify only with worker-boundary authority."
+      ]
     },
     {
       "familyId": "family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d",
-      "workflowIds": ["workflow-internal-backend-src-services-local-agent-claim-service-ts-count-local-agent-claim-items"],
-      "category": "simple tenant-scoped reads",
-      "risk": "low",
-      "canonicalFiles": ["backend/src/services/localAgentClaimService.ts", "backend/src/controllers/printerAgentJobController.ts"],
-      "routeRoots": ["printer-agent job claim endpoint"],
-      "actorClasses": ["authenticated-user"],
-      "commandRuleIds": ["command-print-item-select-b20e44176ff5"],
-      "protectedTables": ["table-print-item"],
+      "workflowIds": [
+        "workflow-internal-backend-src-services-local-agent-claim-service-ts-count-local-agent-claim-items"
+      ],
+      "reviewedRisk": "low",
+      "resolution": "reclassified-contract-only",
+      "resultingFamilyIds": [
+        "family-contract-system-boundary-local-agent-device-claim"
+      ],
+      "canonicalFiles": [
+        "backend/src/services/localAgentClaimService.ts",
+        "backend/src/controllers/printerAgentJobController.ts"
+      ],
+      "routeRoots": [
+        "printer-agent job claim endpoint"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "commandRuleIds": [
+        "command-print-item-select-b20e44176ff5"
+      ],
+      "protectedTables": [
+        "table-print-item"
+      ],
       "scopeSource": "The caller supplies printer/manufacturer scope under the printer-agent trust protocol.",
       "assuranceSource": "The root is not an ordinary human HTTP actor boundary.",
-      "rootCallChainEvidence": ["countLocalAgentClaimItems is called only from printerAgentJobController."],
+      "rootCallChainEvidence": [
+        "countLocalAgentClaimItems is called only from printerAgentJobController."
+      ],
       "transactionStrategy": "Migrate with the approved print/agent system identity family.",
-      "reusableImplementationPattern": "printer-agent restricted boundary",
-      "testPlan": ["Prove connector identity, printer ownership and claim replay semantics."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Installing ordinary authenticated context would impersonate a human boundary."],
-      "implementationStatus": "blocked-special-identity"
+      "testPlan": [
+        "Prove connector identity, printer ownership and claim replay semantics."
+      ],
+      "blockerResolutionEvidence": [
+        "Installing ordinary authenticated context would impersonate a human boundary."
+      ]
+    },
+    {
+      "familyId": "family-simple-tenant-scoped-reads-governanceservice-e3aa1df885",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags",
+        "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile",
+        "workflow-internal-backend-src-services-governance-service-ts-resolve-verify-ux-policy"
+      ],
+      "reviewedRisk": "medium",
+      "resolution": "split-blocked",
+      "resultingFamilyIds": [
+        "family-split-governanceservice-platform-feature-flag-administration-7bb4b15607",
+        "family-split-governanceservice-public-verification-policy-80f0c95935"
+      ],
+      "canonicalFiles": [
+        "backend/src/services/governanceService.ts"
+      ],
+      "routeRoots": [
+        "governance administration routes",
+        "public verification handlers"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "operator",
+        "platform-admin"
+      ],
+      "commandRuleIds": [
+        "command-tenant-feature-flag-select-70594dbe9cf8",
+        "command-tenant-feature-flag-select-84b23ee1039f",
+        "command-tenant-feature-flag-select-c90ec6c2be94"
+      ],
+      "protectedTables": [
+        "table-tenant-feature-flag"
+      ],
+      "scopeSource": "Methods accept nullable licensee IDs and serve both authenticated administration and public verification.",
+      "assuranceSource": "The generated admin rule cannot authorize public verification callers.",
+      "rootCallChainEvidence": [
+        "resolveVerifyUxPolicy and resolveDuplicateRiskProfile have multiple public and authenticated callers."
+      ],
+      "transactionStrategy": "Split public default policy reads from tenant-admin feature-flag reads.",
+      "testPlan": [
+        "Prove null licensee never becomes global tenant access."
+      ],
+      "blockerResolutionEvidence": [
+        "One family currently contains materially different authorization roots."
+      ]
     },
     {
       "familyId": "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
-      "workflowIds": ["workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-licensee-links", "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids"],
-      "category": "simple tenant-scoped reads",
-      "risk": "low",
-      "canonicalFiles": ["backend/src/services/manufacturerScopeService.ts", "backend/src/middleware/auth.ts"],
-      "routeRoots": ["authentication hydration", "auth service", "invitation workflows"],
-      "actorClasses": ["manufacturer"],
-      "commandRuleIds": ["command-manufacturer-licensee-link-select-1d1bc0babd5d", "command-manufacturer-licensee-link-select-8a5527dcca57"],
-      "protectedTables": ["table-manufacturer-licensee-link"],
+      "workflowIds": [
+        "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-licensee-links",
+        "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids"
+      ],
+      "reviewedRisk": "low",
+      "resolution": "split-blocked",
+      "resultingFamilyIds": [
+        "family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46",
+        "family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef"
+      ],
+      "canonicalFiles": [
+        "backend/src/services/manufacturerScopeService.ts",
+        "backend/src/middleware/auth.ts"
+      ],
+      "routeRoots": [
+        "authentication hydration",
+        "auth service",
+        "invitation workflows"
+      ],
+      "actorClasses": [
+        "manufacturer"
+      ],
+      "commandRuleIds": [
+        "command-manufacturer-licensee-link-select-1d1bc0babd5d",
+        "command-manufacturer-licensee-link-select-8a5527dcca57"
+      ],
+      "protectedTables": [
+        "table-manufacturer-licensee-link"
+      ],
       "scopeSource": "The primary caller resolves durable tenant links while authentication claims are being hydrated.",
       "assuranceSource": "Actor context is not fully installed at the authentication middleware root.",
-      "rootCallChainEvidence": ["Methods also run inside invitation/auth transactions via an explicitly supplied client."],
+      "rootCallChainEvidence": [
+        "Methods also run inside invitation/auth transactions via an explicitly supplied client."
+      ],
       "transactionStrategy": "Split authentication hydration from authenticated application reads; keep supplied-client paths intact.",
-      "reusableImplementationPattern": "approved authentication bootstrap boundary",
-      "testPlan": ["Prove signed actor identity and exact manufacturer link lookup before context installation."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["The family crosses pre-context authentication and authenticated runtime surfaces."],
-      "implementationStatus": "blocked-family-split-required"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-replacementchainservice-768679140d",
-      "workflowIds": ["workflow-internal-backend-src-services-replacement-chain-service-ts-resolve-replacement-status"],
-      "category": "simple tenant-scoped reads",
-      "risk": "low",
-      "canonicalFiles": ["backend/src/services/replacementChainService.ts", "backend/src/controllers/verify/verificationHandlers.ts"],
-      "routeRoots": ["public QR verification"],
-      "actorClasses": ["authenticated-user"],
-      "commandRuleIds": ["command-replacement-chain-select-04cbc7d3feb1"],
-      "protectedTables": ["table-replacement-chain"],
-      "scopeSource": "The root derives QR identity from a public verification token/code, not an authenticated tenant actor.",
-      "assuranceSource": "The command rule requires password verification but the production caller is public.",
-      "rootCallChainEvidence": ["resolveReplacementStatus is called from public verificationHandlers."],
-      "transactionStrategy": "Use an approved public verification/token-bound contract.",
-      "reusableImplementationPattern": "public verification lookup boundary",
-      "testPlan": ["Prove exact QR token binding and minimum replacement projection."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Public root and authenticated command semantics conflict."],
-      "implementationStatus": "blocked-public-contract"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a",
-      "workflowIds": ["workflow-http-backend-src-controllers-support-controller-ts-track-support-ticket-public"],
-      "category": "simple tenant-scoped reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/controllers/supportController.ts", "backend/src/routes/index.ts"],
-      "routeRoots": ["GET /support/tickets/track/:reference"],
-      "actorClasses": ["licensee-admin", "operator", "platform-admin"],
-      "commandRuleIds": ["command-support-ticket-select-7a26813adcb6"],
-      "protectedTables": ["table-support-ticket"],
-      "scopeSource": "The registered route is public and uses a reference code.",
-      "assuranceSource": "The command contract permits only authenticated administrative actors.",
-      "rootCallChainEvidence": ["trackSupportTicketPublic is directly registered on publicReadRouter."],
-      "transactionStrategy": "Define a minimum public tracking projection or move behind authentication.",
-      "reusableImplementationPattern": "public reference lookup contract",
-      "testPlan": ["Prove unguessable reference, rate limits and no customer/incident disclosure."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Public behavior is not authorized by the current command semantics."],
-      "implementationStatus": "blocked-public-contract"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb",
-      "workflowIds": ["workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary"],
-      "category": "simple tenant-scoped reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/controllers/telemetryController.ts", "backend/src/routes/index.ts"],
-      "routeRoots": ["GET /telemetry/route-transition/summary"],
-      "actorClasses": ["licensee-admin", "platform-admin"],
-      "commandRuleIds": ["command-route-transition-metric-select-1f0ef0300e15"],
-      "protectedTables": ["table-route-transition-metric"],
-      "scopeSource": "Tenant admins use actor licensee; platform admins may currently omit licenseeId for a global aggregate.",
-      "assuranceSource": "No exact platform purpose or attribution is installed.",
-      "rootCallChainEvidence": ["The controller performs three aggregate queries directly."],
-      "transactionStrategy": "Require an approved bounded platform scope and bounded time-window default before migration.",
-      "reusableImplementationPattern": "tenant-keyed aggregate transaction",
-      "testPlan": ["Prove null/foreign tenant exclusion, bounded time and identical aggregate scope."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Current platform and time-window semantics are unbounded and the required audit event is undefined."],
-      "implementationStatus": "blocked-aggregate-semantics"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f",
-      "workflowIds": ["workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline"],
-      "category": "simple tenant-scoped reads",
-      "risk": "low",
-      "canonicalFiles": ["backend/src/routes/index.ts", "backend/src/controllers/tracePolicyController.ts", "backend/src/services/traceEventService.ts", "backend/src/lib/canonicalDbContext.ts"],
-      "routeRoots": ["GET /trace/timeline"],
-      "actorClasses": ["authenticated-user"],
-      "commandRuleIds": ["command-trace-event-select-f571cd9ea8dd"],
-      "protectedTables": ["table-trace-event"],
-      "scopeSource": "Trusted hydrated actor licensee/link claims plus an independently validated bounded platform licensee.",
-      "assuranceSource": "PASSWORD for tenant/manufacturer reads; fresh ADMIN_MFA for platform administration.",
-      "rootCallChainEvidence": ["routes/index.ts -> authenticate -> enforceTenantIsolation -> getTraceTimelineController -> withCanonicalDbContext -> getTraceTimeline(tx)."],
-      "transactionStrategy": "Install canonical context once and run explicit-projection list/count in one REPEATABLE READ transaction.",
-      "reusableImplementationPattern": "existing withCanonicalDbContext and transaction-client-only service",
-      "testPlan": ["backend/tests/traceTimelineContext.test.js"],
-      "eligibilityVerdict": "implemented",
-      "blockerResolutionEvidence": ["One registered root, exact actor/tenant derivation, complete query trace, no mutation, same-client proof, bounded pagination and deterministic ordering."],
-      "implementationStatus": "context-boundary-implemented-postgresql-certification-pending"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20",
-      "workflowIds": ["workflow-internal-backend-src-services-trace-event-service-ts-backfill-trace-events-from-audit-logs", "workflow-internal-backend-src-services-trace-event-service-ts-create-trace-event-from-audit-log"],
-      "category": "simple tenant-scoped reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/services/traceEventService.ts"],
-      "routeRoots": ["trace backfill and audit-derived event creation"],
-      "actorClasses": ["licensee-admin", "operator", "platform-admin"],
-      "commandRuleIds": ["command-audit-log-select-7db9558237d9", "command-trace-event-select-3b06b5cec754"],
-      "protectedTables": ["table-audit-log", "table-trace-event"],
-      "scopeSource": "Backfill accepts optional licensee scope and reads historical audit data.",
-      "assuranceSource": "No one registered read root is proven.",
-      "rootCallChainEvidence": ["Both methods create TraceEvent rows after their selected reads."],
-      "transactionStrategy": "Move to an append-only backfill/mutation family with idempotency.",
-      "reusableImplementationPattern": "bounded append-only backfill",
-      "testPlan": ["Prove deduplication, retry safety and tenant partitioning."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["The family contains write-bearing backfill operations."],
-      "implementationStatus": "blocked-mutation-path"
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827",
-      "workflowIds": ["workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller"],
-      "category": "simple tenant-scoped reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/controllers/tracePolicyController.ts", "backend/src/routes/index.ts"],
-      "routeRoots": ["GET /policy/alerts"],
-      "actorClasses": ["platform-admin"],
-      "commandRuleIds": ["command-policy-alert-select-72caff430120"],
-      "protectedTables": ["table-policy-alert"],
-      "scopeSource": "The route currently permits any admin, while the command rule permits platform admin only with a tenant key.",
-      "assuranceSource": "The command rule requires MFA and audit; the route currently enforces neither exact property.",
-      "rootCallChainEvidence": ["The controller performs list/count and relation enrichment directly."],
-      "transactionStrategy": "Resolve the licensee-admin route/command conflict and define immutable read attribution first.",
-      "reusableImplementationPattern": "bounded policy-alert read",
-      "testPlan": ["Prove exact allowed actor, tenant scope, attribution and redaction."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Implementing the command rule would change currently allowed licensee-admin behavior without a product decision."],
-      "implementationStatus": "blocked-actor-contract-conflict"
-    },
-    {
-      "familyId": "family-platform-admin-bounded-reads-iralertcontroller-791acbf282",
-      "workflowIds": ["workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts"],
-      "category": "platform-admin bounded reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/controllers/irAlertController.ts", "backend/src/routes/index.ts"],
-      "routeRoots": ["GET /ir/alerts"],
-      "actorClasses": ["platform-admin"],
-      "commandRuleIds": ["command-policy-alert-select-4456be80d295"],
-      "protectedTables": ["table-policy-alert"],
-      "scopeSource": "The platform-only route currently permits omitted licenseeId and therefore global results.",
-      "assuranceSource": "The command rule requires MFA and immutable audit evidence; the root has no purpose contract.",
-      "rootCallChainEvidence": ["listIrAlerts performs direct list/count and relation enrichment."],
-      "transactionStrategy": "Require bounded licensee, fresh MFA, purpose and an approved audit event before migration.",
-      "reusableImplementationPattern": "bounded platform alert read",
-      "testPlan": ["Prove list/count scope, relation projection and attribution."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Platform scope and read attribution semantics remain incomplete."],
-      "implementationStatus": "blocked-platform-scope"
-    },
-    {
-      "familyId": "family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba",
-      "workflowIds": ["workflow-http-backend-src-controllers-licensee-controller-ts-export-licensees-csv"],
-      "category": "platform-admin bounded reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/controllers/licenseeController.ts", "backend/src/routes/index.ts"],
-      "routeRoots": ["GET /licensees/export"],
-      "actorClasses": ["platform-admin"],
-      "commandRuleIds": ["command-licensee-select-6f1d12de6c1e"],
-      "protectedTables": ["table-licensee"],
-      "scopeSource": "The platform export is global while the command rule requires trusted non-null organization scope.",
-      "assuranceSource": "The command rule reports password assurance but architecture requires bounded purpose-attributed administration.",
-      "rootCallChainEvidence": ["exportLicenseesCsv executes one global list before CSV serialization."],
-      "transactionStrategy": "Define an organization-bounded export or an explicit approved platform-reference exception.",
-      "reusableImplementationPattern": "bounded platform CSV export",
-      "testPlan": ["Prove organization scope, row cap, projection and attribution."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Existing global catalog behavior conflicts with the command scope rule."],
-      "implementationStatus": "blocked-scope-contract-conflict"
-    },
-    {
-      "familyId": "family-platform-admin-bounded-reads-licenseecontroller-8ea4017392",
-      "workflowIds": ["workflow-http-backend-src-controllers-licensee-controller-ts-get-licensee", "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensees"],
-      "category": "platform-admin bounded reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/controllers/licenseeController.ts", "backend/src/routes/index.ts"],
-      "routeRoots": ["GET /licensees", "GET /licensees/:id"],
-      "actorClasses": ["platform-admin"],
-      "commandRuleIds": ["command-licensee-select-32463a66da3a", "command-licensee-select-f1b547f804cd"],
-      "protectedTables": ["table-licensee"],
-      "scopeSource": "Platform routes expose global list/by-ID behavior without trusted organization context.",
-      "assuranceSource": "The rules require MFA and audit but no purpose/bounded organization contract is present.",
-      "rootCallChainEvidence": ["Both controllers query Licensee directly from registered platform-only routes."],
-      "transactionStrategy": "Resolve global platform-reference versus organization-bounded semantics before implementation.",
-      "reusableImplementationPattern": "bounded platform directory read",
-      "testPlan": ["Prove list/detail use the same approved organization ceiling and explicit projections."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["The authoritative scope rule and current global directory behavior conflict."],
-      "implementationStatus": "blocked-scope-contract-conflict"
+      "testPlan": [
+        "Prove signed actor identity and exact manufacturer link lookup before context installation."
+      ],
+      "blockerResolutionEvidence": [
+        "The family crosses pre-context authentication and authenticated runtime surfaces."
+      ]
     },
     {
       "familyId": "family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa",
-      "workflowIds": ["workflow-http-backend-src-controllers-support-controller-ts-add-support-message", "workflow-http-backend-src-controllers-support-controller-ts-get-support-ticket", "workflow-http-backend-src-controllers-support-controller-ts-list-support-tickets"],
-      "category": "platform-admin bounded reads",
-      "risk": "medium",
-      "canonicalFiles": ["backend/src/controllers/supportController.ts", "backend/src/routes/index.ts"],
-      "routeRoots": ["GET /support/tickets", "GET /support/tickets/:id", "POST /support/tickets/:id/messages"],
-      "actorClasses": ["platform-admin"],
-      "commandRuleIds": ["command-support-ticket-select-6522ae51ad08", "command-support-ticket-select-7d7476512a56", "command-support-ticket-select-8eca46656b77"],
-      "protectedTables": ["table-support-ticket"],
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-support-controller-ts-add-support-message",
+        "workflow-http-backend-src-controllers-support-controller-ts-get-support-ticket",
+        "workflow-http-backend-src-controllers-support-controller-ts-list-support-tickets"
+      ],
+      "reviewedRisk": "medium",
+      "resolution": "split-blocked",
+      "resultingFamilyIds": [
+        "family-split-supportcontroller-platform-support-message-mutation-2b4b2be0d0",
+        "family-split-supportcontroller-platform-support-ticket-read-4ce4ce4858"
+      ],
+      "canonicalFiles": [
+        "backend/src/controllers/supportController.ts",
+        "backend/src/routes/index.ts"
+      ],
+      "routeRoots": [
+        "GET /support/tickets",
+        "GET /support/tickets/:id",
+        "POST /support/tickets/:id/messages"
+      ],
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "commandRuleIds": [
+        "command-support-ticket-select-6522ae51ad08",
+        "command-support-ticket-select-7d7476512a56",
+        "command-support-ticket-select-8eca46656b77"
+      ],
+      "protectedTables": [
+        "table-support-ticket"
+      ],
       "scopeSource": "Platform routes currently list/read tickets without a bounded tenant; addSupportMessage is a mutation root.",
       "assuranceSource": "Rules require MFA and audit, but exact purpose and attribution are absent.",
-      "rootCallChainEvidence": ["The family combines two reads with a message-creation workflow."],
+      "rootCallChainEvidence": [
+        "The family combines two reads with a message-creation workflow."
+      ],
       "transactionStrategy": "Split list/detail from message mutation, then approve bounded incident/tenant scope.",
-      "reusableImplementationPattern": "bounded support read plus separate message mutation",
-      "testPlan": ["Prove family split, tenant ceiling, PII projection and message idempotency."],
-      "eligibilityVerdict": "blocked",
-      "blockerResolutionEvidence": ["Mixed read/mutation semantics and unbounded cross-tenant platform access require a split."],
-      "implementationStatus": "blocked-family-split-required"
+      "testPlan": [
+        "Prove family split, tenant ceiling, PII projection and message idempotency."
+      ],
+      "blockerResolutionEvidence": [
+        "Mixed read/mutation semantics and unbounded cross-tenant platform access require a split."
+      ]
+    },
+    {
+      "familyId": "family-simple-tenant-scoped-reads-auditservice-964272fbb7",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-audit-service-ts-get-audit-logs",
+        "workflow-internal-backend-src-services-audit-service-ts-resolve-org-id"
+      ],
+      "reviewedRisk": "medium",
+      "resolution": "split-blocked",
+      "resultingFamilyIds": [
+        "family-split-auditservice-audit-write-org-resolution-60e107aefa",
+        "family-split-auditservice-unregistered-audit-reader-bfe36f6eba"
+      ],
+      "canonicalFiles": [
+        "backend/src/services/auditService.ts"
+      ],
+      "routeRoots": [
+        "Repository search finds no production caller for getAuditLogs.",
+        "resolveOrgId is private and is called by resolveAuditPayload for createAuditLog and createAuditLogSafely."
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "operator",
+        "platform-admin"
+      ],
+      "commandRuleIds": [
+        "command-audit-log-select-2708ba0e0ee8",
+        "command-licensee-select-fc757fc42aee"
+      ],
+      "protectedTables": [
+        "table-audit-log",
+        "table-licensee"
+      ],
+      "scopeSource": "No registered production caller is proven by import evidence.",
+      "assuranceSource": "Generated internal actor semantics only.",
+      "rootCallChainEvidence": [
+        "Repository search finds definitions but no production caller for getAuditLogs."
+      ],
+      "transactionStrategy": "Do not authorize potentially legacy helpers; retire or attach to a registered root with evidence.",
+      "testPlan": [
+        "Prove registration or retirement before compatibility status changes."
+      ],
+      "blockerResolutionEvidence": [
+        "Reachability metadata is insufficient to establish an active root and same transaction."
+      ]
+    },
+    {
+      "familyId": "family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "reviewedRisk": "low",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887"
+      ],
+      "canonicalFiles": [
+        "backend/src/services/dashboardSnapshotService.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts"
+      ],
+      "routeRoots": [
+        "dashboard HTTP controller",
+        "authenticated events/SSE controller"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "commandRuleIds": [
+        "command-inventory-status-rollup-select-f64d10600903"
+      ],
+      "protectedTables": [
+        "table-inventory-status-rollup"
+      ],
+      "scopeSource": "getDashboardSnapshot derives multiple tenant/manufacturer/platform variants.",
+      "assuranceSource": "The helper inherits two materially different registered roots.",
+      "rootCallChainEvidence": [
+        "loadInventoryAggregate is only one of many protected global queries in computeDashboardSnapshot."
+      ],
+      "transactionStrategy": "Split the full dashboard snapshot by root and move all of its protected queries together.",
+      "testPlan": [
+        "Prove HTTP and SSE roots share exact scope and snapshot semantics."
+      ],
+      "blockerResolutionEvidence": [
+        "Migrating only the aggregate helper would leave protected sibling queries outside context."
+      ]
+    },
+    {
+      "familyId": "family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"
+      ],
+      "reviewedRisk": "low",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f"
+      ],
+      "canonicalFiles": [
+        "backend/src/services/compliancePackService.ts",
+        "backend/src/controllers/governanceController.ts",
+        "backend/src/routes/modules/governanceRoutes.ts"
+      ],
+      "routeRoots": [
+        "GET /governance/compliance/pack/jobs"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "commandRuleIds": [
+        "command-compliance-pack-job-select-4ef0f20c1c1d"
+      ],
+      "protectedTables": [
+        "table-compliance-pack-job"
+      ],
+      "scopeSource": "The root is platform-admin-only but currently permits omitted licenseeId to mean all tenants.",
+      "assuranceSource": "The generated password-verified actor rule conflicts with the platform-admin route ceiling.",
+      "rootCallChainEvidence": [
+        "listCompliancePackJobsController is the sole production caller."
+      ],
+      "transactionStrategy": "Require a reviewed bounded platform scope, purpose and assurance contract before migration.",
+      "testPlan": [
+        "Prove mandatory tenant scope, read attribution and list/count snapshot."
+      ],
+      "blockerResolutionEvidence": [
+        "Command actor/assurance semantics do not match the registered platform-only root."
+      ]
+    },
+    {
+      "familyId": "family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-submit-product-feedback"
+      ],
+      "reviewedRisk": "low",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e"
+      ],
+      "canonicalFiles": [
+        "backend/src/controllers/verify/feedbackHandlers.ts",
+        "backend/src/routes/index.ts"
+      ],
+      "routeRoots": [
+        "POST /verify/feedback"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "commandRuleIds": [
+        "command-qrcode-select-0ab7268a79d3"
+      ],
+      "protectedTables": [
+        "table-qrcode"
+      ],
+      "scopeSource": "The registered route is public and derives QR identity from request data.",
+      "assuranceSource": "The command rule requires password verification, but the route has no authenticated actor.",
+      "rootCallChainEvidence": [
+        "submitProductFeedback is directly registered on publicMutationRouter."
+      ],
+      "transactionStrategy": "Requires an approved public verification boundary or named function, not authenticated context.",
+      "testPlan": [
+        "Prove exact QR lookup disclosure and abuse limits without tenant-private access."
+      ],
+      "blockerResolutionEvidence": [
+        "Public route and authenticated command semantics conflict."
+      ]
+    },
+    {
+      "familyId": "family-simple-tenant-scoped-reads-replacementchainservice-768679140d",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-replacement-chain-service-ts-resolve-replacement-status"
+      ],
+      "reviewedRisk": "low",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-simple-tenant-scoped-reads-replacementchainservice-768679140d"
+      ],
+      "canonicalFiles": [
+        "backend/src/services/replacementChainService.ts",
+        "backend/src/controllers/verify/verificationHandlers.ts"
+      ],
+      "routeRoots": [
+        "public QR verification"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "commandRuleIds": [
+        "command-replacement-chain-select-04cbc7d3feb1"
+      ],
+      "protectedTables": [
+        "table-replacement-chain"
+      ],
+      "scopeSource": "The root derives QR identity from a public verification token/code, not an authenticated tenant actor.",
+      "assuranceSource": "The command rule requires password verification but the production caller is public.",
+      "rootCallChainEvidence": [
+        "resolveReplacementStatus is called from public verificationHandlers."
+      ],
+      "transactionStrategy": "Use an approved public verification/token-bound contract.",
+      "testPlan": [
+        "Prove exact QR token binding and minimum replacement projection."
+      ],
+      "blockerResolutionEvidence": [
+        "Public root and authenticated command semantics conflict."
+      ]
+    },
+    {
+      "familyId": "family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-support-controller-ts-track-support-ticket-public"
+      ],
+      "reviewedRisk": "medium",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a"
+      ],
+      "canonicalFiles": [
+        "backend/src/controllers/supportController.ts",
+        "backend/src/routes/index.ts"
+      ],
+      "routeRoots": [
+        "GET /support/tickets/track/:reference"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "operator",
+        "platform-admin"
+      ],
+      "commandRuleIds": [
+        "command-support-ticket-select-7a26813adcb6"
+      ],
+      "protectedTables": [
+        "table-support-ticket"
+      ],
+      "scopeSource": "The registered route is public and uses a reference code.",
+      "assuranceSource": "The command contract permits only authenticated administrative actors.",
+      "rootCallChainEvidence": [
+        "trackSupportTicketPublic is directly registered on publicReadRouter."
+      ],
+      "transactionStrategy": "Define a minimum public tracking projection or move behind authentication.",
+      "testPlan": [
+        "Prove unguessable reference, rate limits and no customer/incident disclosure."
+      ],
+      "blockerResolutionEvidence": [
+        "Public behavior is not authorized by the current command semantics."
+      ]
+    },
+    {
+      "familyId": "family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller"
+      ],
+      "reviewedRisk": "medium",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827"
+      ],
+      "canonicalFiles": [
+        "backend/src/controllers/tracePolicyController.ts",
+        "backend/src/routes/index.ts"
+      ],
+      "routeRoots": [
+        "GET /policy/alerts"
+      ],
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "commandRuleIds": [
+        "command-policy-alert-select-72caff430120"
+      ],
+      "protectedTables": [
+        "table-policy-alert"
+      ],
+      "scopeSource": "The route currently permits any admin, while the command rule permits platform admin only with a tenant key.",
+      "assuranceSource": "The command rule requires MFA and audit; the route currently enforces neither exact property.",
+      "rootCallChainEvidence": [
+        "The controller performs list/count and relation enrichment directly."
+      ],
+      "transactionStrategy": "Resolve the licensee-admin route/command conflict and define immutable read attribution first.",
+      "testPlan": [
+        "Prove exact allowed actor, tenant scope, attribution and redaction."
+      ],
+      "blockerResolutionEvidence": [
+        "Implementing the command rule would change currently allowed licensee-admin behavior without a product decision."
+      ]
+    },
+    {
+      "familyId": "family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
+      ],
+      "reviewedRisk": "medium",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014"
+      ],
+      "canonicalFiles": [
+        "backend/src/controllers/incidentController.ts",
+        "backend/src/routes/index.ts"
+      ],
+      "routeRoots": [
+        "GET /incidents/evidence-files/:fileName"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "commandRuleIds": [
+        "command-incident-evidence-select-00b44dd2511d"
+      ],
+      "protectedTables": [
+        "table-incident-evidence"
+      ],
+      "scopeSource": "Tenant admins use incident parent scope; platform admins currently select only by filename without bounded tenant context.",
+      "assuranceSource": "The route does not define platform purpose or immutable read attribution.",
+      "rootCallChainEvidence": [
+        "The controller performs one protected lookup before object/local file delivery."
+      ],
+      "transactionStrategy": "Add a reviewed platform scope and audit contract before wrapping the lookup.",
+      "testPlan": [
+        "Prove tenant parent scope, path containment and platform attribution."
+      ],
+      "blockerResolutionEvidence": [
+        "The platform branch is an unbounded filename lookup and the required audit event is undefined."
+      ]
+    },
+    {
+      "familyId": "family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary"
+      ],
+      "reviewedRisk": "medium",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb"
+      ],
+      "canonicalFiles": [
+        "backend/src/controllers/telemetryController.ts",
+        "backend/src/routes/index.ts"
+      ],
+      "routeRoots": [
+        "GET /telemetry/route-transition/summary"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "commandRuleIds": [
+        "command-route-transition-metric-select-1f0ef0300e15"
+      ],
+      "protectedTables": [
+        "table-route-transition-metric"
+      ],
+      "scopeSource": "Tenant admins use actor licensee; platform admins may currently omit licenseeId for a global aggregate.",
+      "assuranceSource": "No exact platform purpose or attribution is installed.",
+      "rootCallChainEvidence": [
+        "The controller performs three aggregate queries directly."
+      ],
+      "transactionStrategy": "Require an approved bounded platform scope and bounded time-window default before migration.",
+      "testPlan": [
+        "Prove null/foreign tenant exclusion, bounded time and identical aggregate scope."
+      ],
+      "blockerResolutionEvidence": [
+        "Current platform and time-window semantics are unbounded and the required audit event is undefined."
+      ]
+    },
+    {
+      "familyId": "family-platform-admin-bounded-reads-iralertcontroller-791acbf282",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts"
+      ],
+      "reviewedRisk": "medium",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-platform-admin-bounded-reads-iralertcontroller-791acbf282"
+      ],
+      "canonicalFiles": [
+        "backend/src/controllers/irAlertController.ts",
+        "backend/src/routes/index.ts"
+      ],
+      "routeRoots": [
+        "GET /ir/alerts"
+      ],
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "commandRuleIds": [
+        "command-policy-alert-select-4456be80d295"
+      ],
+      "protectedTables": [
+        "table-policy-alert"
+      ],
+      "scopeSource": "The platform-only route currently permits omitted licenseeId and therefore global results.",
+      "assuranceSource": "The command rule requires MFA and immutable audit evidence; the root has no purpose contract.",
+      "rootCallChainEvidence": [
+        "listIrAlerts performs direct list/count and relation enrichment."
+      ],
+      "transactionStrategy": "Require bounded licensee, fresh MFA, purpose and an approved audit event before migration.",
+      "testPlan": [
+        "Prove list/count scope, relation projection and attribution."
+      ],
+      "blockerResolutionEvidence": [
+        "Platform scope and read attribution semantics remain incomplete."
+      ]
+    },
+    {
+      "familyId": "family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-licensee-controller-ts-export-licensees-csv"
+      ],
+      "reviewedRisk": "medium",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba"
+      ],
+      "canonicalFiles": [
+        "backend/src/controllers/licenseeController.ts",
+        "backend/src/routes/index.ts"
+      ],
+      "routeRoots": [
+        "GET /licensees/export"
+      ],
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "commandRuleIds": [
+        "command-licensee-select-6f1d12de6c1e"
+      ],
+      "protectedTables": [
+        "table-licensee"
+      ],
+      "scopeSource": "The platform export is global while the command rule requires trusted non-null organization scope.",
+      "assuranceSource": "The command rule reports password assurance but architecture requires bounded purpose-attributed administration.",
+      "rootCallChainEvidence": [
+        "exportLicenseesCsv executes one global list before CSV serialization."
+      ],
+      "transactionStrategy": "Define an organization-bounded export or an explicit approved platform-reference exception.",
+      "testPlan": [
+        "Prove organization scope, row cap, projection and attribution."
+      ],
+      "blockerResolutionEvidence": [
+        "Existing global catalog behavior conflicts with the command scope rule."
+      ]
+    },
+    {
+      "familyId": "family-platform-admin-bounded-reads-licenseecontroller-8ea4017392",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensee",
+        "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensees"
+      ],
+      "reviewedRisk": "medium",
+      "resolution": "blocked",
+      "resultingFamilyIds": [
+        "family-platform-admin-bounded-reads-licenseecontroller-8ea4017392"
+      ],
+      "canonicalFiles": [
+        "backend/src/controllers/licenseeController.ts",
+        "backend/src/routes/index.ts"
+      ],
+      "routeRoots": [
+        "GET /licensees",
+        "GET /licensees/:id"
+      ],
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "commandRuleIds": [
+        "command-licensee-select-32463a66da3a",
+        "command-licensee-select-f1b547f804cd"
+      ],
+      "protectedTables": [
+        "table-licensee"
+      ],
+      "scopeSource": "Platform routes expose global list/by-ID behavior without trusted organization context.",
+      "assuranceSource": "The rules require MFA and audit but no purpose/bounded organization contract is present.",
+      "rootCallChainEvidence": [
+        "Both controllers query Licensee directly from registered platform-only routes."
+      ],
+      "transactionStrategy": "Resolve global platform-reference versus organization-bounded semantics before implementation.",
+      "testPlan": [
+        "Prove list/detail use the same approved organization ceiling and explicit projections."
+      ],
+      "blockerResolutionEvidence": [
+        "The authoritative scope rule and current global directory behavior conflict."
+      ]
     }
   ]
 }

@@ -6369,7 +6369,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-platform-read-scope"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-81f611458b88afef",
@@ -6378,7 +6380,7 @@
           "method": "findFirst"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-incident-evidence-select-00b44dd2511d"
       ],
@@ -6392,7 +6394,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+        }
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts",
@@ -6441,7 +6457,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-platform-read-scope"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-b5ed86e01eea0aa1",
@@ -6456,7 +6474,7 @@
           "method": "count"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-policy-alert-select-4456be80d295"
       ],
@@ -6469,7 +6487,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+        }
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert",
@@ -7695,7 +7727,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-platform-read-scope"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-3cabc590acb1c3df",
@@ -7704,7 +7738,7 @@
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-licensee-select-6f1d12de6c1e"
       ],
@@ -7717,7 +7751,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+        }
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensee",
@@ -7765,7 +7813,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-platform-read-scope"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-1e6516ac6bc919be",
@@ -7774,7 +7824,7 @@
           "method": "findUnique"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-licensee-select-f1b547f804cd"
       ],
@@ -7787,7 +7837,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+        }
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensees",
@@ -7835,7 +7899,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-platform-read-scope"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-ab1db19319608bcd",
@@ -7844,7 +7910,7 @@
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-licensee-select-32463a66da3a"
       ],
@@ -7857,7 +7923,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+        }
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-licensee-controller-ts-update-licensee",
@@ -11249,7 +11329,7 @@
           "method": "findFirst"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-support-ticket-select-6522ae51ad08"
       ],
@@ -11262,7 +11342,41 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "out-of-scope-mutation-root",
+          "reason": "The selected read is a preflight inside a message-creation mutation root.",
+          "remediation": "Review the complete message mutation, idempotency, audit and transaction boundary in a later high-risk batch."
+        }
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa",
+        "semanticKey": "platform-support-message-mutation",
+        "reason": "Isolate the read preflight owned by the support-message mutation.",
+        "evidence": [
+          "POST /support/tickets/:id/messages requires recent MFA and CSRF, then calls addSupportTicketMessage and createAuditLog."
+        ],
+        "routeRoots": [
+          "POST /support/tickets/:id/messages requires recent MFA and CSRF, then calls addSupportTicketMessage and createAuditLog."
+        ],
+        "actorClasses": [
+          "platform-admin"
+        ],
+        "scopeModel": "Ticket ID plus an approved bounded support tenant scope inside the full message mutation.",
+        "executionSurface": "http",
+        "protectedTableBoundary": "SupportTicket preflight for SupportTicketMessage mutation",
+        "commandSemantics": "SELECT preflight followed by message and audit writes; mutation review required.",
+        "category": "incident/governance workflows",
+        "risk": "high"
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-support-controller-ts-get-support-ticket",
@@ -11310,7 +11424,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-platform-read-scope"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-ac38e8160f137e1a",
@@ -11319,7 +11435,7 @@
           "method": "findFirst"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-support-ticket-select-8eca46656b77"
       ],
@@ -11332,7 +11448,40 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+        }
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa",
+        "semanticKey": "platform-support-ticket-read",
+        "reason": "Keep list/detail reads separate from the message mutation root.",
+        "evidence": [
+          "GET /support/tickets/:id is platform-admin-only and currently selects by ID without tenant scope."
+        ],
+        "routeRoots": [
+          "GET /support/tickets/:id is platform-admin-only and currently selects by ID without tenant scope."
+        ],
+        "actorClasses": [
+          "platform-admin"
+        ],
+        "scopeModel": "Approved bounded licensee/organization support scope; no implicit all-tenant fallback.",
+        "executionSurface": "http",
+        "protectedTableBoundary": "SupportTicket administrative read projection",
+        "commandSemantics": "Bounded list/detail read with explicit PII projection and attribution.",
+        "risk": "medium"
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-support-controller-ts-list-support-tickets",
@@ -11381,7 +11530,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-platform-read-scope"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-80be89de42dd1701",
@@ -11396,7 +11547,7 @@
           "method": "count"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-support-ticket-select-7d7476512a56"
       ],
@@ -11409,7 +11560,40 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+        }
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa",
+        "semanticKey": "platform-support-ticket-read",
+        "reason": "Keep list/detail reads separate from the message mutation root.",
+        "evidence": [
+          "GET /support/tickets is platform-admin-only and currently allows omitted licenseeId."
+        ],
+        "routeRoots": [
+          "GET /support/tickets is platform-admin-only and currently allows omitted licenseeId."
+        ],
+        "actorClasses": [
+          "platform-admin"
+        ],
+        "scopeModel": "Approved bounded licensee/organization support scope; no implicit all-tenant fallback.",
+        "executionSurface": "http",
+        "protectedTableBoundary": "SupportTicket administrative read projection",
+        "commandSemantics": "Bounded list/detail read with explicit PII projection and attribution.",
+        "risk": "medium"
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-support-controller-ts-patch-support-ticket",
@@ -11538,7 +11722,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-public-read-contract"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-6d5cc5a7ace9806d",
@@ -11547,7 +11733,7 @@
           "method": "findFirst"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-support-ticket-select-7a26813adcb6"
       ],
@@ -11562,7 +11748,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-command-contract",
+          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
+          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication."
+        }
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-support-issue-controller-ts-create-support-issue-report",
@@ -11987,7 +12187,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-platform-read-scope"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-24026306f11a7da6",
@@ -12008,7 +12210,7 @@
           "method": "groupBy"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-route-transition-metric-select-1f0ef0300e15"
       ],
@@ -12022,7 +12224,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+        }
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-trace-policy-controller-ts-acknowledge-policy-alert-controller",
@@ -12224,7 +12440,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-policy-alert-actor-ceiling"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-9aba912d4d4e84ac",
@@ -12239,7 +12457,7 @@
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-policy-alert-select-72caff430120"
       ],
@@ -12252,7 +12470,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "actor-command-contract",
+          "reason": "The registered route actor ceiling and assurance do not match the reviewed command rule.",
+          "remediation": "Choose the product actor ceiling and require matching tenant scope, assurance, purpose and immutable read attribution."
+        }
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-trace-policy-controller-ts-update-policy-config-controller",
@@ -13583,7 +13815,7 @@
       "contextRequirements": [
         "transaction-local canonical actor context"
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
@@ -13603,7 +13835,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-public-read-contract"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-0a85c1c46b6dc9a7",
@@ -13624,7 +13858,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-command-contract",
+          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
+          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication."
+        }
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode",
@@ -14767,23 +15015,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "Allowlisted platform SystemCheckpoint key under the analytics worker lease; no tenant or human scope exists.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "Use only system-boundary-analytics-rollup-worker; human role and ordinary authenticated context are forbidden."
       ],
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "Only the exact cryptographically or durably verified system boundary may execute the reviewed read after its full parent workflow is implemented and certified."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Human impersonation, blank scope, generic cross-tenant access, stale/replayed evidence, wrong device/worker identity or partial parent-flow activation is denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
         "access-1f4235c7ed598ef1"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "implementationStatus": "contract-only-system-boundary",
       "requiredUnitTests": [
         "Allowed and denied command contract for this canonical workflow."
       ],
@@ -14799,7 +15047,7 @@
           "method": "findUnique"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-system-checkpoint-select-412dbf5b8acb"
       ],
@@ -14812,7 +15060,20 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "systemBoundaryId": "system-boundary-analytics-rollup-worker",
+      "contextBoundaryReclassification": {
+        "fromFamilyId": "family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f",
+        "classification": "worker boundary",
+        "status": "contract-only"
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-analytics-rollup-service-ts-load-changed-batch-ids",
@@ -15603,7 +15864,7 @@
           "method": "count"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-audit-log-select-2708ba0e0ee8"
       ],
@@ -15618,7 +15879,41 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "unregistered-dead-path",
+          "reason": "No registered production caller imports the legacy audit-log reader.",
+          "remediation": "Delete it after a separate dead-code review, or attach it to one registered root with exact scope and transaction evidence."
+        }
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-simple-tenant-scoped-reads-auditservice-964272fbb7",
+        "semanticKey": "unregistered-audit-reader",
+        "reason": "Separate an unregistered legacy reader from the live audit-write organization resolver.",
+        "evidence": [
+          "Repository search finds no production caller for getAuditLogs."
+        ],
+        "routeRoots": [
+          "Repository search finds no production caller for getAuditLogs."
+        ],
+        "actorClasses": [
+          "licensee-admin",
+          "operator",
+          "platform-admin"
+        ],
+        "scopeModel": "No approved scope because the function has no registered root.",
+        "executionSurface": "internal",
+        "protectedTableBoundary": "AuditLog legacy read helper",
+        "commandSemantics": "Read-only list/count with cursor pagination; no command root is registered."
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-audit-service-ts-resolve-org-id",
@@ -15677,7 +15972,7 @@
           "method": "findUnique"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-licensee-select-fc757fc42aee"
       ],
@@ -15692,7 +15987,43 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "out-of-scope-shared-mutation-root",
+          "reason": "The lookup is shared by audit writes from many incompatible request, worker and public roots.",
+          "remediation": "Move organization resolution into each owning audit transaction or an approved audit system boundary in a mutation-focused batch."
+        }
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-simple-tenant-scoped-reads-auditservice-964272fbb7",
+        "semanticKey": "audit-write-org-resolution",
+        "reason": "Separate the organization lookup inherited by audit writes from the unregistered audit reader.",
+        "evidence": [
+          "resolveOrgId is private and is called by resolveAuditPayload for createAuditLog and createAuditLogSafely."
+        ],
+        "routeRoots": [
+          "resolveOrgId is private and is called by resolveAuditPayload for createAuditLog and createAuditLogSafely."
+        ],
+        "actorClasses": [
+          "authenticated-user",
+          "worker",
+          "scheduled-job"
+        ],
+        "scopeModel": "Organization is derived from explicit orgId or Licensee.orgId inside the owning audit-write boundary.",
+        "executionSurface": "internal",
+        "protectedTableBoundary": "Licensee lookup inherited by AuditLog write roots",
+        "commandSemantics": "SELECT prerequisite inside mixed audit mutation roots.",
+        "category": "incident/governance workflows",
+        "risk": "high"
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-auth-auth-email-service-ts-get-primary-superadmin-email",
@@ -21706,7 +22037,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-platform-read-scope"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-05122d1b13ca3c10",
@@ -21721,7 +22054,7 @@
           "method": "count"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-compliance-pack-job-select-4ef0f20c1c1d"
       ],
@@ -21734,7 +22067,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "platform-admin-scope-contract",
+          "reason": "The route uses role-string platform administration and a query-selected or omitted tenant scope without an approved purpose-attributed ceiling.",
+          "remediation": "Approve a bounded platform-admin contract with trusted scope selection, assurance and same-transaction read attribution."
+        }
+      ]
     },
     {
       "id": "workflow-internal-backend-src-services-compliance-pack-service-ts-rebuild-compliance-pack-artifact-for-job",
@@ -23492,7 +23839,7 @@
           "method": "aggregate"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-inventory-status-rollup-select-f64d10600903"
       ],
@@ -23505,7 +23852,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "incomplete-root-transaction",
+          "reason": "The helper is only one protected query inside HTTP and SSE snapshot roots that still use global Prisma.",
+          "remediation": "Move every protected snapshot query for each compatible root into one canonical transaction before implementing this leaf read."
+        }
+      ]
     },
     {
       "id": "workflow-internal-backend-src-services-degradation-event-service-ts-record-degradation-event",
@@ -23998,7 +24359,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-platform-read-scope"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-9cdaddd5407b3dde",
@@ -24007,7 +24370,7 @@
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-tenant-feature-flag-select-70594dbe9cf8"
       ],
@@ -24022,7 +24385,40 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "platform-admin-scope-contract",
+          "reason": "The route uses role-string platform administration and a query-selected or omitted tenant scope without an approved purpose-attributed ceiling.",
+          "remediation": "Approve a bounded platform-admin contract with trusted scope selection, assurance and same-transaction read attribution."
+        }
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-simple-tenant-scoped-reads-governanceservice-e3aa1df885",
+        "semanticKey": "platform-feature-flag-administration",
+        "reason": "Separate the registered platform administration route from public verification policy helpers.",
+        "evidence": [
+          "GET /governance/feature-flags uses authenticate plus requirePlatformAdmin."
+        ],
+        "routeRoots": [
+          "GET /governance/feature-flags uses authenticate plus requirePlatformAdmin."
+        ],
+        "actorClasses": [
+          "platform-admin"
+        ],
+        "scopeModel": "One explicit licensee selected under a future approved platform-purpose contract; omission is denied.",
+        "executionSurface": "http",
+        "protectedTableBoundary": "TenantFeatureFlag administrative projection",
+        "commandSemantics": "Bounded read with approved read attribution.",
+        "risk": "medium"
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile",
@@ -24072,7 +24468,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-public-read-contract"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-0f4e2a9f62b3b490",
@@ -24081,7 +24479,7 @@
           "method": "findUnique"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-tenant-feature-flag-select-84b23ee1039f"
       ],
@@ -24096,7 +24494,40 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-command-contract",
+          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
+          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication."
+        }
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-simple-tenant-scoped-reads-governanceservice-e3aa1df885",
+        "semanticKey": "public-verification-policy",
+        "reason": "Group QR-derived public policy reads separately from administrative feature-flag listing.",
+        "evidence": [
+          "Public verification resolves licenseeId from the verified QR record; null returns static defaults without a query."
+        ],
+        "routeRoots": [
+          "Public verification resolves licenseeId from the verified QR record; null returns static defaults without a query."
+        ],
+        "actorClasses": [
+          "anonymous",
+          "authenticated-user"
+        ],
+        "scopeModel": "Exact licenseeId inherited from the resolved QR verification target; blank returns static defaults and never queries all tenants.",
+        "executionSurface": "internal",
+        "protectedTableBoundary": "TenantFeatureFlag public verification policy projection",
+        "commandSemantics": "Read-only policy lookup inside public verification roots."
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-governance-service-ts-resolve-verify-ux-policy",
@@ -24146,7 +24577,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-public-read-contract"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-e22a336c15545900",
@@ -24155,7 +24588,7 @@
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-tenant-feature-flag-select-c90ec6c2be94"
       ],
@@ -24170,7 +24603,40 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-command-contract",
+          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
+          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication."
+        }
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-simple-tenant-scoped-reads-governanceservice-e3aa1df885",
+        "semanticKey": "public-verification-policy",
+        "reason": "Group QR-derived public policy reads separately from administrative feature-flag listing.",
+        "evidence": [
+          "Public verification and ownership handlers pass a resolved QR licenseeId; null returns static defaults without a query."
+        ],
+        "routeRoots": [
+          "Public verification and ownership handlers pass a resolved QR licenseeId; null returns static defaults without a query."
+        ],
+        "actorClasses": [
+          "anonymous",
+          "authenticated-user"
+        ],
+        "scopeModel": "Exact licenseeId inherited from the resolved QR verification target; blank returns static defaults and never queries all tenants.",
+        "executionSurface": "internal",
+        "protectedTableBoundary": "TenantFeatureFlag public verification policy projection",
+        "commandSemantics": "Read-only policy lookup inside public verification roots."
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-governance-service-ts-run-retention-lifecycle",
@@ -26572,16 +27038,16 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "Exact verified PrinterRegistration, signed device identity, registration-owned printer IDs and registration.userId manufacturer binding.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "Use only system-boundary-local-agent-device-claim; human role and ordinary authenticated context are forbidden."
       ],
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "Only the exact cryptographically or durably verified system boundary may execute the reviewed read after its full parent workflow is implemented and certified."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Human impersonation, blank scope, generic cross-tenant access, stale/replayed evidence, wrong device/worker identity or partial parent-flow activation is denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -26589,7 +27055,7 @@
         "access-5de6da23c894d6b8"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "implementationStatus": "contract-only-system-boundary",
       "requiredUnitTests": [
         "Allowed and denied command contract for this canonical workflow."
       ],
@@ -26611,7 +27077,7 @@
           "method": "count"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-print-item-select-b20e44176ff5"
       ],
@@ -26624,7 +27090,20 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "systemBoundaryId": "system-boundary-local-agent-device-claim",
+      "contextBoundaryReclassification": {
+        "fromFamilyId": "family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d",
+        "classification": "contract-only internal system path",
+        "status": "contract-only"
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-local-agent-claim-service-ts-fail-stop-and-mark-job",
@@ -27141,7 +27620,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-manufacturer-bootstrap"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-a5b5f9c3c97f13d4",
@@ -27150,7 +27631,7 @@
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-manufacturer-licensee-link-select-8a5527dcca57"
       ],
@@ -27163,7 +27644,40 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "incompatible-shared-auth-roots",
+          "reason": "The helper is shared by login, session projection and invitation mutation roots with different assurance and transaction ownership.",
+          "remediation": "Split or parameterize the owning roots so each supplies its verified actor, assurance and transaction client."
+        }
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
+        "semanticKey": "manufacturer-link-auth-and-invite",
+        "reason": "Separate richer licensee link/detail reads used by authentication and invitation roots.",
+        "evidence": [
+          "Callers include authService, authController and inviteService with different transaction ownership."
+        ],
+        "routeRoots": [
+          "Callers include authService, authController and inviteService with different transaction ownership."
+        ],
+        "actorClasses": [
+          "manufacturer",
+          "platform-admin"
+        ],
+        "scopeModel": "Exact manufacturer actor or operator-approved invitation target; each owning root must supply the transaction.",
+        "executionSurface": "internal",
+        "protectedTableBoundary": "ManufacturerLicenseeLink plus bounded Licensee display projection",
+        "commandSemantics": "SELECT link and minimal licensee display fields across incompatible auth/mutation roots."
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids",
@@ -27211,7 +27725,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-manufacturer-bootstrap"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-091fc2603fab3b2c",
@@ -27220,7 +27736,7 @@
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-manufacturer-licensee-link-select-1d1bc0babd5d"
       ],
@@ -27233,7 +27749,39 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "authentication-bootstrap-scope-model",
+          "reason": "Authentication hydration must enumerate manufacturer links before a single licensee scope exists, while the command rule requires one non-null tenant scope.",
+          "remediation": "Approve an actor-bound authentication-bootstrap lookup and propagate one supplied transaction client; no blank tenant wildcard."
+        }
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
+        "semanticKey": "manufacturer-id-scope-hydration",
+        "reason": "Separate minimal linked-licensee ID hydration from richer link/detail projections.",
+        "evidence": [
+          "hydrateTenantIfNeeded supplies its transaction client after JWT verification; fallback application callers may not."
+        ],
+        "routeRoots": [
+          "hydrateTenantIfNeeded supplies its transaction client after JWT verification; fallback application callers may not."
+        ],
+        "actorClasses": [
+          "manufacturer"
+        ],
+        "scopeModel": "Manufacturer actor ID is authoritative; linked licensee IDs are the result and cannot be prerequisite tenant context.",
+        "executionSurface": "internal",
+        "protectedTableBoundary": "ManufacturerLicenseeLink actor-bound ID projection",
+        "commandSemantics": "SELECT licenseeId only; no licensee wildcard."
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-upsert-manufacturer-licensee-link",
@@ -36489,7 +37037,7 @@
       "contextRequirements": [
         "transaction-local canonical actor context"
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
@@ -36510,7 +37058,9 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [],
+      "unresolvedDecisions": [
+        "decision-context-public-read-contract"
+      ],
       "supportingEvidence": [
         {
           "accessId": "access-971cec462b5494eb",
@@ -36537,7 +37087,21 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-command-contract",
+          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
+          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication."
+        }
+      ]
     },
     {
       "id": "workflow-internal-backend-src-services-sample-scan-policy-service-ts-evaluate-sample-scan-policy",

@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": [
+    "backend/src/services/analyticsRollupService.ts",
+    "backend/src/worker.ts",
+    "backend/src/index.ts",
+    "backend/src/services/localAgentClaimService.ts",
+    "backend/src/services/localAgentRequestAuthService.ts",
+    "backend/src/controllers/printerAgentJobController.ts",
+    "backend/src/routes/index.ts"
+  ],
+  "boundaryCount": 2,
+  "boundaries": [
+    {
+      "id": "system-boundary-analytics-rollup-worker",
+      "classification": "worker-boundary",
+      "familyCategory": "worker/scheduled workflows",
+      "riskLevel": "low",
+      "actorClasses": [
+        "worker"
+      ],
+      "familyRuntimeIdentity": "identity-worker",
+      "requiredAssurance": [
+        "durable-worker-identity"
+      ],
+      "executionSurfaces": [
+        "worker",
+        "startup"
+      ],
+      "workflowIds": [
+        "workflow-internal-backend-src-services-analytics-rollup-service-ts-get-checkpoint-date"
+      ],
+      "registeredRoots": [
+        "backend/src/worker.ts -> startAnalyticsRollupWorker",
+        "backend/src/index.ts -> startAnalyticsRollupWorker compatibility root"
+      ],
+      "credentialRuntimeIdentity": "The approved target is identity-worker; the compatibility app-process root and the full rollup command set must be removed or separately approved before activation.",
+      "authoritativeScopeSource": "An allowlisted SystemCheckpoint key under the analytics distributed lease; the checkpoint is platform operational state and has no tenant or human actor scope.",
+      "humanActorContextExists": false,
+      "ordinaryAuthenticatedContextAllowed": false,
+      "implementationStatus": "contract-only",
+      "activationBlockers": [
+        "The full analytics rollup root also performs high-risk cross-tenant reads and writes that are outside this bounded read review.",
+        "The compatibility backend app-process root does not prove the dedicated worker credential.",
+        "Durable checkpoint, lease, idempotency and same-transaction command behavior are not yet certified."
+      ],
+      "requiredTests": [
+        "Dedicated worker runtime identity and compatibility-root denial",
+        "Exact checkpoint-key allowlist and no generic cross-tenant read",
+        "Lease ownership, idempotent retry and checkpoint ordering",
+        "No human role, tenant wildcard or platform-admin context"
+      ]
+    },
+    {
+      "id": "system-boundary-local-agent-device-claim",
+      "classification": "device-authenticated-internal-system-path",
+      "familyCategory": "print lifecycle",
+      "riskLevel": "low",
+      "actorClasses": [
+        "device"
+      ],
+      "familyRuntimeIdentity": "pending-device-claim-runtime-contract",
+      "requiredAssurance": [
+        "signed-device-request"
+      ],
+      "executionSurfaces": [
+        "http-device"
+      ],
+      "workflowIds": [
+        "workflow-internal-backend-src-services-local-agent-claim-service-ts-count-local-agent-claim-items"
+      ],
+      "registeredRoots": [
+        "POST /printer-agent/local/claim -> verifyLocalAgentRequest -> countLocalAgentClaimItems"
+      ],
+      "credentialRuntimeIdentity": "A fresh signed connector request bound to one non-revoked PrinterRegistration; the database runtime still requires a dedicated approved device-claim contract before activation.",
+      "authoritativeScopeSource": "Verified agentId, deviceFingerprint and public-key signature bind PrinterRegistration.id/userId; candidate printer IDs must belong to that registration and manufacturerId is the verified registration userId.",
+      "humanActorContextExists": false,
+      "ordinaryAuthenticatedContextAllowed": false,
+      "implementationStatus": "contract-only",
+      "activationBlockers": [
+        "The count is part of a larger claim lifecycle with protected reads and mutations that are not one canonical transaction.",
+        "A durable nonce/replay and exact device-claim database boundary is not yet certified.",
+        "The count helper currently accepts caller-shaped printerIds and manufacturerId instead of a verified boundary object."
+      ],
+      "requiredTests": [
+        "Exact device, registration, manufacturer and printer binding",
+        "Expired, replayed, revoked and foreign-device denial",
+        "Same-client claim count, reservation and state transition ordering",
+        "One-time claim and concurrent single-winner behavior"
+      ]
+    }
+  ]
+}

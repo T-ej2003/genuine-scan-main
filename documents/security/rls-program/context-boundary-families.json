@@ -8,12 +8,13 @@
     "documents/security/rls-program/pre-auth-functions.json",
     "documents/security/rls-program/worker-boundaries.json",
     "documents/security/rls-program/operator-boundaries.json",
+    "documents/security/rls-program/system-boundaries.json",
     "documents/security/rls-program/policy-dependency-graph.json",
     "documents/security/rls-program/ARCHITECTURE.md",
     "backend/prisma/schema.prisma"
   ],
   "workflowCount": 428,
-  "familyCount": 316,
+  "familyCount": 320,
   "baselineImplementedWorkflowIds": [
     "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv",
     "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports",
@@ -22,8 +23,89 @@
   "approvedBoundaryCounts": {
     "preAuthFunctions": 7,
     "workerBoundaries": 3,
-    "operatorBoundaries": 29
+    "operatorBoundaries": 29,
+    "systemBoundaries": 2
   },
+  "systemBoundaryContracts": [
+    {
+      "id": "system-boundary-analytics-rollup-worker",
+      "classification": "worker-boundary",
+      "familyCategory": "worker/scheduled workflows",
+      "riskLevel": "low",
+      "actorClasses": [
+        "worker"
+      ],
+      "familyRuntimeIdentity": "identity-worker",
+      "requiredAssurance": [
+        "durable-worker-identity"
+      ],
+      "executionSurfaces": [
+        "worker",
+        "startup"
+      ],
+      "workflowIds": [
+        "workflow-internal-backend-src-services-analytics-rollup-service-ts-get-checkpoint-date"
+      ],
+      "registeredRoots": [
+        "backend/src/worker.ts -> startAnalyticsRollupWorker",
+        "backend/src/index.ts -> startAnalyticsRollupWorker compatibility root"
+      ],
+      "credentialRuntimeIdentity": "The approved target is identity-worker; the compatibility app-process root and the full rollup command set must be removed or separately approved before activation.",
+      "authoritativeScopeSource": "An allowlisted SystemCheckpoint key under the analytics distributed lease; the checkpoint is platform operational state and has no tenant or human actor scope.",
+      "humanActorContextExists": false,
+      "ordinaryAuthenticatedContextAllowed": false,
+      "implementationStatus": "contract-only",
+      "activationBlockers": [
+        "The full analytics rollup root also performs high-risk cross-tenant reads and writes that are outside this bounded read review.",
+        "The compatibility backend app-process root does not prove the dedicated worker credential.",
+        "Durable checkpoint, lease, idempotency and same-transaction command behavior are not yet certified."
+      ],
+      "requiredTests": [
+        "Dedicated worker runtime identity and compatibility-root denial",
+        "Exact checkpoint-key allowlist and no generic cross-tenant read",
+        "Lease ownership, idempotent retry and checkpoint ordering",
+        "No human role, tenant wildcard or platform-admin context"
+      ]
+    },
+    {
+      "id": "system-boundary-local-agent-device-claim",
+      "classification": "device-authenticated-internal-system-path",
+      "familyCategory": "print lifecycle",
+      "riskLevel": "low",
+      "actorClasses": [
+        "device"
+      ],
+      "familyRuntimeIdentity": "pending-device-claim-runtime-contract",
+      "requiredAssurance": [
+        "signed-device-request"
+      ],
+      "executionSurfaces": [
+        "http-device"
+      ],
+      "workflowIds": [
+        "workflow-internal-backend-src-services-local-agent-claim-service-ts-count-local-agent-claim-items"
+      ],
+      "registeredRoots": [
+        "POST /printer-agent/local/claim -> verifyLocalAgentRequest -> countLocalAgentClaimItems"
+      ],
+      "credentialRuntimeIdentity": "A fresh signed connector request bound to one non-revoked PrinterRegistration; the database runtime still requires a dedicated approved device-claim contract before activation.",
+      "authoritativeScopeSource": "Verified agentId, deviceFingerprint and public-key signature bind PrinterRegistration.id/userId; candidate printer IDs must belong to that registration and manufacturerId is the verified registration userId.",
+      "humanActorContextExists": false,
+      "ordinaryAuthenticatedContextAllowed": false,
+      "implementationStatus": "contract-only",
+      "activationBlockers": [
+        "The count is part of a larger claim lifecycle with protected reads and mutations that are not one canonical transaction.",
+        "A durable nonce/replay and exact device-claim database boundary is not yet certified.",
+        "The count helper currently accepts caller-shaped printerIds and manufacturerId instead of a verified boundary object."
+      ],
+      "requiredTests": [
+        "Exact device, registration, manufacturer and printer binding",
+        "Expired, replayed, revoked and foreign-device denial",
+        "Same-client claim count, reservation and state transition ordering",
+        "One-time claim and concurrent single-winner behavior"
+      ]
+    }
+  ],
   "familyOrder": [
     "simple tenant-scoped reads",
     "simple actor-scoped reads",
@@ -48,92 +130,12 @@
   ],
   "families": [
     {
-      "id": "family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f",
-      "category": "simple tenant-scoped reads",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-analytics-rollup-service-ts-get-checkpoint-date"
-      ],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/analyticsRollupService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-system-checkpoint"
-      ],
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-system-checkpoint-select-412dbf5b8acb"
-      ],
-      "tenantScopeModel": [
-        "approved-system boundary from tables.json; empty or forged context is denied."
-      ],
-      "lifecycleStateRequirements": [],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
-      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "low",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-simple-tenant-scoped-reads-analyticsservice-2c20deef24",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -279,6 +281,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -345,98 +348,12 @@
       }
     },
     {
-      "id": "family-simple-tenant-scoped-reads-auditservice-964272fbb7",
-      "category": "simple tenant-scoped reads",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-audit-service-ts-get-audit-logs",
-        "workflow-internal-backend-src-services-audit-service-ts-resolve-org-id"
-      ],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/auditService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-audit-log",
-        "table-licensee"
-      ],
-      "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
-      ],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-audit-log-select-2708ba0e0ee8",
-        "command-licensee-select-fc757fc42aee"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-        "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
-      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "medium",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-auditservice-964272fbb7-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-auditservice-964272fbb7-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-auditservice-964272fbb7-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-auditservice-964272fbb7-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
         "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -494,28 +411,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-unverified-root-call-chain"
+          "code": "platform-admin-scope-contract",
+          "reason": "The route uses role-string platform administration and a query-selected or omitted tenant scope without an approved purpose-attributed ceiling.",
+          "remediation": "Approve a bounded platform-admin contract with trusted scope selection, assurance and same-transaction read attribution.",
+          "id": "blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-platform-admin-scope-contract"
         }
       ],
       "implementationStatus": "blocked",
@@ -531,6 +430,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -575,28 +475,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unverified-root-call-chain"
+          "code": "incomplete-root-transaction",
+          "reason": "The helper is only one protected query inside HTTP and SSE snapshot roots that still use global Prisma.",
+          "remediation": "Move every protected snapshot query for each compatible root into one canonical transaction before implementing this leaf read.",
+          "id": "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-incomplete-root-transaction"
         }
       ],
       "implementationStatus": "blocked",
@@ -612,6 +494,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-submit-product-feedback"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -677,16 +560,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e-unverified-execution-path"
+          "code": "public-command-contract",
+          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
+          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication.",
+          "id": "blocker-family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e-public-command-contract"
         }
       ],
       "implementationStatus": "blocked",
@@ -702,6 +579,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-governance-controller-ts-download-compliance-pack-job-controller"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -781,132 +659,12 @@
       }
     },
     {
-      "id": "family-simple-tenant-scoped-reads-governanceservice-e3aa1df885",
-      "category": "simple tenant-scoped reads",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags",
-        "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile",
-        "workflow-internal-backend-src-services-governance-service-ts-resolve-verify-ux-policy"
-      ],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/governanceService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-tenant-feature-flag"
-      ],
-      "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
-      ],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-tenant-feature-flag-select-70594dbe9cf8",
-        "command-tenant-feature-flag-select-84b23ee1039f",
-        "command-tenant-feature-flag-select-c90ec6c2be94"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-tenant-feature-flag-select-70594dbe9cf8",
-          "columns": [
-            "enabled"
-          ],
-          "allowed": [
-            "enabled=false",
-            "enabled=true"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-tenant-feature-flag-select-84b23ee1039f",
-          "columns": [
-            "enabled"
-          ],
-          "allowed": [
-            "enabled=false",
-            "enabled=true"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-tenant-feature-flag-select-c90ec6c2be94",
-          "columns": [
-            "enabled"
-          ],
-          "allowed": [
-            "enabled=false",
-            "enabled=true"
-          ],
-          "forbidden": []
-        }
-      ],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
-      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "medium",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-governanceservice-e3aa1df885-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-governanceservice-e3aa1df885-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-governanceservice-e3aa1df885-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-governanceservice-e3aa1df885-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-simple-tenant-scoped-reads-idempotencyservice-555b944311",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
         "workflow-internal-backend-src-services-idempotency-service-ts-load-existing"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -1000,6 +758,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -1045,215 +804,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014-unverified-execution-path"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
-      "id": "family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d",
-      "category": "simple tenant-scoped reads",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-local-agent-claim-service-ts-count-local-agent-claim-items"
-      ],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/localAgentClaimService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-print-item"
-      ],
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-print-item-select-b20e44176ff5"
-      ],
-      "tenantScopeModel": [
-        "table-print-item row must join through table-print-session on printSessionId=id; no alternative parent."
-      ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-print-item-select-b20e44176ff5",
-          "columns": [
-            "pipelineState",
-            "printConfirmedAt",
-            "state"
-          ],
-          "allowed": [
-            "pipelineState=QUEUED",
-            "pipelineState=PREFLIGHT_OK",
-            "pipelineState=SENT_TO_PRINTER",
-            "pipelineState=PRINTER_ACKNOWLEDGED",
-            "pipelineState=PRINT_CONFIRMED",
-            "pipelineState=LOCKED",
-            "pipelineState=PAUSED",
-            "pipelineState=RESUME_PENDING",
-            "pipelineState=RETRY_WAITING",
-            "pipelineState=STOPPING",
-            "pipelineState=STOPPED",
-            "pipelineState=FAILED",
-            "pipelineState=NEEDS_OPERATOR_ACTION",
-            "printConfirmedAt=NULL",
-            "printConfirmedAt=SERVER_TIMESTAMP_SET",
-            "state=RESERVED",
-            "state=ISSUED",
-            "state=AGENT_ACKED",
-            "state=PRINT_CONFIRMED",
-            "state=CLOSED",
-            "state=FROZEN",
-            "state=FAILED",
-            "state=CANCELLED"
-          ],
-          "forbidden": []
-        }
-      ],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
-      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "low",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
-      "id": "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
-      "category": "simple tenant-scoped reads",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-licensee-links",
-        "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids"
-      ],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/manufacturerScopeService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-manufacturer-licensee-link"
-      ],
-      "actorClasses": [
-        "manufacturer"
-      ],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-manufacturer-licensee-link-select-1d1bc0babd5d",
-        "command-manufacturer-licensee-link-select-8a5527dcca57"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
-      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "low",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1-unverified-root-call-chain"
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
+          "id": "blocker-family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014-unbounded-platform-scope"
         }
       ],
       "implementationStatus": "blocked",
@@ -1269,6 +823,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-replacement-chain-service-ts-resolve-replacement-status"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -1325,28 +880,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unverified-root-call-chain"
+          "code": "public-command-contract",
+          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
+          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication.",
+          "id": "blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-public-command-contract"
         }
       ],
       "implementationStatus": "blocked",
@@ -1362,6 +899,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-support-controller-ts-track-support-ticket-public"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -1423,16 +961,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a-unverified-execution-path"
+          "code": "public-command-contract",
+          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
+          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication.",
+          "id": "blocker-family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a-public-command-contract"
         }
       ],
       "implementationStatus": "blocked",
@@ -1448,6 +980,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -1493,16 +1026,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb-unverified-execution-path"
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
+          "id": "blocker-family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb-unbounded-platform-scope"
         }
       ],
       "implementationStatus": "blocked",
@@ -1518,6 +1045,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -1636,6 +1164,7 @@
         "workflow-internal-backend-src-services-trace-event-service-ts-backfill-trace-events-from-audit-logs",
         "workflow-internal-backend-src-services-trace-event-service-ts-create-trace-event-from-audit-log"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -1722,6 +1251,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -1766,16 +1296,421 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827-unreviewed-scope"
+          "code": "actor-command-contract",
+          "reason": "The registered route actor ceiling and assurance do not match the reviewed command rule.",
+          "remediation": "Choose the product actor ceiling and require matching tenant scope, assurance, purpose and immutable read attribution.",
+          "id": "blocker-family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827-actor-command-contract"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-split-auditservice-unregistered-audit-reader-bfe36f6eba",
+      "category": "simple tenant-scoped reads",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-audit-service-ts-get-audit-logs"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-simple-tenant-scoped-reads-auditservice-964272fbb7",
+      "splitReason": "Separate an unregistered legacy reader from the live audit-write organization resolver.",
+      "semanticEvidence": [
+        "Repository search finds no production caller for getAuditLogs."
+      ],
+      "routeRoots": [
+        "Repository search finds no production caller for getAuditLogs."
+      ],
+      "protectedTableBoundary": "AuditLog legacy read helper",
+      "commandSemantics": "Read-only list/count with cursor pagination; no command root is registered.",
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/auditService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-audit-log"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "operator",
+        "platform-admin"
+      ],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-audit-log-select-2708ba0e0ee8"
+      ],
+      "tenantScopeModel": [
+        "No approved scope because the function has no registered root."
+      ],
+      "lifecycleStateRequirements": [],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
+      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
+      "riskLevel": "medium",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "unregistered-dead-path",
+          "reason": "No registered production caller imports the legacy audit-log reader.",
+          "remediation": "Delete it after a separate dead-code review, or attach it to one registered root with exact scope and transaction evidence.",
+          "id": "blocker-family-split-auditservice-unregistered-audit-reader-bfe36f6eba-unregistered-dead-path"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-split-governanceservice-platform-feature-flag-administration-7bb4b15607",
+      "category": "simple tenant-scoped reads",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-simple-tenant-scoped-reads-governanceservice-e3aa1df885",
+      "splitReason": "Separate the registered platform administration route from public verification policy helpers.",
+      "semanticEvidence": [
+        "GET /governance/feature-flags uses authenticate plus requirePlatformAdmin."
+      ],
+      "routeRoots": [
+        "GET /governance/feature-flags uses authenticate plus requirePlatformAdmin."
+      ],
+      "protectedTableBoundary": "TenantFeatureFlag administrative projection",
+      "commandSemantics": "Bounded read with approved read attribution.",
+      "executionSurfaces": [
+        "http"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/governanceService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-tenant-feature-flag"
+      ],
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-tenant-feature-flag-select-70594dbe9cf8"
+      ],
+      "tenantScopeModel": [
+        "One explicit licensee selected under a future approved platform-purpose contract; omission is denied."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-tenant-feature-flag-select-70594dbe9cf8",
+          "columns": [
+            "enabled"
+          ],
+          "allowed": [
+            "enabled=false",
+            "enabled=true"
+          ],
+          "forbidden": []
+        }
+      ],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
+      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
+      "riskLevel": "medium",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "platform-admin-scope-contract",
+          "reason": "The route uses role-string platform administration and a query-selected or omitted tenant scope without an approved purpose-attributed ceiling.",
+          "remediation": "Approve a bounded platform-admin contract with trusted scope selection, assurance and same-transaction read attribution.",
+          "id": "blocker-family-split-governanceservice-platform-feature-flag-administration-7bb4b15607-platform-admin-scope-contract"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-split-governanceservice-public-verification-policy-80f0c95935",
+      "category": "simple tenant-scoped reads",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile",
+        "workflow-internal-backend-src-services-governance-service-ts-resolve-verify-ux-policy"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-simple-tenant-scoped-reads-governanceservice-e3aa1df885",
+      "splitReason": "Group QR-derived public policy reads separately from administrative feature-flag listing.",
+      "semanticEvidence": [
+        "Public verification resolves licenseeId from the verified QR record; null returns static defaults without a query."
+      ],
+      "routeRoots": [
+        "Public verification resolves licenseeId from the verified QR record; null returns static defaults without a query."
+      ],
+      "protectedTableBoundary": "TenantFeatureFlag public verification policy projection",
+      "commandSemantics": "Read-only policy lookup inside public verification roots.",
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/governanceService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-tenant-feature-flag"
+      ],
+      "actorClasses": [
+        "anonymous",
+        "authenticated-user"
+      ],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-tenant-feature-flag-select-84b23ee1039f",
+        "command-tenant-feature-flag-select-c90ec6c2be94"
+      ],
+      "tenantScopeModel": [
+        "Exact licenseeId inherited from the resolved QR verification target; blank returns static defaults and never queries all tenants."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-tenant-feature-flag-select-84b23ee1039f",
+          "columns": [
+            "enabled"
+          ],
+          "allowed": [
+            "enabled=false",
+            "enabled=true"
+          ],
+          "forbidden": []
         },
         {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827-unverified-execution-path"
+          "commandRuleId": "command-tenant-feature-flag-select-c90ec6c2be94",
+          "columns": [
+            "enabled"
+          ],
+          "allowed": [
+            "enabled=false",
+            "enabled=true"
+          ],
+          "forbidden": []
+        }
+      ],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
+      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
+      "riskLevel": "medium",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "public-command-contract",
+          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
+          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication.",
+          "id": "blocker-family-split-governanceservice-public-verification-policy-80f0c95935-public-command-contract"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46",
+      "category": "simple tenant-scoped reads",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
+      "splitReason": "Separate minimal linked-licensee ID hydration from richer link/detail projections.",
+      "semanticEvidence": [
+        "hydrateTenantIfNeeded supplies its transaction client after JWT verification; fallback application callers may not."
+      ],
+      "routeRoots": [
+        "hydrateTenantIfNeeded supplies its transaction client after JWT verification; fallback application callers may not."
+      ],
+      "protectedTableBoundary": "ManufacturerLicenseeLink actor-bound ID projection",
+      "commandSemantics": "SELECT licenseeId only; no licensee wildcard.",
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/manufacturerScopeService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-manufacturer-licensee-link"
+      ],
+      "actorClasses": [
+        "manufacturer"
+      ],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-manufacturer-licensee-link-select-1d1bc0babd5d"
+      ],
+      "tenantScopeModel": [
+        "Manufacturer actor ID is authoritative; linked licensee IDs are the result and cannot be prerequisite tenant context."
+      ],
+      "lifecycleStateRequirements": [],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
+      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
+      "riskLevel": "low",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "authentication-bootstrap-scope-model",
+          "reason": "Authentication hydration must enumerate manufacturer links before a single licensee scope exists, while the command rule requires one non-null tenant scope.",
+          "remediation": "Approve an actor-bound authentication-bootstrap lookup and propagate one supplied transaction client; no blank tenant wildcard.",
+          "id": "blocker-family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46-authentication-bootstrap-scope-model"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef",
+      "category": "simple tenant-scoped reads",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-licensee-links"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
+      "splitReason": "Separate richer licensee link/detail reads used by authentication and invitation roots.",
+      "semanticEvidence": [
+        "Callers include authService, authController and inviteService with different transaction ownership."
+      ],
+      "routeRoots": [
+        "Callers include authService, authController and inviteService with different transaction ownership."
+      ],
+      "protectedTableBoundary": "ManufacturerLicenseeLink plus bounded Licensee display projection",
+      "commandSemantics": "SELECT link and minimal licensee display fields across incompatible auth/mutation roots.",
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/manufacturerScopeService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-manufacturer-licensee-link"
+      ],
+      "actorClasses": [
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-manufacturer-licensee-link-select-8a5527dcca57"
+      ],
+      "tenantScopeModel": [
+        "Exact manufacturer actor or operator-approved invitation target; each owning root must supply the transaction."
+      ],
+      "lifecycleStateRequirements": [],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
+      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
+      "riskLevel": "low",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "incompatible-shared-auth-roots",
+          "reason": "The helper is shared by login, session projection and invitation mutation roots with different assurance and transaction ownership.",
+          "remediation": "Split or parameterize the owning roots so each supplies its verified actor, assurance and transaction client.",
+          "id": "blocker-family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef-incompatible-shared-auth-roots"
         }
       ],
       "implementationStatus": "blocked",
@@ -1791,6 +1726,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -1835,16 +1771,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-platform-admin-bounded-reads-iralertcontroller-791acbf282-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-platform-admin-bounded-reads-iralertcontroller-791acbf282-unverified-execution-path"
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
+          "id": "blocker-family-platform-admin-bounded-reads-iralertcontroller-791acbf282-unbounded-platform-scope"
         }
       ],
       "implementationStatus": "blocked",
@@ -1860,6 +1790,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-licensee-controller-ts-export-licensees-csv"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -1904,16 +1835,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba-unverified-execution-path"
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
+          "id": "blocker-family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba-unbounded-platform-scope"
         }
       ],
       "implementationStatus": "blocked",
@@ -1930,6 +1855,7 @@
         "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensee",
         "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensees"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -1975,16 +1901,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-platform-admin-bounded-reads-licenseecontroller-8ea4017392-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-platform-admin-bounded-reads-licenseecontroller-8ea4017392-unverified-execution-path"
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
+          "id": "blocker-family-platform-admin-bounded-reads-licenseecontroller-8ea4017392-unbounded-platform-scope"
         }
       ],
       "implementationStatus": "blocked",
@@ -1995,13 +1915,23 @@
       }
     },
     {
-      "id": "family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa",
+      "id": "family-split-supportcontroller-platform-support-ticket-read-4ce4ce4858",
       "category": "platform-admin bounded reads",
       "workflowIds": [
-        "workflow-http-backend-src-controllers-support-controller-ts-add-support-message",
         "workflow-http-backend-src-controllers-support-controller-ts-get-support-ticket",
         "workflow-http-backend-src-controllers-support-controller-ts-list-support-tickets"
       ],
+      "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa",
+      "splitReason": "Keep list/detail reads separate from the message mutation root.",
+      "semanticEvidence": [
+        "GET /support/tickets/:id is platform-admin-only and currently selects by ID without tenant scope."
+      ],
+      "routeRoots": [
+        "GET /support/tickets/:id is platform-admin-only and currently selects by ID without tenant scope."
+      ],
+      "protectedTableBoundary": "SupportTicket administrative read projection",
+      "commandSemantics": "Bounded list/detail read with explicit PII projection and attribution.",
       "executionSurfaces": [
         "http"
       ],
@@ -2031,28 +1961,13 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-support-ticket-select-6522ae51ad08",
         "command-support-ticket-select-7d7476512a56",
         "command-support-ticket-select-8eca46656b77"
       ],
       "tenantScopeModel": [
-        "table-support-ticket row must join through table-incident on incidentId=id; no alternative parent."
+        "Approved bounded licensee/organization support scope; no implicit all-tenant fallback."
       ],
       "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-support-ticket-select-6522ae51ad08",
-          "columns": [
-            "status"
-          ],
-          "allowed": [
-            "status=OPEN",
-            "status=IN_PROGRESS",
-            "status=WAITING_CUSTOMER",
-            "status=RESOLVED",
-            "status=CLOSED"
-          ],
-          "forbidden": []
-        },
         {
           "commandRuleId": "command-support-ticket-select-7d7476512a56",
           "columns": [
@@ -2091,16 +2006,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa-unverified-execution-path"
+          "code": "unbounded-platform-scope",
+          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
+          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
+          "id": "blocker-family-split-supportcontroller-platform-support-ticket-read-4ce4ce4858-unbounded-platform-scope"
         }
       ],
       "implementationStatus": "blocked",
@@ -2116,6 +2025,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-degradation-event-service-ts-record-degradation-event"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -2203,6 +2113,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-support-workflow-service-ts-add-support-ticket-message"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -2292,6 +2203,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-licensee-controller-ts-update-licensee"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -2367,6 +2279,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-accept-ownership-transfer-handler-ts-accept-ownership-transfer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -2504,6 +2417,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-analytics-rollup-service-ts-refresh-inventory-status-rollups"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -2637,6 +2551,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-cancel-ownership-transfer-handler-ts-cancel-ownership-transfer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -2771,6 +2686,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-claim-handlers-ts-link-device-claim-to-customer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -2870,6 +2786,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-claim-handlers-ts-claim-product-ownership"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -2970,6 +2887,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-create-ownership-transfer-handler-ts-create-ownership-transfer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -3105,6 +3023,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-idempotency-service-ts-begin-idempotent-action"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -3219,6 +3138,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-idempotency-service-ts-complete-idempotent-action"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -3320,6 +3240,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-local-agent-claim-service-ts-reserve-local-agent-item"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -3538,6 +3459,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-local-agent-claim-service-ts-fail-stop-and-mark-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -3662,6 +3584,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-notification-service-ts-mark-notification-read"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -3775,6 +3698,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-notification-service-ts-mark-all-notifications-read"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -3876,6 +3800,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-replacement-chain-service-ts-materialize-replacement-chains-for-reissue"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -4036,6 +3961,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-siem-outbox-service-ts-queue-security-event"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -4136,6 +4062,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-support-controller-ts-patch-support-ticket"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -4243,6 +4170,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-verify-ownership-ts-load-ownership-transfer-by-raw-token"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -4354,6 +4282,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-verify-ownership-ts-expire-pending-ownership-transfers"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -4448,6 +4377,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-support-workflow-service-ts-record-workflow-event"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -4537,6 +4467,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-telemetry-controller-ts-capture-route-transition-metric"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -4612,6 +4543,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-trace-event-service-ts-create-trace-event"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -4699,6 +4631,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-analytics-rollup-service-ts-set-checkpoint-date"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -4787,6 +4720,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -4863,6 +4797,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-manufacturer-scope-service-ts-upsert-manufacturer-licensee-link"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -4951,6 +4886,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-tamper-evidence-service-ts-run-tamper-evidence-checks"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -5041,6 +4977,7 @@
         "workflow-internal-backend-src-services-access-control-service-ts-find-scoped-batch",
         "workflow-internal-backend-src-services-access-control-service-ts-find-scoped-qr-code"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -5165,6 +5102,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-analytics-rollup-service-ts-load-changed-batch-ids"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -5295,6 +5233,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-analytics-rollup-service-ts-refresh-scan-metrics-hourly-rollups"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -5431,6 +5370,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-analytics-service-ts-get-batch-sla-analytics"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -5540,6 +5480,7 @@
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -5730,6 +5671,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-batch-allocation-service-ts-backfill-batch-lineage-from-audit-logs"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -5861,6 +5803,7 @@
         "workflow-internal-backend-src-services-batch-print-lifecycle-reconciliation-service-ts-find-print-lifecycle-drift-batches",
         "workflow-internal-backend-src-services-batch-print-lifecycle-reconciliation-service-ts-load-evidence"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -6064,6 +6007,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-batch-print-lifecycle-reconciliation-service-ts-reconcile-batch-print-lifecycle"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -6194,6 +6138,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-batch-release-service-ts-assert-qr-public-identity-mutable"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -6296,6 +6241,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-batch-release-service-ts-get-batch-release-approval-context"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -6398,6 +6344,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-batch-release-service-ts-latest-relevant-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -6514,6 +6461,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-batch-release-service-ts-evaluate-batch-release-readiness"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -6676,6 +6624,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-batch-release-service-ts-release-batch-for-supply-chain"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -6830,6 +6779,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-batch-state-machine-service-ts-latest-batch-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -6946,6 +6896,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-batch-state-machine-service-ts-assert-batch-transition-allowed-from-db"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -7107,6 +7058,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-batch-state-machine-service-ts-mark-batch-print-acknowledged"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -7210,6 +7162,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-trust-service-ts-list-customer-trust-credentials-for-qr"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -7314,6 +7267,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-verification-session-service-ts-reveal-customer-verification-session"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -7446,6 +7400,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-verification-session-service-ts-create-customer-verification-session"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -7558,6 +7513,7 @@
         "workflow-internal-backend-src-services-customer-verification-session-service-ts-get-customer-verification-session",
         "workflow-internal-backend-src-services-customer-verification-session-service-ts-load-decision-presentation"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -7725,6 +7681,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-verification-session-service-ts-save-customer-trust-intake"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -7886,6 +7843,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-email-verification-service-ts-request-email-change-verification"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -8041,6 +7999,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-immutable-audit-export-service-ts-build-immutable-batch-audit-package"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -8171,6 +8130,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-legacy-qr-rotation-service-ts-count-external-audit-evidence"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -8299,6 +8259,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-legacy-qr-rotation-service-ts-rotate-eligible-legacy-qr-codes"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -8434,6 +8395,7 @@
         "workflow-internal-backend-src-services-legacy-qr-rotation-service-ts-generate-unique-public-code",
         "workflow-internal-backend-src-services-legacy-qr-rotation-service-ts-get-legacy-qr-report"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -8582,6 +8544,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-policy-engine-service-ts-evaluate-scan-and-enforce-policy"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -8714,6 +8677,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-ir-policy-rule-engine-service-ts-evaluate-policy-rules-for-scan"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -8848,6 +8812,7 @@
         "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries",
         "workflow-internal-backend-src-services-print-reservation-service-ts-select-reservable-qr-codes-for-print"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -9491,6 +9456,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-sample-scan-service-ts-record-print-job-sample-scan"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -9643,6 +9609,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-public-verification-post-scan-service-ts-run-post-scan-verification-flow"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -9753,6 +9720,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-qr-allocation-service-ts-get-next-licensee-qr-number"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -9856,6 +9824,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-qr-allocation-service-ts-allocate-qr-range"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -10029,6 +9998,7 @@
         "workflow-http-backend-src-controllers-qr-controller-ts-export-qrcodes-csv",
         "workflow-http-backend-src-controllers-qr-controller-ts-get-qrcodes"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -10140,6 +10110,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-controller-ts-rename-batch"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -10232,6 +10203,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-controller-ts-generate-qrcodes"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -10351,6 +10323,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-controller-ts-release-batch"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -10441,6 +10414,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-controller-ts-assign-manufacturer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -10641,6 +10615,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-controller-ts-bulk-delete-qrcodes"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -10741,6 +10716,7 @@
         "workflow-http-backend-src-controllers-qr-controller-ts-block-qrcode",
         "workflow-http-backend-src-controllers-qr-controller-ts-get-stats"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -10875,6 +10851,7 @@
         "workflow-http-backend-src-controllers-qr-controller-ts-bulk-delete-batches",
         "workflow-http-backend-src-controllers-qr-controller-ts-delete-batch"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -11071,6 +11048,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-controller-ts-create-batch"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -11237,6 +11215,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-log-controller-ts-get-batch-summary"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -11349,6 +11328,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-qr-provenance-backfill-service-ts-backfill-historical-qr-provenance"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -11480,6 +11460,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-request-controller-ts-get-qr-allocation-requests"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -11569,6 +11550,7 @@
         "workflow-http-backend-src-controllers-qr-request-controller-ts-approve-qr-allocation-request",
         "workflow-http-backend-src-controllers-qr-request-controller-ts-reject-qr-allocation-request"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -11724,6 +11706,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-request-controller-ts-create-qr-allocation-request"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -11817,6 +11800,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-qr-service-ts-record-scan"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -11980,6 +11964,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-qr-service-ts-mark-batch-as-printed"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -12128,6 +12113,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-qr-service-ts-get-qrstats"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -12232,6 +12218,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-qr-service-ts-generate-qrcodes-for-range"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -12335,6 +12322,7 @@
         "workflow-internal-backend-src-services-qr-service-ts-activate-qrcodes",
         "workflow-internal-backend-src-services-qr-service-ts-allocate-qrcodes-to-batch"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -12470,6 +12458,7 @@
         "workflow-internal-backend-src-services-qr-tracking-analytics-service-ts-build-inventory-analytics",
         "workflow-internal-backend-src-services-qr-tracking-analytics-service-ts-load-event-metrics"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -12642,6 +12631,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sample-scan-policy-service-ts-mark-batch-sample-verified-if-satisfied"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -12769,6 +12759,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sample-scan-policy-service-ts-evaluate-sample-scan-policy"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -12876,6 +12867,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-scan-insight-service-ts-get-scan-insight"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -12975,6 +12967,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-scan-log-reporting-service-ts-list-scan-logs-for-reporting"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -13108,6 +13101,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-execute-batch-block"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -13240,6 +13234,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-execute-batch-release"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -13327,6 +13322,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-execute-qr-block"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -13437,6 +13433,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-batch-release-review-blocker"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -13548,6 +13545,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-trace-policy-controller-ts-export-batch-audit-package-controller"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -13642,6 +13640,7 @@
         "workflow-internal-backend-src-services-verification-decision-read-service-ts-load-evidence-by-decision-ids",
         "workflow-internal-backend-src-services-verification-decision-read-service-ts-load-trust-by-qr-code-ids"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -13778,6 +13777,7 @@
         "workflow-internal-backend-src-services-verification-decision-service-ts-attach-verification-presentation-snapshot",
         "workflow-internal-backend-src-services-verification-decision-service-ts-issue-public-verification-session-start-token"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -13875,6 +13875,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-verification-decision-service-ts-persist-verification-decision"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -13984,6 +13985,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-verification-decision-service-ts-resolve-public-verification-session-start-token"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -14071,6 +14073,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -14161,6 +14164,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-verification-signed-token-resolver-ts-resolve-signed-verification-target"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -14251,6 +14255,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-verify-fraud-snapshot-ts-build-fraud-verification-snapshot"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -14342,6 +14347,7 @@
         "workflow-http-backend-src-controllers-verify-verify-ownership-ts-load-ownership-by-qr-code-id",
         "workflow-http-backend-src-controllers-verify-verify-ownership-ts-load-pending-ownership-transfer-for-qr"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -14426,11 +14432,99 @@
       }
     },
     {
+      "id": "family-contract-system-boundary-local-agent-device-claim",
+      "category": "print lifecycle",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-local-agent-claim-service-ts-count-local-agent-claim-items"
+      ],
+      "reclassifiedFromFamilyIds": [
+        "family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d"
+      ],
+      "executionSurfaces": [
+        "http-device"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/localAgentClaimService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-print-item"
+      ],
+      "actorClasses": [
+        "device"
+      ],
+      "runtimeIdentity": "pending-device-claim-runtime-contract",
+      "requiredAssurance": [
+        "signed-device-request"
+      ],
+      "canonicalContextKeys": [],
+      "readWriteCommandRuleIds": [
+        "command-print-item-select-b20e44176ff5"
+      ],
+      "tenantScopeModel": [
+        "Verified agentId, deviceFingerprint and public-key signature bind PrinterRegistration.id/userId; candidate printer IDs must belong to that registration and manufacturerId is the verified registration userId."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-print-item-select-b20e44176ff5",
+          "columns": [
+            "pipelineState",
+            "printConfirmedAt",
+            "state"
+          ],
+          "allowed": [
+            "pipelineState=QUEUED",
+            "pipelineState=PREFLIGHT_OK",
+            "pipelineState=SENT_TO_PRINTER",
+            "pipelineState=PRINTER_ACKNOWLEDGED",
+            "pipelineState=PRINT_CONFIRMED",
+            "pipelineState=LOCKED",
+            "pipelineState=PAUSED",
+            "pipelineState=RESUME_PENDING",
+            "pipelineState=RETRY_WAITING",
+            "pipelineState=STOPPING",
+            "pipelineState=STOPPED",
+            "pipelineState=FAILED",
+            "pipelineState=NEEDS_OPERATOR_ACTION",
+            "printConfirmedAt=NULL",
+            "printConfirmedAt=SERVER_TIMESTAMP_SET",
+            "state=RESERVED",
+            "state=ISSUED",
+            "state=AGENT_ACKED",
+            "state=PRINT_CONFIRMED",
+            "state=CLOSED",
+            "state=FROZEN",
+            "state=FAILED",
+            "state=CANCELLED"
+          ],
+          "forbidden": []
+        }
+      ],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "system-boundary-local-agent-device-claim",
+      "implementationStrategy": "Use only the governing system-boundary-local-agent-device-claim contract; do not install ordinary authenticated context.",
+      "testStrategy": "Run the governing boundary's existing contract and mutation tests; PostgreSQL implementation remains separately certified.",
+      "riskLevel": "low",
+      "automationEligibility": "contract-only",
+      "governingBoundaryIds": [
+        "system-boundary-local-agent-device-claim"
+      ],
+      "blockers": [],
+      "implementationStatus": "contract-ready",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-print-lifecycle-createprintjobhandler-c2ecbbec09",
       "category": "print lifecycle",
       "workflowIds": [
         "workflow-http-backend-src-controllers-print-job-create-print-job-handler-ts-create-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -14558,6 +14652,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-print-job-direct-print-confirmation-handlers-ts-confirm-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -14662,6 +14757,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-local-agent-printer-mapping-service-ts-resolve-local-agent-printer-mapping"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -14794,6 +14890,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-local-agent-printer-relink-service-ts-relink-local-agent-printer-to-current-connector"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -14948,6 +15045,7 @@
         "workflow-internal-backend-src-services-network-direct-print-service-ts-mark-job-sent",
         "workflow-internal-backend-src-services-network-direct-print-service-ts-run-network-direct-dispatch"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -15216,6 +15314,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-network-direct-print-service-ts-dispatch-and-confirm-reserved-item"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -15340,6 +15439,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-network-direct-print-service-ts-reserve-next-chunk"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -15566,6 +15666,7 @@
         "workflow-internal-backend-src-services-network-direct-print-service-ts-load-network-dispatch-job",
         "workflow-internal-backend-src-services-network-direct-print-service-ts-resume-pending-network-direct-jobs"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -15964,6 +16065,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-network-ipp-print-service-ts-reserve-next-chunk"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -16182,6 +16284,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-network-ipp-print-service-ts-dispatch-and-confirm-reserved-item"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -16310,6 +16413,7 @@
         "workflow-internal-backend-src-services-network-ipp-print-service-ts-resume-pending-network-ipp-jobs",
         "workflow-internal-backend-src-services-network-ipp-print-service-ts-run-network-ipp-dispatch"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -16603,6 +16707,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-network-ipp-print-service-ts-mark-job-sent"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -16762,6 +16867,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-confirmation-reconciler-ts-reconcile-expired-acknowledged-items"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -16924,6 +17030,7 @@
         "workflow-internal-backend-src-services-print-confirmation-service-ts-acknowledge-print-item-dispatch",
         "workflow-internal-backend-src-services-print-confirmation-service-ts-confirm-print-item-dispatch"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -17204,6 +17311,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-confirmation-service-ts-load-print-item-for-transition"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -17320,6 +17428,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-printer-agent-job-controller-ts-fail-local-agent-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -17467,6 +17576,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-printer-agent-job-controller-ts-ack-local-agent-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -17668,6 +17778,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-printer-agent-job-controller-ts-claim-local-agent-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -17842,6 +17953,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-printer-agent-job-controller-ts-confirm-local-agent-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -17983,6 +18095,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-printer-agent-session-service-ts-open-trusted-printer-agent-session"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -18107,6 +18220,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-printer-agent-session-service-ts-record-trusted-session-heartbeat"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -18216,6 +18330,7 @@
         "workflow-internal-backend-src-services-printer-agent-session-service-ts-load-chunk-job",
         "workflow-internal-backend-src-services-printer-agent-session-service-ts-resolve-trusted-printer-agent-registration-for-session"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -18401,6 +18516,7 @@
         "workflow-internal-backend-src-services-printer-agent-session-service-ts-close-trusted-printer-agent-session",
         "workflow-internal-backend-src-services-printer-agent-session-service-ts-handle-trusted-session-progress-message"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -18837,6 +18953,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-printer-agent-session-service-ts-reserve-chunk-items"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -19088,6 +19205,7 @@
         "workflow-internal-backend-src-services-printer-connection-service-ts-load-latest-registration-for-user",
         "workflow-internal-backend-src-services-printer-connection-service-ts-load-registration-by-id"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -19209,6 +19327,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-printer-connection-service-ts-upsert-printer-connection-heartbeat"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -19370,6 +19489,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-printer-gateway-controller-ts-claim-gateway-ipp-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -19518,6 +19638,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-printer-gateway-controller-ts-fail-gateway-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -19630,6 +19751,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-printer-gateway-controller-ts-authenticate-gateway-printer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -19724,6 +19846,7 @@
         "workflow-http-backend-src-controllers-printer-gateway-controller-ts-load-gateway-item",
         "workflow-http-backend-src-controllers-printer-gateway-controller-ts-load-gateway-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -19865,6 +19988,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-printer-gateway-controller-ts-mark-gateway-seen"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -19966,6 +20090,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-printer-gateway-controller-ts-claim-gateway-direct-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -20113,6 +20238,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-printer-gateway-controller-ts-reserve-gateway-item"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -20319,6 +20445,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-ensure-printer-profile-for-printer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -20450,6 +20577,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-discover-printer-capabilities"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -20551,6 +20679,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-get-printer-profile-for-printer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -20645,6 +20774,7 @@
         "workflow-internal-backend-src-services-printer-registry-service-ts-get-registered-printer-for-manufacturer",
         "workflow-internal-backend-src-services-printer-registry-service-ts-list-registered-printers-for-manufacturer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -20768,6 +20898,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-printer-registry-service-ts-delete-network-direct-printer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -20921,6 +21052,7 @@
         "workflow-internal-backend-src-services-printer-registry-service-ts-sync-local-agent-printers-from-heartbeat",
         "workflow-internal-backend-src-services-printer-registry-service-ts-upsert-managed-network-printer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -21125,6 +21257,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-printer-registry-service-ts-test-registered-printer-connection"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -21238,6 +21371,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-printer-test-label-gate-service-ts-mark-printer-test-label-confirmed"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -21354,6 +21488,7 @@
         "workflow-internal-backend-src-services-printer-test-label-service-ts-confirm-local-agent-printer-test-job",
         "workflow-internal-backend-src-services-printer-test-label-service-ts-fail-local-agent-printer-test-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -21513,6 +21648,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-printer-test-label-service-ts-write-local-agent-test-job-metadata"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -21626,6 +21762,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-job-create-diagnostics-service-ts-build-print-job-create-diagnostics"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -21754,6 +21891,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-job-creation-transaction-service-ts-create-print-job-records"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -21979,6 +22117,7 @@
         "workflow-internal-backend-src-services-print-lifecycle-service-ts-fail-stop-print-session",
         "workflow-internal-backend-src-services-print-lifecycle-service-ts-finalize-print-session-if-ready"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -22626,6 +22765,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-lifecycle-service-ts-create-fail-stop-incident"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -22736,6 +22876,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-lifecycle-service-ts-get-or-create-print-session"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -22897,6 +23038,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-lifecycle-service-ts-count-remaining-to-print"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -23013,6 +23155,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-operation-control-service-ts-get-scoped-job-for-control"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -23129,6 +23272,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-operation-control-service-ts-stop-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -23358,6 +23502,7 @@
         "workflow-internal-backend-src-services-print-operation-control-service-ts-pause-print-job",
         "workflow-internal-backend-src-services-print-operation-control-service-ts-resume-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -23563,6 +23708,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-operation-control-service-ts-create-print-audit"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -23650,6 +23796,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-reissue-request-workflow-service-ts-create-scoped-print-reissue-request"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -23812,6 +23959,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-reissue-request-workflow-service-ts-list-scoped-print-reissue-requests"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -23914,6 +24062,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-reissue-request-workflow-service-ts-decide-scoped-print-reissue-request"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -24045,6 +24194,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-reissue-request-workflow-service-ts-start-approved-print-reissue-request"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -24147,6 +24297,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-reissue-service-ts-project-print-job-reissue-summaries"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -24350,6 +24501,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-reissue-service-ts-create-authorized-print-reissue"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -24650,6 +24802,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-print-validation-evidence-service-ts-generate-print-validation-evidence-report"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -24841,6 +24994,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-print-job-shared-ts-ensure-selected-printer-ready"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -24942,6 +25096,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-print-job-shared-ts-get-manufacturer-print-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -25047,6 +25202,7 @@
         "workflow-http-backend-src-controllers-account-controller-ts-change-my-password",
         "workflow-http-backend-src-controllers-account-controller-ts-update-my-profile"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -25208,6 +25364,7 @@
       "workflowIds": [
         "workflow-http-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -25366,6 +25523,7 @@
       "workflowIds": [
         "workflow-http-backend-src-middleware-auth-ts-hydrate-tenant-if-needed"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -25459,6 +25617,7 @@
         "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-begin-admin-web-authn-setup-controller",
         "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-disable-admin-mfa-controller"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -25572,6 +25731,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-auth-controller-ts-me"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -25666,6 +25826,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-auth-email-service-ts-get-primary-superadmin-email"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -25766,6 +25927,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-auth-service-ts-login-with-password"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -25869,6 +26031,7 @@
         "workflow-internal-backend-src-services-auth-auth-service-ts-issue-session-for-user",
         "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -25994,6 +26157,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-auth-session-controller-ts-password-step-up-controller"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -26089,6 +26253,7 @@
         "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-consume-legacy-backup-code",
         "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-consume-user-backup-code"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -26215,6 +26380,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-replace-user-backup-codes"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -26335,6 +26501,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-trust-service-ts-record-customer-trust-credential"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -26480,6 +26647,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-trust-service-ts-update-customer-trust-credential-review"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -26610,6 +26778,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-trust-service-ts-get-latest-customer-trust-credential"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -26714,6 +26883,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-webauthn-service-ts-delete-customer-web-authn-credential"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -26822,6 +26992,7 @@
         "workflow-internal-backend-src-services-customer-webauthn-service-ts-list-customer-web-authn-credentials",
         "workflow-internal-backend-src-services-customer-webauthn-service-ts-load-challenge-by-ticket"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -26938,6 +27109,7 @@
         "workflow-internal-backend-src-services-customer-webauthn-service-ts-begin-customer-web-authn-assertion",
         "workflow-internal-backend-src-services-customer-webauthn-service-ts-begin-customer-web-authn-registration"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -27087,6 +27259,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-webauthn-service-ts-complete-customer-web-authn-registration"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -27207,6 +27380,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-webauthn-service-ts-complete-customer-web-authn-assertion"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -27327,6 +27501,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-customer-webauthn-service-ts-consume-challenge"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -27437,6 +27612,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -27591,6 +27767,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-report-fraud"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -27719,6 +27896,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-governance-controller-ts-export-incident-evidence-bundle-controller"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -27835,6 +28013,7 @@
         "workflow-internal-backend-src-services-governance-service-ts-build-incident-evidence-audit-bundle",
         "workflow-internal-backend-src-services-governance-service-ts-generate-compliance-report"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -27993,6 +28172,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-ir-incident-actions-service-ts-apply-containment-action"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -28221,6 +28401,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-incident-controller-ts-patch-incident"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -28329,6 +28510,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-incident-controller-ts-report-incident"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -28459,6 +28641,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-incident-email-service-ts-resolve-actor-user"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -28568,6 +28751,7 @@
         "workflow-internal-backend-src-services-incident-email-service-ts-get-primary-superadmin-email",
         "workflow-internal-backend-src-services-incident-email-service-ts-get-superadmin-alert-emails"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -28690,6 +28874,7 @@
         "workflow-internal-backend-src-services-incident-service-ts-get-incident-by-id-scoped",
         "workflow-internal-backend-src-services-incident-service-ts-list-incidents-scoped"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -28875,6 +29060,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-incident-service-ts-create-incident-from-report"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -29012,6 +29198,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-invite-service-ts-get-or-create-platform-org-id"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -29096,6 +29283,7 @@
         "workflow-internal-backend-src-services-auth-invite-service-ts-infer-org-id-for-licensee",
         "workflow-internal-backend-src-services-auth-invite-service-ts-resolve-invite-actor-context"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -29205,6 +29393,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-invite-service-ts-create-invite"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -29369,6 +29558,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-incident-controller-ts-resolve-org-admin-email"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -29468,6 +29658,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-incident-controller-ts-patch-ir-incident"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -29599,6 +29790,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-incident-controller-ts-create-ir-incident"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -29719,6 +29911,7 @@
         "workflow-http-backend-src-controllers-ir-incident-controller-ts-review-ir-incident-customer-trust",
         "workflow-http-backend-src-controllers-ir-incident-controller-ts-send-ir-incident-communication"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -29914,6 +30107,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-policy-controller-ts-create-ir-policy"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -29998,6 +30192,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-policy-controller-ts-patch-ir-policy"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -30080,6 +30275,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-policy-controller-ts-list-ir-policies"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -30149,6 +30345,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-licensee-controller-ts-create-licensee"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -30273,6 +30470,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-licensee-controller-ts-delete-licensee"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -30423,6 +30621,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-licensee-invite-controller-ts-resend-licensee-admin-invite"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -30520,6 +30719,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-local-agent-request-auth-service-ts-verify-local-agent-request"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -30647,6 +30847,7 @@
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-get-admin-mfa-adapter-status",
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-mfa-code-with-adapter"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -30821,6 +31022,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-create-stable-mfa-login-challenge"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -30917,6 +31119,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-begin-totp-mfa-enrollment"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -31106,6 +31309,7 @@
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-record-failure",
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-rotate-mfa-backup-codes-with-adapter"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -31236,6 +31440,7 @@
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-confirm-totp-mfa-enrollment",
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-totp-against-new-factor"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -31413,6 +31618,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -31526,6 +31732,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-totp-against-legacy-credential"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -31687,6 +31894,7 @@
         "workflow-internal-backend-src-services-auth-mfa-service-ts-consume-backup-code",
         "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -31814,6 +32022,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-mfa-service-ts-create-admin-mfa-challenge"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -31939,6 +32148,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-mfa-service-ts-complete-admin-mfa-challenge"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -32065,6 +32275,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-notification-service-ts-create-role-notifications"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -32191,6 +32402,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-notification-service-ts-list-notifications-for-user-uncached"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -32284,6 +32496,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-notification-service-ts-create-user-notification"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -32424,6 +32637,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-notification-service-ts-notify-incident-lifecycle"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -32537,6 +32751,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-policy-engine-service-ts-get-or-create-security-policy"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -32659,6 +32874,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-ir-policy-rule-engine-service-ts-evaluate-policy-rules-for-incident-volume"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -32781,6 +32997,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-ir-policy-rule-engine-service-ts-resolve-active-rules-for-licensee"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -32867,6 +33084,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-support-issue"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -32987,6 +33205,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-public-intake-controller-ts-patch-request-access-record"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -33106,6 +33325,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-request-access"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -33224,6 +33444,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-public-intake-controller-ts-list-request-access-records"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -33317,6 +33538,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-refresh-token-service-ts-create-refresh-token"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -33427,6 +33649,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-refresh-token-service-ts-rotate-refresh-token"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -33579,6 +33802,7 @@
         "workflow-internal-backend-src-services-auth-refresh-token-service-ts-revoke-refresh-token-by-id",
         "workflow-internal-backend-src-services-auth-refresh-token-service-ts-revoke-refresh-token-by-raw"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -33753,6 +33977,7 @@
         "workflow-internal-backend-src-services-auth-refresh-token-service-ts-find-refresh-token-by-raw",
         "workflow-internal-backend-src-services-auth-refresh-token-service-ts-list-active-refresh-tokens-for-user"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -33876,6 +34101,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-reject-sensitive-action-approval"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -34005,6 +34231,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-create-sensitive-action-approval"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -34117,6 +34344,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-expire-if-needed"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -34227,6 +34455,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-list-sensitive-action-approvals"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -34329,6 +34558,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-approve-sensitive-action-approval"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -34455,6 +34685,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-session-risk-service-ts-assess-auth-session-risk"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -34570,6 +34801,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-soar-service-ts-run-incident-auto-containment"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -34683,6 +34915,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-support-issue-controller-ts-serve-support-issue-screenshot"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -34778,6 +35011,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-support-issue-controller-ts-create-support-issue-report"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -34878,6 +35112,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-support-issue-controller-ts-list-support-issue-reports"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -34971,6 +35206,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-support-issue-controller-ts-respond-to-support-issue-report"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -35090,6 +35326,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-support-workflow-service-ts-ensure-incident-workflow-artifacts"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -35278,6 +35515,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-trace-policy-controller-ts-update-policy-config-controller"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -35386,6 +35624,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-user-controller-ts-restore-manufacturer"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -35489,6 +35728,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-user-controller-ts-assert-manufacturer-target"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -35583,6 +35823,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-user-controller-ts-delete-user"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -35748,6 +35989,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-user-controller-ts-update-user"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -35853,6 +36095,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-user-controller-ts-get-manufacturers"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -35948,6 +36191,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-user-controller-ts-create-user"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -36052,6 +36296,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-user-controller-ts-get-users"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -36146,6 +36391,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-complete-web-authn-factor-authentication"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -36273,6 +36519,7 @@
         "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-begin-web-authn-factor-authentication",
         "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-begin-web-authn-factor-registration"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -36429,6 +36676,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-load-challenge-by-ticket"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -36531,6 +36779,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-complete-web-authn-factor-registration"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -36656,6 +36905,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-consume-challenge"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -36766,6 +37016,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-webauthn-service-ts-consume-challenge"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -36877,6 +37128,7 @@
         "workflow-internal-backend-src-services-auth-webauthn-service-ts-list-admin-web-authn-credentials",
         "workflow-internal-backend-src-services-auth-webauthn-service-ts-load-challenge-by-ticket"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -37010,6 +37262,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-webauthn-service-ts-complete-admin-web-authn-challenge"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -37130,6 +37383,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-webauthn-service-ts-begin-admin-web-authn-challenge"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -37253,6 +37507,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-webauthn-service-ts-delete-admin-web-authn-credential"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -37379,6 +37634,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-webauthn-service-ts-complete-admin-web-authn-registration"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -37500,6 +37756,7 @@
         "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv",
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -37608,6 +37865,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -37668,6 +37926,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -37770,6 +38029,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-audit-service-ts-create-audit-log"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -37859,6 +38119,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-compliance-pack-service-ts-run-compliance-pack-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -37974,6 +38235,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-compliance-pack-service-ts-rebuild-compliance-pack-artifact-for-job"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -38089,6 +38351,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-forensic-chain-service-ts-append-forensic-chain-from-audit-log"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -38182,6 +38445,7 @@
         "workflow-internal-backend-src-services-governance-service-ts-update-retention-policy",
         "workflow-internal-backend-src-services-governance-service-ts-upsert-tenant-feature-flag"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -38353,6 +38617,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-governance-service-ts-run-retention-lifecycle"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -38463,6 +38728,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-incident-controller-ts-add-incident-evidence"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -38538,6 +38804,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-incident-email-service-ts-send-incident-email"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -38643,6 +38910,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-incident-service-ts-record-incident-event"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -38732,6 +39000,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-policy-engine-service-ts-create-policy-alert-if-fresh"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -38823,6 +39092,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-ir-policy-rule-engine-service-ts-create-rule-alert-if-fresh"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -38914,6 +39184,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-trace-policy-controller-ts-acknowledge-policy-alert-controller"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "http"
       ],
@@ -38986,11 +39257,177 @@
       }
     },
     {
+      "id": "family-split-auditservice-audit-write-org-resolution-60e107aefa",
+      "category": "incident/governance workflows",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-audit-service-ts-resolve-org-id"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-simple-tenant-scoped-reads-auditservice-964272fbb7",
+      "splitReason": "Separate the organization lookup inherited by audit writes from the unregistered audit reader.",
+      "semanticEvidence": [
+        "resolveOrgId is private and is called by resolveAuditPayload for createAuditLog and createAuditLogSafely."
+      ],
+      "routeRoots": [
+        "resolveOrgId is private and is called by resolveAuditPayload for createAuditLog and createAuditLogSafely."
+      ],
+      "protectedTableBoundary": "Licensee lookup inherited by AuditLog write roots",
+      "commandSemantics": "SELECT prerequisite inside mixed audit mutation roots.",
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/auditService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-licensee"
+      ],
+      "actorClasses": [
+        "authenticated-user",
+        "worker",
+        "scheduled-job"
+      ],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-licensee-select-fc757fc42aee"
+      ],
+      "tenantScopeModel": [
+        "Organization is derived from explicit orgId or Licensee.orgId inside the owning audit-write boundary."
+      ],
+      "lifecycleStateRequirements": [],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "high",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "out-of-scope-shared-mutation-root",
+          "reason": "The lookup is shared by audit writes from many incompatible request, worker and public roots.",
+          "remediation": "Move organization resolution into each owning audit transaction or an approved audit system boundary in a mutation-focused batch.",
+          "id": "blocker-family-split-auditservice-audit-write-org-resolution-60e107aefa-out-of-scope-shared-mutation-root"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-split-supportcontroller-platform-support-message-mutation-2b4b2be0d0",
+      "category": "incident/governance workflows",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-support-controller-ts-add-support-message"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa",
+      "splitReason": "Isolate the read preflight owned by the support-message mutation.",
+      "semanticEvidence": [
+        "POST /support/tickets/:id/messages requires recent MFA and CSRF, then calls addSupportTicketMessage and createAuditLog."
+      ],
+      "routeRoots": [
+        "POST /support/tickets/:id/messages requires recent MFA and CSRF, then calls addSupportTicketMessage and createAuditLog."
+      ],
+      "protectedTableBoundary": "SupportTicket preflight for SupportTicketMessage mutation",
+      "commandSemantics": "SELECT preflight followed by message and audit writes; mutation review required.",
+      "executionSurfaces": [
+        "http"
+      ],
+      "controllerFiles": [
+        "backend/src/controllers/supportController.ts"
+      ],
+      "serviceFiles": [],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-support-ticket"
+      ],
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-support-ticket-select-6522ae51ad08"
+      ],
+      "tenantScopeModel": [
+        "Ticket ID plus an approved bounded support tenant scope inside the full message mutation."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-support-ticket-select-6522ae51ad08",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=OPEN",
+            "status=IN_PROGRESS",
+            "status=WAITING_CUSTOMER",
+            "status=RESOLVED",
+            "status=CLOSED"
+          ],
+          "forbidden": []
+        }
+      ],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "high",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "out-of-scope-mutation-root",
+          "reason": "The selected read is a preflight inside a message-creation mutation root.",
+          "remediation": "Review the complete message mutation, idempotency, audit and transaction boundary in a later high-risk batch.",
+          "id": "blocker-family-split-supportcontroller-platform-support-message-mutation-2b4b2be0d0-out-of-scope-mutation-root"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-contract-preauth-fn-consume-email-verification",
       "category": "pre-auth function-backed workflows",
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -39137,6 +39574,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -39261,6 +39699,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -39388,6 +39827,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -39456,6 +39896,7 @@
       "workflowIds": [
         "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "startup"
       ],
@@ -39527,6 +39968,7 @@
       "workflowIds": [
         "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "startup"
       ],
@@ -39598,6 +40040,7 @@
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
@@ -39679,11 +40122,65 @@
       }
     },
     {
+      "id": "family-contract-system-boundary-analytics-rollup-worker",
+      "category": "worker/scheduled workflows",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-analytics-rollup-service-ts-get-checkpoint-date"
+      ],
+      "reclassifiedFromFamilyIds": [
+        "family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f"
+      ],
+      "executionSurfaces": [
+        "worker",
+        "startup"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/analyticsRollupService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-system-checkpoint"
+      ],
+      "actorClasses": [
+        "worker"
+      ],
+      "runtimeIdentity": "identity-worker",
+      "requiredAssurance": [
+        "durable-worker-identity"
+      ],
+      "canonicalContextKeys": [],
+      "readWriteCommandRuleIds": [
+        "command-system-checkpoint-select-412dbf5b8acb"
+      ],
+      "tenantScopeModel": [
+        "An allowlisted SystemCheckpoint key under the analytics distributed lease; the checkpoint is platform operational state and has no tenant or human actor scope."
+      ],
+      "lifecycleStateRequirements": [],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "system-boundary-analytics-rollup-worker",
+      "implementationStrategy": "Use only the governing system-boundary-analytics-rollup-worker contract; do not install ordinary authenticated context.",
+      "testStrategy": "Run the governing boundary's existing contract and mutation tests; PostgreSQL implementation remains separately certified.",
+      "riskLevel": "low",
+      "automationEligibility": "contract-only",
+      "governingBoundaryIds": [
+        "system-boundary-analytics-rollup-worker"
+      ],
+      "blockers": [],
+      "implementationStatus": "contract-ready",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-contract-worker-boundary-audit-outbox-delivery",
       "category": "worker/scheduled workflows",
       "workflowIds": [
         "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "worker"
       ],
@@ -39763,6 +40260,7 @@
       "workflowIds": [
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "scheduled"
       ],
@@ -39935,6 +40433,7 @@
       "workflowIds": [
         "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "worker"
       ],
@@ -40013,6 +40512,7 @@
         "workflow-cli-backend-scripts-resend-password-setup-link-js-find-actor",
         "workflow-cli-backend-scripts-resend-password-setup-link-js-find-target-user"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "cli"
       ],
@@ -40098,6 +40598,7 @@
       "workflowIds": [
         "workflow-cli-backend-scripts-break-glass-mfa-reset-ts-run"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "cli"
       ],
@@ -40164,6 +40665,7 @@
       "workflowIds": [
         "workflow-cli-backend-scripts-mscqr-print-test-js-main"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "cli"
       ],
@@ -40297,6 +40799,7 @@
         "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-range",
         "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-user"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "cli"
       ],
@@ -40534,6 +41037,7 @@
       "workflowIds": [
         "workflow-startup-backend-src-services-auth-super-admin-bootstrap-service-ts-bootstrap-configured-super-admin"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "startup"
       ],
@@ -40619,6 +41123,7 @@
       "workflowIds": [
         "workflow-cli-scripts-run-system-integration-mjs-main"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "cli"
       ],
@@ -40668,6 +41173,7 @@
         "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-victoria-platform-admin-invite",
         "workflow-cli-backend-scripts-repair-admin-accounts-js-main"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "cli"
       ],
@@ -40842,6 +41348,7 @@
         "workflow-cli-backend-scripts-seed-launch-smoke-users-js-seed-launch-smoke-users",
         "workflow-cli-backend-scripts-seed-launch-smoke-users-js-upsert-launch-user"
       ],
+      "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "cli"
       ],
