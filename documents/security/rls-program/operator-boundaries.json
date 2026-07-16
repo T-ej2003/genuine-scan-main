@@ -1,0 +1,3599 @@
+{
+  "schemaVersion": 1,
+  "decisionId": "decision-operator-administration",
+  "status": "architecture-resolved",
+  "actionClasses": [
+    "read-diagnostics",
+    "catalog-verification",
+    "deployment-preflight",
+    "migration-broker",
+    "credential-rotation",
+    "account-recovery",
+    "mfa-repair",
+    "session-revocation",
+    "tenant-security-recovery",
+    "incident-containment",
+    "data-retention-redaction",
+    "job-recovery",
+    "RLS-readiness-check",
+    "RLS-activation-control",
+    "RLS-rollback-control",
+    "break-glass-only",
+    "prohibited"
+  ],
+  "maximumBreakGlassLifetimeMinutes": 30,
+  "identities": {
+    "operator": "identity-operator",
+    "breakGlass": "identity-production-break-glass"
+  },
+  "arbitrarySqlAllowed": false,
+  "prohibitedActions": [
+    "arbitrary SQL execution",
+    "ownership changes outside the migration broker",
+    "role membership changes outside the approved broker",
+    "disabling FORCE RLS without the paired rollback control",
+    "granting BYPASSRLS or superuser",
+    "direct platform-admin flag changes",
+    "tenant ownership changes",
+    "credential or token hash exposure",
+    "audit evidence deletion or attribution clearing",
+    "unbounded cross-tenant SELECT",
+    "permanent or shared break-glass credentials"
+  ],
+  "boundaries": [
+    {
+      "id": "operator-boundary-catalog-verification",
+      "actionClass": "catalog-verification",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.catalog_verification",
+        "signature": "app_ops.catalog_verification(environment text, release_sha text, manifest_digest text)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "environment",
+        "release_sha",
+        "manifest_digest"
+      ],
+      "returnedFields": [
+        "object_class",
+        "object_identity",
+        "expected_owner",
+        "actual_owner",
+        "rls_enabled",
+        "force_rls",
+        "grant_status",
+        "membership_status"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [],
+      "targetFunctions": [
+        "app_ops.catalog_verification"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": false,
+        "distinctApprovers": 0
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "catalog metadata for the exact programme manifest only",
+      "tenantScopeRequirement": "not-applicable: catalog metadata only",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": false,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-health-readiness",
+      "actionClass": "read-diagnostics",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.health_readiness",
+        "signature": "app_ops.health_readiness(component text)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "component allowlist"
+      ],
+      "returnedFields": [
+        "component",
+        "status",
+        "checked_at",
+        "redacted_reason_code"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [],
+      "targetFunctions": [
+        "app_ops.health_readiness"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": false,
+        "distinctApprovers": 0
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one allowlisted component",
+      "tenantScopeRequirement": "not-applicable: redacted aggregate health",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": false,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-failed-job-summary",
+      "actionClass": "read-diagnostics",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.failed_job_summary",
+        "signature": "app_ops.failed_job_summary(job_type text, tenant_id uuid, page_size integer)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "allowlisted job_type",
+        "exact tenant_id",
+        "page_size 1..100"
+      ],
+      "returnedFields": [
+        "job_id",
+        "job_type",
+        "tenant_id",
+        "state",
+        "attempt_count",
+        "last_error_code",
+        "updated_at"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [],
+      "targetFunctions": [
+        "app_ops.failed_job_summary"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": false,
+        "distinctApprovers": 0
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "100 rows within one tenant and job type",
+      "tenantScopeRequirement": "exact tenant required",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": false,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-tenant-incident-summary",
+      "actionClass": "read-diagnostics",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.tenant_incident_summary",
+        "signature": "app_ops.tenant_incident_summary(tenant_id uuid, incident_id uuid, page_size integer)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "exact tenant_id",
+        "exact incident_id",
+        "page_size 1..100"
+      ],
+      "returnedFields": [
+        "incident_id",
+        "tenant_id",
+        "status",
+        "severity",
+        "event_type",
+        "created_at",
+        "redacted_summary"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [],
+      "targetFunctions": [
+        "app_ops.tenant_incident_summary"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": false,
+        "distinctApprovers": 0
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one incident and at most 100 redacted events",
+      "tenantScopeRequirement": "exact tenant and incident binding required",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": false,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-print-diagnostic",
+      "actionClass": "read-diagnostics",
+      "environmentAvailability": [
+        "development",
+        "staging"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.print_diagnostic",
+        "signature": "app_ops.print_diagnostic(batch_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "exact batch_id"
+      ],
+      "returnedFields": [
+        "batch_id",
+        "print_job_id",
+        "print_state",
+        "item_counts",
+        "redacted_failure_codes"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-batch",
+        "table-print-item",
+        "table-qrcode"
+      ],
+      "targetFunctions": [
+        "app_ops.print_diagnostic"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": false,
+        "distinctApprovers": 0
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": false,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one batch aggregate; no QR payload rows",
+      "tenantScopeRequirement": "batch tenant derived and verified",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": false,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [
+        "workflow-cli-backend-scripts-mscqr-print-test-js-main"
+      ],
+      "exactCommandRuleIds": [
+        "command-batch-select-b9068172ccf8",
+        "command-print-item-select-b9068172ccf8",
+        "command-qrcode-select-b9068172ccf8"
+      ],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-deployment-preflight",
+      "actionClass": "deployment-preflight",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "operator-command",
+        "identifier": "mscqr-operator deployment-preflight",
+        "syntax": "mscqr-operator deployment-preflight --environment <exact> --release-sha <sha> --migration-set-digest <sha256> --baseline-digest <sha256> --approval-id <id>",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "environment",
+        "release_sha",
+        "migration_set_digest",
+        "baseline_digest",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "preflight_id",
+        "environment",
+        "release_sha",
+        "checks",
+        "ready",
+        "expires_at"
+      ],
+      "targetSchemas": [],
+      "targetTables": [],
+      "targetFunctions": [],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "catalog and release metadata only",
+      "tenantScopeRequirement": "not-applicable: deployment metadata only",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-migration-broker",
+      "actionClass": "migration-broker",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "operator-command",
+        "identifier": "mscqr-operator migration-broker",
+        "syntax": "mscqr-operator migration-broker --environment <exact> --migration-id <id> --checksum <sha256> --release-sha <sha> --preflight-id <id> --approval-id <id> --ticket-id <id> --purpose <text>",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "environment",
+        "migration_id",
+        "checksum",
+        "release_sha",
+        "preflight_id",
+        "approval_id",
+        "ticket_id",
+        "purpose"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "migration_id",
+        "transfer_status",
+        "revocation_status",
+        "catalog_verification_status",
+        "transcript_digest"
+      ],
+      "targetSchemas": [],
+      "targetTables": [],
+      "targetFunctions": [],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "exact reviewed migration object set",
+      "tenantScopeRequirement": "not-applicable: object manifest scope",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "Follow object-ownership-chain.json: preflight, reviewed DDL, per-object transfer, grant normalization, unconditional revocation and catalog gate; any residue fails closed.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-credential-rotation",
+      "actionClass": "credential-rotation",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "operator-command",
+        "identifier": "mscqr-operator rotate-runtime-credential",
+        "syntax": "mscqr-operator rotate-runtime-credential --environment <exact> --identity <allowlisted> --rotation-id <id> --approval-id <id> --ticket-id <id> --purpose <text>",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "environment",
+        "allowlisted runtime identity",
+        "rotation_id",
+        "approval_id",
+        "ticket_id",
+        "purpose"
+      ],
+      "returnedFields": [
+        "rotation_id",
+        "identity",
+        "consumer_count",
+        "verification_status",
+        "old_credential_revoked"
+      ],
+      "targetSchemas": [],
+      "targetTables": [],
+      "targetFunctions": [],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one runtime identity credential and its registered consumers",
+      "tenantScopeRequirement": "not-applicable: credential metadata; secret values never returned",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-account-setup-link-reissue",
+      "actionClass": "account-recovery",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.reissue_account_setup_link",
+        "signature": "app_ops.reissue_account_setup_link(target_user_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "target_user_id",
+        "operator_id",
+        "approved reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "delivery_queued",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-user",
+        "table-invite",
+        "table-password-reset"
+      ],
+      "targetFunctions": [
+        "app_ops.reissue_account_setup_link"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one existing account",
+      "tenantScopeRequirement": "target tenant is immutable and operator scope must cover it",
+      "allowedColumns": [
+        "one-time token issuance metadata",
+        "expiry",
+        "consumed state",
+        "delivery state"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [
+        "workflow-cli-backend-scripts-resend-password-setup-link-js-find-actor",
+        "workflow-cli-backend-scripts-resend-password-setup-link-js-find-target-user"
+      ],
+      "exactCommandRuleIds": [
+        "command-user-select-4565c98613c5",
+        "command-user-select-c25c0f7d748a"
+      ],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-locked-account-recovery",
+      "actionClass": "account-recovery",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.recover_locked_account",
+        "signature": "app_ops.recover_locked_account(target_user_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "target_user_id",
+        "operator_id",
+        "approved reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-user",
+        "table-refresh-token"
+      ],
+      "targetFunctions": [
+        "app_ops.recover_locked_account"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one exact account",
+      "tenantScopeRequirement": "target tenant is immutable and operator scope must cover it",
+      "allowedColumns": [
+        "failedLoginAttempts",
+        "lockedUntil",
+        "session revocation state"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-operator-mfa-repair",
+      "actionClass": "mfa-repair",
+      "environmentAvailability": [
+        "development",
+        "staging"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.reset_account_mfa",
+        "signature": "app_ops.reset_account_mfa(target_user_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "target_user_id",
+        "operator_id",
+        "approved reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-user",
+        "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
+        "table-user-mfa-factor",
+        "table-user-backup-code",
+        "table-refresh-token"
+      ],
+      "targetFunctions": [
+        "app_ops.reset_account_mfa"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": false,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one exact account",
+      "tenantScopeRequirement": "target tenant and role are immutable; maker/checker must differ",
+      "allowedColumns": [
+        "MFA disabled/reset state",
+        "credential revocation state",
+        "session revocation state"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-breakglass-mfa-repair",
+      "actionClass": "mfa-repair",
+      "environmentAvailability": [
+        "production"
+      ],
+      "actorClass": "break-glass",
+      "runtimeIdentity": "identity-production-break-glass",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.reset_account_mfa",
+        "signature": "app_ops.reset_account_mfa(target_user_id uuid, executor_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "target_user_id",
+        "ephemeral executor_id",
+        "incident reason",
+        "dual approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-user",
+        "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
+        "table-user-mfa-factor",
+        "table-user-backup-code",
+        "table-refresh-token"
+      ],
+      "targetFunctions": [
+        "app_ops.reset_account_mfa"
+      ],
+      "requiredAssurance": "dual-approved-break-glass",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 2
+      },
+      "approvalClass": "dual-approved-break-glass",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 30,
+      "maximumRowScope": "one exact account",
+      "tenantScopeRequirement": "account binding fixed before credential issuance; role and tenant immutable",
+      "allowedColumns": [
+        "MFA disabled/reset state",
+        "credential revocation state",
+        "session revocation state"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [
+        "workflow-cli-backend-scripts-break-glass-mfa-reset-ts-run"
+      ],
+      "exactCommandRuleIds": [
+        "command-user-select-fcb995864029"
+      ],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-session-revocation",
+      "actionClass": "session-revocation",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.revoke_account_sessions",
+        "signature": "app_ops.revoke_account_sessions(target_user_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "target_user_id",
+        "operator_id",
+        "approved reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-refresh-token"
+      ],
+      "targetFunctions": [
+        "app_ops.revoke_account_sessions"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "all sessions for one exact account",
+      "tenantScopeRequirement": "target account tenant must be verified",
+      "allowedColumns": [
+        "revokedAt",
+        "revocationReason"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-tenant-security-recovery",
+      "actionClass": "tenant-security-recovery",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.recover_tenant_security_state",
+        "signature": "app_ops.recover_tenant_security_state(tenant_id uuid, recovery_case_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "tenant_id",
+        "recovery_case_id",
+        "operator_id",
+        "approved reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-organization",
+        "table-licensee",
+        "table-manufacturer-licensee-link"
+      ],
+      "targetFunctions": [
+        "app_ops.recover_tenant_security_state"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one tenant root and explicitly enumerated access links",
+      "tenantScopeRequirement": "one exact tenant root; ownership columns immutable",
+      "allowedColumns": [
+        "approved suspension/recovery state only"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-contain-user",
+      "actionClass": "incident-containment",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.contain_user",
+        "signature": "app_ops.contain_user(user_id uuid, incident_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "user_id",
+        "incident_id",
+        "operator_id",
+        "reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-user",
+        "table-refresh-token"
+      ],
+      "targetFunctions": [
+        "app_ops.contain_user"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one exact user and that user's sessions",
+      "tenantScopeRequirement": "incident tenant must match user tenant",
+      "allowedColumns": [
+        "disabled/security status",
+        "session revocation state"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-contain-tenant",
+      "actionClass": "incident-containment",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.contain_tenant_access",
+        "signature": "app_ops.contain_tenant_access(tenant_id uuid, incident_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "tenant_id",
+        "incident_id",
+        "operator_id",
+        "reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-organization",
+        "table-licensee",
+        "table-manufacturer-licensee-link"
+      ],
+      "targetFunctions": [
+        "app_ops.contain_tenant_access"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one tenant and its enumerated access links",
+      "tenantScopeRequirement": "one exact tenant; ownership columns immutable",
+      "allowedColumns": [
+        "approved suspension state"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-contain-qr-batch",
+      "actionClass": "incident-containment",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.contain_qr_or_batch",
+        "signature": "app_ops.contain_qr_or_batch(target_kind text, target_id uuid, incident_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "target_kind enum QR|BATCH",
+        "target_id",
+        "incident_id",
+        "operator_id",
+        "reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-batch",
+        "table-qrcode"
+      ],
+      "targetFunctions": [
+        "app_ops.contain_qr_or_batch"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one batch or one QR identity; released identity fields remain immutable",
+      "tenantScopeRequirement": "incident tenant must match target tenant",
+      "allowedColumns": [
+        "supported FAILED/VOIDED/blocked state only"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-contain-job-type",
+      "actionClass": "incident-containment",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.contain_job_type",
+        "signature": "app_ops.contain_job_type(job_type text, tenant_id uuid, incident_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "allowlisted job_type",
+        "tenant_id or approved platform scope",
+        "incident_id",
+        "operator_id",
+        "reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-compliance-pack-job",
+        "table-evidence-retention-job",
+        "table-audit-log-outbox",
+        "table-security-event-outbox"
+      ],
+      "targetFunctions": [
+        "app_ops.contain_job_type"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one allowlisted job type and one tenant; platform scope requires explicit platform approval",
+      "tenantScopeRequirement": "exact tenant unless separately approved platform incident",
+      "allowedColumns": [
+        "paused/failed claim state"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-contain-credential",
+      "actionClass": "incident-containment",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.suspend_credential",
+        "signature": "app_ops.suspend_credential(credential_kind text, credential_id uuid, incident_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "allowlisted credential_kind",
+        "credential_id",
+        "incident_id",
+        "operator_id",
+        "reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-printer-registration",
+        "table-printer-agent-session",
+        "table-customer-trust-credential",
+        "table-admin-web-authn-credential"
+      ],
+      "targetFunctions": [
+        "app_ops.suspend_credential"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one exact credential or connector",
+      "tenantScopeRequirement": "credential tenant/actor must match incident scope",
+      "allowedColumns": [
+        "revocation/suspension state",
+        "revokedAt"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-retention-redaction",
+      "actionClass": "data-retention-redaction",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.redact_retained_evidence",
+        "signature": "app_ops.redact_retained_evidence(evidence_id uuid, retention_case_id uuid, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "evidence_id",
+        "retention_case_id",
+        "operator_id",
+        "reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-incident-evidence",
+        "table-audit-log"
+      ],
+      "targetFunctions": [
+        "app_ops.redact_retained_evidence"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one evidence object; immutable audit record is appended, never deleted",
+      "tenantScopeRequirement": "retention case tenant and legal-hold state must match",
+      "allowedColumns": [
+        "approved redaction projection only"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-job-recovery",
+      "actionClass": "job-recovery",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.recover_failed_job",
+        "signature": "app_ops.recover_failed_job(job_id uuid, expected_state text, operator_id uuid, reason text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "job_id",
+        "exact expected_state",
+        "operator_id",
+        "reason",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-compliance-pack-job",
+        "table-evidence-retention-job",
+        "table-audit-log-outbox",
+        "table-security-event-outbox"
+      ],
+      "targetFunctions": [
+        "app_ops.recover_failed_job"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one failed durable job",
+      "tenantScopeRequirement": "job durable tenant scope is reverified",
+      "allowedColumns": [
+        "retry/claim state",
+        "attempt metadata"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-staging-rls-fixture",
+      "actionClass": "RLS-readiness-check",
+      "environmentAvailability": [
+        "staging"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "named-procedure",
+        "identifier": "app_ops.prepare_rls_validation_fixture",
+        "signature": "app_ops.prepare_rls_validation_fixture(fixture_id uuid, tenant_key text, approval_id uuid)",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "fixture_id",
+        "reserved tenant_key",
+        "approval_id"
+      ],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [
+        "app_ops"
+      ],
+      "targetTables": [
+        "table-organization",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-user",
+        "table-qrrange",
+        "table-batch",
+        "table-qrcode"
+      ],
+      "targetFunctions": [
+        "app_ops.prepare_rls_validation_fixture"
+      ],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": false,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "one reserved synthetic tenant fixture with bounded QR count",
+      "tenantScopeRequirement": "reserved staging-only fixture tenant; production denied",
+      "allowedColumns": [
+        "fixed synthetic fixture columns from the reviewed fixture manifest"
+      ],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-batch",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-licensee",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-manufacturer-link",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-organization",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-codes",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-range",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-user"
+      ],
+      "exactCommandRuleIds": [
+        "command-batch-insert-c3fe26c91d5d",
+        "command-batch-select-c3fe26c91d5d",
+        "command-batch-update-c3fe26c91d5d",
+        "command-licensee-insert-15353eb3f86d",
+        "command-licensee-select-15353eb3f86d",
+        "command-licensee-update-15353eb3f86d",
+        "command-manufacturer-licensee-link-insert-b445a87dc13c",
+        "command-manufacturer-licensee-link-select-b445a87dc13c",
+        "command-manufacturer-licensee-link-update-b445a87dc13c",
+        "command-organization-insert-e101c330a5d4",
+        "command-organization-select-e101c330a5d4",
+        "command-organization-update-e101c330a5d4",
+        "command-qrcode-insert-a580129206cf",
+        "command-qrcode-select-a580129206cf",
+        "command-qrcode-update-a580129206cf",
+        "command-qrrange-insert-ddd82bdb411b",
+        "command-qrrange-select-ddd82bdb411b",
+        "command-qrrange-update-ddd82bdb411b",
+        "command-user-insert-47b88288d0d8",
+        "command-user-select-47b88288d0d8",
+        "command-user-update-47b88288d0d8"
+      ],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-rls-readiness",
+      "actionClass": "RLS-readiness-check",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "operator-command",
+        "identifier": "mscqr-operator rls-readiness",
+        "syntax": "mscqr-operator rls-readiness --environment <exact> --release-sha <sha> --policy-digest <sha256> --grant-digest <sha256> --role-digest <sha256> --baseline-digest <sha256>",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "environment",
+        "release_sha",
+        "policy_digest",
+        "grant_digest",
+        "role_digest",
+        "baseline_digest"
+      ],
+      "returnedFields": [
+        "readiness_id",
+        "checks",
+        "catalog_baseline_digest",
+        "ready",
+        "expires_at"
+      ],
+      "targetSchemas": [],
+      "targetTables": [],
+      "targetFunctions": [],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "catalog metadata and bounded canary assertions only",
+      "tenantScopeRequirement": "canary uses approved synthetic tenant; no business payload output",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-rls-activation",
+      "actionClass": "RLS-activation-control",
+      "environmentAvailability": [
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "operator-command",
+        "identifier": "mscqr-operator rls-activate",
+        "syntax": "mscqr-operator rls-activate --environment <exact> --release-sha <sha> --migration-set-digest <sha256> --catalog-baseline-digest <sha256> --readiness-id <id> --approval-id <id> --ticket-id <id> --window-id <id> --checker-id <id> --rollback-digest <sha256>",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "environment",
+        "release_sha",
+        "migration_set_digest",
+        "catalog_baseline_digest",
+        "readiness_id",
+        "approval_id",
+        "ticket_id",
+        "window_id",
+        "independent checker_id",
+        "rollback_digest",
+        "staging_evidence_digest for production"
+      ],
+      "returnedFields": [
+        "activation_id",
+        "phase",
+        "table_set_digest",
+        "canary_status",
+        "post_catalog_digest",
+        "rollback_ready"
+      ],
+      "targetSchemas": [],
+      "targetTables": [],
+      "targetFunctions": [],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "exact checksum-bound RLS activation phase only",
+      "tenantScopeRequirement": "approved canary tenants only; operator receives no policy bypass",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true,
+      "rollbackBoundaryId": "operator-boundary-rls-rollback",
+      "productionRequirements": {
+        "stagingEvidenceRequired": true,
+        "exactReleaseBindingRequired": true,
+        "exactMigrationSetRequired": true,
+        "currentCatalogBaselineRequired": true,
+        "approvalRecordRequired": true,
+        "rollbackArtifactRequired": true,
+        "maintenanceWindowRequired": true,
+        "independentCheckerRequired": true,
+        "postActivationVerificationRequired": true
+      }
+    },
+    {
+      "id": "operator-boundary-rls-rollback",
+      "actionClass": "RLS-rollback-control",
+      "environmentAvailability": [
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "operator-command",
+        "identifier": "mscqr-operator rls-rollback",
+        "syntax": "mscqr-operator rls-rollback --environment <exact> --activation-id <id> --release-sha <sha> --rollback-digest <sha256> --approval-id <id> --ticket-id <id> --purpose <text>",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "environment",
+        "activation_id",
+        "release_sha",
+        "rollback_digest",
+        "approval_id",
+        "ticket_id",
+        "purpose"
+      ],
+      "returnedFields": [
+        "rollback_id",
+        "phase",
+        "catalog_status",
+        "membership_status",
+        "post_rollback_digest"
+      ],
+      "targetSchemas": [],
+      "targetTables": [],
+      "targetFunctions": [],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 1
+      },
+      "approvalClass": "operator-change-approval",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 60,
+      "maximumRowScope": "exact activation phase and checksum-paired rollback artifact only",
+      "tenantScopeRequirement": "not-applicable: exact table phase",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true,
+      "pairedActivationBoundaryId": "operator-boundary-rls-activation"
+    },
+    {
+      "id": "operator-boundary-breakglass-issuance",
+      "actionClass": "break-glass-only",
+      "environmentAvailability": [
+        "production"
+      ],
+      "actorClass": "break-glass",
+      "runtimeIdentity": "identity-production-break-glass",
+      "exactCommandOrNamedProcedure": {
+        "kind": "operator-command",
+        "identifier": "mscqr-security-broker issue-breakglass",
+        "syntax": "mscqr-security-broker issue-breakglass --incident-id <id> --ticket-id <id> --purpose <text> --approver-one <id> --approver-two <id> --boundary-ids <allowlist> --ttl-minutes <1..30>",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [
+        "incident_id",
+        "ticket_id",
+        "purpose",
+        "two distinct approver identities",
+        "exact boundary allowlist",
+        "ttl 1..30 minutes"
+      ],
+      "returnedFields": [
+        "ephemeral_identity",
+        "credential_handle",
+        "expires_at",
+        "allowlist_digest",
+        "audit_transcript_id"
+      ],
+      "targetSchemas": [],
+      "targetTables": [],
+      "targetFunctions": [],
+      "requiredAssurance": "dual-approved-break-glass",
+      "approvalRequirement": {
+        "required": true,
+        "distinctApprovers": 2
+      },
+      "approvalClass": "dual-approved-break-glass",
+      "ticketRequirement": true,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 30,
+      "maximumRowScope": "only targets permitted by the issued boundary allowlist",
+      "tenantScopeRequirement": "each issued command retains exact target/tenant binding",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."
+      ],
+      "implementationStatus": "contract-only-not-implemented",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [],
+      "exactCommandRuleIds": [],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true,
+      "lifecycle": [
+        "incident declared",
+        "ticket created",
+        "two distinct approvers approve",
+        "broker creates individually attributable ephemeral credential",
+        "exact boundary allowlist attached",
+        "expiry fixed at no more than 30 minutes",
+        "every command records actor/ticket/purpose/result",
+        "automatic revocation at expiry",
+        "early revocation remains available",
+        "post-use catalog and data audit",
+        "credential and memberships verified absent"
+      ]
+    },
+    {
+      "id": "operator-boundary-prohibited-platform-role-repair",
+      "actionClass": "prohibited",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "break-glass",
+      "runtimeIdentity": "identity-production-break-glass",
+      "exactCommandOrNamedProcedure": {
+        "kind": "prohibited",
+        "identifier": "backend/scripts/repair-admin-accounts.js",
+        "syntax": "No executable command",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [],
+      "targetTables": [],
+      "targetFunctions": [],
+      "requiredAssurance": "dual-approved-break-glass",
+      "approvalRequirement": {
+        "required": false,
+        "distinctApprovers": 0
+      },
+      "approvalClass": "dual-approved-break-glass",
+      "ticketRequirement": false,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 0,
+      "maximumRowScope": "zero rows",
+      "tenantScopeRequirement": "Exact tenant/account/object identifier must be bound to approved server evidence; global scope is denied unless this boundary explicitly describes catalog-only metadata.",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "No execution is authorized.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Direct creation, promotion or repair of platform administrators is not an approved operator or break-glass action; use reviewed application governance or a future exact maker/checker procedure."
+      ],
+      "implementationStatus": "prohibited",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [
+        "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-administration-super-admin",
+        "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-victoria-platform-admin-invite",
+        "workflow-cli-backend-scripts-repair-admin-accounts-js-main"
+      ],
+      "exactCommandRuleIds": [
+        "command-user-insert-cc8598d27b96",
+        "command-user-select-5f77f5708f23",
+        "command-user-select-cc8598d27b96",
+        "command-user-select-e14b0187d696",
+        "command-user-update-5f77f5708f23",
+        "command-user-update-cc8598d27b96"
+      ],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-prohibited-seed-and-test-data",
+      "actionClass": "prohibited",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "prohibited",
+        "identifier": "registered Prisma/enterprise/launch-smoke seed and QR-reset workflows",
+        "syntax": "No executable command",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [],
+      "targetTables": [],
+      "targetFunctions": [],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": false,
+        "distinctApprovers": 0
+      },
+      "approvalClass": "not-applicable-denied",
+      "ticketRequirement": false,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 0,
+      "maximumRowScope": "zero rows",
+      "tenantScopeRequirement": "Exact tenant/account/object identifier must be bound to approved server evidence; global scope is denied unless this boundary explicitly describes catalog-only metadata.",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "No execution is authorized against protected environments.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Generic seed, upsert, delete or test-data mutation is not operator administration. Local disposable development may use test credentials outside protected environment roles."
+      ],
+      "implementationStatus": "prohibited",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [
+        "workflow-cli-backend-prisma-seed-ts-ensure-licensee",
+        "workflow-cli-backend-prisma-seed-ts-main",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-reset-codes-for-batch",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed-manufacturer-mfa-backup-codes",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed-printer",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-upsert-fresh-admin-mfa",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-upsert-user",
+        "workflow-cli-backend-scripts-seed-launch-smoke-users-js-ensure-licensee",
+        "workflow-cli-backend-scripts-seed-launch-smoke-users-js-refresh-admin-mfa-marker",
+        "workflow-cli-backend-scripts-seed-launch-smoke-users-js-seed-launch-smoke-users",
+        "workflow-cli-backend-scripts-seed-launch-smoke-users-js-upsert-launch-user"
+      ],
+      "exactCommandRuleIds": [
+        "command-admin-mfa-credential-insert-5add1dbec9e5",
+        "command-admin-mfa-credential-insert-82cdaee581ff",
+        "command-admin-mfa-credential-update-5add1dbec9e5",
+        "command-admin-mfa-credential-update-82cdaee581ff",
+        "command-audit-log-insert-79f46a1bc2f0",
+        "command-audit-log-insert-80f0e7a7985d",
+        "command-batch-insert-80f0e7a7985d",
+        "command-batch-insert-fe33efe6d646",
+        "command-batch-update-80f0e7a7985d",
+        "command-batch-update-fe33efe6d646",
+        "command-inventory-status-rollup-insert-fe33efe6d646",
+        "command-inventory-status-rollup-update-fe33efe6d646",
+        "command-licensee-insert-30177e996b03",
+        "command-licensee-insert-c209931446fc",
+        "command-licensee-insert-fe33efe6d646",
+        "command-licensee-select-30177e996b03",
+        "command-licensee-select-c209931446fc",
+        "command-licensee-update-30177e996b03",
+        "command-licensee-update-fe33efe6d646",
+        "command-manufacturer-licensee-link-insert-79f46a1bc2f0",
+        "command-manufacturer-licensee-link-insert-fe33efe6d646",
+        "command-manufacturer-licensee-link-update-79f46a1bc2f0",
+        "command-manufacturer-licensee-link-update-fe33efe6d646",
+        "command-organization-insert-30177e996b03",
+        "command-organization-insert-c209931446fc",
+        "command-organization-insert-fe33efe6d646",
+        "command-organization-update-30177e996b03",
+        "command-organization-update-c209931446fc",
+        "command-organization-update-fe33efe6d646",
+        "command-print-job-delete-fe33efe6d646",
+        "command-printer-attestation-delete-c6d418bd30c8",
+        "command-printer-attestation-insert-c6d418bd30c8",
+        "command-printer-insert-c6d418bd30c8",
+        "command-printer-profile-insert-c6d418bd30c8",
+        "command-printer-profile-update-c6d418bd30c8",
+        "command-printer-registration-insert-c6d418bd30c8",
+        "command-printer-registration-update-c6d418bd30c8",
+        "command-printer-update-c6d418bd30c8",
+        "command-qrcode-insert-2cbc825b30a8",
+        "command-qrcode-insert-80f0e7a7985d",
+        "command-qrcode-update-2cbc825b30a8",
+        "command-qrcode-update-80f0e7a7985d",
+        "command-qrcode-update-fe33efe6d646",
+        "command-qrrange-insert-80f0e7a7985d",
+        "command-qrrange-update-80f0e7a7985d",
+        "command-user-backup-code-delete-6feb1bfa0d7b",
+        "command-user-backup-code-insert-6feb1bfa0d7b",
+        "command-user-insert-67130d27c2cc",
+        "command-user-insert-80f0e7a7985d",
+        "command-user-insert-b9cf437eb9dc",
+        "command-user-select-b9cf437eb9dc",
+        "command-user-update-67130d27c2cc",
+        "command-user-update-80f0e7a7985d",
+        "command-user-update-b9cf437eb9dc"
+      ],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    },
+    {
+      "id": "operator-boundary-prohibited-audit-browser",
+      "actionClass": "prohibited",
+      "environmentAvailability": [
+        "development",
+        "staging",
+        "production"
+      ],
+      "actorClass": "operator-admin",
+      "runtimeIdentity": "identity-operator",
+      "exactCommandOrNamedProcedure": {
+        "kind": "prohibited",
+        "identifier": "scripts/run-system-integration.mjs direct AuditLog SELECT",
+        "syntax": "No executable command",
+        "arbitraryArgumentsAllowed": false
+      },
+      "acceptedArguments": [],
+      "returnedFields": [
+        "operation_id",
+        "status",
+        "affected_count",
+        "audit_event_id"
+      ],
+      "targetSchemas": [],
+      "targetTables": [],
+      "targetFunctions": [],
+      "requiredAssurance": "operator-approved",
+      "approvalRequirement": {
+        "required": false,
+        "distinctApprovers": 0
+      },
+      "approvalClass": "not-applicable-denied",
+      "ticketRequirement": false,
+      "purposeRequirement": true,
+      "maximumDurationMinutes": 0,
+      "maximumRowScope": "zero rows",
+      "tenantScopeRequirement": "Exact tenant/account/object identifier must be bound to approved server evidence; global scope is denied unless this boundary explicitly describes catalog-only metadata.",
+      "allowedColumns": [],
+      "prohibitedColumns": [
+        "passwordHash",
+        "tokenHash",
+        "secret",
+        "privateKey",
+        "credentialPublicKey",
+        "backupCodeHash",
+        "platform-admin flags",
+        "tenant ownership columns",
+        "audit actor identity"
+      ],
+      "transactionBehavior": "No execution is authorized.",
+      "auditEventRequirement": {
+        "required": true,
+        "immutable": true,
+        "fields": [
+          "operator_actor",
+          "runtime_identity",
+          "ticket_id",
+          "approval_id",
+          "purpose",
+          "target",
+          "before_digest",
+          "after_digest",
+          "result",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "beforeAfterEvidence": true,
+      "expiryBehavior": "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+      "revocationBehavior": "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+      "retrySemantics": "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+      "allowScenarios": [
+        "The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."
+      ],
+      "denyScenarios": [
+        "Unrestricted audit-log browsing is denied; use exact redacted incident or catalog diagnostics."
+      ],
+      "implementationStatus": "prohibited",
+      "certificationTests": [
+        "Exact allow case",
+        "Wrong environment and target denial",
+        "Expired/missing approval denial",
+        "Secret-output redaction",
+        "Ownership/SET ROLE/BYPASSRLS denial",
+        "Audit and retry proof"
+      ],
+      "workflowIds": [
+        "workflow-cli-scripts-run-system-integration-mjs-main"
+      ],
+      "exactCommandRuleIds": [
+        "command-audit-log-select-5998dbf5eb0a"
+      ],
+      "arbitrarySqlAllowed": false,
+      "objectOwnershipAllowed": false,
+      "ownerRoleMembershipAllowed": false,
+      "setRoleAllowed": false,
+      "bypassRlsAllowed": false,
+      "superuserAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "unrestrictedCrossTenantScope": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false,
+      "roleElevationAllowed": false,
+      "tenantReassignmentAllowed": false,
+      "auditDeletionAllowed": false,
+      "secretOutputAllowed": false,
+      "sharedCredentialAllowed": false,
+      "automaticRevocation": true
+    }
+  ],
+  "supportingEvidence": [
+    "documents/security/rls-program/object-ownership-chain.json",
+    "documents/ops/MSCQR_STAGING_DATABASE_ROLE_CREDENTIALS_AND_CUTOVER_RUNBOOK_2026-07-10.md",
+    "documents/ops/MSCQR_RLS_PRODUCTION_ROLLOUT_CHECKLIST_2026-06-30.md",
+    "backend/scripts/break-glass-mfa-reset.ts",
+    "backend/scripts/resend-password-setup-link.js",
+    "backend/scripts/repair-admin-accounts.js"
+  ]
+}

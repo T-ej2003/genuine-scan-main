@@ -32,8 +32,8 @@ Rules: 983; workflows mapped: 428/428.
 | worker | 5 |
 | scheduled-job | 10 |
 | migration | 2 |
-| operator-admin | 79 |
-| break-glass | 9 |
+| operator-admin | 81 |
+| break-glass | 7 |
 
 ## Assurance levels
 
@@ -45,8 +45,8 @@ Rules: 983; workflows mapped: 428/428.
 | mfa-verified | 239 |
 | step-up-verified | 14 |
 | system-verified | 33 |
-| operator-approved | 79 |
-| dual-approved-break-glass | 9 |
+| operator-approved | 81 |
+| dual-approved-break-glass | 7 |
 
 ## Commands
 

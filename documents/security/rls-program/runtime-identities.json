@@ -479,51 +479,79 @@
       ]
     },
     {
-      "id": "identity-staging-operator-admin",
-      "logicalIdentity": "operator administration",
+      "id": "identity-operator",
+      "logicalIdentity": "operator administrator",
       "roleSuffix": "operator",
       "environmentRoleNames": {
         "development": "mscqr_dev_operator",
         "staging": "mscqr_staging_operator",
         "production": "mscqr_prod_operator"
       },
-      "purpose": "Broker-controlled, audited environment administration without standing ownership authority.",
+      "purpose": "Standing restricted administrative login for exact broker commands and named procedures only.",
       "loginExpectation": "LOGIN",
       "allowedSchemas": [
-        "public",
-        "app_rls",
-        "app_auth"
+        "app_ops"
       ],
       "allowedCommands": [
         "CONNECT",
         "USAGE",
-        "BROKER_ALLOWLISTED_ADMINISTRATION"
+        "EXECUTE_EXACT_OPERATOR_BOUNDARIES"
       ],
-      "tablePrivilegeMode": "no standing table privileges; temporary command-scoped grants only",
+      "tablePrivilegeMode": "no direct table privileges; exact procedure/command execution only",
       "securityDefinerExecution": "approved operator function signatures only when broker-authorized",
       "mayExecuteSecurityDefinerFunctions": true,
-      "ownershipExpectations": "Owns no objects and receives no standing owner membership.",
+      "ownershipExpectations": "Owns no object and has no owner-role membership.",
       "mayOwnProtectedTables": false,
       "mayCreateObjects": false,
       "maySetRole": false,
       "mayUseBypassRls": false,
       "superuser": false,
-      "credentialSource": "ephemeral-broker-issued-operator-credential-per-environment",
-      "standingCredential": false,
-      "rotationExpectation": "Short-lived credential expires automatically after the approved operation; revoke immediately on completion or failure.",
+      "credentialSource": "dedicated-managed-operator-credential-per-environment-with-individual-attribution",
+      "standingCredential": true,
+      "rotationExpectation": "Managed rotation at least every 90 days and immediate rotation on compromise or personnel change; command approvals remain short-lived.",
       "auditRequirements": [
         "Capture approval, operator, exact command allowlist, checksum, target guard, start/end, result, and immutable transcript."
       ],
       "resolvedDecisions": [
+        "decision-operator-administration",
         "decision-runtime-role-split"
       ],
-      "unresolvedDecisions": [
-        "decision-operator-administration"
-      ],
+      "unresolvedDecisions": [],
       "mayOwnProtectedObjects": false,
       "ownerRoleMemberships": [],
       "objectOwnershipDecision": "decision-object-ownership-chain",
-      "protectedObjectOwnershipAllowed": false
+      "protectedObjectOwnershipAllowed": false,
+      "approvedOperatorBoundaryIds": [
+        "operator-boundary-catalog-verification",
+        "operator-boundary-health-readiness",
+        "operator-boundary-failed-job-summary",
+        "operator-boundary-tenant-incident-summary",
+        "operator-boundary-print-diagnostic",
+        "operator-boundary-deployment-preflight",
+        "operator-boundary-migration-broker",
+        "operator-boundary-credential-rotation",
+        "operator-boundary-account-setup-link-reissue",
+        "operator-boundary-locked-account-recovery",
+        "operator-boundary-operator-mfa-repair",
+        "operator-boundary-session-revocation",
+        "operator-boundary-tenant-security-recovery",
+        "operator-boundary-contain-user",
+        "operator-boundary-contain-tenant",
+        "operator-boundary-contain-qr-batch",
+        "operator-boundary-contain-job-type",
+        "operator-boundary-contain-credential",
+        "operator-boundary-retention-redaction",
+        "operator-boundary-job-recovery",
+        "operator-boundary-staging-rls-fixture",
+        "operator-boundary-rls-readiness",
+        "operator-boundary-rls-activation",
+        "operator-boundary-rls-rollback"
+      ],
+      "directTablePrivileges": [],
+      "unrestrictedSqlAllowed": false,
+      "applicationImpersonationAllowed": false,
+      "schemaCreateAllowed": false,
+      "migrationAuthorityAllowed": false
     },
     {
       "id": "identity-production-break-glass",
@@ -567,15 +595,25 @@
         "Immutable session transcript records incident/ticket, approvers, MFA assurance, exact scope, expiry, commands, rows affected, result, and revocation."
       ],
       "resolvedDecisions": [
+        "decision-operator-administration",
         "decision-runtime-role-split"
       ],
-      "unresolvedDecisions": [
-        "decision-operator-administration"
-      ],
+      "unresolvedDecisions": [],
       "mayOwnProtectedObjects": false,
       "ownerRoleMemberships": [],
       "objectOwnershipDecision": "decision-object-ownership-chain",
-      "protectedObjectOwnershipAllowed": false
+      "protectedObjectOwnershipAllowed": false,
+      "approvedOperatorBoundaryIds": [
+        "operator-boundary-breakglass-mfa-repair",
+        "operator-boundary-breakglass-issuance"
+      ],
+      "maximumLifetimeMinutes": 30,
+      "individuallyAttributable": true,
+      "sharedCredential": false,
+      "automaticRevocation": true,
+      "unrestrictedSqlAllowed": false,
+      "directTablePrivileges": [],
+      "applicationImpersonationAllowed": false
     }
   ]
 }

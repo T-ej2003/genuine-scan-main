@@ -21,6 +21,8 @@ export const workerBoundariesPath = path.join(programDir, "worker-boundaries.jso
 export const workerIdentityReviewPath = path.join(programDir, "WORKER_IDENTITY_REVIEW.md");
 export const objectOwnershipChainPath = path.join(programDir, "object-ownership-chain.json");
 export const objectOwnershipReviewPath = path.join(programDir, "OBJECT_OWNERSHIP_REVIEW.md");
+export const operatorBoundariesPath = path.join(programDir, "operator-boundaries.json");
+export const operatorAdministrationReviewPath = path.join(programDir, "OPERATOR_ADMINISTRATION_REVIEW.md");
 export const blockedApplyPath = "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql";
 
 export const commands = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "UPSERT", "COUNT", "RAW_SQL"]);
@@ -513,14 +515,14 @@ const displayName = (fn) => fn === "module" ? "Module database access" : fn.repl
 const identityForWorkflow = (workflow) => workflow.authorizationBoundaryType === "pre-auth-security-function" ? "identity-pre-auth-app"
   : workflow.executionSurface === "worker" ? "identity-worker"
     : workflow.executionSurface === "scheduled" ? "identity-scheduled-job"
-      : ["cli", "startup"].includes(workflow.executionSurface) ? "identity-staging-operator-admin"
+      : ["cli", "startup"].includes(workflow.executionSurface) ? "identity-operator"
         : "identity-authenticated-app";
 const expandCommands = (commandsToExpand) => [...new Set(commandsToExpand.flatMap((command) => command === "COUNT" ? ["SELECT"] : command === "UPSERT" ? ["INSERT", "UPDATE"] : [command]))].sort();
 const commandCondition = (identityId, table) => identityId === "identity-pre-auth-app" ? "EXECUTE only an exact named function signature; no direct table grant"
   : identityId === "identity-auth-function-owner" ? "Exact function-required column privileges only; NOLOGIN owner"
     : identityId === "identity-worker" ? "Durably verified job and tenant scope; queue payload is not authority"
       : identityId === "identity-scheduled-job" ? "Approved schedule and durable tenant/job scope"
-        : identityId === "identity-staging-operator-admin" ? "Broker-controlled command allowlist with immutable audit"
+        : identityId === "identity-operator" ? "Broker-controlled command allowlist with immutable audit"
           : table.appendOnly ? "Scoped projection or append command; mutation of existing evidence is denied" : "Reviewed canonical workflow with transaction-local actor/tenant context";
 
 const applyRuntimeCommandMatrix = (table, workflows) => {
@@ -663,7 +665,7 @@ const runtimeIdentityForCommand = (workflow) => workflow.authorizationBoundaryTy
     : workflow.executionSurface === "worker" ? "identity-worker"
       : workflow.executionSurface === "scheduled" ? "identity-scheduled-job"
         : workflow.authorizationBoundaryType === "migration-owner" ? "identity-migration"
-          : ["cli", "startup"].includes(workflow.executionSurface) ? "identity-staging-operator-admin"
+          : ["cli", "startup"].includes(workflow.executionSurface) ? "identity-operator"
             : "identity-authenticated-app";
 
 const assuranceForCommand = (workflow, actors, command, table, routeEvidence) => {
@@ -1452,6 +1454,185 @@ export const buildObjectOwnershipProgramme = () => {
   return manifest;
 };
 
+const OPERATOR_ACTION_CLASSES = Object.freeze(["read-diagnostics", "catalog-verification", "deployment-preflight", "migration-broker", "credential-rotation", "account-recovery", "mfa-repair", "session-revocation", "tenant-security-recovery", "incident-containment", "data-retention-redaction", "job-recovery", "RLS-readiness-check", "RLS-activation-control", "RLS-rollback-control", "break-glass-only", "prohibited"]);
+const OPERATOR_SECRET_COLUMNS = Object.freeze(["passwordHash", "tokenHash", "secret", "privateKey", "credentialPublicKey", "backupCodeHash", "platform-admin flags", "tenant ownership columns", "audit actor identity"]);
+const operatorWorkflowBoundaryId = (workflowId) => workflowId.includes("break-glass-mfa-reset") ? "operator-boundary-breakglass-mfa-repair"
+  : workflowId.includes("repair-admin-accounts") ? "operator-boundary-prohibited-platform-role-repair"
+  : workflowId.includes("resend-password-setup-link") ? "operator-boundary-account-setup-link-reissue"
+  : workflowId.includes("mscqr-print-test") ? "operator-boundary-print-diagnostic"
+  : workflowId.includes("seed-staging-rls-validation-data") ? "operator-boundary-staging-rls-fixture"
+  : workflowId.includes("run-system-integration") ? "operator-boundary-prohibited-audit-browser"
+  : "operator-boundary-prohibited-seed-and-test-data";
+
+const operatorBoundary = (id, actionClass, environmentAvailability, actorClass, exactCommandOrNamedProcedure, overrides = {}) => ({
+  id,
+  actionClass,
+  environmentAvailability,
+  actorClass,
+  runtimeIdentity: actorClass === "break-glass" ? "identity-production-break-glass" : "identity-operator",
+  exactCommandOrNamedProcedure,
+  acceptedArguments: [],
+  returnedFields: ["operation_id", "status", "affected_count", "audit_event_id"],
+  targetSchemas: exactCommandOrNamedProcedure.kind === "named-procedure" ? ["app_ops"] : [],
+  targetTables: [],
+  targetFunctions: exactCommandOrNamedProcedure.kind === "named-procedure" ? [exactCommandOrNamedProcedure.identifier] : [],
+  requiredAssurance: actorClass === "break-glass" ? "dual-approved-break-glass" : "operator-approved",
+  approvalRequirement: { required: !["read-diagnostics", "catalog-verification", "prohibited"].includes(actionClass), distinctApprovers: actorClass === "break-glass" ? 2 : 1 },
+  approvalClass: actorClass === "break-glass" ? "dual-approved-break-glass" : actionClass === "prohibited" ? "not-applicable-denied" : "operator-change-approval",
+  ticketRequirement: environmentAvailability.includes("production"),
+  purposeRequirement: true,
+  maximumDurationMinutes: actorClass === "break-glass" ? 30 : 60,
+  maximumRowScope: "one exact target or one bounded metadata page of at most 100 rows",
+  tenantScopeRequirement: "Exact tenant/account/object identifier must be bound to approved server evidence; global scope is denied unless this boundary explicitly describes catalog-only metadata.",
+  allowedColumns: [],
+  prohibitedColumns: [...OPERATOR_SECRET_COLUMNS],
+  transactionBehavior: "One transaction for validation, mutation, immutable audit and result; failure rolls back business mutation while preserving broker failure evidence.",
+  auditEventRequirement: { required: true, immutable: true, fields: ["operator_actor", "runtime_identity", "ticket_id", "approval_id", "purpose", "target", "before_digest", "after_digest", "result", "started_at", "completed_at"] },
+  beforeAfterEvidence: true,
+  expiryBehavior: "The command authorization expires at maximumDurationMinutes or earlier completion; stale approvals and credentials are rejected.",
+  revocationBehavior: "Broker authorization is revoked on completion, failure, approval withdrawal or expiry and absence is verified.",
+  retrySemantics: "Retry uses the same operation/idempotency key; a conflicting target or payload is denied and a completed result is returned without repeating side effects.",
+  allowScenarios: ["The exact allowlisted command runs with verified actor, assurance, environment, approval, ticket/purpose, target scope and unexpired authorization."],
+  denyScenarios: ["Arbitrary SQL, missing or stale evidence, shared identity, foreign target, excessive rows, protected-column output, role/tenant elevation or owner reachability is denied."],
+  implementationStatus: actionClass === "prohibited" ? "prohibited" : "contract-only-not-implemented",
+  certificationTests: ["Exact allow case", "Wrong environment and target denial", "Expired/missing approval denial", "Secret-output redaction", "Ownership/SET ROLE/BYPASSRLS denial", "Audit and retry proof"],
+  workflowIds: [],
+  exactCommandRuleIds: [],
+  arbitrarySqlAllowed: false,
+  objectOwnershipAllowed: false,
+  ownerRoleMembershipAllowed: false,
+  setRoleAllowed: false,
+  bypassRlsAllowed: false,
+  superuserAllowed: false,
+  applicationImpersonationAllowed: false,
+  unrestrictedCrossTenantScope: false,
+  schemaCreateAllowed: false,
+  migrationAuthorityAllowed: actionClass === "migration-broker",
+  roleElevationAllowed: false,
+  tenantReassignmentAllowed: false,
+  auditDeletionAllowed: false,
+  secretOutputAllowed: false,
+  sharedCredentialAllowed: false,
+  automaticRevocation: true,
+  ...overrides,
+});
+
+export const buildOperatorBoundaryManifest = (workflowManifest, commandManifest) => {
+  const proc = (identifier, signature) => ({ kind: "named-procedure", identifier, signature, arbitraryArgumentsAllowed: false });
+  const command = (identifier, syntax) => ({ kind: "operator-command", identifier, syntax, arbitraryArgumentsAllowed: false });
+  const denied = (identifier) => ({ kind: "prohibited", identifier, syntax: "No executable command", arbitraryArgumentsAllowed: false });
+  const boundaries = [
+    operatorBoundary("operator-boundary-catalog-verification", "catalog-verification", ["development", "staging", "production"], "operator-admin", proc("app_ops.catalog_verification", "app_ops.catalog_verification(environment text, release_sha text, manifest_digest text)"), { acceptedArguments: ["environment", "release_sha", "manifest_digest"], returnedFields: ["object_class", "object_identity", "expected_owner", "actual_owner", "rls_enabled", "force_rls", "grant_status", "membership_status"], maximumRowScope: "catalog metadata for the exact programme manifest only", tenantScopeRequirement: "not-applicable: catalog metadata only", approvalRequirement: { required: false, distinctApprovers: 0 }, beforeAfterEvidence: false }),
+    operatorBoundary("operator-boundary-health-readiness", "read-diagnostics", ["development", "staging", "production"], "operator-admin", proc("app_ops.health_readiness", "app_ops.health_readiness(component text)"), { acceptedArguments: ["component allowlist"], returnedFields: ["component", "status", "checked_at", "redacted_reason_code"], maximumRowScope: "one allowlisted component", tenantScopeRequirement: "not-applicable: redacted aggregate health", approvalRequirement: { required: false, distinctApprovers: 0 }, beforeAfterEvidence: false }),
+    operatorBoundary("operator-boundary-failed-job-summary", "read-diagnostics", ["development", "staging", "production"], "operator-admin", proc("app_ops.failed_job_summary", "app_ops.failed_job_summary(job_type text, tenant_id uuid, page_size integer)"), { acceptedArguments: ["allowlisted job_type", "exact tenant_id", "page_size 1..100"], returnedFields: ["job_id", "job_type", "tenant_id", "state", "attempt_count", "last_error_code", "updated_at"], maximumRowScope: "100 rows within one tenant and job type", tenantScopeRequirement: "exact tenant required", approvalRequirement: { required: false, distinctApprovers: 0 }, beforeAfterEvidence: false }),
+    operatorBoundary("operator-boundary-tenant-incident-summary", "read-diagnostics", ["development", "staging", "production"], "operator-admin", proc("app_ops.tenant_incident_summary", "app_ops.tenant_incident_summary(tenant_id uuid, incident_id uuid, page_size integer)"), { acceptedArguments: ["exact tenant_id", "exact incident_id", "page_size 1..100"], returnedFields: ["incident_id", "tenant_id", "status", "severity", "event_type", "created_at", "redacted_summary"], maximumRowScope: "one incident and at most 100 redacted events", tenantScopeRequirement: "exact tenant and incident binding required", approvalRequirement: { required: false, distinctApprovers: 0 }, beforeAfterEvidence: false }),
+    operatorBoundary("operator-boundary-print-diagnostic", "read-diagnostics", ["development", "staging"], "operator-admin", proc("app_ops.print_diagnostic", "app_ops.print_diagnostic(batch_id uuid)"), { acceptedArguments: ["exact batch_id"], returnedFields: ["batch_id", "print_job_id", "print_state", "item_counts", "redacted_failure_codes"], targetTables: ["table-batch", "table-print-item", "table-qrcode"], maximumRowScope: "one batch aggregate; no QR payload rows", tenantScopeRequirement: "batch tenant derived and verified", approvalRequirement: { required: false, distinctApprovers: 0 }, beforeAfterEvidence: false }),
+    operatorBoundary("operator-boundary-deployment-preflight", "deployment-preflight", ["development", "staging", "production"], "operator-admin", command("mscqr-operator deployment-preflight", "mscqr-operator deployment-preflight --environment <exact> --release-sha <sha> --migration-set-digest <sha256> --baseline-digest <sha256> --approval-id <id>"), { acceptedArguments: ["environment", "release_sha", "migration_set_digest", "baseline_digest", "approval_id"], returnedFields: ["preflight_id", "environment", "release_sha", "checks", "ready", "expires_at"], maximumRowScope: "catalog and release metadata only", tenantScopeRequirement: "not-applicable: deployment metadata only" }),
+    operatorBoundary("operator-boundary-migration-broker", "migration-broker", ["development", "staging", "production"], "operator-admin", command("mscqr-operator migration-broker", "mscqr-operator migration-broker --environment <exact> --migration-id <id> --checksum <sha256> --release-sha <sha> --preflight-id <id> --approval-id <id> --ticket-id <id> --purpose <text>"), { acceptedArguments: ["environment", "migration_id", "checksum", "release_sha", "preflight_id", "approval_id", "ticket_id", "purpose"], returnedFields: ["operation_id", "migration_id", "transfer_status", "revocation_status", "catalog_verification_status", "transcript_digest"], maximumRowScope: "exact reviewed migration object set", tenantScopeRequirement: "not-applicable: object manifest scope", transactionBehavior: "Follow object-ownership-chain.json: preflight, reviewed DDL, per-object transfer, grant normalization, unconditional revocation and catalog gate; any residue fails closed.", migrationAuthorityAllowed: false }),
+    operatorBoundary("operator-boundary-credential-rotation", "credential-rotation", ["development", "staging", "production"], "operator-admin", command("mscqr-operator rotate-runtime-credential", "mscqr-operator rotate-runtime-credential --environment <exact> --identity <allowlisted> --rotation-id <id> --approval-id <id> --ticket-id <id> --purpose <text>"), { acceptedArguments: ["environment", "allowlisted runtime identity", "rotation_id", "approval_id", "ticket_id", "purpose"], returnedFields: ["rotation_id", "identity", "consumer_count", "verification_status", "old_credential_revoked"], maximumRowScope: "one runtime identity credential and its registered consumers", tenantScopeRequirement: "not-applicable: credential metadata; secret values never returned" }),
+    operatorBoundary("operator-boundary-account-setup-link-reissue", "account-recovery", ["development", "staging", "production"], "operator-admin", proc("app_ops.reissue_account_setup_link", "app_ops.reissue_account_setup_link(target_user_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["target_user_id", "operator_id", "approved reason", "approval_id"], returnedFields: ["operation_id", "delivery_queued", "audit_event_id"], targetTables: ["table-user", "table-invite", "table-password-reset"], allowedColumns: ["one-time token issuance metadata", "expiry", "consumed state", "delivery state"], maximumRowScope: "one existing account", tenantScopeRequirement: "target tenant is immutable and operator scope must cover it" }),
+    operatorBoundary("operator-boundary-locked-account-recovery", "account-recovery", ["development", "staging", "production"], "operator-admin", proc("app_ops.recover_locked_account", "app_ops.recover_locked_account(target_user_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["target_user_id", "operator_id", "approved reason", "approval_id"], targetTables: ["table-user", "table-refresh-token"], allowedColumns: ["failedLoginAttempts", "lockedUntil", "session revocation state"], maximumRowScope: "one exact account", tenantScopeRequirement: "target tenant is immutable and operator scope must cover it" }),
+    operatorBoundary("operator-boundary-operator-mfa-repair", "mfa-repair", ["development", "staging"], "operator-admin", proc("app_ops.reset_account_mfa", "app_ops.reset_account_mfa(target_user_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["target_user_id", "operator_id", "approved reason", "approval_id"], targetTables: ["table-user", "table-admin-mfa-credential", "table-admin-web-authn-credential", "table-user-mfa-factor", "table-user-backup-code", "table-refresh-token"], allowedColumns: ["MFA disabled/reset state", "credential revocation state", "session revocation state"], maximumRowScope: "one exact account", tenantScopeRequirement: "target tenant and role are immutable; maker/checker must differ" }),
+    operatorBoundary("operator-boundary-breakglass-mfa-repair", "mfa-repair", ["production"], "break-glass", proc("app_ops.reset_account_mfa", "app_ops.reset_account_mfa(target_user_id uuid, executor_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["target_user_id", "ephemeral executor_id", "incident reason", "dual approval_id"], targetTables: ["table-user", "table-admin-mfa-credential", "table-admin-web-authn-credential", "table-user-mfa-factor", "table-user-backup-code", "table-refresh-token"], allowedColumns: ["MFA disabled/reset state", "credential revocation state", "session revocation state"], maximumRowScope: "one exact account", tenantScopeRequirement: "account binding fixed before credential issuance; role and tenant immutable", maximumDurationMinutes: 30 }),
+    operatorBoundary("operator-boundary-session-revocation", "session-revocation", ["development", "staging", "production"], "operator-admin", proc("app_ops.revoke_account_sessions", "app_ops.revoke_account_sessions(target_user_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["target_user_id", "operator_id", "approved reason", "approval_id"], targetTables: ["table-refresh-token"], allowedColumns: ["revokedAt", "revocationReason"], maximumRowScope: "all sessions for one exact account", tenantScopeRequirement: "target account tenant must be verified" }),
+    operatorBoundary("operator-boundary-tenant-security-recovery", "tenant-security-recovery", ["development", "staging", "production"], "operator-admin", proc("app_ops.recover_tenant_security_state", "app_ops.recover_tenant_security_state(tenant_id uuid, recovery_case_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["tenant_id", "recovery_case_id", "operator_id", "approved reason", "approval_id"], targetTables: ["table-organization", "table-licensee", "table-manufacturer-licensee-link"], allowedColumns: ["approved suspension/recovery state only"], maximumRowScope: "one tenant root and explicitly enumerated access links", tenantScopeRequirement: "one exact tenant root; ownership columns immutable" }),
+    operatorBoundary("operator-boundary-contain-user", "incident-containment", ["development", "staging", "production"], "operator-admin", proc("app_ops.contain_user", "app_ops.contain_user(user_id uuid, incident_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["user_id", "incident_id", "operator_id", "reason", "approval_id"], targetTables: ["table-user", "table-refresh-token"], allowedColumns: ["disabled/security status", "session revocation state"], maximumRowScope: "one exact user and that user's sessions", tenantScopeRequirement: "incident tenant must match user tenant" }),
+    operatorBoundary("operator-boundary-contain-tenant", "incident-containment", ["development", "staging", "production"], "operator-admin", proc("app_ops.contain_tenant_access", "app_ops.contain_tenant_access(tenant_id uuid, incident_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["tenant_id", "incident_id", "operator_id", "reason", "approval_id"], targetTables: ["table-organization", "table-licensee", "table-manufacturer-licensee-link"], allowedColumns: ["approved suspension state"], maximumRowScope: "one tenant and its enumerated access links", tenantScopeRequirement: "one exact tenant; ownership columns immutable" }),
+    operatorBoundary("operator-boundary-contain-qr-batch", "incident-containment", ["development", "staging", "production"], "operator-admin", proc("app_ops.contain_qr_or_batch", "app_ops.contain_qr_or_batch(target_kind text, target_id uuid, incident_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["target_kind enum QR|BATCH", "target_id", "incident_id", "operator_id", "reason", "approval_id"], targetTables: ["table-batch", "table-qrcode"], allowedColumns: ["supported FAILED/VOIDED/blocked state only"], maximumRowScope: "one batch or one QR identity; released identity fields remain immutable", tenantScopeRequirement: "incident tenant must match target tenant" }),
+    operatorBoundary("operator-boundary-contain-job-type", "incident-containment", ["development", "staging", "production"], "operator-admin", proc("app_ops.contain_job_type", "app_ops.contain_job_type(job_type text, tenant_id uuid, incident_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["allowlisted job_type", "tenant_id or approved platform scope", "incident_id", "operator_id", "reason", "approval_id"], targetTables: ["table-compliance-pack-job", "table-evidence-retention-job", "table-audit-log-outbox", "table-security-event-outbox"], allowedColumns: ["paused/failed claim state"], maximumRowScope: "one allowlisted job type and one tenant; platform scope requires explicit platform approval", tenantScopeRequirement: "exact tenant unless separately approved platform incident" }),
+    operatorBoundary("operator-boundary-contain-credential", "incident-containment", ["development", "staging", "production"], "operator-admin", proc("app_ops.suspend_credential", "app_ops.suspend_credential(credential_kind text, credential_id uuid, incident_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["allowlisted credential_kind", "credential_id", "incident_id", "operator_id", "reason", "approval_id"], targetTables: ["table-printer-registration", "table-printer-agent-session", "table-customer-trust-credential", "table-admin-web-authn-credential"], allowedColumns: ["revocation/suspension state", "revokedAt"], maximumRowScope: "one exact credential or connector", tenantScopeRequirement: "credential tenant/actor must match incident scope" }),
+    operatorBoundary("operator-boundary-retention-redaction", "data-retention-redaction", ["development", "staging", "production"], "operator-admin", proc("app_ops.redact_retained_evidence", "app_ops.redact_retained_evidence(evidence_id uuid, retention_case_id uuid, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["evidence_id", "retention_case_id", "operator_id", "reason", "approval_id"], targetTables: ["table-incident-evidence", "table-audit-log"], allowedColumns: ["approved redaction projection only"], maximumRowScope: "one evidence object; immutable audit record is appended, never deleted", tenantScopeRequirement: "retention case tenant and legal-hold state must match" }),
+    operatorBoundary("operator-boundary-job-recovery", "job-recovery", ["development", "staging", "production"], "operator-admin", proc("app_ops.recover_failed_job", "app_ops.recover_failed_job(job_id uuid, expected_state text, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["job_id", "exact expected_state", "operator_id", "reason", "approval_id"], targetTables: ["table-compliance-pack-job", "table-evidence-retention-job", "table-audit-log-outbox", "table-security-event-outbox"], allowedColumns: ["retry/claim state", "attempt metadata"], maximumRowScope: "one failed durable job", tenantScopeRequirement: "job durable tenant scope is reverified" }),
+    operatorBoundary("operator-boundary-staging-rls-fixture", "RLS-readiness-check", ["staging"], "operator-admin", proc("app_ops.prepare_rls_validation_fixture", "app_ops.prepare_rls_validation_fixture(fixture_id uuid, tenant_key text, approval_id uuid)"), { acceptedArguments: ["fixture_id", "reserved tenant_key", "approval_id"], targetTables: ["table-organization", "table-licensee", "table-manufacturer-licensee-link", "table-user", "table-qrrange", "table-batch", "table-qrcode"], allowedColumns: ["fixed synthetic fixture columns from the reviewed fixture manifest"], maximumRowScope: "one reserved synthetic tenant fixture with bounded QR count", tenantScopeRequirement: "reserved staging-only fixture tenant; production denied" }),
+    operatorBoundary("operator-boundary-rls-readiness", "RLS-readiness-check", ["development", "staging", "production"], "operator-admin", command("mscqr-operator rls-readiness", "mscqr-operator rls-readiness --environment <exact> --release-sha <sha> --policy-digest <sha256> --grant-digest <sha256> --role-digest <sha256> --baseline-digest <sha256>"), { acceptedArguments: ["environment", "release_sha", "policy_digest", "grant_digest", "role_digest", "baseline_digest"], returnedFields: ["readiness_id", "checks", "catalog_baseline_digest", "ready", "expires_at"], maximumRowScope: "catalog metadata and bounded canary assertions only", tenantScopeRequirement: "canary uses approved synthetic tenant; no business payload output" }),
+    operatorBoundary("operator-boundary-rls-activation", "RLS-activation-control", ["staging", "production"], "operator-admin", command("mscqr-operator rls-activate", "mscqr-operator rls-activate --environment <exact> --release-sha <sha> --migration-set-digest <sha256> --catalog-baseline-digest <sha256> --readiness-id <id> --approval-id <id> --ticket-id <id> --window-id <id> --checker-id <id> --rollback-digest <sha256>"), { acceptedArguments: ["environment", "release_sha", "migration_set_digest", "catalog_baseline_digest", "readiness_id", "approval_id", "ticket_id", "window_id", "independent checker_id", "rollback_digest", "staging_evidence_digest for production"], returnedFields: ["activation_id", "phase", "table_set_digest", "canary_status", "post_catalog_digest", "rollback_ready"], maximumRowScope: "exact checksum-bound RLS activation phase only", tenantScopeRequirement: "approved canary tenants only; operator receives no policy bypass", rollbackBoundaryId: "operator-boundary-rls-rollback", productionRequirements: { stagingEvidenceRequired: true, exactReleaseBindingRequired: true, exactMigrationSetRequired: true, currentCatalogBaselineRequired: true, approvalRecordRequired: true, rollbackArtifactRequired: true, maintenanceWindowRequired: true, independentCheckerRequired: true, postActivationVerificationRequired: true } }),
+    operatorBoundary("operator-boundary-rls-rollback", "RLS-rollback-control", ["staging", "production"], "operator-admin", command("mscqr-operator rls-rollback", "mscqr-operator rls-rollback --environment <exact> --activation-id <id> --release-sha <sha> --rollback-digest <sha256> --approval-id <id> --ticket-id <id> --purpose <text>"), { acceptedArguments: ["environment", "activation_id", "release_sha", "rollback_digest", "approval_id", "ticket_id", "purpose"], returnedFields: ["rollback_id", "phase", "catalog_status", "membership_status", "post_rollback_digest"], maximumRowScope: "exact activation phase and checksum-paired rollback artifact only", tenantScopeRequirement: "not-applicable: exact table phase", pairedActivationBoundaryId: "operator-boundary-rls-activation" }),
+    operatorBoundary("operator-boundary-breakglass-issuance", "break-glass-only", ["production"], "break-glass", command("mscqr-security-broker issue-breakglass", "mscqr-security-broker issue-breakglass --incident-id <id> --ticket-id <id> --purpose <text> --approver-one <id> --approver-two <id> --boundary-ids <allowlist> --ttl-minutes <1..30>"), { acceptedArguments: ["incident_id", "ticket_id", "purpose", "two distinct approver identities", "exact boundary allowlist", "ttl 1..30 minutes"], returnedFields: ["ephemeral_identity", "credential_handle", "expires_at", "allowlist_digest", "audit_transcript_id"], maximumRowScope: "only targets permitted by the issued boundary allowlist", tenantScopeRequirement: "each issued command retains exact target/tenant binding", maximumDurationMinutes: 30, lifecycle: ["incident declared", "ticket created", "two distinct approvers approve", "broker creates individually attributable ephemeral credential", "exact boundary allowlist attached", "expiry fixed at no more than 30 minutes", "every command records actor/ticket/purpose/result", "automatic revocation at expiry", "early revocation remains available", "post-use catalog and data audit", "credential and memberships verified absent"] }),
+    operatorBoundary("operator-boundary-prohibited-platform-role-repair", "prohibited", ["development", "staging", "production"], "break-glass", denied("backend/scripts/repair-admin-accounts.js"), { maximumDurationMinutes: 0, maximumRowScope: "zero rows", approvalRequirement: { required: false, distinctApprovers: 0 }, ticketRequirement: false, automaticRevocation: true, denyScenarios: ["Direct creation, promotion or repair of platform administrators is not an approved operator or break-glass action; use reviewed application governance or a future exact maker/checker procedure."], transactionBehavior: "No execution is authorized." }),
+    operatorBoundary("operator-boundary-prohibited-seed-and-test-data", "prohibited", ["development", "staging", "production"], "operator-admin", denied("registered Prisma/enterprise/launch-smoke seed and QR-reset workflows"), { maximumDurationMinutes: 0, maximumRowScope: "zero rows", approvalRequirement: { required: false, distinctApprovers: 0 }, ticketRequirement: false, automaticRevocation: true, denyScenarios: ["Generic seed, upsert, delete or test-data mutation is not operator administration. Local disposable development may use test credentials outside protected environment roles."], transactionBehavior: "No execution is authorized against protected environments." }),
+    operatorBoundary("operator-boundary-prohibited-audit-browser", "prohibited", ["development", "staging", "production"], "operator-admin", denied("scripts/run-system-integration.mjs direct AuditLog SELECT"), { maximumDurationMinutes: 0, maximumRowScope: "zero rows", approvalRequirement: { required: false, distinctApprovers: 0 }, ticketRequirement: false, automaticRevocation: true, denyScenarios: ["Unrestricted audit-log browsing is denied; use exact redacted incident or catalog diagnostics."], transactionBehavior: "No execution is authorized." }),
+  ];
+  const selectedWorkflows = workflowManifest.workflows.filter((workflow) => workflow.commandActorClasses?.some((actor) => ["operator-admin", "break-glass"].includes(actor)));
+  for (const workflow of selectedWorkflows) {
+    const boundaryId = operatorWorkflowBoundaryId(workflow.id);
+    const boundary = boundaries.find((item) => item.id === boundaryId);
+    assert(boundary, `${workflow.id} lacks an operator boundary definition`);
+    boundary.workflowIds.push(workflow.id);
+    workflow.operatorBoundaryId = boundaryId;
+    workflow.operatorBoundaryStatus = "resolved";
+    workflow.unresolvedDecisions = workflow.unresolvedDecisions.filter((id) => id !== "decision-operator-administration");
+    workflow.authorizationBoundaryType = boundary.actorClass === "break-glass" ? "operator-break-glass" : "unresolved";
+    workflow.runtimeIdentities = [boundary.runtimeIdentity];
+  }
+  for (const rule of commandManifest.rules.filter((rule) => rule.actorClasses.some((actor) => ["operator-admin", "break-glass"].includes(actor)))) {
+    const boundaryIds = [...new Set(rule.supportingWorkflowIds.filter((id) => selectedWorkflows.some((workflow) => workflow.id === id)).map(operatorWorkflowBoundaryId))].sort();
+    assert(boundaryIds.length, `${rule.id} operator rule lacks registration-backed boundary evidence`);
+    rule.operatorBoundaryIds = boundaryIds;
+    rule.operatorBoundaryStatus = "resolved";
+    rule.runtimeIdentities = rule.actorClasses.includes("break-glass") ? ["identity-production-break-glass"] : ["identity-operator"];
+    for (const boundaryId of boundaryIds) boundaries.find((boundary) => boundary.id === boundaryId).exactCommandRuleIds.push(rule.id);
+  }
+  for (const boundary of boundaries) boundary.exactCommandRuleIds = [...new Set(boundary.exactCommandRuleIds)].sort();
+  return { schemaVersion: 1, decisionId: "decision-operator-administration", status: "architecture-resolved", actionClasses: OPERATOR_ACTION_CLASSES, maximumBreakGlassLifetimeMinutes: 30, identities: { operator: "identity-operator", breakGlass: "identity-production-break-glass" }, arbitrarySqlAllowed: false, prohibitedActions: ["arbitrary SQL execution", "ownership changes outside the migration broker", "role membership changes outside the approved broker", "disabling FORCE RLS without the paired rollback control", "granting BYPASSRLS or superuser", "direct platform-admin flag changes", "tenant ownership changes", "credential or token hash exposure", "audit evidence deletion or attribution clearing", "unbounded cross-tenant SELECT", "permanent or shared break-glass credentials"], boundaries, supportingEvidence: ["documents/security/rls-program/object-ownership-chain.json", "documents/ops/MSCQR_STAGING_DATABASE_ROLE_CREDENTIALS_AND_CUTOVER_RUNBOOK_2026-07-10.md", "documents/ops/MSCQR_RLS_PRODUCTION_ROLLOUT_CHECKLIST_2026-06-30.md", "backend/scripts/break-glass-mfa-reset.ts", "backend/scripts/resend-password-setup-link.js", "backend/scripts/repair-admin-accounts.js"] };
+};
+
+const applyOperatorAuthority = (manifest, workflows, commandSemantics, tables, identities, decisions) => {
+  const replaceIdentity = (value) => value === "identity-staging-operator-admin" ? "identity-operator" : value;
+  const operator = identities.identities.find((identity) => identity.id === "identity-staging-operator-admin" || identity.id === "identity-operator");
+  operator.id = "identity-operator";
+  Object.assign(operator, { logicalIdentity: "operator administrator", purpose: "Standing restricted administrative login for exact broker commands and named procedures only.", tablePrivilegeMode: "no direct table privileges; exact procedure/command execution only", allowedSchemas: ["app_ops"], allowedCommands: ["CONNECT", "USAGE", "EXECUTE_EXACT_OPERATOR_BOUNDARIES"], ownershipExpectations: "Owns no object and has no owner-role membership.", mayOwnProtectedTables: false, mayOwnProtectedObjects: false, protectedObjectOwnershipAllowed: false, ownerRoleMemberships: [], mayCreateObjects: false, maySetRole: false, mayUseBypassRls: false, superuser: false, credentialSource: "dedicated-managed-operator-credential-per-environment-with-individual-attribution", standingCredential: true, rotationExpectation: "Managed rotation at least every 90 days and immediate rotation on compromise or personnel change; command approvals remain short-lived.", approvedOperatorBoundaryIds: manifest.boundaries.filter((boundary) => boundary.runtimeIdentity === "identity-operator" && boundary.actionClass !== "prohibited").map((boundary) => boundary.id), directTablePrivileges: [], unrestrictedSqlAllowed: false, applicationImpersonationAllowed: false, schemaCreateAllowed: false, migrationAuthorityAllowed: false });
+  const breakGlass = identities.identities.find((identity) => identity.id === "identity-production-break-glass");
+  Object.assign(breakGlass, { approvedOperatorBoundaryIds: manifest.boundaries.filter((boundary) => boundary.runtimeIdentity === "identity-production-break-glass" && boundary.actionClass !== "prohibited").map((boundary) => boundary.id), maximumLifetimeMinutes: manifest.maximumBreakGlassLifetimeMinutes, individuallyAttributable: true, sharedCredential: false, automaticRevocation: true, unrestrictedSqlAllowed: false, directTablePrivileges: [], ownerRoleMemberships: [], applicationImpersonationAllowed: false });
+  for (const identity of [operator, breakGlass]) {
+    identity.resolvedDecisions = [...new Set([...identity.resolvedDecisions, "decision-operator-administration"])].sort();
+    identity.unresolvedDecisions = identity.unresolvedDecisions.filter((id) => id !== "decision-operator-administration");
+  }
+  for (const table of tables.tables) {
+    table.allowedRuntimeReaders = table.allowedRuntimeReaders.map(replaceIdentity);
+    table.allowedRuntimeWriters = table.allowedRuntimeWriters.map(replaceIdentity);
+    table.intendedDatabaseRoles = table.intendedDatabaseRoles.map(replaceIdentity);
+    for (const entry of table.allowedCommandsByIdentity) entry.identityId = replaceIdentity(entry.identityId);
+  }
+  for (const workflow of workflows.workflows) workflow.runtimeIdentities = workflow.runtimeIdentities.map(replaceIdentity);
+  for (const rule of commandSemantics.rules) rule.runtimeIdentities = rule.runtimeIdentities.map(replaceIdentity);
+  const decision = decisions.decisions.find((item) => item.id === "decision-operator-administration");
+  decision.status = "resolved";
+  decision.resolvedAt = "2026-07-16";
+  decision.affectedWorkflows = manifest.boundaries.flatMap((boundary) => boundary.workflowIds).sort();
+  decision.affectedTables = [...new Set(manifest.boundaries.flatMap((boundary) => boundary.targetTables))].sort();
+  decision.resolution = { authority: "documents/security/rls-program/operator-boundaries.json", boundaries: manifest.boundaries.length, selectedWorkflows: decision.affectedWorkflows.length, selectedCommandRules: commandSemantics.rules.filter((rule) => rule.operatorBoundaryIds?.length).length, maximumBreakGlassLifetimeMinutes: manifest.maximumBreakGlassLifetimeMinutes, arbitrarySqlAllowed: false, ownershipOrBypassAllowed: false };
+};
+
+const writeOperatorAdministrationReview = (manifest) => {
+  const lines = ["# MSCQR Operator Administration Review", "", "This document reviews `operator-boundaries.json`. It creates no role, procedure, policy, grant, credential, infrastructure action, or runtime behavior.", "", "## Identity model and environment ceilings", "", "`identity-operator` is an individually attributable standing but restricted LOGIN named `mscqr_dev_operator`, `mscqr_staging_operator`, or `mscqr_prod_operator`. It owns nothing, has no owner membership, SET ROLE, superuser, BYPASSRLS, CREATE, migration credential, direct table privilege, application impersonation, broad visibility, or arbitrary SQL. Development may use disposable local actions but preserves the same forbidden capabilities. Staging may run exact activation, rollback, recovery and certification boundaries after evidence checks. Production additionally requires ticket, purpose, exact release/change binding, independent approval and immutable audit; staging success is never production approval.", "", "Production break-glass is an individually attributable broker-issued identity with two distinct approvers, strong MFA, incident/ticket/purpose, an exact boundary allowlist and a maximum 30-minute lifetime. It is neither shared nor standing and cannot become an owner, migrator, SQL shell or policy bypass.", "", "## Approved action classes", "", "| Boundary | Class | Environments | Identity | Exact command/procedure | Max scope |", "|---|---|---|---|---|---|"];
+  for (const boundary of manifest.boundaries) lines.push(`| ${boundary.id} | ${boundary.actionClass} | ${boundary.environmentAvailability.join(", ")} | ${boundary.runtimeIdentity} | ${boundary.exactCommandOrNamedProcedure.identifier} | ${boundary.maximumRowScope} |`);
+  lines.push("", "## Diagnostic model", "", "Catalog verification exposes only programme-scoped ownership, RLS/FORCE, policy, grant, membership and signature metadata. Health is aggregate and redacted. Failed jobs are limited to one tenant/job type and 100 rows. Incident inspection is limited to one tenant/incident and redacted events. Print diagnostics return one batch aggregate, never QR payload rows. Direct audit-log browsing and secret/user enumeration remain prohibited.", "", "## Migration broker", "", "The exact migration broker command binds environment, reviewed migration ID, checksum, release SHA, preflight, approval, ticket and purpose. It follows `object-ownership-chain.json`: per-object transfer, privilege normalization, unconditional revocation and catalog verification. The operator receives neither migration credentials nor owner membership; any ownership or membership residue fails closed.", "", "## Account, MFA and incident recovery", "", "Setup-link reissue, locked-account recovery, MFA reset and session revocation each target one account, preserve role and tenant, revoke relevant sessions, return no hashes, require reason/approval and append immutable audit evidence. Production MFA repair additionally requires the 30-minute dual-approved break-glass identity. Incident procedures separately scope one user, tenant, QR/batch, job type or credential; they cannot change ownership or platform-admin status.", "", "## RLS readiness, activation and rollback", "", "Readiness binds release, policy, grant, role and baseline digests. Activation is staging/production only and binds readiness, exact release/migrations/baseline, approval, ticket, maintenance window, independent checker and checksum-paired rollback. Production also requires staging evidence. The operator verifies through normal non-bypass authority. Rollback is a separate exact command paired to the activation ID and artifact; disabling FORCE outside it is prohibited.", "", "## Break-glass lifecycle", "");
+  const lifecycle = manifest.boundaries.find((boundary) => boundary.id === "operator-boundary-breakglass-issuance").lifecycle;
+  lifecycle.forEach((step, index) => lines.push(`${index + 1}. ${step}.`));
+  lines.push("", "## Forbidden actions", "");
+  for (const action of manifest.prohibitedActions) lines.push(`- ${action}.`);
+  lines.push("", "## Audit requirements", "", "Every attempted action records the human actor, execution identity, ticket, approval, purpose, target, before/after digest, result, time bounds and revocation. Mutations are idempotent and transaction-bound; a conflicting retry is denied. Break-glass adds approvers, allowlist digest, credential lifecycle and post-use catalog/data audit.", "", "## Remaining implementation work", "", "Implement the exact `app_ops` procedures and operator/broker commands in later reviewed work, generate grants from this allowlist, retire prohibited scripts from protected runtime images, add disposable PostgreSQL certification and rehearse staged activation/rollback. This contract does not authorize execution.", "");
+  fs.writeFileSync(operatorAdministrationReviewPath, `${lines.join("\n")}\n`);
+};
+
+export const buildOperatorProgramme = () => {
+  const workflows = readJson(workflowManifestPath);
+  const commandSemantics = readJson(commandSemanticsPath);
+  const tables = readJson(tableManifestPath);
+  const identities = readJson(identityManifestPath);
+  const decisions = readJson(decisionManifestPath);
+  const manifest = buildOperatorBoundaryManifest(workflows, commandSemantics);
+  applyOperatorAuthority(manifest, workflows, commandSemantics, tables, identities, decisions);
+  writeJson(operatorBoundariesPath, manifest);
+  writeOperatorAdministrationReview(manifest);
+  writeJson(workflowManifestPath, workflows);
+  writeJson(commandSemanticsPath, commandSemantics);
+  writeJson(tableManifestPath, tables);
+  writeJson(identityManifestPath, identities);
+  writeJson(decisionManifestPath, decisions);
+  return manifest;
+};
+
 export const buildWorkflowManifest = () => {
   const scan = scanProductionAccess();
   const existing = readJson(workflowManifestPath, { schemaVersion: 1, workflows: [] });
@@ -1577,8 +1758,14 @@ export const buildWorkflowManifest = () => {
     const identityManifest = readJson(identityManifestPath);
     const ownershipManifest = buildObjectOwnershipManifest(tableManifest, identityManifest, preAuthManifest, workerManifest);
     applyObjectOwnershipAuthority(ownershipManifest, tableManifest, identityManifest, decisionManifest);
+    const operatorManifest = buildOperatorBoundaryManifest(result, commandManifest);
+    applyOperatorAuthority(operatorManifest, result, commandManifest, tableManifest, identityManifest, decisionManifest);
     writeJson(objectOwnershipChainPath, ownershipManifest);
     writeObjectOwnershipReview(ownershipManifest);
+    writeJson(operatorBoundariesPath, operatorManifest);
+    writeOperatorAdministrationReview(operatorManifest);
+    writeJson(commandSemanticsPath, commandManifest);
+    writeJson(workflowManifestPath, result);
     writeJson(tableManifestPath, tableManifest);
     writeJson(identityManifestPath, identityManifest);
     writeJson(decisionManifestPath, decisionManifest);
@@ -1586,7 +1773,7 @@ export const buildWorkflowManifest = () => {
   return result;
 };
 
-export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath), workerBoundaries: readJson(workerBoundariesPath), objectOwnershipChain: readJson(objectOwnershipChainPath) });
+export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath), workerBoundaries: readJson(workerBoundariesPath), objectOwnershipChain: readJson(objectOwnershipChainPath), operatorBoundaries: readJson(operatorBoundariesPath) });
 export const validatePreAuthFunctions = (manifest, workflowManifest, commandManifest, identityManifest, tableManifest) => {
   assert(manifest?.functions?.length, "pre-auth function manifest is missing");
   const workflows = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
@@ -1819,6 +2006,100 @@ export const validateObjectOwnershipChain = (manifest, tableManifest, identityMa
   for (const table of manifest.migrationOnlyTables) assert.equal(table.owner, "identity-table-owner", `${table.tableId} remains migration-owned`);
   return true;
 };
+export const validateOperatorBoundaries = (manifest, workflowManifest, commandManifest, identityManifest) => {
+  assert.equal(manifest?.status, "architecture-resolved", "operator administration is unresolved");
+  assert.equal(manifest.arbitrarySqlAllowed, false, "arbitrary SQL is allowed");
+  assert.deepEqual(new Set(manifest.actionClasses), new Set(OPERATOR_ACTION_CLASSES), "operator action classes drifted");
+  const boundaries = new Map(manifest.boundaries.map((boundary) => [boundary.id, boundary]));
+  assert.equal(boundaries.size, manifest.boundaries.length, "operator boundary IDs must be unique");
+  const workflows = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
+  const rules = new Map(commandManifest.rules.map((rule) => [rule.id, rule]));
+  const identities = new Map(identityManifest.identities.map((identity) => [identity.id, identity]));
+  const selectedWorkflows = workflowManifest.workflows.filter((workflow) => workflow.commandActorClasses?.some((actor) => ["operator-admin", "break-glass"].includes(actor)));
+  const selectedRules = commandManifest.rules.filter((rule) => rule.actorClasses.some((actor) => ["operator-admin", "break-glass"].includes(actor)));
+  assert(selectedWorkflows.length && selectedRules.length, "operator selector is empty");
+  for (const workflow of selectedWorkflows) {
+    assert(boundaries.has(workflow.operatorBoundaryId), `${workflow.id} operator rule lacks a boundary`);
+    assert.equal(workflow.operatorBoundaryStatus, "resolved", `${workflow.id} operator boundary is unresolved`);
+    assert(!workflow.unresolvedDecisions.includes("decision-operator-administration"), `${workflow.id} retains unresolved operator decision`);
+  }
+  for (const rule of selectedRules) {
+    assert(rule.operatorBoundaryIds?.length && rule.operatorBoundaryIds.every((id) => boundaries.has(id)), `${rule.id} operator rule lacks a boundary`);
+    assert.equal(rule.operatorBoundaryStatus, "resolved", `${rule.id} operator boundary is unresolved`);
+  }
+  const secretPattern = /password|token.?hash|secret|private.?key|backup.?code|credential.?public.?key/i;
+  const sensitiveClasses = new Set(OPERATOR_ACTION_CLASSES.filter((actionClass) => !["read-diagnostics", "catalog-verification", "prohibited"].includes(actionClass)));
+  for (const boundary of manifest.boundaries) {
+    assert(/^operator-boundary-[a-z0-9-]+$/.test(boundary.id) && OPERATOR_ACTION_CLASSES.includes(boundary.actionClass), `${boundary.id} has invalid class or ID`);
+    assert(boundary.environmentAvailability.length && boundary.environmentAvailability.every((environment) => ["development", "staging", "production"].includes(environment)), `${boundary.id} lacks environment availability`);
+    assert(["operator-admin", "break-glass"].includes(boundary.actorClass) && ["identity-operator", "identity-production-break-glass"].includes(boundary.runtimeIdentity), `${boundary.id} has invalid actor or runtime identity`);
+    assert(["named-procedure", "operator-command", "prohibited"].includes(boundary.exactCommandOrNamedProcedure?.kind) && boundary.exactCommandOrNamedProcedure?.identifier, `${boundary.id} lacks an exact command or named procedure`);
+    assert.equal(boundary.exactCommandOrNamedProcedure.arbitraryArgumentsAllowed, false, `${boundary.id} allows arbitrary SQL or arguments`);
+    assert.equal(boundary.arbitrarySqlAllowed, false, `${boundary.id} arbitrary SQL is allowed`);
+    assert.equal(boundary.objectOwnershipAllowed, false, `${boundary.id} operator owns an object`);
+    assert.equal(boundary.ownerRoleMembershipAllowed, false, `${boundary.id} operator has owner-role membership`);
+    assert.equal(boundary.setRoleAllowed, false, `${boundary.id} SET ROLE is enabled`);
+    assert.equal(boundary.bypassRlsAllowed, false, `${boundary.id} BYPASSRLS is enabled`);
+    assert.equal(boundary.superuserAllowed, false, `${boundary.id} superuser is enabled`);
+    assert.equal(boundary.schemaCreateAllowed, false, `${boundary.id} schema CREATE is enabled`);
+    assert.equal(boundary.applicationImpersonationAllowed, false, `${boundary.id} application impersonation is enabled`);
+    assert.equal(boundary.unrestrictedCrossTenantScope, false, `${boundary.id} cross-tenant scope is unbounded`);
+    assert.equal(boundary.roleElevationAllowed, false, `${boundary.id} account recovery permits platform-admin promotion`);
+    assert.equal(boundary.tenantReassignmentAllowed, false, `${boundary.id} tenant reassignment becomes allowed`);
+    assert.equal(boundary.auditDeletionAllowed, false, `${boundary.id} audit deletion becomes permitted`);
+    assert.equal(boundary.secretOutputAllowed, false, `${boundary.id} diagnostics expose password/token hashes`);
+    assert.equal(boundary.sharedCredentialAllowed, false, `${boundary.id} break-glass becomes shared`);
+    assert(boundary.requiredAssurance && boundary.approvalRequirement && boundary.approvalClass && typeof boundary.ticketRequirement === "boolean" && typeof boundary.purposeRequirement === "boolean", `${boundary.id} lacks assurance/approval/ticket/purpose semantics`);
+    assert(boundary.maximumRowScope && !/unbounded|all tenants/i.test(boundary.maximumRowScope), `${boundary.id} cross-tenant scope is unbounded`);
+    assert(boundary.expiryBehavior && boundary.revocationBehavior && boundary.retrySemantics && boundary.auditEventRequirement?.required && boundary.auditEventRequirement?.immutable, `${boundary.id} lacks expiry/revocation/retry/audit semantics`);
+    assert(boundary.allowScenarios.length && boundary.denyScenarios.length && boundary.certificationTests.length, `${boundary.id} lacks scenarios or certification tests`);
+    if (boundary.actionClass !== "prohibited") assert(boundary.maximumDurationMinutes > 0, `${boundary.id} lacks action expiry`);
+    if (boundary.environmentAvailability.includes("production") && boundary.actionClass !== "prohibited") {
+      assert.equal(boundary.ticketRequirement, true, `${boundary.id} production ticket requirement is removed`);
+      assert.equal(boundary.purposeRequirement, true, `${boundary.id} production purpose requirement is removed`);
+    }
+    if (sensitiveClasses.has(boundary.actionClass)) assert.equal(boundary.approvalRequirement.required, true, `${boundary.id} sensitive action approval requirement is removed`);
+    if (boundary.actorClass === "break-glass" && boundary.actionClass !== "prohibited") {
+      assert.equal(boundary.environmentAvailability.length, 1, `${boundary.id} break-glass is not production-only`);
+      assert.equal(boundary.environmentAvailability[0], "production", `${boundary.id} break-glass is not production-only`);
+      assert.equal(boundary.automaticRevocation, true, `${boundary.id} break-glass expiry/revocation is removed`);
+      assert(boundary.maximumDurationMinutes > 0 && boundary.maximumDurationMinutes <= manifest.maximumBreakGlassLifetimeMinutes, `${boundary.id} break-glass expiry is removed`);
+      assert.equal(boundary.approvalRequirement.distinctApprovers, 2, `${boundary.id} break-glass lacks dual approval`);
+    }
+    if (["account-recovery", "mfa-repair", "session-revocation"].includes(boundary.actionClass)) {
+      assert.equal(boundary.roleElevationAllowed, false, `${boundary.id} account recovery permits platform-admin promotion`);
+      assert.equal(boundary.tenantReassignmentAllowed, false, `${boundary.id} recovery permits tenant reassignment`);
+      assert(/one (?:exact|existing) account|one exact user|sessions for one exact account/i.test(boundary.maximumRowScope), `${boundary.id} recovery is not single-account scoped`);
+    }
+    if (["read-diagnostics", "catalog-verification"].includes(boundary.actionClass)) {
+      assert.equal(boundary.secretOutputAllowed, false, `${boundary.id} diagnostics expose password/token hashes`);
+      assert(!boundary.returnedFields.some((field) => secretPattern.test(field)), `${boundary.id} diagnostics expose password/token hashes`);
+    }
+    for (const workflowId of boundary.workflowIds) assert.equal(workflows.get(workflowId)?.operatorBoundaryId, boundary.id, `${boundary.id} references unmapped workflow`);
+    for (const ruleId of boundary.exactCommandRuleIds) assert(rules.get(ruleId)?.operatorBoundaryIds?.includes(boundary.id), `${boundary.id} references unmapped command rule`);
+  }
+  const activation = boundaries.get("operator-boundary-rls-activation");
+  assert(boundaries.has(activation?.rollbackBoundaryId), "production RLS activation lacks rollback");
+  for (const requirement of ["stagingEvidenceRequired", "exactReleaseBindingRequired", "exactMigrationSetRequired", "currentCatalogBaselineRequired", "approvalRecordRequired", "rollbackArtifactRequired", "maintenanceWindowRequired", "independentCheckerRequired", "postActivationVerificationRequired"]) assert.equal(activation.productionRequirements?.[requirement], true, `production RLS activation loses ${requirement}`);
+  const issuance = boundaries.get("operator-boundary-breakglass-issuance");
+  assert.equal(issuance.lifecycle?.length, 11, "break-glass lifecycle is incomplete");
+  assert.equal(manifest.maximumBreakGlassLifetimeMinutes, 30, "break-glass expiry is removed");
+  const operator = identities.get("identity-operator");
+  assert(operator && operator.loginExpectation === "LOGIN" && operator.standingCredential === true, "operator standing restricted identity is missing");
+  assert.equal(operator.mayOwnProtectedObjects, false, "operator owns an object");
+  assert.deepEqual(operator.ownerRoleMemberships, [], "operator has owner-role membership");
+  assert.equal(operator.maySetRole, false, "operator SET ROLE is enabled");
+  assert.equal(operator.mayUseBypassRls, false, "operator BYPASSRLS is enabled");
+  assert.equal(operator.superuser, false, "operator superuser is enabled");
+  assert.equal(operator.unrestrictedSqlAllowed, false, "operator arbitrary SQL is allowed");
+  assert.deepEqual(operator.directTablePrivileges, [], "operator has unrestricted DML");
+  const breakGlass = identities.get("identity-production-break-glass");
+  assert.equal(breakGlass.standingCredential, false, "break-glass is standing");
+  assert.equal(breakGlass.sharedCredential, false, "break-glass becomes shared");
+  assert.equal(breakGlass.automaticRevocation, true, "break-glass expiry/revocation is removed");
+  assert.equal(breakGlass.maximumLifetimeMinutes, 30, "break-glass expiry is removed");
+  return true;
+};
 export const validateRuntimeIdentities = (manifest, decisionManifest) => {
   const identities = manifest.identities;
   const byId = new Map(identities.map((identity) => [identity.id, identity]));
@@ -1831,7 +2112,7 @@ export const validateRuntimeIdentities = (manifest, decisionManifest) => {
     ["identity-migration", "migration"],
     ["identity-table-owner", "owner"],
     ["identity-auth-function-owner", "auth_owner"],
-    ["identity-staging-operator-admin", "operator"],
+    ["identity-operator", "operator"],
   ]);
   assert.equal(identities.length, 10, "exactly ten logical runtime identities are required");
   for (const [id, suffix] of suffixes) {

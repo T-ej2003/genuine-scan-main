@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, parseSchema, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validateObjectOwnershipChain, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, operatorAdministrationReviewPath, operatorBoundariesPath, parseSchema, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validateObjectOwnershipChain, validateOperatorBoundaries, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 
-const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, objectOwnershipChainPath, objectOwnershipReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
+const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, objectOwnershipChainPath, objectOwnershipReviewPath, operatorBoundariesPath, operatorAdministrationReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
 
 test("all Prisma models and production access sites are represented exactly and deterministically", () => {
   const before = snapshot();
@@ -185,6 +185,43 @@ test("object ownership mutation guards fail closed", () => {
   rejects((candidate) => { candidate.objectOwnershipChain.migrationCompletionGate.revocationFailureReportsSuccess = true; }, /migration failure may leave membership active/);
 });
 
+test("operator and break-glass workflows use finite reviewed boundaries", () => {
+  const { operatorBoundaries, workflows, commandSemantics, identities, decisions } = manifests();
+  const selectedWorkflows = workflows.workflows.filter((workflow) => workflow.commandActorClasses?.some((actor) => ["operator-admin", "break-glass"].includes(actor)));
+  const selectedRules = commandSemantics.rules.filter((rule) => rule.actorClasses.some((actor) => ["operator-admin", "break-glass"].includes(actor)));
+  assert.equal(operatorBoundaries.boundaries.length, 29);
+  assert.equal(selectedWorkflows.length, 27);
+  assert.equal(selectedRules.length, 88);
+  assert(selectedWorkflows.every((workflow) => workflow.operatorBoundaryId));
+  assert(selectedRules.every((rule) => rule.operatorBoundaryIds?.length));
+  assert(validateOperatorBoundaries(operatorBoundaries, workflows, commandSemantics, identities));
+  assert.equal(decisions.decisions.find((decision) => decision.id === "decision-operator-administration")?.status, "resolved");
+});
+
+test("operator boundary mutation guards fail closed", () => {
+  const current = manifests();
+  const rejects = (mutate, pattern) => {
+    const candidate = structuredClone(current);
+    mutate(candidate);
+    assert.throws(() => validateOperatorBoundaries(candidate.operatorBoundaries, candidate.workflows, candidate.commandSemantics, candidate.identities), pattern);
+  };
+  rejects((candidate) => { candidate.operatorBoundaries.arbitrarySqlAllowed = true; }, /arbitrary SQL is allowed/);
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-operator").mayOwnProtectedObjects = true; }, /operator owns an object/);
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-operator").ownerRoleMemberships = ["identity-table-owner"]; }, /owner-role membership/);
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-operator").maySetRole = true; }, /SET ROLE is enabled/);
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-operator").mayUseBypassRls = true; }, /BYPASSRLS is enabled/);
+  rejects((candidate) => { candidate.operatorBoundaries.boundaries.find((boundary) => boundary.environmentAvailability.includes("production") && boundary.actionClass !== "prohibited").ticketRequirement = false; }, /production ticket requirement is removed/);
+  rejects((candidate) => { candidate.operatorBoundaries.boundaries.find((boundary) => boundary.approvalRequirement.required).approvalRequirement.required = false; }, /sensitive action approval requirement is removed/);
+  rejects((candidate) => { candidate.operatorBoundaries.boundaries.find((boundary) => boundary.id === "operator-boundary-breakglass-issuance").maximumDurationMinutes = 0; }, /break-glass expiry is removed|lacks action expiry/);
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-production-break-glass").sharedCredential = true; }, /break-glass becomes shared/);
+  rejects((candidate) => { candidate.operatorBoundaries.boundaries.find((boundary) => boundary.actionClass === "account-recovery").roleElevationAllowed = true; }, /platform-admin promotion/);
+  rejects((candidate) => { candidate.operatorBoundaries.boundaries.find((boundary) => boundary.actionClass === "mfa-repair").tenantReassignmentAllowed = true; }, /tenant reassignment/);
+  rejects((candidate) => { candidate.operatorBoundaries.boundaries.find((boundary) => boundary.actionClass === "data-retention-redaction").auditDeletionAllowed = true; }, /audit deletion/);
+  rejects((candidate) => { delete candidate.operatorBoundaries.boundaries.find((boundary) => boundary.actionClass === "RLS-activation-control").rollbackBoundaryId; }, /activation lacks rollback/);
+  rejects((candidate) => { candidate.operatorBoundaries.boundaries.find((boundary) => boundary.actionClass === "read-diagnostics").returnedFields.push("passwordHash"); }, /diagnostics expose password\/token hashes/);
+  rejects((candidate) => { candidate.operatorBoundaries.boundaries.find((boundary) => boundary.actionClass === "incident-containment").unrestrictedCrossTenantScope = true; }, /cross-tenant scope is unbounded/);
+});
+
 test("tests do not inflate production totals and repeated technical calls remain one functional workflow", () => {
   const { accesses } = scanProductionAccess();
   assert(accesses.every((item) => !/(?:^|\/)tests?\//.test(item.sourceFile)), "test-only access leaked into production totals");
@@ -308,4 +345,6 @@ test("human manifests are present and parseable", () => {
   assert(fs.readFileSync(workerIdentityReviewPath, "utf8").includes("Approved boundaries"));
   assert.equal(JSON.parse(fs.readFileSync(objectOwnershipChainPath, "utf8")).objectClasses.length, 17);
   assert(fs.readFileSync(objectOwnershipReviewPath, "utf8").includes("Migration lifecycle"));
+  assert.equal(JSON.parse(fs.readFileSync(operatorBoundariesPath, "utf8")).boundaries.length, 29);
+  assert(fs.readFileSync(operatorAdministrationReviewPath, "utf8").includes("Break-glass lifecycle"));
 });

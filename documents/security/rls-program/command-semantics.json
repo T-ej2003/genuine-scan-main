@@ -465,7 +465,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent.",
@@ -513,13 +513,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-admin-mfa-credential-insert-82cdaee581ff",
@@ -529,7 +533,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent.",
@@ -577,13 +581,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-admin-mfa-credential-select-1f3181acb5d1",
@@ -1001,7 +1009,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent.",
@@ -1051,13 +1059,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-admin-mfa-credential-update-5b6f7fbee099",
@@ -1331,7 +1343,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent.",
@@ -1381,13 +1393,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-admin-web-authn-credential-delete-0995e885a891",
@@ -2231,7 +2247,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -2272,13 +2288,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-audit-log-insert-80f0e7a7985d",
@@ -2288,7 +2308,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -2329,13 +2349,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-audit-log-insert-a9a52392104e",
@@ -3144,7 +3168,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -3193,13 +3217,17 @@
         "scripts/run-system-integration.mjs"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-audit-browser"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-audit-log-select-7691bd31cd81",
@@ -4936,7 +4964,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -4995,13 +5023,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-batch-insert-87ac040872c6",
@@ -5087,7 +5119,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -5146,13 +5178,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-batch-insert-fe33efe6d646",
@@ -5162,7 +5198,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -5221,13 +5257,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-batch-select-07eefc737d86",
@@ -7408,7 +7448,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -7482,13 +7522,17 @@
         "backend/scripts/mscqr-print-test.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-print-diagnostic"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-batch-select-ba667bcc5353",
@@ -7680,7 +7724,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -7754,13 +7798,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-batch-select-c4a8699032b2",
@@ -9489,7 +9537,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -9548,13 +9596,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-batch-update-959eaeb5ce94",
@@ -9718,7 +9770,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -9777,13 +9829,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-batch-update-efa34782702b",
@@ -10019,7 +10075,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -10078,13 +10134,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-compliance-pack-job-delete-prohibited",
@@ -18965,7 +19025,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -19009,13 +19069,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-inventory-status-rollup-select-afd12473687a",
@@ -19340,7 +19404,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -19384,13 +19448,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-invite-delete-prohibited",
@@ -19931,7 +19999,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -19976,13 +20044,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-licensee-insert-30177e996b03",
@@ -19992,7 +20064,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -20037,13 +20109,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-licensee-insert-c209931446fc",
@@ -20053,7 +20129,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -20098,13 +20174,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-licensee-insert-c39576e741aa",
@@ -20176,7 +20256,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -20221,13 +20301,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-licensee-select-15353eb3f86d",
@@ -20237,7 +20321,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -20290,13 +20374,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-licensee-select-30177e996b03",
@@ -20306,7 +20394,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -20359,13 +20447,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-licensee-select-32463a66da3a",
@@ -21285,7 +21377,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -21338,13 +21430,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-licensee-select-c39576e741aa",
@@ -21973,7 +22069,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -22018,13 +22114,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-licensee-update-30177e996b03",
@@ -22034,7 +22134,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -22079,13 +22179,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-licensee-update-fe33efe6d646",
@@ -22095,7 +22199,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -22140,13 +22244,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-manufacturer-licensee-link-delete-fcd02a1a5d81",
@@ -22250,7 +22358,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -22284,13 +22392,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-manufacturer-licensee-link-insert-85c80e248ef7",
@@ -22350,7 +22462,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -22384,13 +22496,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-manufacturer-licensee-link-insert-fe33efe6d646",
@@ -22400,7 +22516,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -22434,13 +22550,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-manufacturer-licensee-link-select-1d1bc0babd5d",
@@ -22667,7 +22787,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -22705,13 +22825,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-manufacturer-licensee-link-select-fcd02a1a5d81",
@@ -22828,7 +22952,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -22862,13 +22986,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-manufacturer-licensee-link-update-85c80e248ef7",
@@ -22928,7 +23056,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -22962,13 +23090,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-manufacturer-licensee-link-update-fe33efe6d646",
@@ -22978,7 +23110,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -23012,13 +23144,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-mfa-login-challenge-delete-prohibited",
@@ -23972,7 +24108,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "tenant-root boundary from tables.json; empty or forged context is denied.",
@@ -24006,13 +24142,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-organization-insert-c209931446fc",
@@ -24022,7 +24162,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "tenant-root boundary from tables.json; empty or forged context is denied.",
@@ -24056,13 +24196,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-organization-insert-c39576e741aa",
@@ -24173,7 +24317,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "tenant-root boundary from tables.json; empty or forged context is denied.",
@@ -24207,13 +24351,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-organization-insert-fe33efe6d646",
@@ -24223,7 +24371,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "tenant-root boundary from tables.json; empty or forged context is denied.",
@@ -24257,13 +24405,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-organization-select-c61d0f915adc",
@@ -24326,7 +24478,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "tenant-root boundary from tables.json; empty or forged context is denied.",
@@ -24363,13 +24515,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-organization-select-restricted-read",
@@ -24430,7 +24586,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "tenant-root boundary from tables.json; empty or forged context is denied.",
@@ -24464,13 +24620,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-organization-update-c209931446fc",
@@ -24480,7 +24640,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "tenant-root boundary from tables.json; empty or forged context is denied.",
@@ -24514,13 +24674,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-organization-update-e101c330a5d4",
@@ -24530,7 +24694,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "tenant-root boundary from tables.json; empty or forged context is denied.",
@@ -24564,13 +24728,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-organization-update-fe33efe6d646",
@@ -24580,7 +24748,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "tenant-root boundary from tables.json; empty or forged context is denied.",
@@ -24614,13 +24782,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-ownership-delete-prohibited",
@@ -31812,7 +31984,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-print-item row must join through table-print-session on printSessionId=id; no alternative parent.",
@@ -31904,13 +32076,17 @@
         "backend/scripts/mscqr-print-test.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-print-diagnostic"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-print-item-select-bb323dd3f65d",
@@ -35181,7 +35357,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-print-job row must join through table-batch on batchId=id; no alternative parent.",
@@ -35249,13 +35425,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs DELETE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs DELETE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-print-job-delete-prohibited",
@@ -45752,7 +45932,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-printer-attestation row must join through table-printer-registration on printerRegistrationId=id; no alternative parent.",
@@ -45795,13 +45975,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs DELETE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs DELETE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-printer-attestation-delete-prohibited",
@@ -45932,7 +46116,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-printer-attestation row must join through table-printer-registration on printerRegistrationId=id; no alternative parent.",
@@ -45981,13 +46165,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-printer-attestation-select-restricted-read",
@@ -46401,7 +46589,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -46477,13 +46665,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-printer-profile-delete-prohibited",
@@ -46648,7 +46840,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-printer-profile row must join through table-printer on printerId=id; no alternative parent.",
@@ -46714,13 +46906,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-printer-profile-select-6ed00090c98d",
@@ -47228,7 +47424,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-printer-profile row must join through table-printer on printerId=id; no alternative parent.",
@@ -47297,13 +47493,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-printer-profile-update-f6ec02a8d08b",
@@ -47527,7 +47727,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -47581,13 +47781,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-printer-registration-select-389e63a160db",
@@ -48334,7 +48538,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -48393,13 +48597,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-printer-select-2fd647d33deb",
@@ -51093,7 +51301,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -51172,13 +51380,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qr-allocation-request-delete-prohibited",
@@ -52631,13 +52843,13 @@
       "tableId": "table-qrcode",
       "command": "INSERT",
       "actorClasses": [
-        "break-glass"
+        "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-production-break-glass"
+        "identity-operator"
       ],
-      "minimumAssurance": "dual-approved-break-glass",
-      "scopeRule": "Ephemeral command allowlist, exact incident scope, expiry, dual approval, and immutable transcript.",
+      "minimumAssurance": "operator-approved",
+      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
         "batchId",
         "blockedAt",
@@ -52685,13 +52897,13 @@
         "status",
         "tokenExpiresAt"
       ],
-      "withCheckRule": "New row preserves Ephemeral command allowlist, exact incident scope, expiry, dual approval, and immutable transcript. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "withCheckRule": "New row preserves Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": true,
-      "approvalClass": "dual-approved-break-glass",
+      "approvalClass": "operator-approved",
       "authorizationBoundary": "operator-approval",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
@@ -52703,13 +52915,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "break-glass using identity-production-break-glass at dual-approved-break-glass performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrcode-insert-80f0e7a7985d",
@@ -52719,7 +52935,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -52788,13 +53004,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrcode-insert-87ac040872c6",
@@ -52975,7 +53195,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -53044,13 +53264,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrcode-select-07eefc737d86",
@@ -56434,7 +56658,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -56523,13 +56747,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrcode-select-affb5471eee3",
@@ -56961,7 +57189,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -57050,13 +57278,17 @@
         "backend/scripts/mscqr-print-test.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-print-diagnostic"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrcode-select-bb323dd3f65d",
@@ -59547,13 +59779,13 @@
       "tableId": "table-qrcode",
       "command": "UPDATE",
       "actorClasses": [
-        "break-glass"
+        "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-production-break-glass"
+        "identity-operator"
       ],
-      "minimumAssurance": "dual-approved-break-glass",
-      "scopeRule": "Ephemeral command allowlist, exact incident scope, expiry, dual approval, and immutable transcript.",
+      "minimumAssurance": "operator-approved",
+      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
         "batchId",
         "blockedAt",
@@ -59609,13 +59841,13 @@
         "status",
         "tokenExpiresAt"
       ],
-      "withCheckRule": "New row preserves Ephemeral command allowlist, exact incident scope, expiry, dual approval, and immutable transcript. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "withCheckRule": "New row preserves Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": true,
-      "approvalClass": "dual-approved-break-glass",
+      "approvalClass": "operator-approved",
       "authorizationBoundary": "operator-approval",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
@@ -59627,13 +59859,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "break-glass using identity-production-break-glass at dual-approved-break-glass performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrcode-update-330d4691bab0",
@@ -60483,7 +60719,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -60560,13 +60796,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrcode-update-81a10b868163",
@@ -61045,7 +61285,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -61122,13 +61362,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrcode-update-aaa2d1e5005a",
@@ -61696,7 +61940,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -61773,13 +62017,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrrange-delete-prohibited",
@@ -61837,7 +62085,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -61874,13 +62122,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrrange-insert-87ac040872c6",
@@ -61944,7 +62196,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -61981,13 +62233,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrrange-select-a05563be592f",
@@ -62057,7 +62313,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -62100,13 +62356,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrrange-update-80f0e7a7985d",
@@ -62116,7 +62376,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -62153,13 +62413,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-qrrange-update-ddd82bdb411b",
@@ -62169,7 +62433,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -62206,13 +62470,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-refresh-token-delete-prohibited",
@@ -68503,7 +68771,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-user-backup-code row must join through table-user on userId=id; no alternative parent.",
@@ -68543,13 +68811,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs DELETE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs DELETE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-backup-code-delete-prohibited",
@@ -68716,7 +68988,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "table-user-backup-code row must join through table-user on userId=id; no alternative parent.",
@@ -68755,13 +69027,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-backup-code-select-1f3181acb5d1",
@@ -69243,7 +69519,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -69305,13 +69581,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-insert-67130d27c2cc",
@@ -69321,7 +69601,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -69383,13 +69663,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-insert-6dd6313b7cc1",
@@ -69478,7 +69762,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -69540,13 +69824,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-insert-b9cf437eb9dc",
@@ -69556,7 +69844,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -69618,13 +69906,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-insert-c39576e741aa",
@@ -69781,7 +70073,11 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-platform-role-repair"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-mfa-factor-delete-19248b1c58f5",
@@ -72114,7 +72410,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -72187,13 +72483,17 @@
         "backend/scripts/resend-password-setup-link.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-account-setup-link-reissue"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-select-47b88288d0d8",
@@ -72203,7 +72503,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -72276,13 +72576,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-select-4f35ab8681e9",
@@ -72737,7 +73041,11 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-platform-role-repair"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-select-65b85bc0759d",
@@ -74114,7 +74422,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -74187,13 +74495,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-select-bf4ed20e8b5b",
@@ -74294,7 +74606,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -74367,13 +74679,17 @@
         "backend/scripts/resend-password-setup-link.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-account-setup-link-reissue"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-select-c39576e741aa",
@@ -74552,7 +74868,11 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-platform-role-repair"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-select-d8e5bdf36b53",
@@ -74909,7 +75229,11 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-platform-role-repair"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-select-e1561aa306f2",
@@ -75281,7 +75605,11 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-breakglass-mfa-repair"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-select-fdd1ab5d6fcb",
@@ -75885,7 +76213,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -75951,13 +76279,17 @@
         "backend/scripts/seed-staging-rls-validation-data.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-staging-rls-fixture"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-update-56821d292ecf",
@@ -76127,7 +76459,11 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-platform-role-repair"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-update-67130d27c2cc",
@@ -76137,7 +76473,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -76203,13 +76539,17 @@
         "backend/scripts/seed-enterprise-e2e.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-update-80f0e7a7985d",
@@ -76219,7 +76559,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -76285,13 +76625,17 @@
         "backend/prisma/seed.ts"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-update-93fe5e2f9580",
@@ -76569,7 +76913,7 @@
         "operator-admin"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "minimumAssurance": "operator-approved",
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -76635,13 +76979,17 @@
         "backend/scripts/seed-launch-smoke-users.js"
       ],
       "allowScenarios": [
-        "operator-admin using identity-staging-operator-admin at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "operator-admin using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-seed-and-test-data"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-update-cc8598d27b96",
@@ -76723,7 +77071,11 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-platform-role-repair"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-user-update-e1561aa306f2",

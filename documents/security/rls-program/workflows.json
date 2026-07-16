@@ -2436,9 +2436,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-prisma-seed-ts-main",
@@ -2610,9 +2612,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-break-glass-mfa-reset-ts-run",
@@ -2683,7 +2687,9 @@
       "runtimeIdentities": [
         "identity-production-break-glass"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-breakglass-mfa-repair",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-mscqr-print-test-js-main",
@@ -2789,9 +2795,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-print-diagnostic",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-administration-super-admin",
@@ -2880,7 +2888,9 @@
       "runtimeIdentities": [
         "identity-production-break-glass"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-platform-role-repair",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-victoria-platform-admin-invite",
@@ -2967,7 +2977,9 @@
       "runtimeIdentities": [
         "identity-production-break-glass"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-platform-role-repair",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-repair-admin-accounts-js-main",
@@ -3038,7 +3050,9 @@
       "runtimeIdentities": [
         "identity-production-break-glass"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-platform-role-repair",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-resend-password-setup-link-js-find-actor",
@@ -3107,9 +3121,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-account-setup-link-reissue",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-resend-password-setup-link-js-find-target-user",
@@ -3178,9 +3194,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-account-setup-link-reissue",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-reset-codes-for-batch",
@@ -3189,7 +3207,7 @@
       "executionSurface": "cli",
       "authenticationStage": "system",
       "actorClasses": [
-        "break-glass"
+        "operator-admin"
       ],
       "canonicalSourceFiles": [
         "backend/scripts/seed-enterprise-e2e.ts"
@@ -3211,7 +3229,7 @@
         "approved non-owning system or operator identity",
         "command-bound scope"
       ],
-      "authorizationBoundaryType": "operator-break-glass",
+      "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
       ],
@@ -3252,15 +3270,17 @@
         "command-qrcode-update-2cbc825b30a8"
       ],
       "commandActorClasses": [
-        "break-glass"
+        "operator-admin"
       ],
       "requiredAssurance": [
-        "dual-approved-break-glass"
+        "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-production-break-glass"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed",
@@ -3450,9 +3470,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed-manufacturer-mfa-backup-codes",
@@ -3530,9 +3552,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed-printer",
@@ -3661,9 +3685,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-upsert-fresh-admin-mfa",
@@ -3734,9 +3760,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-upsert-user",
@@ -3807,9 +3835,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-launch-smoke-users-js-ensure-licensee",
@@ -3920,9 +3950,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-launch-smoke-users-js-refresh-admin-mfa-marker",
@@ -3993,9 +4025,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-launch-smoke-users-js-seed-launch-smoke-users",
@@ -4081,9 +4115,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-launch-smoke-users-js-upsert-launch-user",
@@ -4170,9 +4206,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-seed-and-test-data",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-batch",
@@ -4259,9 +4297,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-staging-rls-fixture",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-licensee",
@@ -4355,9 +4395,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-staging-rls-fixture",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-manufacturer-link",
@@ -4444,9 +4486,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-staging-rls-fixture",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-organization",
@@ -4533,9 +4577,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-staging-rls-fixture",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-codes",
@@ -4629,9 +4675,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-staging-rls-fixture",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-range",
@@ -4718,9 +4766,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-staging-rls-fixture",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-user",
@@ -4814,9 +4864,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-staging-rls-fixture",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-cli-scripts-run-system-integration-mjs-main",
@@ -4885,9 +4937,11 @@
         "operator-approved"
       ],
       "runtimeIdentities": [
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "operatorBoundaryId": "operator-boundary-prohibited-audit-browser",
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "workflow-http-backend-src-controllers-account-controller-ts-change-my-password",

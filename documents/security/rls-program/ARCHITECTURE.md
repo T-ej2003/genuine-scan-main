@@ -25,7 +25,7 @@ This directory is the machine-readable programme authority for taking every Pris
 
 The break-glass name is a creation pattern, not a standing reusable role. Issuance requires dual approval, strong MFA, an incident/ticket, explicit expiry, an exact command allowlist, an immutable audit transcript, and automatic revocation. Development and staging do not define a production break-glass identity; they use their broker-controlled operator roles.
 
-Migration may perform required DDL only through an explicitly approved deployment and ownership-transfer process. It must transfer protected tables and policies to `*_owner`, and approved `app_auth` objects to `*_auth_owner`, before the deployment is complete. Migration and operator authority never implies application authority. `decision-object-ownership-chain` and `decision-operator-administration` remain open for the exact transfer and broker implementation; they do not reopen the resolved identity split.
+Migration may perform required DDL only through an explicitly approved deployment and ownership-transfer process. It must transfer protected tables and policies to `*_owner`, and approved `app_auth` objects to `*_auth_owner`, before the deployment is complete. Migration and operator authority never implies application authority. The resolved ownership and operator contracts remain architecture-only until their exact transfer, broker and certification artifacts are implemented and reviewed.
 
 ## Canonical transaction context
 
@@ -108,7 +108,7 @@ The generated `TABLE_OWNERSHIP_REVIEW.md` is the concise table-by-table review. 
 
 ## Unresolved semantic decisions
 
-Ownership classification, policy command semantics, pre-authentication boundaries, worker/job authority, and the object-transfer chain have no unresolved architecture decision. Broker/operator implementation (`decision-operator-administration`) remains blocking. It does not reopen the approved category, owner, FORCE target, parent DAG, command contract, pre-auth function contract, worker contract, object ownership contract, or administrator ceiling.
+Ownership classification, policy command semantics, pre-authentication boundaries, worker/job authority, the object-transfer chain, and operator administration have no unresolved architecture decision. Implementation and certification remain incomplete; no resolved contract authorizes role, procedure, policy, grant, RLS, infrastructure or database changes.
 
 ## Pre-authentication function rules
 
@@ -133,6 +133,18 @@ Two exact future `app_rls` SECURITY INVOKER functions are required: `consume_aud
 ## Administrator ceilings
 
 Tenant administrators stay inside their proven tenant and assignable-role ceiling. Platform administrators do not receive blanket write predicates: each cross-tenant command requires explicit purpose, assurance, column/lifecycle rules and audit. Production break-glass is ephemeral, dual-approved, time-bound, incident-linked, non-owning and fully recorded. No administrator can set arbitrary RLS context, assume an owner, create objects, use superuser, or use `BYPASSRLS`.
+
+## Operator administration and break-glass
+
+`decision-operator-administration` is resolved by `operator-boundaries.json`. `identity-operator` is the standing, individually attributable but restricted `mscqr_dev_operator`, `mscqr_staging_operator` or `mscqr_prod_operator` LOGIN. It receives only CONNECT, `app_ops` USAGE and exact command/procedure execution. It owns no object, joins no owner role, cannot SET ROLE, create schemas, run migrations, impersonate the application, use superuser/BYPASSRLS, issue arbitrary SQL, access tables directly or browse tenants broadly. The credential is independently managed and rotated; each command authorization is separately approved, purpose-bound, scoped, audited and expiring.
+
+The manifest defines 29 finite boundaries spanning all 17 approved action classes. Catalog/read diagnostics expose only bounded metadata or redacted projections. Account setup reissue, locked-account recovery, MFA repair and session revocation target one account, preserve tenant and role, expose no hashes and revoke sessions where required. Incident containment separately scopes one user, tenant, QR/batch, job type or credential. Retention may redact one eligible evidence object while appending immutable audit; it never deletes audit history. Generic seed/test mutations, direct platform-role repair and unrestricted audit browsing are explicitly prohibited.
+
+Migration brokerage follows `object-ownership-chain.json` and binds environment, reviewed migration ID, checksum, release SHA, preflight, approval, ticket and purpose. The operator never receives migration credentials or standing owner membership. Transfer, grant normalization, unconditional revocation and catalog verification form one fail-closed transcript.
+
+RLS readiness binds exact release, policy, grant, role and catalog-baseline digests. Staging/production activation additionally binds an approval, ticket, maintenance window, independent checker and checksum-paired rollback. Production requires staging evidence and does not inherit staging approval. The operator validates using ordinary non-bypass authority. Rollback is a distinct exact command paired to the activation ID; disabling FORCE RLS outside that control is prohibited.
+
+Production break-glass is broker-issued only after an incident, ticket, strong MFA and two distinct approvals. Its individually attributable credential receives an exact boundary allowlist, expires within 30 minutes, records every command/result, supports early revocation, revokes automatically at expiry and requires post-use catalog/data audit proving credentials and memberships absent. It is never shared, standing, an SQL shell, a migration substitute or an owner/policy bypass.
 
 ## Direct Prisma migration strategy
 

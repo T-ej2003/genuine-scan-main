@@ -7,7 +7,7 @@ const decisionSections = {
   "decision-pre-auth-boundary": ["Pre-authentication function rules"],
   "decision-worker-identity-model": ["Worker authorization rules"],
   "decision-object-ownership-chain": ["Physical ownership and row-ownership taxonomy", "Object ownership and migration authority chain"],
-  "decision-operator-administration": ["Administrator ceilings"],
+  "decision-operator-administration": ["Administrator ceilings", "Operator administration and break-glass"],
 };
 const priority = [
   ["architecture-decision", () => decisions.decisions.find((decision) => decision.blockingStatus === "blocking" && decision.status !== "resolved")],
@@ -23,7 +23,7 @@ const manifestSelectors = {
   "decision-pre-auth-boundary": { commandRuleActor: "pre-auth-runtime", workflowBoundary: "pre-auth-security-function", preAuthFunctionIds: "all" },
   "decision-worker-identity-model": { commandRuleBoundary: "restricted-worker", executionSurfaces: ["worker", "scheduled"], workerBoundaryIds: "all" },
   "decision-object-ownership-chain": { objectOwnershipRuleIds: "all", physicalOwnerRole: "identity-table-owner" },
-  "decision-operator-administration": { commandRuleActors: ["operator-admin", "break-glass"] },
+  "decision-operator-administration": { commandRuleActors: ["operator-admin", "break-glass"], operatorBoundaryIds: "all" },
 };
 for (const [phase, find] of priority) {
   const item = find();

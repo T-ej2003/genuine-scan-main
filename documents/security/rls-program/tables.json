@@ -225,7 +225,7 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -368,7 +368,7 @@
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -383,7 +383,7 @@
           ]
         },
         {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "INSERT",
             "UPDATE"
@@ -907,8 +907,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
+        "identity-operator",
         "identity-scheduled-job",
-        "identity-staging-operator-admin",
         "identity-worker"
       ],
       "rlsApplicability": "force-rls-target",
@@ -1047,13 +1047,13 @@
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
         "identity-authenticated-app",
-        "identity-scheduled-job",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-scheduled-job"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
+        "identity-operator",
         "identity-scheduled-job",
-        "identity-staging-operator-admin",
         "identity-worker"
       ],
       "allowedCommandsByIdentity": [
@@ -1068,6 +1068,16 @@
           ]
         },
         {
+          "identityId": "identity-operator",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ],
+          "conditions": [
+            "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
           "identityId": "identity-scheduled-job",
           "commands": [
             "INSERT",
@@ -1075,16 +1085,6 @@
           ],
           "conditions": [
             "Approved schedule and durable tenant/job scope"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
-          "commands": [
-            "INSERT",
-            "SELECT"
-          ],
-          "conditions": [
-            "Broker-controlled command allowlist with immutable audit"
           ]
         },
         {
@@ -2107,8 +2107,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -2435,12 +2435,12 @@
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -2456,16 +2456,7 @@
           ]
         },
         {
-          "identityId": "identity-restricted-read",
-          "commands": [
-            "SELECT"
-          ],
-          "conditions": [
-            "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "INSERT",
             "SELECT",
@@ -2473,6 +2464,15 @@
           ],
           "conditions": [
             "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
+          "identityId": "identity-restricted-read",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Explicitly approved read-only RLS projection/canary table"
           ]
         }
       ],
@@ -7044,8 +7044,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -7212,7 +7212,7 @@
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -7227,22 +7227,22 @@
           ]
         },
         {
-          "identityId": "identity-restricted-read",
-          "commands": [
-            "SELECT"
-          ],
-          "conditions": [
-            "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "INSERT",
             "UPDATE"
           ],
           "conditions": [
             "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
+          "identityId": "identity-restricted-read",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Explicitly approved read-only RLS projection/canary table"
           ]
         }
       ],
@@ -7617,10 +7617,10 @@
       "intendedDatabaseRoles": [
         "identity-auth-function-owner",
         "identity-authenticated-app",
+        "identity-operator",
         "identity-pre-auth-app",
         "identity-restricted-read",
-        "identity-scheduled-job",
-        "identity-staging-operator-admin"
+        "identity-scheduled-job"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -7989,14 +7989,14 @@
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
         "identity-authenticated-app",
+        "identity-operator",
         "identity-pre-auth-app",
         "identity-restricted-read",
-        "identity-scheduled-job",
-        "identity-staging-operator-admin"
+        "identity-scheduled-job"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -8018,6 +8018,17 @@
           ],
           "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-operator",
+          "commands": [
+            "INSERT",
+            "SELECT",
+            "UPDATE"
+          ],
+          "conditions": [
+            "Broker-controlled command allowlist with immutable audit"
           ]
         },
         {
@@ -8045,17 +8056,6 @@
           ],
           "conditions": [
             "Approved schedule and durable tenant/job scope"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
-          "commands": [
-            "INSERT",
-            "SELECT",
-            "UPDATE"
-          ],
-          "conditions": [
-            "Broker-controlled command allowlist with immutable audit"
           ]
         }
       ],
@@ -8168,8 +8168,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -8261,12 +8261,12 @@
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -8282,16 +8282,7 @@
           ]
         },
         {
-          "identityId": "identity-restricted-read",
-          "commands": [
-            "SELECT"
-          ],
-          "conditions": [
-            "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "INSERT",
             "SELECT",
@@ -8299,6 +8290,15 @@
           ],
           "conditions": [
             "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
+          "identityId": "identity-restricted-read",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Explicitly approved read-only RLS projection/canary table"
           ]
         }
       ],
@@ -8911,8 +8911,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -9061,12 +9061,12 @@
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -9080,16 +9080,7 @@
           ]
         },
         {
-          "identityId": "identity-restricted-read",
-          "commands": [
-            "SELECT"
-          ],
-          "conditions": [
-            "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "INSERT",
             "SELECT",
@@ -9097,6 +9088,15 @@
           ],
           "conditions": [
             "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
+          "identityId": "identity-restricted-read",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Explicitly approved read-only RLS projection/canary table"
           ]
         }
       ],
@@ -10721,8 +10721,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -10981,8 +10981,8 @@
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app"
@@ -11000,21 +11000,21 @@
           ]
         },
         {
+          "identityId": "identity-operator",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
           "identityId": "identity-restricted-read",
           "commands": [
             "SELECT"
           ],
           "conditions": [
             "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
-          "commands": [
-            "SELECT"
-          ],
-          "conditions": [
-            "Broker-controlled command allowlist with immutable audit"
           ]
         }
       ],
@@ -11401,8 +11401,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -11741,7 +11741,7 @@
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -11756,21 +11756,21 @@
           ]
         },
         {
+          "identityId": "identity-operator",
+          "commands": [
+            "DELETE"
+          ],
+          "conditions": [
+            "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
           "identityId": "identity-restricted-read",
           "commands": [
             "SELECT"
           ],
           "conditions": [
             "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
-          "commands": [
-            "DELETE"
-          ],
-          "conditions": [
-            "Broker-controlled command allowlist with immutable audit"
           ]
         }
       ],
@@ -13143,8 +13143,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -13548,7 +13548,7 @@
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -13564,22 +13564,22 @@
           ]
         },
         {
-          "identityId": "identity-restricted-read",
-          "commands": [
-            "SELECT"
-          ],
-          "conditions": [
-            "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "INSERT",
             "UPDATE"
           ],
           "conditions": [
             "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
+          "identityId": "identity-restricted-read",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Explicitly approved read-only RLS projection/canary table"
           ]
         }
       ],
@@ -14018,8 +14018,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -14184,7 +14184,7 @@
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -14197,22 +14197,22 @@
           ]
         },
         {
-          "identityId": "identity-restricted-read",
-          "commands": [
-            "SELECT"
-          ],
-          "conditions": [
-            "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "DELETE",
             "INSERT"
           ],
           "conditions": [
             "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
+          "identityId": "identity-restricted-read",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Explicitly approved read-only RLS projection/canary table"
           ]
         }
       ],
@@ -14282,8 +14282,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -14602,7 +14602,7 @@
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -14617,22 +14617,22 @@
           ]
         },
         {
-          "identityId": "identity-restricted-read",
-          "commands": [
-            "SELECT"
-          ],
-          "conditions": [
-            "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "INSERT",
             "UPDATE"
           ],
           "conditions": [
             "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
+          "identityId": "identity-restricted-read",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Explicitly approved read-only RLS projection/canary table"
           ]
         }
       ],
@@ -14896,8 +14896,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -15115,7 +15115,7 @@
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -15130,22 +15130,22 @@
           ]
         },
         {
-          "identityId": "identity-restricted-read",
-          "commands": [
-            "SELECT"
-          ],
-          "conditions": [
-            "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "INSERT",
             "UPDATE"
           ],
           "conditions": [
             "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
+          "identityId": "identity-restricted-read",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Explicitly approved read-only RLS projection/canary table"
           ]
         }
       ],
@@ -15930,8 +15930,8 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -16319,12 +16319,12 @@
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
         "identity-authenticated-app",
-        "identity-restricted-read",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-restricted-read"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -16340,16 +16340,7 @@
           ]
         },
         {
-          "identityId": "identity-restricted-read",
-          "commands": [
-            "SELECT"
-          ],
-          "conditions": [
-            "Explicitly approved read-only RLS projection/canary table"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "INSERT",
             "SELECT",
@@ -16357,6 +16348,15 @@
           ],
           "conditions": [
             "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
+          "identityId": "identity-restricted-read",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Explicitly approved read-only RLS projection/canary table"
           ]
         }
       ],
@@ -16520,7 +16520,7 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -16625,11 +16625,11 @@
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -16643,7 +16643,7 @@
           ]
         },
         {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "INSERT",
             "SELECT",
@@ -20197,10 +20197,10 @@
       "intendedDatabaseRoles": [
         "identity-auth-function-owner",
         "identity-authenticated-app",
+        "identity-operator",
         "identity-pre-auth-app",
         "identity-restricted-read",
-        "identity-scheduled-job",
-        "identity-staging-operator-admin"
+        "identity-scheduled-job"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -20869,15 +20869,15 @@
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
         "identity-authenticated-app",
+        "identity-operator",
         "identity-pre-auth-app",
         "identity-restricted-read",
-        "identity-scheduled-job",
-        "identity-staging-operator-admin"
+        "identity-scheduled-job"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-pre-auth-app",
-        "identity-staging-operator-admin"
+        "identity-operator",
+        "identity-pre-auth-app"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -20900,6 +20900,17 @@
           ],
           "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-operator",
+          "commands": [
+            "INSERT",
+            "SELECT",
+            "UPDATE"
+          ],
+          "conditions": [
+            "Broker-controlled command allowlist with immutable audit"
           ]
         },
         {
@@ -20927,17 +20938,6 @@
           ],
           "conditions": [
             "Approved schedule and durable tenant/job scope"
-          ]
-        },
-        {
-          "identityId": "identity-staging-operator-admin",
-          "commands": [
-            "INSERT",
-            "SELECT",
-            "UPDATE"
-          ],
-          "conditions": [
-            "Broker-controlled command allowlist with immutable audit"
           ]
         }
       ],
@@ -21091,7 +21091,7 @@
       ],
       "intendedDatabaseRoles": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -21186,7 +21186,7 @@
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-staging-operator-admin"
+        "identity-operator"
       ],
       "allowedCommandsByIdentity": [
         {
@@ -21202,7 +21202,7 @@
           ]
         },
         {
-          "identityId": "identity-staging-operator-admin",
+          "identityId": "identity-operator",
           "commands": [
             "DELETE",
             "INSERT"

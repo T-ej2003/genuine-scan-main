@@ -1397,15 +1397,59 @@
     {
       "id": "decision-operator-administration",
       "affectedWorkflows": [
+        "workflow-cli-backend-prisma-seed-ts-ensure-licensee",
+        "workflow-cli-backend-prisma-seed-ts-main",
         "workflow-cli-backend-scripts-break-glass-mfa-reset-ts-run",
+        "workflow-cli-backend-scripts-mscqr-print-test-js-main",
         "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-administration-super-admin",
         "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-victoria-platform-admin-invite",
         "workflow-cli-backend-scripts-repair-admin-accounts-js-main",
-        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-reset-codes-for-batch"
+        "workflow-cli-backend-scripts-resend-password-setup-link-js-find-actor",
+        "workflow-cli-backend-scripts-resend-password-setup-link-js-find-target-user",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-reset-codes-for-batch",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed-manufacturer-mfa-backup-codes",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed-printer",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-upsert-fresh-admin-mfa",
+        "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-upsert-user",
+        "workflow-cli-backend-scripts-seed-launch-smoke-users-js-ensure-licensee",
+        "workflow-cli-backend-scripts-seed-launch-smoke-users-js-refresh-admin-mfa-marker",
+        "workflow-cli-backend-scripts-seed-launch-smoke-users-js-seed-launch-smoke-users",
+        "workflow-cli-backend-scripts-seed-launch-smoke-users-js-upsert-launch-user",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-batch",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-licensee",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-manufacturer-link",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-organization",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-codes",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-range",
+        "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-user",
+        "workflow-cli-scripts-run-system-integration-mjs-main"
       ],
       "affectedTables": [
+        "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
+        "table-audit-log",
+        "table-audit-log-outbox",
+        "table-batch",
+        "table-compliance-pack-job",
+        "table-customer-trust-credential",
+        "table-evidence-retention-job",
+        "table-incident-evidence",
+        "table-invite",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-password-reset",
+        "table-print-item",
+        "table-printer-agent-session",
+        "table-printer-registration",
         "table-qrcode",
-        "table-user"
+        "table-qrrange",
+        "table-refresh-token",
+        "table-security-event-outbox",
+        "table-user",
+        "table-user-backup-code",
+        "table-user-mfa-factor"
       ],
       "question": "Which staging and production operator commands are allowed without ownership, SET ROLE, superuser, or BYPASSRLS?",
       "securityConsequence": "Standing administrator authority becomes an unaudited universal tenant bypass.",
@@ -1417,7 +1461,17 @@
       "recommendedOption": "Broker-issued time-bound identity plus exact incident command/function and immutable audit evidence.",
       "blockingStatus": "blocking",
       "owner": "Security operations and database security",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-07-16",
+      "resolution": {
+        "authority": "documents/security/rls-program/operator-boundaries.json",
+        "boundaries": 29,
+        "selectedWorkflows": 27,
+        "selectedCommandRules": 88,
+        "maximumBreakGlassLifetimeMinutes": 30,
+        "arbitrarySqlAllowed": false,
+        "ownershipOrBypassAllowed": false
+      }
     }
   ]
 }

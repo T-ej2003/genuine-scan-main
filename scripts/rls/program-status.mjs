@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import { manifests, policyDependencyGraphPath } from "./lib/program-inventory.mjs";
 
-const { tables, workflows, decisions, commandSemantics, preAuthFunctions, workerBoundaries, identities, objectOwnershipChain } = manifests();
+const { tables, workflows, decisions, commandSemantics, preAuthFunctions, workerBoundaries, identities, objectOwnershipChain, operatorBoundaries } = manifests();
 const graph = JSON.parse(fs.readFileSync(policyDependencyGraphPath, "utf8"));
 const bySurface = Object.fromEntries([...new Set(workflows.workflows.map((workflow) => workflow.executionSurface))].sort().map((surface) => [surface, workflows.workflows.filter((workflow) => workflow.executionSurface === surface).length]));
 const byCategory = Object.fromEntries([...new Set(tables.tables.map((table) => table.primaryCategory))].sort().map((category) => [category, tables.tables.filter((table) => table.primaryCategory === category).length]));
@@ -70,6 +70,19 @@ console.log(JSON.stringify({
   schemaCreateViolations: objectOwnershipChain.schemaOwnershipRules.filter((rule) => rule.publicCreate || rule.runtimeCreate).length,
   defaultPrivilegeViolations: objectOwnershipChain.defaultPrivilegeRules.publicGrants.length + objectOwnershipChain.defaultPrivilegeRules.runtimeGrants.length,
   unresolvedOwnershipChainItems: objectOwnershipChain.status === "architecture-resolved" && decisions.decisions.find((decision) => decision.id === objectOwnershipChain.decisionId)?.status === "resolved" ? 0 : 1,
+  operatorBoundariesTotal: operatorBoundaries.boundaries.length,
+  stagingOnlyBoundaries: operatorBoundaries.boundaries.filter((boundary) => boundary.environmentAvailability.length === 1 && boundary.environmentAvailability[0] === "staging").length,
+  productionBoundaries: operatorBoundaries.boundaries.filter((boundary) => boundary.environmentAvailability.includes("production") && boundary.actionClass !== "prohibited").length,
+  breakGlassOnlyBoundaries: operatorBoundaries.boundaries.filter((boundary) => boundary.actorClass === "break-glass" && boundary.actionClass !== "prohibited").length,
+  approvalGatedOperatorBoundaries: operatorBoundaries.boundaries.filter((boundary) => boundary.approvalRequirement.required).length,
+  ticketBoundOperatorBoundaries: operatorBoundaries.boundaries.filter((boundary) => boundary.ticketRequirement).length,
+  purposeBoundOperatorBoundaries: operatorBoundaries.boundaries.filter((boundary) => boundary.purposeRequirement).length,
+  expiringOperatorBoundaries: operatorBoundaries.boundaries.filter((boundary) => boundary.expiryBehavior && boundary.automaticRevocation).length,
+  namedOperatorProceduresRequired: operatorBoundaries.boundaries.filter((boundary) => boundary.exactCommandOrNamedProcedure.kind === "named-procedure").length,
+  prohibitedOperatorActions: operatorBoundaries.prohibitedActions.length,
+  arbitrarySqlViolations: operatorBoundaries.boundaries.filter((boundary) => boundary.arbitrarySqlAllowed || boundary.exactCommandOrNamedProcedure.arbitraryArgumentsAllowed).length,
+  operatorOwnershipBypassViolations: operatorBoundaries.boundaries.filter((boundary) => boundary.objectOwnershipAllowed || boundary.ownerRoleMembershipAllowed || boundary.setRoleAllowed || boundary.bypassRlsAllowed || boundary.superuserAllowed).length,
+  unresolvedOperatorBoundaries: workflows.workflows.filter((workflow) => workflow.commandActorClasses?.some((actor) => ["operator-admin", "break-glass"].includes(actor)) && !workflow.operatorBoundaryId).length,
   workflowsTotal: workflows.workflows.length,
   workflowsByExecutionSurface: bySurface,
   workflowsCompatible: compatible,
