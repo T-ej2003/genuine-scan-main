@@ -7,11 +7,11 @@ This deterministic pass groups every canonical workflow and fails closed where e
 - Canonical workflows: 428
 - Families: 316
 - Already implemented: 3
-- Newly implemented in this pass: 0
+- Newly implemented in this pass: 1
 - Contract-only: 38
-- Blocked: 387
+- Blocked: 386
 - Auto-implementable but pending: 0
-- PostgreSQL certification pending: 3
+- PostgreSQL certification pending: 4
 
 No remaining ordinary workflow was auto-edited: the inventory does not yet prove both a human-reviewed scope and complete root-to-repository transaction propagation. That is a safety stop, not a compatibility claim.
 
@@ -21,10 +21,10 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 |---|---:|---|
 | mutation-concurrency-proof | 204 | Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation. |
 | named-function-prerequisite | 179 | Implement and certify the exact approved function contract before replacing ordinary Prisma access. |
-| unresolved-boundary | 270 | Reconcile middleware, actor classes and command rules into one approved boundary type. |
-| unreviewed-scope | 387 | Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code. |
-| unverified-execution-path | 387 | Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests. |
-| unverified-root-call-chain | 278 | Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client. |
+| unresolved-boundary | 269 | Reconcile middleware, actor classes and command rules into one approved boundary type. |
+| unreviewed-scope | 386 | Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code. |
+| unverified-execution-path | 386 | Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests. |
+| unverified-root-call-chain | 277 | Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client. |
 
 ## Families
 
@@ -46,7 +46,7 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 | family-simple-tenant-scoped-reads-replacementchainservice-768679140d | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unverified-root-call-chain |
 | family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a-unverified-execution-path |
 | family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb-unverified-execution-path |
-| family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unverified-root-call-chain |
+| family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f | simple tenant-scoped reads | 1 | medium | implemented | implemented | none |
 | family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20 | simple tenant-scoped reads | 2 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unverified-root-call-chain |
 | family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827 | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827-unverified-execution-path |
 | family-platform-admin-bounded-reads-iralertcontroller-791acbf282 | platform-admin bounded reads | 1 | medium | blocked | blocked | blocker-family-platform-admin-bounded-reads-iralertcontroller-791acbf282-unreviewed-scope, blocker-family-platform-admin-bounded-reads-iralertcontroller-791acbf282-unverified-execution-path |
@@ -346,6 +346,18 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 | family-contract-operator-boundary-prohibited-audit-browser | prohibited or legacy workflows | 1 | critical | contract-only | contract-ready | operator-boundary-prohibited-audit-browser |
 | family-contract-operator-boundary-prohibited-platform-role-repair | prohibited or legacy workflows | 3 | critical | contract-only | contract-ready | operator-boundary-prohibited-platform-role-repair |
 | family-contract-operator-boundary-prohibited-seed-and-test-data | prohibited or legacy workflows | 12 | critical | contract-only | contract-ready | operator-boundary-prohibited-seed-and-test-data |
+
+## Bounded read-only batch
+
+- Families considered: 23
+- Workflows considered: 31
+- Families implemented: 1
+- Workflows implemented: 1
+- Families retained as blocked: 22
+- Workflows retained as blocked: 30
+- The implemented trace-timeline read installs canonical context before explicit-projection list/count queries on one REPEATABLE READ transaction client.
+- Blocked entries retain the exact root, scope, hidden-mutation or special-boundary evidence needed for their next review.
+- No workflow in this batch is PostgreSQL-certified; disposable database evidence remains required.
 
 ## Shared primitives
 

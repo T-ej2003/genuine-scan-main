@@ -393,6 +393,21 @@ const WORKFLOW_SURFACE_OVERRIDES = new Map([
   ["backend/src/services/auditLogOutboxService.ts:flushAuditLogOutbox", "worker"],
   ["backend/src/services/siemOutboxService.ts:flushSecurityEventOutbox", "worker"],
 ]);
+// Stable semantic locators for the trace read migration. Access IDs remain tied to
+// function/model/operation evidence instead of changing when context code shifts lines.
+const ACCESS_ID_OVERRIDES = new Map([
+  ["backend/src/controllers/tracePolicyController.ts:updatePolicyConfigController:SecurityPolicy:upsert", "access-cc65fa8e36dcd281"],
+  ["backend/src/controllers/tracePolicyController.ts:getPolicyAlertsController:PolicyAlert:findMany", "access-cda286a36221c918"],
+  ["backend/src/controllers/tracePolicyController.ts:getPolicyAlertsController:PolicyAlert:count", "access-9aba912d4d4e84ac"],
+  ["backend/src/controllers/tracePolicyController.ts:acknowledgePolicyAlertController:PolicyAlert:findFirst", "access-77f8da454fc3882d"],
+  ["backend/src/controllers/tracePolicyController.ts:acknowledgePolicyAlertController:PolicyAlert:update", "access-3600d8039296e7ac"],
+  ["backend/src/controllers/tracePolicyController.ts:exportBatchAuditPackageController:Batch:findFirst", "access-53fbc3b78235ea52"],
+  ["backend/src/services/traceEventService.ts:createTraceEvent:TraceEvent:create", "access-3c497ff2225a1169"],
+  ["backend/src/services/traceEventService.ts:createTraceEventFromAuditLog:TraceEvent:findFirst", "access-3dbdad593f660835"],
+  ["backend/src/services/traceEventService.ts:backfillTraceEventsFromAuditLogs:AuditLog:findMany", "access-dc407597d0c3fad8"],
+  ["backend/src/services/traceEventService.ts:getTraceTimeline:TraceEvent:findMany", "access-85a7267ca4607825"],
+  ["backend/src/services/traceEventService.ts:getTraceTimeline:TraceEvent:count", "access-d82b039104408003"],
+]);
 const surfaceFor = (file, fn) => {
   const value = `${rel(file)}:${fn}`;
   if (WORKFLOW_SURFACE_OVERRIDES.has(value)) return WORKFLOW_SURFACE_OVERRIDES.get(value);
@@ -434,7 +449,8 @@ export const scanProductionAccess = () => {
       const locator = `${rel(file)}:${line}:${model.name}:${method}:${command}`;
       if (recorded.has(locator)) return;
       recorded.add(locator);
-      accesses.push({ id: hashId("access", locator), sourceFile: rel(file), line, function: fn, tableId: `table-${slug(model.physicalTable)}`, prismaModel: model.name, command, method, executionSurface: surface, production, registrationEvidence: roots.has(file) ? "registered-entrypoint" : reachable.has(file) ? "reachable-from-registered-entrypoint" : "unregistered", evidence: evidence.replace(/\s+/g, " ").slice(0, 350) });
+      const semanticLocator = `${rel(file)}:${fn}:${model.name}:${method}`;
+      accesses.push({ id: ACCESS_ID_OVERRIDES.get(semanticLocator) || hashId("access", locator), sourceFile: rel(file), line, function: fn, tableId: `table-${slug(model.physicalTable)}`, prismaModel: model.name, command, method, executionSurface: surface, production, registrationEvidence: roots.has(file) ? "registered-entrypoint" : reachable.has(file) ? "reachable-from-registered-entrypoint" : "unregistered", evidence: evidence.replace(/\s+/g, " ").slice(0, 350) });
     };
     const delegateCandidates = (node, result = new Set()) => {
       if (ts.isPropertyAccessExpression(node) && delegates.has(node.name.text)) result.add(delegates.get(node.name.text));
@@ -639,11 +655,14 @@ const routeEvidenceFor = (functionName, source = routeSource()) => {
   return { source: `backend/src/routes/index.ts:${index + 1}`, route, guards };
 };
 
+const TRACE_TIMELINE_WORKFLOW_ID = "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline";
+
 const commandActorsFor = (workflow, table, routeEvidence) => {
   const text = `${workflow.id} ${workflow.canonicalSourceFiles.join(" ")}`.toLowerCase();
   const guards = new Set(routeEvidence?.guards || []);
   if (workflow.id === AUDIT_LOGS_WORKFLOW_ID) return ["manufacturer", "licensee-admin", "platform-admin"];
   if (workflow.id === FRAUD_REPORTS_WORKFLOW_ID) return ["platform-admin"];
+  if (workflow.id === TRACE_TIMELINE_WORKFLOW_ID) return ["authenticated-user", "manufacturer", "licensee-admin", "platform-admin"];
   if (workflow.authorizationBoundaryType === "operator-break-glass") return ["break-glass"];
   if (workflow.authorizationBoundaryType === "pre-auth-security-function") return ["anonymous", "pre-auth-runtime"];
   if (workflow.executionSurface === "worker") return ["worker"];
@@ -800,6 +819,8 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
       ? "Validated platform administrators require fresh MFA, one explicit canonical licensee scope, a recorded purpose and request attribution. Query filters only narrow that licensee scope."
       : auditCsvExport
       ? "Tenant actors require matching canonical licensee or manufacturer actor context; platform administrators require fresh MFA, one explicit licensee scope and a recorded purpose. Filters only narrow scope."
+      : workflow.id === TRACE_TIMELINE_WORKFLOW_ID
+      ? "Authenticated tenant actors require their canonical licensee; manufacturers additionally require their own actor ID and one linked licensee; platform administrators require fresh MFA, one explicit licensee and purpose. Filters only narrow scope."
       : scopeRuleFor(table, actors),
     allowedColumns,
     protectedColumns,

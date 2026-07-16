@@ -9,6 +9,7 @@ import { manifests, programDir, repoRoot } from "./lib/program-inventory.mjs";
 
 export const contextBoundaryFamiliesPath = path.join(programDir, "context-boundary-families.json");
 export const contextBoundaryReportPath = path.join(programDir, "CONTEXT_BOUNDARY_MIGRATION_REPORT.md");
+export const contextBoundaryReadBatchPath = path.join(programDir, "context-boundary-read-batch.json");
 export const canonicalContextKeys = [
   "app.user_id",
   "app.role",
@@ -159,6 +160,23 @@ const writeReport = (manifest) => {
   }
   lines.push("", "## Families", "", "| Family | Category | Workflows | Risk | Eligibility | Status | Governing boundary/blocker |", "|---|---|---:|---|---|---|---|");
   for (const family of manifest.families) lines.push(`| ${family.id} | ${family.category} | ${family.workflowIds.length} | ${family.riskLevel} | ${family.automationEligibility} | ${family.implementationStatus} | ${[...family.governingBoundaryIds, ...family.blockers.map((item) => item.id)].join(", ") || "none"} |`);
+  if (fs.existsSync(contextBoundaryReadBatchPath)) {
+    const batch = JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8"));
+    lines.push(
+      "",
+      "## Bounded read-only batch",
+      "",
+      `- Families considered: ${batch.selectionTotals.families}`,
+      `- Workflows considered: ${batch.selectionTotals.workflows}`,
+      `- Families implemented: ${batch.selectionTotals.implementedFamilies}`,
+      `- Workflows implemented: ${batch.selectionTotals.implementedWorkflows}`,
+      `- Families retained as blocked: ${batch.selectionTotals.blockedFamilies}`,
+      `- Workflows retained as blocked: ${batch.selectionTotals.blockedWorkflows}`,
+      "- The implemented trace-timeline read installs canonical context before explicit-projection list/count queries on one REPEATABLE READ transaction client.",
+      "- Blocked entries retain the exact root, scope, hidden-mutation or special-boundary evidence needed for their next review.",
+      "- No workflow in this batch is PostgreSQL-certified; disposable database evidence remains required.",
+    );
+  }
   lines.push(
     "",
     "## Shared primitives",
@@ -243,6 +261,19 @@ export const buildContextBoundaryPlan = () => {
       governingBoundaryIds,
       blockers,
       implementationStatus,
+      ...(automationEligibility === "implemented" && familyWorkflows.some((workflow) => workflow.resolvedContextBlockerIds?.length) ? {
+        resolvedBlockerIds: unique(familyWorkflows.flatMap((workflow) => workflow.resolvedContextBlockerIds || [])),
+        rootCallChainEvidence: unique(familyWorkflows.flatMap((workflow) => workflow.rootCallChainEvidence || [])),
+        scopeEvidence: unique(familyWorkflows.flatMap((workflow) => workflow.scopeEvidence || [])),
+        implementationFiles: unique(familyWorkflows.flatMap((workflow) => workflow.implementationFiles || [])),
+        testFiles: unique(familyWorkflows.flatMap((workflow) => workflow.testFiles || [])),
+        contextKeys: unique(familyWorkflows.flatMap((workflow) => workflow.canonicalContextKeys || [])),
+        sameTransactionGuarantee: familyWorkflows.every((workflow) => workflow.sameTransactionGuarantee === true),
+        responseProjection: unique(familyWorkflows.flatMap((workflow) => workflow.responseProjection || [])),
+        allowScenarios: unique(familyWorkflows.flatMap((workflow) => workflow.expectedAllowedScenarios || [])),
+        denyScenarios: unique(familyWorkflows.flatMap((workflow) => workflow.expectedDeniedScenarios || [])),
+        postgresqlCertificationStatus: unique(familyWorkflows.map((workflow) => workflow.postgresqlCertificationStatus)),
+      } : {}),
       changeSizeGuard: { maximumProductionFiles: 15, maximumTestFiles: 10, maximumNetChangedLines: 2500 },
     };
   }).sort((a, b) => (order.get(a.category) ?? 99) - (order.get(b.category) ?? 99) || a.id.localeCompare(b.id));
@@ -310,6 +341,96 @@ export const validateContextBoundaryPlan = (manifest, workflowManifest, commandM
       assert.equal(family.governingBoundaryIds.length, 0, `${family.id} special boundary is treated as ordinary context`);
     }
   }
+  return true;
+};
+
+export const validateContextBoundaryReadBatch = (batch, familyManifest, workflowManifest, commandManifest, tableManifest) => {
+  const allowedCategories = new Set([
+    "simple tenant-scoped reads",
+    "simple actor-scoped reads",
+    "platform-admin bounded reads",
+    "read-only tenant aggregates",
+    "read-only actor aggregates",
+    "read-only reference lookups",
+  ]);
+  assert.equal(batch.schemaVersion, 1, "read batch schema version");
+  assert.deepEqual(batch.limits, {
+    maximumFamilies: 25,
+    maximumWorkflows: 60,
+    maximumProductionFiles: 20,
+    maximumTestFiles: 15,
+    maximumNetProductionTestLines: 4000,
+  }, "read batch weakens its hard limits");
+  assert.equal(batch.selectionTotals.families, batch.selectedFamilies.length, "read batch family total drifted");
+  const selectedWorkflowIds = batch.selectedFamilies.flatMap((family) => family.workflowIds);
+  assert.equal(new Set(batch.selectedFamilies.map((family) => family.familyId)).size, batch.selectedFamilies.length, "read batch family IDs are duplicated");
+  assert.equal(new Set(selectedWorkflowIds).size, selectedWorkflowIds.length, "read batch workflows are duplicated");
+  assert.equal(batch.selectionTotals.workflows, selectedWorkflowIds.length, "read batch workflow total drifted");
+  assert(batch.selectedFamilies.length <= batch.limits.maximumFamilies, "read batch exceeds family limit");
+  assert(selectedWorkflowIds.length <= batch.limits.maximumWorkflows, "read batch exceeds workflow limit");
+  assert(batch.actualChanges.productionFiles <= batch.limits.maximumProductionFiles, "read batch exceeds production-file limit");
+  assert(batch.actualChanges.testFiles <= batch.limits.maximumTestFiles, "read batch exceeds test-file limit");
+  assert(batch.actualChanges.netProductionTestChangedLines <= batch.limits.maximumNetProductionTestLines, "read batch exceeds changed-line limit");
+
+  const familyById = new Map(familyManifest.families.map((family) => [family.id, family]));
+  const workflowById = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
+  const ruleById = new Map(commandManifest.rules.map((rule) => [rule.id, rule]));
+  const tableIds = new Set(tableManifest.tables.map((table) => table.id));
+  let implementedFamilies = 0;
+  let implementedWorkflows = 0;
+  let blockedFamilies = 0;
+  let blockedWorkflows = 0;
+
+  for (const selected of batch.selectedFamilies) {
+    assert(allowedCategories.has(selected.category), `${selected.familyId} is not an approved read category`);
+    assert(["low", "medium"].includes(selected.risk), `${selected.familyId} is outside the approved risk ceiling`);
+    assert(selected.canonicalFiles?.length && selected.routeRoots && selected.actorClasses?.length && selected.commandRuleIds?.length && selected.protectedTables?.length, `${selected.familyId} lacks selection evidence`);
+    assert(selected.scopeSource?.trim() && selected.assuranceSource?.trim() && selected.rootCallChainEvidence?.length, `${selected.familyId} lacks scope/root evidence`);
+    assert(selected.transactionStrategy?.trim() && selected.reusableImplementationPattern?.trim() && selected.testPlan?.length && selected.blockerResolutionEvidence?.length, `${selected.familyId} lacks implementation/test evidence`);
+    const planned = familyById.get(selected.familyId);
+    assert(planned, `${selected.familyId} is absent from the family plan`);
+    assert.deepEqual([...selected.workflowIds].sort(), [...planned.workflowIds].sort(), `${selected.familyId} workflow membership drifted`);
+    selected.commandRuleIds.forEach((id) => {
+      const rule = ruleById.get(id);
+      assert(rule, `${selected.familyId} references unknown command rule ${id}`);
+      assert.equal(rule.command, "SELECT", `${selected.familyId} includes a mutation command`);
+    });
+    selected.protectedTables.forEach((id) => assert(tableIds.has(id), `${selected.familyId} references unknown table ${id}`));
+    selected.workflowIds.forEach((id) => assert(workflowById.has(id), `${selected.familyId} references unknown workflow ${id}`));
+
+    if (selected.eligibilityVerdict === "implemented") {
+      implementedFamilies += 1;
+      implementedWorkflows += selected.workflowIds.length;
+      assert.equal(planned.automationEligibility, "implemented", `${selected.familyId} is not implemented in the family plan`);
+      assert.equal(planned.blockers.length, 0, `${selected.familyId} retains active blockers`);
+      assert(planned.rootCallChainEvidence.length && planned.scopeEvidence.length && planned.implementationFiles.length && planned.testFiles.length, `${selected.familyId} lacks implementation evidence`);
+      assert.equal(planned.sameTransactionGuarantee, true, `${selected.familyId} lacks same-transaction proof`);
+      for (const id of selected.workflowIds) {
+        const workflow = workflowById.get(id);
+        assert.equal(workflow.contextBoundaryStatus, "implemented", `${id} is falsely marked in the read batch`);
+        assert.equal(workflow.implementationFamilyId, selected.familyId, `${id} has the wrong family`);
+        assert.equal(workflow.routeRootVerified, true, `${id} lacks route-root proof`);
+        assert(workflow.scopeEvidence?.length, `${id} lacks scope evidence`);
+        assert.equal(workflow.protectedQueryClient, "transaction-client-only", `${id} permits global Prisma`);
+        assert.equal(workflow.consistentReadScopeGuarantee, true, `${id} permits inconsistent list/count/aggregate scope`);
+        assert.equal(workflow.sameTransactionGuarantee, true, `${id} lacks same-transaction proof`);
+        assert(workflow.implementationFiles?.length && workflow.testFiles?.length, `${id} lacks code/test evidence`);
+        assert.equal(workflow.postgresqlCertificationStatus, "pending", `${id} is falsely PostgreSQL-certified`);
+        assert(workflow.expectedAllowedScenarios?.length && workflow.expectedDeniedScenarios?.length, `${id} lacks allow/deny evidence`);
+        if (/aggregate/i.test(selected.category)) assert.equal(workflow.aggregateScopeStatus, "tenant-keyed-null-denied", `${id} aggregate scope is not fail closed`);
+      }
+    } else {
+      blockedFamilies += 1;
+      blockedWorkflows += selected.workflowIds.length;
+      assert.equal(selected.eligibilityVerdict, "blocked", `${selected.familyId} has an invalid verdict`);
+      assert.equal(planned.automationEligibility, "blocked", `${selected.familyId} blocker was silently cleared`);
+      assert(planned.blockers.length, `${selected.familyId} lacks active planner blockers`);
+    }
+  }
+  assert.equal(batch.selectionTotals.implementedFamilies, implementedFamilies, "read batch implemented-family total drifted");
+  assert.equal(batch.selectionTotals.implementedWorkflows, implementedWorkflows, "read batch implemented-workflow total drifted");
+  assert.equal(batch.selectionTotals.blockedFamilies, blockedFamilies, "read batch blocked-family total drifted");
+  assert.equal(batch.selectionTotals.blockedWorkflows, blockedWorkflows, "read batch blocked-workflow total drifted");
   return true;
 };
 

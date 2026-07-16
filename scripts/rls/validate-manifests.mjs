@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateObjectOwnershipChain, validateOperatorBoundaries, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
-import { contextBoundaryFamiliesPath, validateContextBoundaryPlan } from "./context-boundary-plan.mjs";
+import { contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch } from "./context-boundary-plan.mjs";
 
 const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries, objectOwnershipChain, operatorBoundaries } = manifests();
 assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries && objectOwnershipChain && operatorBoundaries, "all programme manifests must exist");
@@ -178,6 +178,8 @@ validatePreAuthFunctions(preAuthFunctions, workflows, commandSemantics, identiti
 validateWorkerBoundaries(workerBoundaries, workflows, commandSemantics, identities, tables);
 validateObjectOwnershipChain(objectOwnershipChain, tables, identities, preAuthFunctions, workerBoundaries);
 validateOperatorBoundaries(operatorBoundaries, workflows, commandSemantics, identities);
-validateContextBoundaryPlan(JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8")), workflows, commandSemantics, tables);
+const contextBoundaryFamilies = JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8"));
+validateContextBoundaryPlan(contextBoundaryFamilies, workflows, commandSemantics, tables);
+validateContextBoundaryReadBatch(JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8")), contextBoundaryFamilies, workflows, commandSemantics, tables);
 assert(sharedApplyIsBlocked(), "existing shared-table apply must remain blocked before BEGIN");
 console.log(JSON.stringify({ valid: true, tables: tables.tables.length, workflows: workflows.workflows.length, productionAccessSites: mappedAccessIds.size }));

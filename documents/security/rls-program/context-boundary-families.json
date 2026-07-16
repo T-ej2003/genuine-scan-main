@@ -1521,7 +1521,9 @@
       "executionSurfaces": [
         "internal"
       ],
-      "controllerFiles": [],
+      "controllerFiles": [
+        "backend/src/controllers/tracePolicyController.ts"
+      ],
       "serviceFiles": [
         "backend/src/services/traceEventService.ts"
       ],
@@ -1530,10 +1532,14 @@
         "table-trace-event"
       ],
       "actorClasses": [
-        "authenticated-user"
+        "authenticated-user",
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
       ],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -1550,43 +1556,73 @@
         "command-trace-event-select-f571cd9ea8dd"
       ],
       "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "Authenticated tenant actors require their canonical licensee; manufacturers additionally require their own actor ID and one linked licensee; platform administrators require fresh MFA, one explicit licensee and purpose. Filters only narrow scope."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
       "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
+      "implementationStrategy": "Retain the reviewed transaction-client-only service and focused contract tests; do not broaden the boundary.",
       "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "low",
-      "automationEligibility": "blocked",
+      "riskLevel": "medium",
+      "automationEligibility": "implemented",
       "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unverified-root-call-chain"
-        }
+      "blockers": [],
+      "implementationStatus": "implemented",
+      "resolvedBlockerIds": [
+        "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unresolved-boundary",
+        "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unreviewed-scope",
+        "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unverified-execution-path",
+        "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unverified-root-call-chain"
       ],
-      "implementationStatus": "blocked",
+      "rootCallChainEvidence": [
+        "backend/src/routes/index.ts registers GET /trace/timeline with authenticate, protected-read rate limiting and enforceTenantIsolation before getTraceTimelineController.",
+        "getTraceTimelineController is the only production caller of getTraceTimeline."
+      ],
+      "scopeEvidence": [
+        "authenticate hydrates actor licensee, organization and linked-licensee claims from trusted server-side state.",
+        "buildTraceTimelineBoundary independently fails closed on foreign/blank scope and requires bounded MFA-verified platform access.",
+        "enforceTenantIsolation denies foreign requested licensees for non-platform actors."
+      ],
+      "implementationFiles": [
+        "backend/src/controllers/tracePolicyController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/routes/index.ts",
+        "backend/src/services/traceEventService.ts"
+      ],
+      "testFiles": [
+        "backend/tests/traceTimelineContext.test.js"
+      ],
+      "contextKeys": [
+        "app.auth_assurance",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.organization_id",
+        "app.purpose",
+        "app.request_id",
+        "app.role",
+        "app.user_id"
+      ],
+      "sameTransactionGuarantee": true,
+      "responseProjection": [
+        "Explicit TraceEvent scalar and named relation projections only.",
+        "Nested details recursively redact secret-bearing keys before serialization."
+      ],
+      "allowScenarios": [
+        "A freshly MFA-verified platform administrator reads one explicit licensee for an explicit purpose.",
+        "A manufacturer reads only its own events within a verified linked licensee.",
+        "An authenticated tenant actor reads trace events for their own licensee within bounded pagination.",
+        "Event, batch, QR and manufacturer filters narrow the canonical tenant scope."
+      ],
+      "denyScenarios": [
+        "A manufacturer cannot select another manufacturer or an unlinked licensee.",
+        "A protected query before context installation, through a different/global client, or with a scope inconsistent with list/count is denied.",
+        "Foreign, missing or blank tenant scope is denied.",
+        "Platform administration without fresh MFA, purpose, request ID or bounded licensee scope is denied.",
+        "Secret-bearing nested detail fields are recursively redacted."
+      ],
+      "postgresqlCertificationStatus": [
+        "pending"
+      ],
       "changeSizeGuard": {
         "maximumProductionFiles": 15,
         "maximumTestFiles": 10,

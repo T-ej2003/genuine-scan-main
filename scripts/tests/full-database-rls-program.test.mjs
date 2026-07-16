@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, operatorAdministrationReviewPath, operatorBoundariesPath, parseSchema, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validateObjectOwnershipChain, validateOperatorBoundaries, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
-import { buildContextBoundaryPlan, contextBoundaryFamiliesPath, contextBoundaryReportPath, validateContextBoundaryPlan } from "../rls/context-boundary-plan.mjs";
+import { buildContextBoundaryPlan, contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, contextBoundaryReportPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch } from "../rls/context-boundary-plan.mjs";
 
 const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, objectOwnershipChainPath, objectOwnershipReviewPath, operatorBoundariesPath, operatorAdministrationReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath, contextBoundaryFamiliesPath, contextBoundaryReportPath].map((file) => fs.readFileSync(file, "utf8"));
 
@@ -84,9 +84,9 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   assert.equal(generated.workflowCount, 428);
   assert.equal(generated.familyCount, 316);
   const count = (eligibility) => generated.families.filter((family) => family.automationEligibility === eligibility).reduce((total, family) => total + family.workflowIds.length, 0);
-  assert.equal(count("implemented"), 3);
+  assert.equal(count("implemented"), 4);
   assert.equal(count("contract-only"), 38);
-  assert.equal(count("blocked"), 387);
+  assert.equal(count("blocked"), 386);
   assert.equal(count("auto-implementable"), 0);
   assert.equal(new Set(generated.families.flatMap((family) => family.workflowIds)).size, workflows.workflows.length);
   const specialWorkflowIds = new Set([
@@ -108,6 +108,42 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   reject((candidate) => { const family = candidate.families.find((item) => item.automationEligibility === "blocked"); family.automationEligibility = "auto-implementable"; family.implementationStatus = "planned"; family.blockers = []; }, /eligibility does not match workflow evidence/);
   reject((candidate) => { const family = candidate.families.find((item) => item.automationEligibility === "contract-only"); family.canonicalContextKeys = ["app.user_id"]; }, /contract boundary is invalid/);
   reject((candidate, candidateWorkflows) => { const family = candidate.families.find((item) => item.automationEligibility === "implemented"); const workflow = candidateWorkflows.workflows.find((item) => item.id === family.workflowIds[0]); workflow.postgresqlCertificationStatus = "certified"; }, /falsely PostgreSQL-certified/);
+});
+
+test("bounded read-family batch is scoped, evidenced, and fail closed", () => {
+  const { workflows, commandSemantics, tables } = manifests();
+  const families = JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8"));
+  const batch = JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8"));
+  assert(validateContextBoundaryReadBatch(batch, families, workflows, commandSemantics, tables));
+  assert.equal(batch.selectedFamilies.length, 23);
+  assert.equal(batch.selectionTotals.workflows, 31);
+  assert.equal(batch.selectionTotals.implementedFamilies, 1);
+  assert.equal(batch.selectionTotals.implementedWorkflows, 1);
+  assert.equal(batch.selectionTotals.blockedFamilies, 22);
+  assert.equal(batch.selectionTotals.blockedWorkflows, 30);
+
+  const reject = (mutate, pattern) => {
+    const candidateBatch = structuredClone(batch);
+    const candidateFamilies = structuredClone(families);
+    const candidateWorkflows = structuredClone(workflows);
+    mutate(candidateBatch, candidateFamilies, candidateWorkflows);
+    assert.throws(() => validateContextBoundaryReadBatch(candidateBatch, candidateFamilies, candidateWorkflows, commandSemantics, tables), pattern);
+  };
+  reject((candidate) => { candidate.actualChanges.productionFiles = 21; }, /production-file limit/);
+  reject((candidate) => { candidate.actualChanges.testFiles = 16; }, /test-file limit/);
+  reject((candidate) => { candidate.actualChanges.netProductionTestChangedLines = 4001; }, /changed-line limit/);
+  reject((candidate) => { candidate.selectedFamilies[0].risk = "high"; }, /risk ceiling/);
+  reject((candidate) => { candidate.selectedFamilies[0].category = "tenant-scoped updates"; }, /approved read category/);
+  const implementedId = batch.selectedFamilies.find((family) => family.eligibilityVerdict === "implemented").workflowIds[0];
+  reject((_batch, _families, candidateWorkflows) => { candidateWorkflows.workflows.find((workflow) => workflow.id === implementedId).routeRootVerified = false; }, /route-root proof/);
+  reject((_batch, _families, candidateWorkflows) => { candidateWorkflows.workflows.find((workflow) => workflow.id === implementedId).scopeEvidence = []; }, /scope evidence/);
+  reject((_batch, _families, candidateWorkflows) => { candidateWorkflows.workflows.find((workflow) => workflow.id === implementedId).protectedQueryClient = "global-prisma"; }, /global Prisma/);
+  reject((_batch, _families, candidateWorkflows) => { candidateWorkflows.workflows.find((workflow) => workflow.id === implementedId).consistentReadScopeGuarantee = false; }, /inconsistent list\/count\/aggregate scope/);
+  reject((_batch, _families, candidateWorkflows) => { candidateWorkflows.workflows.find((workflow) => workflow.id === implementedId).postgresqlCertificationStatus = "certified"; }, /falsely PostgreSQL-certified/);
+  reject((candidateBatch, candidateFamilies) => {
+    const selected = candidateBatch.selectedFamilies.find((family) => family.eligibilityVerdict === "implemented");
+    candidateFamilies.families.find((family) => family.id === selected.familyId).blockers.push({ id: "blocker-regression" });
+  }, /retains active blockers/);
 });
 
 test("all FORCE-table commands and workflows have exact resolved semantics", () => {
