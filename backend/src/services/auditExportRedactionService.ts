@@ -25,7 +25,7 @@ const escapeCsv = (val: unknown) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-const sensitiveDetailKey = /(?:password|token|secret|credential|authorization|cookie|private.?key|mfa|otp|hash)/i;
+const sensitiveDetailKey = /(?:password|token|secret|credential|authorization|cookie|private.?key|mfa|otp|hash|session|api.?key|signing)/i;
 
 export const redactAuditDetails = (value: unknown, depth = 0): unknown => {
   if (depth > 8) return "[REDACTED]";

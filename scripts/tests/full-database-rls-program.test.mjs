@@ -45,19 +45,21 @@ test("implemented HTTP context boundaries retain complete certification evidence
     assert.equal(workflow.contextBoundaryStatus, "implemented", "context boundary status");
     assert.equal(workflow.implementationStatus, "context-boundary-implemented", "implementation status");
     assert(workflow.implementationFiles.length && workflow.testFiles.length, "implementation and test evidence");
+    assert(workflow.tablesTouched.length, "protected table evidence");
     assert.deepEqual([...workflow.canonicalContextKeys].sort(), requiredKeys, "canonical context keys");
     assert.equal(workflow.sameTransactionGuarantee, true, "same transaction guarantee");
     assert(["pending", "certified"].includes(workflow.postgresqlCertificationStatus), "PostgreSQL certification status");
     assert(workflow.expectedAllowedScenarios.length && workflow.expectedDeniedScenarios.length, "allow and deny scenarios");
   };
   const implemented = manifests().workflows.workflows.filter((item) => item.contextBoundaryStatus === "implemented");
-  assert(implemented.length >= 2, "expected both reviewed context-boundary slices");
+  assert(implemented.length >= 3, "expected all reviewed context-boundary slices");
   implemented.forEach(verify);
   const workflow = implemented.find((item) => item.id === "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports");
   assert(workflow, "fraud-report workflow context boundary");
   for (const [field, value, pattern] of [
     ["implementationFiles", [], /implementation and test evidence/],
     ["testFiles", [], /implementation and test evidence/],
+    ["tablesTouched", [], /protected table evidence/],
     ["canonicalContextKeys", workflow.canonicalContextKeys.filter((key) => key !== "app.purpose"), /canonical context keys/],
     ["sameTransactionGuarantee", false, /same transaction guarantee/],
     ["postgresqlCertificationStatus", undefined, /PostgreSQL certification status/],

@@ -1,8 +1,8 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLog, getAuditLogs, onAuditLog } from "../services/auditService";
+import { createAuditLog, onAuditLog } from "../services/auditService";
 import prisma from "../config/database";
-import { UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import {
@@ -21,6 +21,11 @@ import {
   FraudReportStatus,
   queryFraudReports,
 } from "../services/fraudReportQueryService";
+import {
+  AuditLogQueryAccessError,
+  buildAuditLogBoundary,
+  queryAuditLogs,
+} from "../services/auditLogQueryService";
 
 const fraudResponseSchema = z.object({
   status: z.enum(["REVIEWED", "RESOLVED", "DISMISSED"]).default("REVIEWED"),
@@ -32,14 +37,20 @@ const fraudReportIdParamSchema = z.object({
   id: z.string().uuid("Invalid fraud report id"),
 }).strict();
 
-const auditLogQuerySchema = z.object({
+export const auditLogQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
   offset: z.coerce.number().int().min(0).max(20_000).optional(),
   cursor: z.string().trim().max(512).optional(),
   entityType: z.string().trim().max(120).optional(),
   entityId: z.string().trim().max(160).optional(),
   action: z.string().trim().max(160).optional(),
+  userId: z.string().uuid().optional(),
   licenseeId: z.string().uuid().optional(),
+  organizationId: z.string().uuid().optional(),
+  manufacturerId: z.string().uuid().optional(),
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
+  purpose: z.string().trim().min(1).max(240).optional(),
 }).strict();
 
 const auditExportQuerySchema = z.object({
@@ -80,78 +91,29 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
     }
 
-    const limit = parsed.data.limit ?? 50;
-    const offset = parsed.data.offset ?? 0;
-    const cursor = parsed.data.cursor;
-    const entityType = parsed.data.entityType;
-    const entityId = parsed.data.entityId;
-    const action = parsed.data.action;
-
-    const isSuper = isAuditSuperUser(req.user.role);
-    const isManufacturer = isAuditManufacturerUser(req.user.role);
-    const licenseeId = isSuper ? parsed.data.licenseeId : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
-
-    let userIds: string[] | undefined;
-    if (isManufacturer) {
-      userIds = [req.user.userId];
-    } else if (!isSuper && licenseeId) {
-      const users = await prisma.user.findMany({
-        where: {
-          OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
-        },
-        select: { id: true },
-      });
-      userIds = users.map((u) => u.id);
-    }
-
-    if (
-      req.user.role !== UserRole.SUPER_ADMIN &&
-      req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
-      action &&
-      hiddenActionsForNonSuper.includes(action)
-    ) {
-      return res.json({ success: true, data: { logs: [], total: 0, limit, offset } });
-    }
-
-    const result = await getAuditLogs({
-      entityType,
-      entityId,
-      action,
-      excludeActions:
-        isSuper ? undefined : hiddenActionsForNonSuper,
-      licenseeId,
-      userIds,
-      limit,
-      offset,
-      cursor,
-    });
-
-    const userIdsForMap = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
-    let userMap = new Map<string, { id: string; name: string; email: string }>();
-    if (userIdsForMap.length > 0) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: userIdsForMap } },
-        select: { id: true, name: true, email: true },
-      });
-      userMap = new Map(users.map((u) => [u.id, u]));
-    }
-
-    const enriched = result.logs.map((l) => ({
-      ...l,
-      user: l.userId ? userMap.get(l.userId) || null : null,
-    }));
+    const filters = { ...parsed.data, limit: parsed.data.limit ?? 50, offset: parsed.data.offset ?? 0 };
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "");
+    const boundary = buildAuditLogBoundary(req.user, filters, requestId);
+    const result = await withCanonicalDbContext(
+      prisma,
+      boundary.context,
+      (tx) => queryAuditLogs(tx, filters, boundary),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+    );
 
     return res.json({
       success: true,
       data: {
         ...result,
-        logs: enriched,
-        limit,
-        offset: cursor ? 0 : offset,
-        cursor: cursor || null,
+        limit: filters.limit,
+        offset: filters.cursor ? 0 : filters.offset,
+        cursor: filters.cursor || null,
       },
     });
   } catch (err) {
+    if (err instanceof AuditLogQueryAccessError) {
+      return res.status(err.statusCode).json({ success: false, error: err.message });
+    }
     console.error("Audit logs error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }

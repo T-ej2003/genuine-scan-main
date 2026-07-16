@@ -46,6 +46,10 @@ assert(
   auditRoutesSource.includes('"/logs/export", auditLogsExportPreAuthRouteLimiter, authenticate, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
   "audit CSV export must require the approved platform-admin MFA ceiling before tenant isolation"
 );
+assert(
+  auditRoutesSource.includes('"/logs", auditLogsReadPreAuthRouteLimiter, authenticate, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
+  "audit log reads must require the approved MFA ceiling before tenant isolation"
+);
 
 [
   "...verifyCodeLimiters",

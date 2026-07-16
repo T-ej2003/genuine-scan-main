@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "groupingRule": "One workflow per execution surface, canonical source file, and containing function; repeated table calls within that function remain one functional workflow.",
   "generatedEvidence": {
-    "productionAccessSites": 1024,
+    "productionAccessSites": 1026,
     "testPathsExcluded": [
       "backend/tests",
       "scripts/tests"
@@ -72,22 +72,22 @@
         {
           "method": "GET",
           "path": "/logs/export",
-          "source": "backend/src/routes/auditRoutes.ts:184"
+          "source": "backend/src/routes/auditRoutes.ts:185"
         },
         {
           "method": "GET",
           "path": "/stream",
-          "source": "backend/src/routes/auditRoutes.ts:196"
+          "source": "backend/src/routes/auditRoutes.ts:197"
         },
         {
           "method": "GET",
           "path": "/fraud-reports",
-          "source": "backend/src/routes/auditRoutes.ts:207"
+          "source": "backend/src/routes/auditRoutes.ts:208"
         },
         {
           "method": "POST",
           "path": "/fraud-reports/:id/respond",
-          "source": "backend/src/routes/auditRoutes.ts:226"
+          "source": "backend/src/routes/auditRoutes.ts:227"
         },
         {
           "method": "POST",
@@ -5393,16 +5393,27 @@
       "authenticationStage": "authenticated",
       "actorClasses": [
         "licensee-admin",
-        "operator",
+        "manufacturer",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
-        "backend/src/controllers/auditController.ts"
+        "backend/src/controllers/auditController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/services/auditLogQueryService.ts"
       ],
       "tablesTouched": [
+        "table-audit-log",
         "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ]
+        },
         {
           "tableId": "table-user",
           "commands": [
@@ -5410,24 +5421,41 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "Tenant administrators use their canonical licensee; manufacturers use their own actor plus one approved linked licensee; platform administrators require fresh MFA, one explicit licensee and purpose. Filters only narrow authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "fresh administrator MFA",
+        "bounded tenant or manufacturer scope",
+        "platform purpose and request attribution",
+        "count, list, enrichment and attribution share the installed transaction client"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A licensee administrator with fresh MFA reads only audit rows for the authenticated licensee.",
+        "A manufacturer with fresh MFA reads only self-attributed audit rows in one approved linked licensee.",
+        "A validated platform administrator with fresh MFA, purpose and request attribution reads one explicit licensee.",
+        "Actor, event, resource, bounded date, cursor and offset filters only narrow the canonical scope.",
+        "Count, list, user-name enrichment and immutable read attribution execute after context installation on one transaction client.",
+        "The response retains pagination shape while omitting IP hashes, blanking enrichment email and recursively redacting secret-bearing details."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Foreign or blank licensee, organization, manufacturer or actor scope is denied.",
+        "Missing actor, request ID, tenant scope, fresh MFA, platform purpose or platform licensee is denied.",
+        "Ordinary authenticated roles and unsupported assurance values are denied.",
+        "Invalid UUIDs, cursors, pagination combinations and incomplete, reversed or over-90-day date ranges are denied.",
+        "Filters that differ from canonical context are denied before protected reads.",
+        "No protected query may use the global Prisma client or execute before context installation or after transaction completion.",
+        "Password, token, credential, MFA, session, cookie, authorization, hash, API-key, signing and private-key material is redacted recursively."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-321d19647013807e",
-        "access-4b9aa3d277641e5d"
+        "access-09f6c1872aea2b8c",
+        "access-3f6a7323e3c9b5ef",
+        "access-7fbee7c5bdbd28d8",
+        "access-ad14196680b38d1b"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "context-boundary-implemented-postgresql-certification-pending",
+      "implementationStatus": "context-boundary-implemented",
       "requiredUnitTests": [
         "Allowed and denied command contract for this canonical workflow."
       ],
@@ -5437,34 +5465,75 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-321d19647013807e",
-          "source": "backend/src/controllers/auditController.ts:98",
+          "accessId": "access-09f6c1872aea2b8c",
+          "source": "backend/src/services/auditLogQueryService.ts:167",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-4b9aa3d277641e5d",
-          "source": "backend/src/controllers/auditController.ts:132",
+          "accessId": "access-3f6a7323e3c9b5ef",
+          "source": "backend/src/services/auditLogQueryService.ts:163",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "count"
+        },
+        {
+          "accessId": "access-7fbee7c5bdbd28d8",
+          "source": "backend/src/services/auditLogQueryService.ts:177",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-ad14196680b38d1b",
+          "source": "backend/src/services/auditLogQueryService.ts:144",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
+        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-select-97535583a8fe",
         "command-user-select-97535583a8fe"
       ],
       "commandActorClasses": [
         "licensee-admin",
-        "operator",
+        "manufacturer",
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryStatus": "implemented",
+      "implementationFiles": [
+        "backend/src/controllers/auditController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/routes/auditRoutes.ts",
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/services/auditLogQueryService.ts"
+      ],
+      "testFiles": [
+        "backend/tests/auditLogQueryContext.test.js",
+        "backend/tests/routeSecurityContracts.test.js",
+        "backend/tests/securityResponseSurface.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "postgresqlCertificationStatus": "pending",
+      "platformAdminRequiredAssurance": "mfa-verified",
+      "remainingCertification": "Disposable PostgreSQL tests must prove exact app-role grants, AuditLog and User policy enforcement, cross-tenant denial and empty-context denial before production certification."
     },
     {
       "id": "workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report",
@@ -5504,7 +5573,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-1168db4d90b261e3"
+        "access-39c7814659f6d612"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -5517,8 +5586,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-1168db4d90b261e3",
-          "source": "backend/src/controllers/auditController.ts:313",
+          "accessId": "access-39c7814659f6d612",
+          "source": "backend/src/controllers/auditController.ts:275",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }

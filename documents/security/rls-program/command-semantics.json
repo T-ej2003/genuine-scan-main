@@ -2485,6 +2485,68 @@
       "operatorBoundaryStatus": "resolved"
     },
     {
+      "id": "command-audit-log-insert-97535583a8fe",
+      "tableId": "table-audit-log",
+      "command": "INSERT",
+      "actorClasses": [
+        "manufacturer",
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "scopeRule": "Tenant administrators require their canonical licensee; manufacturers require their own actor plus an approved linked licensee; platform administrators require fresh MFA, one explicit licensee and purpose. Every filter only narrows that boundary.",
+      "allowedColumns": [
+        "action",
+        "entityId",
+        "entityType",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "details",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "New row preserves trusted actor, tenant, request and purpose context. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "ordinary-rls",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-http-backend-src-controllers-audit-controller-ts-get-logs"
+      ],
+      "supportingEvidence": [
+        "backend/src/controllers/auditController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/services/auditLogQueryService.ts"
+      ],
+      "allowScenarios": [
+        "manufacturer or licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-audit-log-insert-a9a52392104e",
       "tableId": "table-audit-log",
       "command": "INSERT",
@@ -3672,6 +3734,75 @@
       ],
       "allowScenarios": [
         "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-audit-log-select-97535583a8fe",
+      "tableId": "table-audit-log",
+      "command": "SELECT",
+      "actorClasses": [
+        "manufacturer",
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "scopeRule": "Tenant administrators require their canonical licensee; manufacturers require their own actor plus an approved linked licensee; platform administrators require fresh MFA, one explicit licensee and purpose. Every filter only narrows that boundary.",
+      "allowedColumns": [
+        "id",
+        "userId",
+        "orgId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "details",
+        "ipAddress",
+        "userAgent",
+        "createdAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "details",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "ordinary-rls",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-http-backend-src-controllers-audit-controller-ts-get-logs"
+      ],
+      "supportingEvidence": [
+        "backend/src/controllers/auditController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/services/auditLogQueryService.ts"
+      ],
+      "allowScenarios": [
+        "manufacturer or licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -74234,32 +74365,18 @@
       "tableId": "table-user",
       "command": "SELECT",
       "actorClasses": [
-        "operator",
+        "manufacturer",
         "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
-      "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "minimumAssurance": "mfa-verified",
+      "scopeRule": "Tenant administrators require their canonical licensee; manufacturers require their own actor plus an approved linked licensee; platform administrators require fresh MFA, one explicit licensee and purpose. Every filter only narrows that boundary.",
       "allowedColumns": [
-        "createdAt",
-        "deletedAt",
-        "disabledAt",
-        "disabledReason",
-        "failedLoginAttempts",
         "id",
-        "isActive",
-        "lastLoginAt",
-        "licenseeId",
-        "lockedUntil",
-        "name",
-        "orgId",
-        "role",
-        "status",
-        "updatedAt",
-        "website"
+        "name"
       ],
       "protectedColumns": [
         "createdAt",
@@ -74295,13 +74412,13 @@
         "status"
       ],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "authenticated-security-repository-function",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -74309,10 +74426,13 @@
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs"
       ],
       "supportingEvidence": [
-        "backend/src/controllers/auditController.ts"
+        "backend/src/controllers/auditController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/services/auditLogQueryService.ts"
       ],
       "allowScenarios": [
-        "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "manufacturer or licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."

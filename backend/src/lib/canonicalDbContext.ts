@@ -92,9 +92,10 @@ export const installCanonicalDbContext = async (
 export const withCanonicalDbContext = async <T>(
   runner: TransactionRunner,
   context: CanonicalDbContext,
-  callback: (tx: Prisma.TransactionClient, installedContext: CanonicalDbContext) => Promise<T>
+  callback: (tx: Prisma.TransactionClient, installedContext: CanonicalDbContext) => Promise<T>,
+  options?: { isolationLevel?: Prisma.TransactionIsolationLevel; maxWait?: number; timeout?: number }
 ) =>
   runner.$transaction(async (tx) => {
     const installedContext = await installCanonicalDbContext(tx, context);
     return callback(tx, installedContext);
-  });
+  }, options);

@@ -111,6 +111,7 @@ for (const workflow of workflows.workflows) {
     assert.equal(workflow.implementationStatus, "context-boundary-implemented", `${workflow.id} has an inconsistent context-boundary status`);
     assert(workflow.implementationFiles?.length && workflow.implementationFiles.every((file) => fs.existsSync(file)), `${workflow.id} lacks implementation files`);
     assert(workflow.testFiles?.length && workflow.testFiles.every((file) => fs.existsSync(file)), `${workflow.id} lacks context-boundary tests`);
+    assert(workflow.tablesTouched?.length, `${workflow.id} lacks protected-table evidence`);
     assert.deepEqual(
       [...workflow.canonicalContextKeys].sort(),
       ["app.auth_assurance", "app.licensee_id", "app.manufacturer_id", "app.organization_id", "app.purpose", "app.request_id", "app.role", "app.user_id"],
