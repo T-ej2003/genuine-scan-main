@@ -13,6 +13,7 @@ import {
   isAuditManufacturerUser,
   isAuditSuperUser,
 } from "../services/auditExportRedactionService";
+import { AuditCsvExportAccessError, readAuditCsvExport } from "../services/auditCsvExportService";
 
 const fraudResponseSchema = z.object({
   status: z.enum(["REVIEWED", "RESOLVED", "DISMISSED"]).default("REVIEWED"),
@@ -40,6 +41,7 @@ const auditExportQuerySchema = z.object({
   entityId: z.string().trim().max(160).optional(),
   action: z.string().trim().max(160).optional(),
   licenseeId: z.string().uuid().optional(),
+  purpose: z.string().trim().min(1).max(240).optional(),
 }).strict();
 
 const defaultFraudReply = (status: "REVIEWED" | "RESOLVED" | "DISMISSED", code: string) => {
@@ -152,64 +154,35 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
     }
 
     const limit = parsed.data.limit ?? 5000;
-    const entityType = parsed.data.entityType;
-    const entityId = parsed.data.entityId;
-    const action = parsed.data.action;
-
     const isSuper = isAuditSuperUser(req.user.role);
-    const isManufacturer = isAuditManufacturerUser(req.user.role);
-    const licenseeId = isSuper ? parsed.data.licenseeId : isManufacturer ? undefined : req.user.licenseeId ?? undefined;
-
-    let userIds: string[] | undefined;
-    if (isManufacturer) {
-      userIds = [req.user.userId];
-    } else if (!isSuper && licenseeId) {
-      const users = await prisma.user.findMany({
-        where: {
-          OR: [{ licenseeId }, { manufacturerLicenseeLinks: { some: { licenseeId } } }],
-        },
-        select: { id: true },
-      });
-      userIds = users.map((u) => u.id);
-    }
 
     if (
       req.user.role !== UserRole.SUPER_ADMIN &&
       req.user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
-      action &&
-      hiddenActionsForNonSuper.includes(action)
+      parsed.data.action &&
+      hiddenActionsForNonSuper.includes(parsed.data.action)
     ) {
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
       return res.status(200).send(emptyAuditCsv(isSuper));
     }
 
-    const result = await getAuditLogs({
-      entityType,
-      entityId,
-      action,
-      excludeActions:
-        isSuper ? undefined : hiddenActionsForNonSuper,
-      licenseeId,
-      userIds,
-      limit,
-      offset: 0,
+    const result = await readAuditCsvExport({
+      user: req.user,
+      requestId: String((req as AuthRequest & { requestId?: string }).requestId || req.get("x-request-id") || "").trim(),
+      filters: {
+        ...parsed.data,
+        limit,
+      },
     });
-
-    const userIdsForMap = Array.from(new Set(result.logs.map((l) => l.userId).filter(Boolean))) as string[];
-    let userMap = new Map<string, { id: string; name: string; email: string }>();
-    if (userIdsForMap.length > 0) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: userIdsForMap } },
-        select: { id: true, name: true, email: true },
-      });
-      userMap = new Map(users.map((u) => [u.id, u]));
-    }
 
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", "attachment; filename=\"audit-logs.csv\"");
-    return res.status(200).send(buildAuditLogsCsv(result.logs, userMap, isSuper));
+    return res.status(200).send(buildAuditLogsCsv(result.logs, result.userMap, result.isSuper));
   } catch (err) {
+    if (err instanceof AuditCsvExportAccessError) {
+      return res.status(err.statusCode).json({ success: false, error: err.message });
+    }
     console.error("Audit logs export error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }

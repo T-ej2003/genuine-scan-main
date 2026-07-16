@@ -1175,7 +1175,7 @@
       "resolvedAt": "2026-07-16",
       "resolution": {
         "authority": "documents/security/rls-program/command-semantics.json",
-        "rules": 983,
+        "rules": 985,
         "forceRlsTables": 75,
         "workflowsMapped": 428,
         "commandVocabulary": [

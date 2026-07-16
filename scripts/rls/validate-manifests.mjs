@@ -107,6 +107,19 @@ for (const workflow of workflows.workflows) {
     for (const command of item.commands) assert(commands.has(command), `${workflow.id} has invalid command ${command}`);
   }
   for (const id of workflow.unresolvedDecisions) assert(decisionIds.has(id), `${workflow.id} references missing decision ${id}`);
+  if (workflow.contextBoundaryStatus === "implemented") {
+    assert.equal(workflow.implementationStatus, "context-boundary-implemented", `${workflow.id} has an inconsistent context-boundary status`);
+    assert(workflow.implementationFiles?.length && workflow.implementationFiles.every((file) => fs.existsSync(file)), `${workflow.id} lacks implementation files`);
+    assert(workflow.testFiles?.length && workflow.testFiles.every((file) => fs.existsSync(file)), `${workflow.id} lacks context-boundary tests`);
+    assert.deepEqual(
+      [...workflow.canonicalContextKeys].sort(),
+      ["app.auth_assurance", "app.licensee_id", "app.manufacturer_id", "app.organization_id", "app.purpose", "app.request_id", "app.role", "app.user_id"],
+      `${workflow.id} lacks the canonical context keys`
+    );
+    assert.equal(workflow.sameTransactionGuarantee, true, `${workflow.id} lacks the same-transaction guarantee`);
+    assert(["pending", "certified"].includes(workflow.postgresqlCertificationStatus), `${workflow.id} lacks PostgreSQL certification status`);
+    assert(workflow.expectedAllowedScenarios.length && workflow.expectedDeniedScenarios.length, `${workflow.id} lacks implemented allow/deny scenarios`);
+  }
   if (["worker", "scheduled"].includes(workflow.executionSurface)) assert(workflow.contextRequirements.includes("approved restricted system identity"), `${workflow.id} needs an explicit system identity design`);
 }
 for (const rule of commandSemantics.rules) {

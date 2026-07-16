@@ -660,6 +660,8 @@ const commandActorsFor = (workflow, table, routeEvidence) => {
   return ["authenticated-user"];
 };
 
+const AUDIT_CSV_EXPORT_WORKFLOW_ID = "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv";
+
 const runtimeIdentityForCommand = (workflow) => workflow.authorizationBoundaryType === "operator-break-glass" ? "identity-production-break-glass"
   : workflow.authorizationBoundaryType === "pre-auth-security-function" ? "identity-pre-auth-app"
     : workflow.executionSurface === "worker" ? "identity-worker"
@@ -670,6 +672,7 @@ const runtimeIdentityForCommand = (workflow) => workflow.authorizationBoundaryTy
 
 const assuranceForCommand = (workflow, actors, command, table, routeEvidence) => {
   const guards = new Set(routeEvidence?.guards || []);
+  if (workflow.id === AUDIT_CSV_EXPORT_WORKFLOW_ID) return "password-verified";
   if (actors.includes("break-glass")) return "dual-approved-break-glass";
   if (actors.includes("operator-admin")) return "operator-approved";
   if (actors.includes("worker") || actors.includes("scheduled-job") || actors.includes("migration")) return "system-verified";
@@ -753,14 +756,17 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   const scalarColumns = scalarColumnsFor(table);
   const protectedColumns = protectedColumnsFor(table);
   const lifecycle = lifecycleFor(table, command, workflow);
-  const securityFunction = table.primaryCategory === "security-sensitive" && (command !== "SELECT" || table.sensitiveColumns.length > 0);
+  const auditCsvExport = workflow.id === AUDIT_CSV_EXPORT_WORKFLOW_ID;
+  const securityFunction = table.primaryCategory === "security-sensitive" && (command !== "SELECT" || table.sensitiveColumns.length > 0) && !auditCsvExport;
   const preAuthFunction = actors.includes("pre-auth-runtime");
   const workerBoundary = actors.some((actor) => ["worker", "scheduled-job"].includes(actor));
   const operatorApproval = actors.some((actor) => ["operator-admin", "break-glass"].includes(actor));
   const rawEvidence = workflow.supportingEvidence.some((evidence) => evidence.method?.startsWith("$"));
-  const allowedColumns = command === "DELETE" ? [] : command === "SELECT"
+  let allowedColumns = command === "DELETE" ? [] : command === "SELECT"
     ? scalarColumns.filter((column) => !(table.primaryCategory === "security-sensitive" && table.sensitiveColumns.includes(column)))
     : scalarColumns.filter((column) => !protectedColumns.includes(column));
+  if (auditCsvExport && table.prismaModel === "User" && command === "SELECT") allowedColumns = ["id", "name"];
+  if (auditCsvExport && table.prismaModel === "AuditLog" && command === "SELECT") allowedColumns = ["id", "createdAt", "action", "entityType", "entityId", "userId", "licenseeId"];
   const hardDeleteSemantics = command === "DELETE" ? deleteSemanticsFor(table, workflow) : "not-applicable";
   const approvalClass = actors.includes("break-glass") ? "dual-approved-break-glass"
     : actors.includes("operator-admin") ? "operator-approved"
@@ -777,13 +783,19 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
     actorClasses: actors,
     runtimeIdentities: [identityId],
     minimumAssurance: assurance,
-    scopeRule: scopeRuleFor(table, actors),
+    scopeRule: auditCsvExport
+      ? "Tenant actors require matching canonical licensee or manufacturer actor context; platform administrators require fresh MFA, one explicit licensee scope and a recorded purpose. Filters only narrow scope."
+      : scopeRuleFor(table, actors),
     allowedColumns,
     protectedColumns,
     allowedLifecycleStates: lifecycle.allowed,
     forbiddenLifecycleStates: lifecycle.forbidden,
     lifecycleColumns: lifecycle.columns,
-    withCheckRule: command === "SELECT" || command === "DELETE" ? "not-applicable" : `New row preserves ${scopeRuleFor(table, actors)} Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.`,
+    withCheckRule: command === "SELECT" || command === "DELETE"
+      ? "not-applicable"
+      : auditCsvExport
+        ? "New row preserves trusted actor, tenant, request and purpose context. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary."
+        : `New row preserves ${scopeRuleFor(table, actors)} Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.`,
     requiresNamedFunction,
     namedFunctionClass: requiresNamedFunction ? (preAuthFunction ? "narrow-pre-auth-security-definer" : rawEvidence ? "exact-reviewed-query-function" : "authenticated-security-repository-function") : "none",
     requiresRestrictedWorkerBoundary: workerBoundary,
@@ -833,8 +845,13 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
     workflow.requiredAssurance = [...new Set(workflow.requiredAssurance)].sort();
     workflow.runtimeIdentities = [...new Set(workflow.runtimeIdentities)].sort();
     workflow.semanticStatus = workflow.commandRuleIds.length || workflow.tablesTouched.every((id) => !tablesById.get(id)?.forceRlsTarget) ? "mapped" : "unresolved";
-    workflow.expectedAllowedScenarios = ["Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."];
-    workflow.expectedDeniedScenarios = ["Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."];
+    if (workflow.contextBoundaryStatus !== "implemented") {
+      workflow.expectedAllowedScenarios = ["Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."];
+      workflow.expectedDeniedScenarios = ["Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."];
+    }
+    if (workflow.platformAdminRequiredAssurance) {
+      workflow.requiredAssurance = [...new Set([...workflow.requiredAssurance, workflow.platformAdminRequiredAssurance])].sort();
+    }
     workflow.unresolvedDecisions = workflow.unresolvedDecisions.filter((id) => id !== "decision-policy-command-semantics");
   }
   for (const table of tableManifest.tables.filter((item) => item.forceRlsTarget)) {
@@ -1162,7 +1179,12 @@ const buildWorkerBoundaryManifest = (workflowManifest, commandManifest, currentT
       else workflow.commandsPerTable.push({ tableId: tableCommand.tableId, commands: [...tableCommand.commands].sort() });
       for (const command of tableCommand.commands) {
         if (rules.some((rule) => rule.tableId === tableCommand.tableId && rule.command === command)) continue;
-        const source = commandManifest.rules.find((rule) => rule.tableId === tableCommand.tableId && rule.command === command && rule.authorizationBoundary !== "prohibited");
+        const source = commandManifest.rules.find((rule) =>
+          rule.tableId === tableCommand.tableId &&
+          rule.command === command &&
+          rule.authorizationBoundary !== "prohibited" &&
+          !rule.supportingWorkflowIds.includes(AUDIT_CSV_EXPORT_WORKFLOW_ID)
+        );
         assert(source, `${definition.id} cannot derive ${tableCommand.tableId}:${command} command semantics`);
         const rule = structuredClone(source);
         rule.id = `command-${slug(tableCommand.tableId.replace(/^table-/, ""))}-${command.toLowerCase()}-${definition.id}`;
@@ -1639,12 +1661,18 @@ export const buildWorkflowManifest = () => {
   const previous = new Map(existing.workflows.map((workflow) => [workflow.id, workflow]));
   const groups = new Map();
   for (const access of scan.accesses) {
-    const key = `${access.executionSurface}:${access.sourceFile}:${access.function}`;
+    const key = access.sourceFile === "backend/src/services/auditCsvExportService.ts" && access.function === "readAuditCsvExport"
+      ? "http:backend/src/controllers/auditController.ts:exportLogsCsv"
+      : `${access.executionSurface}:${access.sourceFile}:${access.function}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(access);
   }
   const workflows = [...groups.entries()].map(([key, accesses]) => {
-    const first = accesses[0];
+    const firstAccess = accesses[0];
+    const delegatedAuditExport = key === "http:backend/src/controllers/auditController.ts:exportLogsCsv";
+    const first = delegatedAuditExport
+      ? { ...firstAccess, executionSurface: "http", sourceFile: "backend/src/controllers/auditController.ts", function: "exportLogsCsv" }
+      : firstAccess;
     const id = `workflow-${slug(key)}`;
     const old = previous.get(id) || {};
     const boundary = old.authorizationBoundaryType || boundaryFor(path.join(repoRoot, first.sourceFile), first.function, first.executionSurface);
@@ -1661,7 +1689,9 @@ export const buildWorkflowManifest = () => {
       executionSurface: first.executionSurface,
       authenticationStage: old.authenticationStage || (preAuth ? "pre-authentication" : background || ["cli", "startup"].includes(first.executionSurface) ? "system" : "authenticated"),
       actorClasses: old.actorClasses || (background ? ["system-job"] : preAuth ? ["anonymous-or-partially-authenticated"] : first.executionSurface === "cli" ? ["operator"] : ["authenticated-user"]),
-      canonicalSourceFiles: [...new Set(accesses.map((access) => access.sourceFile))].sort(),
+      canonicalSourceFiles: old.contextBoundaryStatus === "implemented"
+        ? old.canonicalSourceFiles
+        : [...new Set(accesses.map((access) => access.sourceFile))].sort(),
       tablesTouched: mergedCommands.map((item) => item.tableId),
       commandsPerTable: mergedCommands,
       tenantScopeRule: old.tenantScopeRule || "unresolved; must be approved before implementation",

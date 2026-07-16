@@ -29,11 +29,11 @@ Migration may perform required DDL only through an explicitly approved deploymen
 
 ## Canonical transaction context
 
-Authenticated database work occurs inside one transaction that validates and sets the six transaction-local settings already used by the prototype: actor/user ID, normalized role, licensee ID, organization ID, manufacturer ID, and platform-administrator boolean. Context is derived from authenticated server state, never accepted directly from request or queue payloads, and the transaction client cannot escape its callback. Missing, malformed, forged, stale, or cross-tenant context fails closed.
+Authenticated database work occurs inside one transaction that validates and sets the canonical transaction-local settings `app.user_id`, `app.role`, `app.organization_id`, `app.licensee_id`, `app.manufacturer_id`, `app.auth_assurance`, `app.request_id`, and `app.purpose`. Platform authority is not inferred from a caller-set boolean: the route guard, validated role, assurance, bounded scope and purpose must all agree. Context is derived from authenticated server state, never accepted directly from request or queue payloads, and the transaction client cannot escape its callback. Missing, malformed, forged, stale, blank, or cross-tenant context fails closed.
 
 Worker transactions use a separate system context: `app.system_identity`, `app.job_id`, `app.job_type`, `app.organization_id`, `app.licensee_id`, `app.manufacturer_id`, `app.initiating_user_id`, `app.request_id`, and `app.auth_assurance=system-verified`. Every value is transaction-local, installed in the same transaction as protected commands, derived from verified durable job evidence, and automatically cleared at transaction end. Worker context never sets `app.role`, platform-admin state, or a human executor identity.
 
-`decision-policy-command-semantics` is resolved by `command-semantics.json`. Future changes should reuse the existing transaction-context primitive after it is promoted and certified; no second context implementation is needed.
+`decision-policy-command-semantics` is resolved by `command-semantics.json`. `backend/src/lib/canonicalDbContext.ts` is the promoted application primitive: it validates the context shape and assurance vocabulary, rejects explicit blank values and unknown keys, parameterizes one `set_config(..., true)` statement, and runs the protected callback on that same interactive Prisma transaction client. The audit CSV export is its first application workflow; later slices reuse this primitive rather than adding another context implementation. PostgreSQL policy certification remains separate and pending.
 
 ## Command authorization semantics
 

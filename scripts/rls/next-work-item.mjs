@@ -12,7 +12,7 @@ const decisionSections = {
 const priority = [
   ["architecture-decision", () => decisions.decisions.find((decision) => decision.blockingStatus === "blocking" && decision.status !== "resolved")],
   ["runtime-identity", () => decisions.decisions.find((decision) => /identity|role/i.test(`${decision.id} ${decision.question}`) && decision.status !== "resolved")],
-  ["context-boundary", () => workflows.workflows.find((workflow) => workflow.authorizationBoundaryType === "authenticated-context" && workflow.implementationStatus !== "complete")],
+  ["context-boundary", () => workflows.workflows.find((workflow) => workflow.authorizationBoundaryType === "authenticated-context" && workflow.contextBoundaryStatus !== "implemented" && workflow.implementationStatus !== "complete")],
   ["pre-auth-boundary", () => workflows.workflows.find((workflow) => workflow.authorizationBoundaryType === "pre-auth-security-function" && workflow.implementationStatus !== "complete")],
   ["authenticated-workflow", () => workflows.workflows.find((workflow) => workflow.authenticationStage === "authenticated" && workflow.implementationStatus !== "complete")],
   ["worker-system-workflow", () => workflows.workflows.find((workflow) => ["worker", "scheduled", "startup", "cli"].includes(workflow.executionSurface) && workflow.implementationStatus !== "complete")],

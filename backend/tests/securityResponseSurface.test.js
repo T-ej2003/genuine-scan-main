@@ -78,6 +78,26 @@ const createResponse = () => ({
       total: 1,
     }),
   });
+  mockModule("services/auditCsvExportService.js", {
+    AuditCsvExportAccessError: class AuditCsvExportAccessError extends Error {},
+    readAuditCsvExport: async () => ({
+      logs: [
+        {
+          id: "audit-row",
+          createdAt: new Date("2026-05-18T00:00:00.000Z"),
+          action: "QR_EXPORT",
+          entityType: "QRCode",
+          entityId: "internal-qr-id",
+          userId: "actor-user",
+          licenseeId: "lic-secret",
+          ipAddress: "10.0.0.1",
+          details: { secret: "private-detail", manufacturerId: "manufacturer-secret" },
+        },
+      ],
+      userMap: new Map([["actor-user", { id: "actor-user", name: "Scoped Admin", email: "" }]]),
+      isSuper: false,
+    }),
+  });
   mockModule("services/degradationEventService.js", { recordDegradationEvent: async () => undefined });
   mockModule("services/verificationDecisionService.js", {
     attachVerificationPresentationSnapshot: async () => undefined,
@@ -108,6 +128,7 @@ const createResponse = () => ({
   await exportLogsCsv(
     {
       query: {},
+      requestId: "request-audit-export",
       ip: "127.0.0.1",
       user: {
         userId: "licensee-admin-a",

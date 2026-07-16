@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "groupingRule": "One workflow per execution surface, canonical source file, and containing function; repeated table calls within that function remain one functional workflow.",
   "generatedEvidence": {
-    "productionAccessSites": 1020,
+    "productionAccessSites": 1022,
     "testPathsExcluded": [
       "backend/tests",
       "scripts/tests"
@@ -77,17 +77,17 @@
         {
           "method": "GET",
           "path": "/stream",
-          "source": "backend/src/routes/auditRoutes.ts:195"
+          "source": "backend/src/routes/auditRoutes.ts:196"
         },
         {
           "method": "GET",
           "path": "/fraud-reports",
-          "source": "backend/src/routes/auditRoutes.ts:206"
+          "source": "backend/src/routes/auditRoutes.ts:207"
         },
         {
           "method": "POST",
           "path": "/fraud-reports/:id/respond",
-          "source": "backend/src/routes/auditRoutes.ts:224"
+          "source": "backend/src/routes/auditRoutes.ts:225"
         },
         {
           "method": "POST",
@@ -5113,12 +5113,24 @@
         "platform-admin"
       ],
       "canonicalSourceFiles": [
-        "backend/src/controllers/auditController.ts"
+        "backend/src/routes/auditRoutes.ts",
+        "backend/src/controllers/auditController.ts",
+        "backend/src/services/auditCsvExportService.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/services/auditExportRedactionService.ts"
       ],
       "tablesTouched": [
+        "table-audit-log",
         "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ]
+        },
         {
           "tableId": "table-user",
           "commands": [
@@ -5126,26 +5138,40 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "Licensee and organization administrators are bound to their authenticated licensee; manufacturers are bound to their own actor evidence; platform administrators require fresh MFA, an explicit licenseeId and a nonblank export purpose. Query filters may only narrow that resolved scope.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "context installation and all User/AuditLog reads use one interactive Prisma transaction client",
+        "platform export requires mfa-verified assurance, explicit bounded licensee scope and purpose"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A licensee or organization administrator exports only rows inside the authenticated licensee boundary.",
+        "A manufacturer exports only audit evidence attributed to that authenticated manufacturer actor.",
+        "A platform administrator with fresh MFA exports one explicitly selected licensee for a recorded purpose.",
+        "Entity, action and row-limit filters narrow the already authorized scope."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "A tenant actor requests, omits or tampers with required tenant scope.",
+        "An ordinary authenticated actor without an audit-viewer role requests an export.",
+        "A platform role lacks fresh MFA, explicit licensee scope or purpose.",
+        "Actor, request or tenant context is blank, or a filter attempts to broaden canonical scope.",
+        "A protected query is attempted outside the canonical transaction client.",
+        "CSV output attempts to include AuditLog sensitive columns or User security columns."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-2359ff1254197ebc",
-        "access-8a1b93aa7f51def4"
+        "access-26872b429e521418",
+        "access-86fce06e3ad7d924",
+        "access-c35d2313224e2f2d",
+        "access-ed9820353a9b8768"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "context-boundary-implemented-postgresql-certification-pending",
+      "implementationStatus": "context-boundary-implemented",
       "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
+        "backend/tests/auditCsvExportContext.test.js",
+        "backend/tests/routeSecurityContracts.test.js",
+        "backend/tests/securityResponseSurface.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
@@ -5153,20 +5179,34 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-2359ff1254197ebc",
-          "source": "backend/src/controllers/auditController.ts:202",
+          "accessId": "access-26872b429e521418",
+          "source": "backend/src/services/auditCsvExportService.ts:166",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-86fce06e3ad7d924",
+          "source": "backend/src/services/auditCsvExportService.ts:144",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-8a1b93aa7f51def4",
-          "source": "backend/src/controllers/auditController.ts:167",
+          "accessId": "access-c35d2313224e2f2d",
+          "source": "backend/src/services/auditCsvExportService.ts:109",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-ed9820353a9b8768",
+          "source": "backend/src/services/auditCsvExportService.ts:161",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
+        "command-audit-log-insert-10bb09d50d24",
+        "command-audit-log-select-10bb09d50d24",
         "command-user-select-10bb09d50d24"
       ],
       "commandActorClasses": [
@@ -5175,12 +5215,40 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryStatus": "implemented",
+      "implementationFiles": [
+        "backend/src/routes/auditRoutes.ts",
+        "backend/src/controllers/auditController.ts",
+        "backend/src/services/auditCsvExportService.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/services/auditExportRedactionService.ts"
+      ],
+      "testFiles": [
+        "backend/tests/auditCsvExportContext.test.js",
+        "backend/tests/routeSecurityContracts.test.js",
+        "backend/tests/securityResponseSurface.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "postgresqlCertificationStatus": "pending",
+      "platformAdminRequiredAssurance": "mfa-verified",
+      "remainingCertification": "Disposable PostgreSQL tests must prove exact app-role grants, policy enforcement, cross-tenant denial and empty-context denial before production certification."
     },
     {
       "id": "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports",
@@ -5220,8 +5288,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-42a00e088945fc9e",
-        "access-f499201482326172"
+        "access-2d74f63d418e6abc",
+        "access-eadf544f207fed94"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -5234,14 +5302,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-42a00e088945fc9e",
-          "source": "backend/src/controllers/auditController.ts:302",
+          "accessId": "access-2d74f63d418e6abc",
+          "source": "backend/src/controllers/auditController.ts:260",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-f499201482326172",
-          "source": "backend/src/controllers/auditController.ts:287",
+          "accessId": "access-eadf544f207fed94",
+          "source": "backend/src/controllers/auditController.ts:275",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -5301,8 +5369,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-3785fe727ef21a79",
-        "access-b5d426c150f0f4be"
+        "access-bb9e61bbf80c0272",
+        "access-d5f98e7f4532ac5e"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -5315,14 +5383,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-3785fe727ef21a79",
-          "source": "backend/src/controllers/auditController.ts:81",
+          "accessId": "access-bb9e61bbf80c0272",
+          "source": "backend/src/controllers/auditController.ts:117",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-b5d426c150f0f4be",
-          "source": "backend/src/controllers/auditController.ts:115",
+          "accessId": "access-d5f98e7f4532ac5e",
+          "source": "backend/src/controllers/auditController.ts:83",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -5382,7 +5450,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-ca91441ed964b858"
+        "access-9063aa394801de98"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -5395,8 +5463,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-ca91441ed964b858",
-          "source": "backend/src/controllers/auditController.ts:394",
+          "accessId": "access-9063aa394801de98",
+          "source": "backend/src/controllers/auditController.ts:367",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }

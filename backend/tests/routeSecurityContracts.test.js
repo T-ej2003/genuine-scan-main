@@ -42,6 +42,11 @@ assert(
   assert(!authRoutesSource.includes(pattern), `auth routes should not use spread-applied limiter bundle ${pattern}`);
 });
 
+assert(
+  auditRoutesSource.includes('"/logs/export", auditLogsExportPreAuthRouteLimiter, authenticate, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
+  "audit CSV export must require the approved platform-admin MFA ceiling before tenant isolation"
+);
+
 [
   "...verifyCodeLimiters",
   "...verifyOtpRequestLimiters",
