@@ -23,6 +23,7 @@ export const objectOwnershipChainPath = path.join(programDir, "object-ownership-
 export const objectOwnershipReviewPath = path.join(programDir, "OBJECT_OWNERSHIP_REVIEW.md");
 export const operatorBoundariesPath = path.join(programDir, "operator-boundaries.json");
 export const operatorAdministrationReviewPath = path.join(programDir, "OPERATOR_ADMINISTRATION_REVIEW.md");
+export const systemBoundariesPath = path.join(programDir, "system-boundaries.json");
 export const blockedApplyPath = "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql";
 
 export const commands = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "UPSERT", "COUNT", "RAW_SQL"]);
@@ -881,7 +882,7 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
     workflow.requiredAssurance = [...new Set(workflow.requiredAssurance)].sort();
     workflow.runtimeIdentities = [...new Set(workflow.runtimeIdentities)].sort();
     workflow.semanticStatus = workflow.commandRuleIds.length || workflow.tablesTouched.every((id) => !tablesById.get(id)?.forceRlsTarget) ? "mapped" : "unresolved";
-    if (workflow.contextBoundaryStatus !== "implemented") {
+    if (workflow.contextBoundaryStatus !== "implemented" && !workflow.systemBoundaryId) {
       workflow.expectedAllowedScenarios = ["Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."];
       workflow.expectedDeniedScenarios = ["Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."];
     }
@@ -1847,7 +1848,7 @@ export const buildWorkflowManifest = () => {
   return result;
 };
 
-export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath), workerBoundaries: readJson(workerBoundariesPath), objectOwnershipChain: readJson(objectOwnershipChainPath), operatorBoundaries: readJson(operatorBoundariesPath) });
+export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath), workerBoundaries: readJson(workerBoundariesPath), objectOwnershipChain: readJson(objectOwnershipChainPath), operatorBoundaries: readJson(operatorBoundariesPath), systemBoundaries: readJson(systemBoundariesPath) });
 export const validatePreAuthFunctions = (manifest, workflowManifest, commandManifest, identityManifest, tableManifest) => {
   assert(manifest?.functions?.length, "pre-auth function manifest is missing");
   const workflows = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
