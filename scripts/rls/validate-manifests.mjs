@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
+import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validatePublicReadContract, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
 import { contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch, validateSystemBoundaryContracts } from "./context-boundary-plan.mjs";
 
-const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries, objectOwnershipChain, operatorBoundaries, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling } = manifests();
-assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries && objectOwnershipChain && operatorBoundaries && systemBoundaries && manufacturerBootstrapBoundary && platformReadScopeBoundary && policyAlertActorCeiling, "all programme manifests must exist");
+const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries, objectOwnershipChain, operatorBoundaries, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract } = manifests();
+assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries && objectOwnershipChain && operatorBoundaries && systemBoundaries && manufacturerBootstrapBoundary && platformReadScopeBoundary && policyAlertActorCeiling && publicReadContract, "all programme manifests must exist");
 const modelNames = parseSchema().map((model) => model.name);
 assert.deepEqual([...tables.tables.map((table) => table.prismaModel)].sort(), [...modelNames].sort(), "every Prisma model must appear exactly once");
 assert.equal(new Set(tables.tables.map((table) => table.id)).size, tables.tables.length, "table IDs must be unique");
@@ -146,7 +146,7 @@ for (const rule of commandSemantics.rules) {
     for (const column of [...table.tenantKeyColumns, ...table.actorKeyColumns]) assert(rule.protectedColumns.includes(column), `${rule.id} makes ownership column ${column} generally mutable`);
     assert(rule.withCheckRule && rule.withCheckRule !== "not-applicable", `${rule.id} lacks WITH CHECK semantics`);
   }
-  if (table.primaryCategory === "security-sensitive" && rule.command === "SELECT") for (const column of table.sensitiveColumns) assert(!rule.allowedColumns.includes(column), `${rule.id} broadly selects secret column ${column}`);
+  if (table.primaryCategory === "security-sensitive" && rule.command === "SELECT") for (const column of table.sensitiveColumns) assert(!rule.allowedColumns.includes(column) || (rule.publicFunctionId && rule.requiresNamedFunction), `${rule.id} broadly selects secret column ${column}`);
   assert(!(table.appendOnly && rule.command === "UPDATE" && rule.authorizationBoundary !== "prohibited"), `${rule.id} allows append-only UPDATE`);
   if (rule.command === "DELETE") assert(["prohibited", "soft-delete only", "actor self-delete", "tenant-admin delete", "retention delete", "cascade through approved parent lifecycle", "migration-only", "operator-approved", "break-glass only"].includes(rule.hardDeleteSemantics), `${rule.id} lacks explicit DELETE semantics`);
   if (rule.actorClasses.includes("platform-admin")) {
@@ -181,9 +181,10 @@ validateOperatorBoundaries(operatorBoundaries, workflows, commandSemantics, iden
 validateManufacturerBootstrapBoundary(manufacturerBootstrapBoundary, workflows, commandSemantics, tables, decisions);
 validatePlatformReadScopeBoundary(platformReadScopeBoundary, workflows, commandSemantics, tables, decisions, operatorBoundaries);
 validatePolicyAlertActorCeiling(policyAlertActorCeiling, workflows, commandSemantics, tables, decisions, operatorBoundaries, workerBoundaries);
+validatePublicReadContract(publicReadContract, workflows, commandSemantics, tables, decisions, preAuthFunctions);
 const contextBoundaryFamilies = JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8"));
 validateSystemBoundaryContracts(systemBoundaries, workflows);
-validateContextBoundaryPlan(contextBoundaryFamilies, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling);
+validateContextBoundaryPlan(contextBoundaryFamilies, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract);
 validateContextBoundaryReadBatch(JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8")), contextBoundaryFamilies, workflows, commandSemantics, tables);
 assert(sharedApplyIsBlocked(), "existing shared-table apply must remain blocked before BEGIN");
 console.log(JSON.stringify({ valid: true, tables: tables.tables.length, workflows: workflows.workflows.length, productionAccessSites: mappedAccessIds.size }));

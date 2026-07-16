@@ -3619,7 +3619,9 @@
         "UPDATE"
       ],
       "intendedDatabaseRoles": [
-        "identity-authenticated-app"
+        "identity-auth-function-owner",
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -3822,21 +3824,41 @@
       ],
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedRuntimeWriters": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedCommandsByIdentity": [
         {
-          "identityId": "identity-authenticated-app",
+          "identityId": "identity-auth-function-owner",
           "commands": [
             "INSERT",
+            "SELECT"
+          ],
+          "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
+        {
+          "identityId": "identity-authenticated-app",
+          "commands": [
             "SELECT",
             "UPDATE"
           ],
           "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         }
       ],
@@ -5394,7 +5416,9 @@
         "UPDATE"
       ],
       "intendedDatabaseRoles": [
+        "identity-auth-function-owner",
         "identity-authenticated-app",
+        "identity-pre-auth-app",
         "identity-scheduled-job"
       ],
       "rlsApplicability": "force-rls-target",
@@ -5842,9 +5866,19 @@
         "identity-scheduled-job"
       ],
       "allowedRuntimeWriters": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedCommandsByIdentity": [
+        {
+          "identityId": "identity-auth-function-owner",
+          "commands": [
+            "UPDATE"
+          ],
+          "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
         {
           "identityId": "identity-authenticated-app",
           "commands": [
@@ -5854,6 +5888,15 @@
           ],
           "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         },
         {
@@ -6377,7 +6420,9 @@
         "SELECT"
       ],
       "intendedDatabaseRoles": [
-        "identity-authenticated-app"
+        "identity-auth-function-owner",
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -6507,12 +6552,22 @@
       ],
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app"
       ],
       "allowedCommandsByIdentity": [
+        {
+          "identityId": "identity-auth-function-owner",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
         {
           "identityId": "identity-authenticated-app",
           "commands": [
@@ -6523,6 +6578,15 @@
           "conditions": [
             "DELETE is limited to the approved retention lifecycle; ordinary callers are denied",
             "Scoped projection or append command; mutation of existing evidence is denied"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         }
       ],
@@ -15939,8 +16003,10 @@
         "UPDATE"
       ],
       "intendedDatabaseRoles": [
+        "identity-auth-function-owner",
         "identity-authenticated-app",
         "identity-operator",
+        "identity-pre-auth-app",
         "identity-restricted-read"
       ],
       "rlsApplicability": "force-rls-target",
@@ -16330,13 +16396,25 @@
       "allowedRuntimeReaders": [
         "identity-authenticated-app",
         "identity-operator",
+        "identity-pre-auth-app",
         "identity-restricted-read"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app",
-        "identity-operator"
+        "identity-operator",
+        "identity-pre-auth-app"
       ],
       "allowedCommandsByIdentity": [
+        {
+          "identityId": "identity-auth-function-owner",
+          "commands": [
+            "SELECT",
+            "UPDATE"
+          ],
+          "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
         {
           "identityId": "identity-authenticated-app",
           "commands": [
@@ -16358,6 +16436,15 @@
           ],
           "conditions": [
             "Broker-controlled command allowlist with immutable audit"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         },
         {
@@ -17014,7 +17101,9 @@
         "UPDATE"
       ],
       "intendedDatabaseRoles": [
-        "identity-authenticated-app"
+        "identity-auth-function-owner",
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -17141,21 +17230,38 @@
       ],
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app"
       ],
       "allowedCommandsByIdentity": [
         {
+          "identityId": "identity-auth-function-owner",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
+        {
           "identityId": "identity-authenticated-app",
           "commands": [
             "INSERT",
-            "SELECT",
             "UPDATE"
           ],
           "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         }
       ],
@@ -17217,7 +17323,9 @@
         "UPDATE"
       ],
       "intendedDatabaseRoles": [
-        "identity-authenticated-app"
+        "identity-auth-function-owner",
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -17443,18 +17551,37 @@
         "identity-authenticated-app"
       ],
       "allowedRuntimeWriters": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedCommandsByIdentity": [
         {
-          "identityId": "identity-authenticated-app",
+          "identityId": "identity-auth-function-owner",
           "commands": [
             "INSERT",
+            "UPDATE"
+          ],
+          "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
+        {
+          "identityId": "identity-authenticated-app",
+          "commands": [
             "SELECT",
             "UPDATE"
           ],
           "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         }
       ],
@@ -18729,7 +18856,9 @@
         "UPDATE"
       ],
       "intendedDatabaseRoles": [
-        "identity-authenticated-app"
+        "identity-auth-function-owner",
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -19040,9 +19169,20 @@
         "identity-authenticated-app"
       ],
       "allowedRuntimeWriters": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedCommandsByIdentity": [
+        {
+          "identityId": "identity-auth-function-owner",
+          "commands": [
+            "INSERT",
+            "UPDATE"
+          ],
+          "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
         {
           "identityId": "identity-authenticated-app",
           "commands": [
@@ -19052,6 +19192,15 @@
           ],
           "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         }
       ],
@@ -19132,7 +19281,9 @@
         "UPDATE"
       ],
       "intendedDatabaseRoles": [
-        "identity-authenticated-app"
+        "identity-auth-function-owner",
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -19319,12 +19470,22 @@
       ],
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app"
       ],
       "allowedCommandsByIdentity": [
+        {
+          "identityId": "identity-auth-function-owner",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
         {
           "identityId": "identity-authenticated-app",
           "commands": [
@@ -19334,6 +19495,15 @@
           ],
           "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         }
       ],
@@ -19715,7 +19885,9 @@
         "UPDATE"
       ],
       "intendedDatabaseRoles": [
-        "identity-authenticated-app"
+        "identity-auth-function-owner",
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -19828,12 +20000,22 @@
       "policyDependencyTables": [],
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedRuntimeWriters": [
         "identity-authenticated-app"
       ],
       "allowedCommandsByIdentity": [
+        {
+          "identityId": "identity-auth-function-owner",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
         {
           "identityId": "identity-authenticated-app",
           "commands": [
@@ -19843,6 +20025,15 @@
           ],
           "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         }
       ],
@@ -21601,7 +21792,9 @@
         "SELECT"
       ],
       "intendedDatabaseRoles": [
-        "identity-authenticated-app"
+        "identity-auth-function-owner",
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -21821,20 +22014,39 @@
       "policyDependencyTables": [],
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedRuntimeWriters": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
       "allowedCommandsByIdentity": [
         {
-          "identityId": "identity-authenticated-app",
+          "identityId": "identity-auth-function-owner",
           "commands": [
             "INSERT",
             "SELECT"
           ],
           "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
+        {
+          "identityId": "identity-authenticated-app",
+          "commands": [
+            "SELECT"
+          ],
+          "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         }
       ],
@@ -21905,7 +22117,9 @@
         "UPDATE"
       ],
       "intendedDatabaseRoles": [
-        "identity-authenticated-app"
+        "identity-auth-function-owner",
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "rlsApplicability": "force-rls-target",
       "currentRlsState": "not-verified-for-production",
@@ -22026,21 +22240,41 @@
       ],
       "forceRlsTarget": true,
       "allowedRuntimeReaders": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedRuntimeWriters": [
-        "identity-authenticated-app"
+        "identity-authenticated-app",
+        "identity-pre-auth-app"
       ],
       "allowedCommandsByIdentity": [
         {
-          "identityId": "identity-authenticated-app",
+          "identityId": "identity-auth-function-owner",
           "commands": [
             "INSERT",
+            "SELECT"
+          ],
+          "conditions": [
+            "Exact named function-required column privileges only; no generic query authority"
+          ]
+        },
+        {
+          "identityId": "identity-authenticated-app",
+          "commands": [
             "SELECT",
             "UPDATE"
           ],
           "conditions": [
             "Reviewed canonical workflow with transaction-local actor/tenant context"
+          ]
+        },
+        {
+          "identityId": "identity-pre-auth-app",
+          "commands": [
+            "EXECUTE"
+          ],
+          "conditions": [
+            "EXECUTE only an exact named function signature; no direct table grant"
           ]
         }
       ],

@@ -52,6 +52,7 @@ const allCommands = (workflow) => unique(workflow.commandsPerTable.flatMap((item
 
 const governingBoundary = (workflow) => {
   if (workflow.preAuthBoundary?.boundaryMode === "exact-security-definer-function") return workflow.preAuthBoundary.functionId;
+  if (workflow.publicReadContractBoundaryId && workflow.publicReadFunctionId) return workflow.publicReadFunctionId;
   if (workflow.workerBoundaryId) return workflow.workerBoundaryId;
   if (workflow.operatorBoundaryId) return workflow.operatorBoundaryId;
   if (workflow.systemBoundaryId) return workflow.systemBoundaryId;
@@ -205,7 +206,7 @@ const writeReport = (manifest) => {
 };
 
 export const buildContextBoundaryPlan = () => {
-  const { workflows, commandSemantics, tables, workerBoundaries, operatorBoundaries, preAuthFunctions, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling } = manifests();
+  const { workflows, commandSemantics, tables, workerBoundaries, operatorBoundaries, preAuthFunctions, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract } = manifests();
   const existing = fs.existsSync(contextBoundaryFamiliesPath) ? JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8")) : null;
   const baselineImplementedWorkflowIds = existing?.baselineImplementedWorkflowIds || workflows.workflows.filter((workflow) => workflow.contextBoundaryStatus === "implemented").map((workflow) => workflow.id).sort();
   const rules = new Map(commandSemantics.rules.map((rule) => [rule.id, rule]));
@@ -222,7 +223,7 @@ export const buildContextBoundaryPlan = () => {
     const category = split?.category || systemBoundary?.familyCategory || baseCategory;
     const implementedFamily = workflow.implementationFamilyId || (workflow.id.includes("export-logs-csv") || workflow.id.endsWith("get-logs") ? "family-audit-read-context" : workflow.id.endsWith("get-fraud-reports") ? "family-fraud-report-read" : null);
     const source = workflow.canonicalSourceFiles[0] || "manifest-only";
-    const signature = [baseCategory, source, workflow.authorizationBoundaryType, allCommands(workflow).join("+"), unique(workflow.commandActorClasses || []).join("+"), unique(workflow.requiredAssurance || []).join("+"), ...(workflow.platformReadScopeBoundaryId ? [workflow.platformReadScopeClass, workflow.platformReadExecutionBoundary] : []), ...(workflow.policyAlertActorCeilingBoundaryId ? [workflow.policyAlertClass, workflow.policyAlertExecutionBoundary] : [])].join("|");
+    const signature = [baseCategory, source, workflow.authorizationBoundaryType, allCommands(workflow).join("+"), unique(workflow.commandActorClasses || []).join("+"), unique(workflow.requiredAssurance || []).join("+"), ...(workflow.platformReadScopeBoundaryId ? [workflow.platformReadScopeClass, workflow.platformReadExecutionBoundary] : []), ...(workflow.policyAlertActorCeilingBoundaryId ? [workflow.policyAlertClass, workflow.policyAlertExecutionBoundary] : []), ...(workflow.publicReadContractBoundaryId ? [workflow.publicAccessClass, workflow.publicReadFunctionId] : [])].join("|");
     const defaultFamilyId = implementedFamily || (boundaryId ? `family-contract-${slug(boundaryId)}` : `family-${slug(baseCategory).slice(0, 32)}-${slug(path.basename(source, path.extname(source))).slice(0, 32)}-${digest(signature)}`);
     const key = split ? `family-split-${slug(path.basename(source, path.extname(source))).slice(0, 24)}-${slug(split.semanticKey).slice(0, 36)}-${digest(`${split.parentFamilyId}|${split.semanticKey}`)}` : defaultFamilyId;
     if (!groups.has(key)) groups.set(key, { category, workflows: [], dispositions: [], split });
@@ -241,7 +242,7 @@ export const buildContextBoundaryPlan = () => {
     const blockers = [...blockerByCode.values()].sort((a, b) => a.code.localeCompare(b.code)).map((item) => ({ ...item, id: `blocker-${id}-${item.code}` }));
     if (eligibility.length > 1) blockers.push({ id: `blocker-${id}-mixed-disposition`, code: "mixed-disposition", reason: "Grouped workflows do not share one implementation disposition.", remediation: "Split the family before implementation." });
     const governingBoundaryIds = unique(familyWorkflows.map(governingBoundary));
-    const approvedBoundaryIds = unique(familyWorkflows.flatMap((workflow) => [workflow.manufacturerBootstrapBoundaryId, workflow.platformReadScopeBoundaryId, workflow.policyAlertActorCeilingBoundaryId]));
+    const approvedBoundaryIds = unique(familyWorkflows.flatMap((workflow) => [workflow.manufacturerBootstrapBoundaryId, workflow.platformReadScopeBoundaryId, workflow.policyAlertActorCeilingBoundaryId, workflow.publicReadContractBoundaryId]));
     const systemBoundary = governingBoundaryIds.length === 1 ? systemBoundaryMap.get(governingBoundaryIds[0]) : null;
     const lifecycle = familyRules.filter((rule) => rule.lifecycleColumns?.length).map((rule) => ({ commandRuleId: rule.id, columns: rule.lifecycleColumns, allowed: rule.allowedLifecycleStates, forbidden: rule.forbiddenLifecycleStates }));
     const runtimeIdentities = unique(familyWorkflows.flatMap((workflow) => workflow.runtimeIdentities || []));
@@ -299,16 +300,16 @@ export const buildContextBoundaryPlan = () => {
   }).sort((a, b) => (order.get(a.category) ?? 99) - (order.get(b.category) ?? 99) || a.id.localeCompare(b.id));
   const manifest = {
     schemaVersion: 1,
-    generatedFrom: ["documents/security/rls-program/workflows.json", "documents/security/rls-program/command-semantics.json", "documents/security/rls-program/tables.json", "documents/security/rls-program/runtime-identities.json", "documents/security/rls-program/pre-auth-functions.json", "documents/security/rls-program/worker-boundaries.json", "documents/security/rls-program/operator-boundaries.json", "documents/security/rls-program/system-boundaries.json", "documents/security/rls-program/manufacturer-bootstrap-boundary.json", "documents/security/rls-program/platform-read-scope-boundary.json", "documents/security/rls-program/policy-alert-actor-ceiling.json", "documents/security/rls-program/policy-dependency-graph.json", "documents/security/rls-program/ARCHITECTURE.md", "backend/prisma/schema.prisma"],
+    generatedFrom: ["documents/security/rls-program/workflows.json", "documents/security/rls-program/command-semantics.json", "documents/security/rls-program/tables.json", "documents/security/rls-program/runtime-identities.json", "documents/security/rls-program/pre-auth-functions.json", "documents/security/rls-program/worker-boundaries.json", "documents/security/rls-program/operator-boundaries.json", "documents/security/rls-program/system-boundaries.json", "documents/security/rls-program/manufacturer-bootstrap-boundary.json", "documents/security/rls-program/platform-read-scope-boundary.json", "documents/security/rls-program/policy-alert-actor-ceiling.json", "documents/security/rls-program/public-read-contract.json", "documents/security/rls-program/policy-dependency-graph.json", "documents/security/rls-program/ARCHITECTURE.md", "backend/prisma/schema.prisma"],
     workflowCount: workflows.workflows.length,
     familyCount: families.length,
     baselineImplementedWorkflowIds,
-    approvedBoundaryCounts: { preAuthFunctions: preAuthFunctions.functions.length, workerBoundaries: workerBoundaries.boundaries.length, operatorBoundaries: operatorBoundaries.boundaries.length, systemBoundaries: systemBoundaries.boundaries.length, manufacturerBootstrapBoundaries: 1, platformReadScopeBoundaries: 1, policyAlertActorCeilings: 1 },
+    approvedBoundaryCounts: { preAuthFunctions: preAuthFunctions.functions.length, workerBoundaries: workerBoundaries.boundaries.length, operatorBoundaries: operatorBoundaries.boundaries.length, systemBoundaries: systemBoundaries.boundaries.length, manufacturerBootstrapBoundaries: 1, platformReadScopeBoundaries: 1, policyAlertActorCeilings: 1, publicReadContracts: 1 },
     systemBoundaryContracts: systemBoundaries.boundaries,
     familyOrder: categoryOrder,
     families,
   };
-  validateContextBoundaryPlan(manifest, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling);
+  validateContextBoundaryPlan(manifest, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract);
   fs.writeFileSync(contextBoundaryFamiliesPath, `${JSON.stringify(manifest, null, 2)}\n`);
   writeReport(manifest);
   return manifest;
@@ -340,7 +341,7 @@ export const validateSystemBoundaryContracts = (manifest, workflowManifest) => {
   return true;
 };
 
-export const validateContextBoundaryPlan = (manifest, workflowManifest, commandManifest, tableManifest, systemBoundaryManifest = { boundaries: [] }, manufacturerBootstrapBoundary = null, platformReadScopeBoundary = null, policyAlertActorCeiling = null) => {
+export const validateContextBoundaryPlan = (manifest, workflowManifest, commandManifest, tableManifest, systemBoundaryManifest = { boundaries: [] }, manufacturerBootstrapBoundary = null, platformReadScopeBoundary = null, policyAlertActorCeiling = null, publicReadContract = null) => {
   assert.equal(manifest.schemaVersion, 1, "context family schema version");
   assert.equal(manifest.workflowCount, workflowManifest.workflows.length, "context family workflow count drifted");
   assert.equal(manifest.familyCount, manifest.families.length, "context family count drifted");
@@ -410,6 +411,12 @@ export const validateContextBoundaryPlan = (manifest, workflowManifest, commandM
       assert(policyAlertActorCeiling, `${family.id} lacks policy alert actor-ceiling contract`);
       assert(family.approvedBoundaryIds.includes(policyAlertActorCeiling.id), `${family.id} lacks policy alert actor-ceiling boundary ID`);
     }
+    const publicReadWorkflows = family.workflowIds.filter((id) => workflowManifest.workflows.find((workflow) => workflow.id === id)?.publicReadContractBoundaryId);
+    if (publicReadWorkflows.length) {
+      assert(publicReadContract, `${family.id} lacks public-read contract`);
+      assert(family.approvedBoundaryIds.includes(publicReadContract.id), `${family.id} lacks public-read boundary ID`);
+      assert(family.actorClasses.every((actor) => ["anonymous", "pre-auth-runtime"].includes(actor)), `${family.id} invents authenticated public context`);
+    }
     for (const boundaryId of family.governingBoundaryIds.filter((id) => id.startsWith("system-boundary-"))) {
       assert(systemBoundaryIds.has(boundaryId), `${family.id} references unknown system boundary ${boundaryId}`);
       const boundary = systemBoundaryManifest.boundaries.find((item) => item.id === boundaryId);
@@ -454,6 +461,7 @@ export const validateContextBoundaryReadBatch = (batch, familyManifest, workflow
   assert(batch.actualChanges.netProductionTestChangedLines <= batch.limits.maximumNetProductionTestLines, "read batch exceeds changed-line limit");
 
   const familyById = new Map(familyManifest.families.map((family) => [family.id, family]));
+  const familyByWorkflowId = new Map(familyManifest.families.flatMap((family) => family.workflowIds.map((id) => [id, family])));
   const workflowById = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
   const ruleById = new Map(commandManifest.rules.map((rule) => [rule.id, rule]));
   const tableIds = new Set(tableManifest.tables.map((table) => table.id));
@@ -470,9 +478,21 @@ export const validateContextBoundaryReadBatch = (batch, familyManifest, workflow
     assert(selected.scopeSource?.trim() && selected.assuranceSource?.trim() && selected.rootCallChainEvidence?.length, `${selected.familyId} lacks scope/root evidence`);
     assert(selected.transactionStrategy?.trim() && selected.testPlan?.length && selected.blockerResolutionEvidence?.length, `${selected.familyId} lacks implementation/test evidence`);
     assert(selected.resultingFamilyIds?.length, `${selected.familyId} lacks resulting families`);
-    const resulting = selected.resultingFamilyIds.map((id) => familyById.get(id));
+    let resulting = selected.resultingFamilyIds.map((id) => familyById.get(id));
+    let supersededByFrozenPublicContract = false;
+    if (!resulting.every(Boolean) && selected.workflowIds.every((id) => workflowById.get(id).publicReadContractBoundaryId === "public-read-contract-v1")) {
+      supersededByFrozenPublicContract = true;
+      resulting = [...new Map(selected.workflowIds.map((id) => {
+        const family = familyByWorkflowId.get(id);
+        return [family?.id, family];
+      })).values()];
+    }
     assert(resulting.every(Boolean), `${selected.familyId} resulting family is absent from the plan`);
-    assert.deepEqual(resulting.flatMap((family) => family.workflowIds).sort(), [...selected.workflowIds].sort(), `${selected.familyId} workflow membership drifted`);
+    if (supersededByFrozenPublicContract) {
+      assert(selected.workflowIds.every((id) => resulting.some((family) => family.workflowIds.includes(id))), `${selected.familyId} lost a workflow after public-contract reclassification`);
+    } else {
+      assert.deepEqual(resulting.flatMap((family) => family.workflowIds).sort(), [...selected.workflowIds].sort(), `${selected.familyId} workflow membership drifted`);
+    }
     selected.commandRuleIds.forEach((id) => {
       const rule = ruleById.get(id);
       assert(rule, `${selected.familyId} references unknown command rule ${id}`);
@@ -487,7 +507,13 @@ export const validateContextBoundaryReadBatch = (batch, familyManifest, workflow
       assert(selected.workflowIds.every((id) => workflowById.get(id).contextBoundaryStatus !== "implemented"), `${selected.familyId} is falsely implemented`);
     } else {
       blockedWorkflows += selected.workflowIds.length;
-      assert(resulting.every((family) => family.automationEligibility === "blocked" && family.blockers.length), `${selected.familyId} blocker was silently cleared`);
+      const retainsBlockerOrUsesFrozenPublicContract = resulting.every((family) =>
+        (family.automationEligibility === "blocked" && family.blockers.length)
+        || (family.automationEligibility === "contract-only"
+          && family.approvedBoundaryIds?.includes("public-read-contract-v1")
+          && family.workflowIds.every((id) => workflowById.get(id).publicReadContractBoundaryId === "public-read-contract-v1"))
+      );
+      assert(retainsBlockerOrUsesFrozenPublicContract, `${selected.familyId} blocker was silently cleared`);
     }
     if (selected.resolution === "split-blocked") {
       splitFamilies += 1;

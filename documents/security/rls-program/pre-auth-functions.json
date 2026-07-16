@@ -3,8 +3,10 @@
   "generatedFrom": [
     "documents/security/rls-program/workflows.json",
     "documents/security/rls-program/command-semantics.json",
+    "documents/security/rls-program/public-read-contract.json",
     "backend/src/services/auth"
   ],
+  "publicReadContractReference": "public-read-contract-v1 preserves these seven exact app_auth functions and defines separate app_public functions; no generic pre-auth function or direct-table fallback is approved.",
   "functionCount": 7,
   "securityInvariants": [
     "No dynamic SQL or generic query input",

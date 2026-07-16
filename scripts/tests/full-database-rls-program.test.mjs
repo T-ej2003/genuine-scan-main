@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manufacturerBootstrapBoundaryPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, operatorAdministrationReviewPath, operatorBoundariesPath, parseSchema, platformReadScopeBoundaryPath, policyAlertActorCeilingPath, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, systemBoundariesPath, tableManifestPath, tableOwnershipReviewPath, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manufacturerBootstrapBoundaryPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, operatorAdministrationReviewPath, operatorBoundariesPath, parseSchema, platformReadScopeBoundaryPath, policyAlertActorCeilingPath, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, publicReadContractPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, systemBoundariesPath, tableManifestPath, tableOwnershipReviewPath, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validatePublicReadContract, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 import { buildContextBoundaryPlan, contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, contextBoundaryReportPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch, validateSystemBoundaryContracts } from "../rls/context-boundary-plan.mjs";
 
-const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, objectOwnershipChainPath, objectOwnershipReviewPath, operatorBoundariesPath, operatorAdministrationReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath, systemBoundariesPath, manufacturerBootstrapBoundaryPath, platformReadScopeBoundaryPath, policyAlertActorCeilingPath, contextBoundaryFamiliesPath, contextBoundaryReportPath].map((file) => fs.readFileSync(file, "utf8"));
+const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, objectOwnershipChainPath, objectOwnershipReviewPath, operatorBoundariesPath, operatorAdministrationReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath, systemBoundariesPath, manufacturerBootstrapBoundaryPath, platformReadScopeBoundaryPath, policyAlertActorCeilingPath, publicReadContractPath, contextBoundaryFamiliesPath, contextBoundaryReportPath].map((file) => fs.readFileSync(file, "utf8"));
 
 test("all Prisma models and production access sites are represented exactly and deterministically", () => {
   const before = snapshot();
@@ -79,15 +79,15 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   const generated = buildContextBoundaryPlan();
   assert.equal(fs.readFileSync(contextBoundaryFamiliesPath, "utf8"), beforePlan, "context family plan changed on a second run");
   assert.equal(fs.readFileSync(contextBoundaryReportPath, "utf8"), beforeReport, "context family report changed on a second run");
-  const { workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling } = manifests();
+  const { workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract } = manifests();
   validateSystemBoundaryContracts(systemBoundaries, workflows);
-  validateContextBoundaryPlan(generated, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling);
+  validateContextBoundaryPlan(generated, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract);
   assert.equal(generated.workflowCount, 428);
-  assert.equal(generated.familyCount, 321);
+  assert.equal(generated.familyCount, 316);
   const count = (eligibility) => generated.families.filter((family) => family.automationEligibility === eligibility).reduce((total, family) => total + family.workflowIds.length, 0);
   assert.equal(count("implemented"), 4);
-  assert.equal(count("contract-only"), 40);
-  assert.equal(count("blocked"), 384);
+  assert.equal(count("contract-only"), 59);
+  assert.equal(count("blocked"), 365);
   assert.equal(count("auto-implementable"), 0);
   assert.equal(new Set(generated.families.flatMap((family) => family.workflowIds)).size, workflows.workflows.length);
   const specialWorkflowIds = new Set([
@@ -95,6 +95,7 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
     ...workflows.workflows.filter((workflow) => workflow.workerBoundaryId),
     ...workflows.workflows.filter((workflow) => workflow.operatorBoundaryId),
     ...workflows.workflows.filter((workflow) => workflow.systemBoundaryId),
+    ...workflows.workflows.filter((workflow) => workflow.publicReadContractBoundaryId),
     ...workflows.workflows.filter((workflow) => workflow.authorizationBoundaryType === "migration-owner"),
   ].map((workflow) => workflow.id));
   for (const family of generated.families.filter((family) => family.workflowIds.some((id) => specialWorkflowIds.has(id)))) assert.equal(family.automationEligibility, "contract-only", family.id);
@@ -107,7 +108,7 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
     const candidate = structuredClone(generated);
     const candidateWorkflows = structuredClone(workflows);
     mutate(candidate, candidateWorkflows);
-    assert.throws(() => validateContextBoundaryPlan(candidate, candidateWorkflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling), pattern);
+    assert.throws(() => validateContextBoundaryPlan(candidate, candidateWorkflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract), pattern);
   };
   reject((candidate) => candidate.families[1].workflowIds.push(candidate.families[0].workflowIds[0]), /cover every workflow exactly once|multiple context families/);
   reject((candidate) => { const family = candidate.families.find((item) => item.automationEligibility === "blocked"); family.blockers = []; }, /blocker evidence drifted|lacks exact blockers/);
@@ -215,6 +216,40 @@ test("policy alert actor ceiling is scoped, stateful, attributed, and fail close
   reject((_boundary, _workflows, _rules, candidateDecisions) => { candidateDecisions.decisions.find((decision) => decision.id === "decision-context-policy-alert-actor-ceiling").status = "unresolved"; }, /decision is unresolved/);
 });
 
+test("public-read contract is proof-bound, non-enumerable, projected, and fail closed", () => {
+  const { publicReadContract, workflows, commandSemantics, tables, decisions, preAuthFunctions } = manifests();
+  validatePublicReadContract(publicReadContract, workflows, commandSemantics, tables, decisions, preAuthFunctions);
+  const reject = (mutate, pattern) => {
+    const boundary = structuredClone(publicReadContract);
+    const candidateWorkflows = structuredClone(workflows);
+    const candidateRules = structuredClone(commandSemantics);
+    const candidateDecisions = structuredClone(decisions);
+    const candidatePreAuth = structuredClone(preAuthFunctions);
+    mutate(boundary, candidateWorkflows, candidateRules, candidateDecisions, candidatePreAuth);
+    assert.throws(() => validatePublicReadContract(boundary, candidateWorkflows, candidateRules, tables, candidateDecisions, candidatePreAuth), pattern);
+  };
+  reject((boundary) => { boundary.publicAccessClasses[0] = "anonymous-read"; }, /public access classes drifted|generic public-read class/);
+  reject((boundary) => { boundary.workflowClassifications.shift(); boundary.affectedWorkflows.shift(); }, /public or pre-auth workflow lacks an exact public class/);
+  reject((boundary) => { boundary.namedFunctionContracts[0].maximumRows = 100; }, /permits a public list/);
+  reject((boundary) => { boundary.proofTokenModels.supportStatus.emailAloneSufficient = true; }, /email alone grants public access/);
+  reject((boundary) => { boundary.proofTokenModels.signedQr.unsignedClaimsEstablishAuthority = true; }, /unsigned token fields establish authority/);
+  reject((boundary) => { boundary.proofTokenModels.signedQr.fallbackAfterFailure = true; }, /invalid signature falls back to raw lookup/);
+  reject((boundary) => { boundary.exactPublicProjections["public-qr-verification"].push("riskScore"); }, /secret or tenant-private field riskScore enters public projection/);
+  reject((boundary) => { boundary.qrVerificationContract.readiness = "Any matching QR may be returned."; }, /unreleased QR becomes publicly visible/);
+  reject((boundary) => { boundary.proofTokenModels.supportStatus.referenceAloneSufficient = true; }, /support reference alone grants access/);
+  reject((boundary) => { boundary.feedbackContract.tenantRouting = "Use body.licenseeId."; }, /public feedback accepts caller-provided tenant authority/);
+  reject((_boundary, _workflows, _rules, _decisions, candidatePreAuth) => { candidatePreAuth.functions.find((item) => item.id === "preauth-fn-consume-invitation").expiryRequired = false; }, /token replay or expiry semantics are incomplete/);
+  reject((boundary) => { boundary.publicDownloadContract.artifactRequirements = boundary.publicDownloadContract.artifactRequirements.filter((item) => !/release root/.test(item)); }, /public download permits arbitrary paths/);
+  reject((boundary) => { boundary.policyGovernancePublicContentRules.authenticatedOnly = []; }, /public policy content exposes internal feature flags/);
+  reject((boundary) => { boundary.namedFunctionContracts[0].maximumRows = 50; }, /permits a public list/);
+  reject((boundary) => { boundary.rateLimits.shift(); }, /lacks a public rate-limit class/);
+  reject((boundary) => { boundary.failureSemantics.accountOrInvitationRequest.body = "Account not found."; }, /account or invitation response reveals existence/);
+  reject((boundary) => { boundary.publicActorModel.callerContextTrusted = true; }, /trusts caller context/);
+  reject((_boundary, candidateWorkflows) => { delete candidateWorkflows.workflows.find((workflow) => workflow.publicReadContractBoundaryId).publicReadContractBoundaryId; }, /lacks public-read boundary reference/);
+  reject((_boundary, _workflows, _rules, candidateDecisions) => { candidateDecisions.decisions.find((decision) => decision.id === "decision-context-public-read-contract").status = "unresolved"; }, /decision is unresolved/);
+  reject((_boundary, _workflows, _rules, candidateDecisions) => { candidateDecisions.decisions.find((decision) => decision.id === "decision-context-manufacturer-bootstrap").status = "unresolved"; }, /architecture freeze retains an unresolved blocking decision/);
+});
+
 test("bounded read-family batch is scoped, evidenced, and fail closed", () => {
   const { workflows, commandSemantics, tables } = manifests();
   const families = JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8"));
@@ -267,7 +302,9 @@ test("command semantics mutation guards fail closed", () => {
     for (const rule of candidate.rules) {
       const table = tableById.get(rule.tableId);
       if (["INSERT", "UPDATE"].includes(rule.command)) for (const column of [...table.tenantKeyColumns, ...table.actorKeyColumns]) assert(rule.protectedColumns.includes(column), "ownership mutable");
-      if (table.primaryCategory === "security-sensitive" && rule.command === "SELECT") for (const column of table.sensitiveColumns) assert(!rule.allowedColumns.includes(column), "secret selectable");
+      if (table.primaryCategory === "security-sensitive" && rule.command === "SELECT") for (const column of table.sensitiveColumns) {
+        assert(!rule.allowedColumns.includes(column) || (rule.publicFunctionId && rule.requiresNamedFunction), "secret selectable");
+      }
       assert(!(table.appendOnly && rule.command === "UPDATE" && rule.authorizationBoundary !== "prohibited"), "append-only update");
       if (rule.actorClasses.includes("licensee-admin") && ["User", "Invite"].includes(table.prismaModel) && ["INSERT", "UPDATE"].includes(rule.command)) assert(rule.protectedColumns.includes("role"), "platform role assignable");
       if (rule.actorClasses.includes("platform-admin")) assert(rule.minimumAssurance !== "none" && rule.requiresAuditEvent, "unconditional platform admin");
@@ -285,7 +322,7 @@ test("command semantics mutation guards fail closed", () => {
     assert.throws(() => verify(candidate), pattern);
   };
   rejects((rule) => rule.command === "INSERT" && tableById.get(rule.tableId).tenantKeyColumns.length, (rule) => { rule.protectedColumns = rule.protectedColumns.filter((column) => !tableById.get(rule.tableId).tenantKeyColumns.includes(column)); }, /ownership mutable/);
-  rejects((rule) => rule.command === "SELECT" && tableById.get(rule.tableId).primaryCategory === "security-sensitive" && tableById.get(rule.tableId).sensitiveColumns.length, (rule) => { rule.allowedColumns.push(tableById.get(rule.tableId).sensitiveColumns[0]); }, /secret selectable/);
+  rejects((rule) => rule.command === "SELECT" && !rule.publicFunctionId && tableById.get(rule.tableId).primaryCategory === "security-sensitive" && tableById.get(rule.tableId).sensitiveColumns.length, (rule) => { rule.allowedColumns.push(tableById.get(rule.tableId).sensitiveColumns[0]); }, /secret selectable/);
   rejects((rule) => rule.command === "SELECT" && tableById.get(rule.tableId).appendOnly, (rule) => { rule.command = "UPDATE"; rule.authorizationBoundary = "ordinary-rls"; }, /append-only update/);
   rejects((rule) => rule.actorClasses.includes("licensee-admin") && ["INSERT", "UPDATE"].includes(rule.command) && ["User", "Invite"].includes(tableById.get(rule.tableId).prismaModel), (rule) => { rule.protectedColumns = rule.protectedColumns.filter((column) => column !== "role"); }, /platform role assignable/);
   rejects((rule) => rule.actorClasses.includes("platform-admin"), (rule) => { rule.minimumAssurance = "none"; }, /unconditional platform admin/);

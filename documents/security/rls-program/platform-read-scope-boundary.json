@@ -471,6 +471,9 @@
     "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs",
     "workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags"
   ],
+  "crossReferences": {
+    "publicReadContract": "public-read-contract-v1 prohibits public platform directories, tenant-private raw rows, diagnostics and blank-scope fallback; this platform contract applies only after verified platform actor context."
+  },
   "implementationStatus": "architecture-contract-resolved-runtime-not-implemented",
   "postgresqlCertificationRequirements": {
     "status": "pending",

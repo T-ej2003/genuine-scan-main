@@ -183,17 +183,45 @@
       "question": "Which public QR-policy, replacement and support-tracking fields may be disclosed, and what exact token or reference proof authorizes each lookup?",
       "recommendedOption": "Approve separate minimal token-bound projections; require optional-email support tracking to become proof-bearing rather than existence-bearing.",
       "affectedWorkflows": [
-        "workflow-http-backend-src-controllers-support-controller-ts-track-support-ticket-public",
-        "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-submit-product-feedback",
+        "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode",
+        "workflow-http-backend-src-controllers-verify-verification-signed-token-resolver-ts-resolve-signed-verification-target",
+        "workflow-http-backend-src-controllers-verify-verify-fraud-snapshot-ts-build-fraud-verification-snapshot",
         "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile",
         "workflow-internal-backend-src-services-governance-service-ts-resolve-verify-ux-policy",
-        "workflow-internal-backend-src-services-replacement-chain-service-ts-resolve-replacement-status"
+        "workflow-internal-backend-src-services-replacement-chain-service-ts-resolve-replacement-status",
+        "workflow-internal-backend-src-services-public-verification-post-scan-service-ts-run-post-scan-verification-flow",
+        "workflow-internal-backend-src-services-verification-decision-service-ts-persist-verification-decision",
+        "workflow-internal-backend-src-services-verification-decision-service-ts-resolve-public-verification-session-start-token",
+        "workflow-internal-backend-src-services-customer-verification-session-service-ts-create-customer-verification-session",
+        "workflow-internal-backend-src-services-customer-verification-session-service-ts-get-customer-verification-session",
+        "workflow-internal-backend-src-services-customer-verification-session-service-ts-load-decision-presentation",
+        "workflow-internal-backend-src-services-customer-verification-session-service-ts-assert-session-proof-binding",
+        "workflow-http-backend-src-controllers-support-controller-ts-track-support-ticket-public",
+        "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-submit-product-feedback",
+        "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-report-fraud",
+        "workflow-http-backend-src-controllers-incident-controller-ts-report-incident",
+        "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-request-access",
+        "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-support-issue",
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user",
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure",
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset",
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token",
+        "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview",
+        "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite",
+        "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
       ],
       "affectedTables": [
+        "table-customer-verification-session",
+        "table-incident",
+        "table-incident-evidence",
         "table-qrcode",
         "table-replacement-chain",
+        "table-request-access",
+        "table-support-issue-report",
         "table-support-ticket",
-        "table-tenant-feature-flag"
+        "table-tenant-feature-flag",
+        "table-verification-decision",
+        "table-verification-evidence-snapshot"
       ],
       "securityConsequence": "Implementing without this decision could authorize public disclosure, cross-tenant platform access, actor elevation or a blank-scope fallback.",
       "availableOptions": [
@@ -203,7 +231,41 @@
       ],
       "blockingStatus": "blocking",
       "owner": "Product authorization owner, application security, and domain engineering",
-      "status": "unresolved"
+      "status": "resolved",
+      "resolvedAt": "2026-07-16",
+      "selectedBoundary": "public-read-contract-v1",
+      "resolution": {
+        "authority": "documents/security/rls-program/public-read-contract.json",
+        "boundaryId": "public-read-contract-v1",
+        "publicAccessClasses": [
+          "static-public-content",
+          "public-qr-verification",
+          "signed-scan-verification",
+          "proof-bound-public-status",
+          "one-time-token-consumption",
+          "email-link-verification",
+          "public-support-tracking",
+          "public-feedback-submission",
+          "public-download",
+          "pre-auth-security-function",
+          "authenticated-only",
+          "operator-only",
+          "prohibited-public-access"
+        ],
+        "affectedWorkflows": 26,
+        "workflowLevelAuthorizationFrozen": true,
+        "nextStage": "full-system-runtime-implementation",
+        "runtimeImplementationPending": true,
+        "postgresqlCertificationPending": true,
+        "guarantees": [
+          "No generic public or anonymous database read",
+          "Signed-token failure cannot fall back to raw QR lookup",
+          "Reference, email and internal IDs are not public proof",
+          "Caller tenant, role and routing fields establish no authority",
+          "Public projections, rate limits, replay, expiry and generic failures are exact",
+          "All public protected-table work remains named-function contract-only until full-system certification"
+        ]
+      }
     },
     {
       "id": "decision-object-ownership-chain",

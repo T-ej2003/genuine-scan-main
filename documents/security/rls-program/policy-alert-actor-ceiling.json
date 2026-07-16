@@ -422,6 +422,9 @@
     "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
     "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
   ],
+  "crossReferences": {
+    "publicReadContract": "public-read-contract-v1 classifies every alert disclosure as prohibited-public-access; no signed scan, support proof, public reference or notification token authorizes PolicyAlert or incident-security detail."
+  },
   "implementationStatus": "architecture-resolved-runtime-pending",
   "postgresqlCertificationRequirements": [
     "Prove tenant own-scope allow and foreign/blank/NULL/ambiguous scope denial for PolicyAlert SELECT and UPDATE.",

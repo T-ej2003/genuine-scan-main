@@ -20,15 +20,15 @@ Rules: 988; workflows mapped: 428/428.
 
 | Value | Rules |
 |---|---:|
-| anonymous | 19 |
-| authenticated-user | 291 |
+| anonymous | 47 |
+| authenticated-user | 271 |
 | manufacturer | 239 |
-| operator | 100 |
+| operator | 92 |
 | checker | 10 |
-| licensee-admin | 140 |
-| platform-admin | 229 |
+| licensee-admin | 132 |
+| platform-admin | 221 |
 | restricted-read | 16 |
-| pre-auth-runtime | 19 |
+| pre-auth-runtime | 47 |
 | worker | 5 |
 | scheduled-job | 10 |
 | migration | 2 |
@@ -39,10 +39,10 @@ Rules: 988; workflows mapped: 428/428.
 
 | Value | Rules |
 |---|---:|
-| none | 94 |
-| password-verified | 507 |
+| none | 122 |
+| password-verified | 488 |
 | mfa-bootstrap | 3 |
-| mfa-verified | 246 |
+| mfa-verified | 237 |
 | step-up-verified | 17 |
 | system-verified | 33 |
 | operator-approved | 81 |
@@ -59,7 +59,7 @@ Rules: 988; workflows mapped: 428/428.
 
 ## Boundary and deletion summary
 
-Named-function rules: 339.
+Named-function rules: 354.
 Restricted-worker rules: 15.
 Approval-gated rules: 101.
 

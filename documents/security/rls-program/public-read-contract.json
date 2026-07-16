@@ -1,0 +1,403 @@
+{
+  "schemaVersion": 1,
+  "id": "public-read-contract-v1",
+  "decisionId": "decision-context-public-read-contract",
+  "generatedFrom": [
+    "documents/security/rls-program/decisions.json",
+    "documents/security/rls-program/workflows.json",
+    "documents/security/rls-program/command-semantics.json",
+    "documents/security/rls-program/tables.json",
+    "documents/security/rls-program/context-boundary-families.json",
+    "documents/security/rls-program/pre-auth-functions.json",
+    "documents/security/rls-program/platform-read-scope-boundary.json",
+    "documents/security/rls-program/policy-alert-actor-ceiling.json",
+    "documents/security/rls-program/runtime-identities.json",
+    "documents/security/rls-program/ARCHITECTURE.md",
+    "backend/prisma/schema.prisma",
+    "backend/src/routes/index.ts",
+    "backend/src/routes/publicRoutes.ts",
+    "backend/src/routes/modules/authRoutes.ts",
+    "backend/src/controllers/verify/verificationHandlers.ts",
+    "backend/src/controllers/verify/verificationSignedTokenResolver.ts",
+    "backend/src/controllers/verify/sessionHandlers.ts",
+    "backend/src/controllers/verify/feedbackHandlers.ts",
+    "backend/src/controllers/supportController.ts",
+    "backend/src/controllers/publicIntakeController.ts",
+    "backend/src/controllers/connectorController.ts",
+    "backend/src/services/qrTokenService.ts",
+    "backend/src/services/customerVerificationSessionService.ts",
+    "backend/src/services/connectorReleaseService.ts",
+    "backend/src/middleware/publicRateLimit.ts",
+    "backend/tests/publicEgressContract.test.js",
+    "backend/tests/publicVerificationApiContract.test.js",
+    "backend/tests/routeSecurityContracts.test.js"
+  ],
+  "publicAccessClasses": [
+    "static-public-content",
+    "public-qr-verification",
+    "signed-scan-verification",
+    "proof-bound-public-status",
+    "one-time-token-consumption",
+    "email-link-verification",
+    "public-support-tracking",
+    "public-feedback-submission",
+    "public-download",
+    "pre-auth-security-function",
+    "authenticated-only",
+    "operator-only",
+    "prohibited-public-access"
+  ],
+  "publicActorModel": {
+    "actorClasses": ["anonymous", "pre-auth-runtime"],
+    "humanActorContextExists": false,
+    "callerContextTrusted": false,
+    "blankScopeIsWildcard": false,
+    "runtimeIdentity": "identity-pre-auth-app",
+    "runtimePrivilegeCeiling": "CONNECT plus schema USAGE and EXECUTE on the one exact named function; no direct protected-table privileges"
+  },
+  "routeClassifications": [
+    { "routes": ["GET /health", "GET /healthz", "GET /health/live", "GET /health/ready", "GET /health/latency"], "primaryClass": "static-public-content", "condition": "Health projections only; readiness may test dependencies but returns no database, host, role, policy, tenant, error or timing internals.", "databaseRowsReturned": 0 },
+    { "routes": ["GET /verify/:code", "GET /scan", "GET /verify", "GET /verify/:code (legacy publicRoutes alias)"], "primaryClass": "public-qr-verification", "condition": "No signed token is present and the normalized legacy code passes the exact compatibility grammar.", "databaseRowsReturned": 1 },
+    { "routes": ["GET /verify/:code?t=:signedToken", "GET /scan?t=:signedToken"], "primaryClass": "signed-scan-verification", "condition": "A signed token is present; any signature, expiry, binding, nonce, epoch or stored-hash failure terminates without raw-code fallback.", "databaseRowsReturned": 1 },
+    { "routes": ["POST /verify/session/start", "GET /verify/session/:id"], "primaryClass": "proof-bound-public-status", "condition": "A valid opaque session-start/session proof is bound to the exact decision/session and is unexpired; a session ID alone is not proof.", "databaseRowsReturned": 1 },
+    { "routes": ["POST /auth/accept-invite", "POST /auth/reset-password"], "primaryClass": "one-time-token-consumption", "condition": "The exact existing invitation or reset SECURITY DEFINER function atomically locks and consumes one unexpired hashed token.", "databaseRowsReturned": 1 },
+    { "routes": ["POST /auth/verify-email"], "primaryClass": "email-link-verification", "condition": "The exact existing email-verification function atomically consumes one unexpired hashed token and returns a generic result.", "databaseRowsReturned": 1 },
+    { "routes": ["GET /support/tickets/track/:reference"], "primaryClass": "public-support-tracking", "condition": "A signed support-status proof binds reference, purpose, expiry and version; reference, email or ticket ID alone is denied.", "databaseRowsReturned": 1 },
+    { "routes": ["POST /verify/feedback", "POST /verify/report-fraud", "POST /fraud-report", "POST /incidents/report", "POST /public/request-access", "POST /public/support"], "primaryClass": "public-feedback-submission", "condition": "Strict bounded input, layered rate limit, anti-automation control where required and server-derived routing; caller tenant identifiers never establish authority.", "databaseRowsReturned": 0 },
+    { "routes": ["GET /public/connector/releases", "GET /public/connector/releases/latest", "GET /public/connector/download/:version/:platform"], "primaryClass": "public-download", "condition": "Only allowlisted signed release-manifest entries and path-contained artifacts; no database access.", "databaseRowsReturned": 0 },
+    { "routes": ["POST /auth/login", "GET /auth/invite-preview", "POST /auth/forgot-password"], "primaryClass": "pre-auth-security-function", "condition": "Only the exact existing password, invitation or reset-request function; external responses do not reveal account existence.", "databaseRowsReturned": 1 },
+    { "routes": ["POST /verify/session/:id/intake", "POST /verify/session/:id/reveal", "POST /verify/:code/claim", "POST /verify/:code/link-claim", "POST /verify/:code/transfer", "POST /verify/:code/transfer/cancel", "POST /verify/transfer/accept", "GET /verify/auth/session", "all verify passkey credential routes"], "primaryClass": "authenticated-only", "condition": "A verified customer actor and CSRF/continuity proof are required; public route placement or optional-auth middleware does not make protected data public.", "databaseRowsReturned": 0 },
+    { "routes": ["all catalog, role, grant, ownership, policy and RLS diagnostics"], "primaryClass": "operator-only", "condition": "Only exact operator-boundaries.json procedures; never an application public route.", "databaseRowsReturned": 0 },
+    { "routes": ["all public tenant, user, licensee, manufacturer, batch, QR-range, invitation, reset, alert, governance or policy lists", "all public routes not explicitly classified above"], "primaryClass": "prohibited-public-access", "condition": "Default deny; no generic public database read exists.", "databaseRowsReturned": 0 }
+  ],
+  "proofTokenModels": {
+    "qrRawCompatibility": {
+      "trustedInput": "Normalized route code only as a lookup key, never as tenant authority.",
+      "normalization": "Trim once, uppercase ASCII, reject non-canonical input; require ^[A-Z0-9][A-Z0-9_-]{7,127}$ and at most 128 characters before any protected read.",
+      "removalPlan": "Disable raw lookup after signed-label coverage is at least 99.9 percent, no unexpired legacy inventory remains, and 90 consecutive days record no valid legacy-only scans; review progress by 2026-10-31."
+    },
+    "signedQr": {
+      "maximumLength": 4096,
+      "signature": "Ed25519 with an allowlisted key version; managed signer or reviewed public key. JWT_SECRET fallback and unsigned payload authority are prohibited.",
+      "requiredClaims": ["qr_id", "licensee_id", "batch_id", "nonce", "epoch", "kid", "iat", "exp"],
+      "binding": "All claims, SHA-256 token digest, nonce, replay epoch and optional manufacturer ID must match the single stored QR and its parent chain.",
+      "replay": "Repeat scans may be recorded idempotently under the same token epoch; a rotated epoch, nonce, digest, expired token or revoked QR is denied.",
+      "unsignedClaimsEstablishAuthority": false,
+      "fallbackAfterFailure": false
+    },
+    "supportStatus": {
+      "proof": "Server-signed opaque token with at least 128 bits of entropy binding support reference, purpose=support-status, token version and expiry.",
+      "maximumTtlHours": 168,
+      "referenceAloneSufficient": false,
+      "emailAloneSufficient": false,
+      "revocation": "A future proof-version column or dedicated proof row must invalidate prior tokens; until it exists the workflow remains blocked."
+    },
+    "verificationSession": {
+      "proof": "Opaque random token of at least 192 bits, stored only as a hash and bound to one decision/session, replay epoch and expiry.",
+      "maximumTtlMinutes": 30,
+      "sessionIdAloneSufficient": false,
+      "identityUpgrade": "After customer authentication, the session is actor-bound and every subsequent read requires the same customer plus fresh continuity proof."
+    }
+  },
+  "qrVerificationContract": {
+    "authoritativeIdentifier": "QRCode.code for the temporary raw path; verified signed qr_id plus stored tokenHash/nonce/epoch and exact parent bindings for the signed path.",
+    "tablesConsulted": ["table-qrcode", "table-replacement-chain", "table-tenant-feature-flag"],
+    "parentChain": "QRCode.licenseeId -> active Licensee.orgId -> active Organization; QRCode.batchId -> released, unsuspended Batch -> optional manufacturer. Every parent must agree and no NULL parent becomes global.",
+    "readiness": "Only a released, customer-verifiable, unsuspended, non-orphaned label may produce an authentic result. Unknown, unreleased, inconsistent and unavailable dependencies fail closed.",
+    "allowedResultStates": ["authentic", "review-required", "blocked", "unavailable"],
+    "scanRecording": "One transaction records bounded hashed request attribution, scan counters and the immutable verification decision after proof validation and before serialization.",
+    "riskEvaluation": "Internal risk and duplicate evaluation may influence the four public states but raw factors, weights, rules, scores, locations and device/IP material are never returned.",
+    "duplicateBehavior": "A repeat scan remains a safe customer outcome or review-required; it does not reveal previous scanner identity or location.",
+    "idempotency": "The request ID plus QR/token epoch and bounded time bucket identify one logical scan record; retries return the same public decision without duplicating attribution.",
+    "implementationForm": "Separate exact app_public named-function contracts for raw and signed verification, called by identity-pre-auth-app; no direct protected-table fallback."
+  },
+  "signedScanContract": {
+    "validationOrder": ["syntax and length", "signature and key version", "expiry and purpose", "claim completeness", "exact stored QR", "token digest, nonce and epoch", "licensee, batch and manufacturer parent bindings", "readiness", "atomic attribution"],
+    "failure": "All signature, expiry, claim, digest, nonce, epoch and parent mismatches return the same signed-proof-rejected response and stop.",
+    "rawFallbackAllowed": false
+  },
+  "supportTrackingContract": {
+    "requiredInputs": ["reference", "signedSupportStatusProof", "requestId"],
+    "exactProjection": ["referenceCode", "customerFacingStatus", "updatedAt", "slaState"],
+    "maximumRows": 1,
+    "genericFailure": "Tracking information is unavailable.",
+    "currentContradiction": "The current handler accepts reference alone when customerEmail is absent and emits not-found/email-mismatch distinctions; runtime and schema support remain blocked."
+  },
+  "feedbackContract": {
+    "allowedInputs": {
+      "productFeedback": { "codeMax": 128, "rating": "integer 1..5", "notesMax": 1000, "urlMax": 1000 },
+      "fraudOrIncident": { "codeMax": 128, "descriptionMax": 2000, "emailMax": 160, "captchaMax": 4000, "attachmentsMaximum": 5, "attachmentMaximumBytes": 10485760, "allowedTypes": ["image/png", "image/jpeg", "image/webp", "application/pdf"] },
+      "requestAccess": { "nameMax": 120, "emailMax": 160, "companyMax": 160, "messageMax": 3000 },
+      "publicSupport": { "nameMax": 120, "emailMax": 160, "titleMax": 160, "messageMax": 4000 }
+    },
+    "tenantRouting": "Only a successfully verified QR/signed artifact or server-maintained routing map may derive tenant/licensee/manufacturer. Body/query tenant IDs are rejected.",
+    "pii": "Collect only reply contact and user-supplied issue content; encrypt or separately protect retained contact fields, never copy PII into broad audit details, and enforce retention.",
+    "spamReplay": "IP plus privacy-preserving actor/resource buckets, CAPTCHA for incident/fraud submissions, honeypots for public forms and an idempotency digest prevent duplicate protected rows.",
+    "response": "Return only accepted, opaque public reference where required, and generic delivery state; never echo tenant routing, internal IDs, risk or operator state."
+  },
+  "publicDownloadContract": {
+    "databaseRequired": false,
+    "allowedPlatforms": ["macos", "windows"],
+    "versionSelection": "Exact canonical version present in the signed release manifest; latest is a server-selected manifest entry.",
+    "artifactRequirements": ["manifest SHA-256 matches", "production signature status is signed", "internalOnly is false", "resolved path remains below the release root", "content type and filename come from the manifest"],
+    "privateChannels": "windowsUnsignedTest and every internal/test artifact require authenticated operator release tooling and are never public.",
+    "exactMetadataProjection": ["version", "publishedAt", "platform", "filename", "architecture", "bytes", "sha256", "signatureStatus", "publisherName", "protocolVersion", "buildVersion", "downloadPath"]
+  },
+  "preAuthMappings": [
+    { "class": "pre-auth-security-function", "functionId": "preauth-fn-lookup-password-user", "workflowId": "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user" },
+    { "class": "pre-auth-security-function", "functionId": "preauth-fn-record-password-failure", "workflowId": "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure" },
+    { "class": "pre-auth-security-function", "functionId": "preauth-fn-request-password-reset", "workflowId": "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset" },
+    { "class": "one-time-token-consumption", "functionId": "preauth-fn-consume-password-reset", "workflowId": "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token" },
+    { "class": "pre-auth-security-function", "functionId": "preauth-fn-lookup-invitation", "workflowId": "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview" },
+    { "class": "one-time-token-consumption", "functionId": "preauth-fn-consume-invitation", "workflowId": "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite" },
+    { "class": "email-link-verification", "functionId": "preauth-fn-consume-email-verification", "workflowId": "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification" }
+  ],
+  "policyGovernancePublicContentRules": {
+    "staticPublicContent": "Version-controlled marketing, help, trust and published policy text with no protected-table access.",
+    "versionedPublicProjection": "Permitted only from a separately published immutable artifact containing title, public version, effective date and public body; none is currently registered.",
+    "authenticatedOnly": ["TenantFeatureFlag", "SecurityPolicy", "PolicyRule", "governance state", "tenant compliance data", "security configuration"],
+    "publicAlertDisposition": "prohibited-public-access per policy-alert-actor-ceiling-v1"
+  },
+  "exactPublicProjections": {
+    "public-qr-verification": ["result", "messageKey", "nextAction", "maskedCode", "brandName", "manufacturerName", "manufacturerWebsite", "printedAt", "firstVerifiedAt", "latestVerifiedAt", "ownershipClaimAvailable", "sessionStartToken"],
+    "signed-scan-verification": ["result", "messageKey", "nextAction", "verificationMethod", "maskedCode", "brandName", "manufacturerName", "manufacturerWebsite", "printedAt", "firstVerifiedAt", "latestVerifiedAt", "ownershipClaimAvailable", "sessionStartToken"],
+    "proof-bound-public-status": ["sessionId", "maskedCode", "customerFacingState", "startedAt", "expiresAt", "intakeCompleted", "revealed", "brandName"],
+    "public-support-tracking": ["referenceCode", "customerFacingStatus", "updatedAt", "slaState"],
+    "public-feedback-submission": ["accepted", "publicReference", "message"],
+    "pre-auth-token-external": ["accepted", "message"]
+  },
+  "prohibitedFields": [
+    "passwordHash", "tokenHash", "MFA secrets", "recovery or backup codes", "WebAuthn credential material", "session or refresh credentials", "invitation/reset/email-verification hashes", "private/signing keys", "internal IDs", "licenseeId", "organizationId", "manufacturerId", "batchId", "decisionId", "raw QR code", "raw fraud factors", "risk score or band", "device/IP fingerprints", "internal rule names or feature flags", "audit records", "private batch metadata", "printer/manufacturing diagnostics", "unreleased product data", "customer PII", "raw metadata/details/config"
+  ],
+  "rateLimits": [
+    { "class": "qr-lookup", "windowSeconds": 60, "ipMaximum": 45, "actorResourceMaximum": 20 },
+    { "class": "verification-session", "windowSeconds": 600, "ipMaximum": 24, "actorResourceMaximum": 20 },
+    { "class": "support-tracking", "windowSeconds": 900, "ipMaximum": 30, "actorResourceMaximum": 30 },
+    { "class": "product-feedback", "windowSeconds": 900, "ipMaximum": 30, "actorResourceMaximum": 30 },
+    { "class": "fraud-incident-report", "windowSeconds": 900, "ipMaximum": 20, "actorResourceMaximum": 20 },
+    { "class": "request-access", "windowSeconds": 900, "ipMaximum": 12, "actorResourceMaximum": 3 },
+    { "class": "public-support", "windowSeconds": 900, "ipMaximum": 20, "actorResourceMaximum": 5 },
+    { "class": "connector-manifest", "windowSeconds": 60, "ipMaximum": 120, "actorResourceMaximum": 120 },
+    { "class": "connector-download", "windowSeconds": 300, "ipMaximum": 60, "actorResourceMaximum": 60 },
+    { "class": "auth-login", "windowSeconds": 900, "ipMaximum": 25, "actorResourceMaximum": 10 },
+    { "class": "auth-invite-email", "windowSeconds": 900, "ipMaximum": 25, "actorResourceMaximum": 10 },
+    { "class": "auth-password-reset", "windowSeconds": 900, "ipMaximum": 10, "actorResourceMaximum": 5 }
+  ],
+  "enumerationProtections": [
+    "Validate syntax, canonical length and token structure before any protected read.",
+    "No email, reference, tenant, licensee, manufacturer, batch, QR range, user or internal ID is sufficient proof.",
+    "Use constant-shape generic external failures within each class and retain detailed reason only in redacted server security evidence.",
+    "No public list endpoint or count exists; every approved database result is at most one resource.",
+    "Apply both IP and privacy-preserving actor/resource buckets and never include raw tokens or email in rate-limit keys or logs.",
+    "Malformed, unknown, inactive, foreign, ambiguous and inconsistent resources do not reveal which check failed."
+  ],
+  "failureSemantics": {
+    "malformedInput": { "status": 400, "body": "Request could not be verified." },
+    "proofFailure": { "status": 400, "body": "Request could not be verified." },
+    "unknownInactiveForeignOrInconsistent": { "status": 404, "body": "Requested information is unavailable." },
+    "consumedOrExpiredOneTimeToken": { "status": 400, "body": "Link is invalid or expired." },
+    "accountOrInvitationRequest": { "status": 202, "body": "If the request is eligible, the next step will be sent." },
+    "rateLimit": { "status": 429, "body": "Too many requests. Please try again later." },
+    "dependencyFailure": { "status": 503, "body": "Service is temporarily unavailable." },
+    "serverDetailRetention": "Record request ID, class, normalized reason code, hashed attribution and outcome without raw proof, email, device, QR payload or returned data."
+  },
+  "auditScanAttribution": {
+    "requiredFields": ["requestId", "publicClass", "route/workflow", "purpose", "proof type", "hashed IP/device attribution where lawful", "resource digest", "outcome", "timestamp"],
+    "sameTransaction": true,
+    "payloadLogging": false,
+    "denials": "Security-relevant repeated proof/signature/replay denials are recorded without confirming resource existence."
+  },
+  "projectionProfiles": {
+    "qr-read": [{ "tableId": "table-qrcode", "commands": { "SELECT": ["id", "code", "licenseeId", "batchId", "status", "printedAt", "scannedAt", "scanCount", "tokenNonce", "tokenExpiresAt", "tokenHash", "replayEpoch", "issuanceMode", "customerVerifiableAt", "signedFirstSeenAt", "lastSignedVerificationAt"] } }],
+    "qr-policy": [{ "tableId": "table-tenant-feature-flag", "commands": { "SELECT": ["licenseeId", "key", "enabled", "config"] } }],
+    "replacement-status": [{ "tableId": "table-replacement-chain", "commands": { "SELECT": ["id", "status", "originalQrCodeId", "replacementQrCodeId", "createdAt"] } }],
+    "qr-feedback": [{ "tableId": "table-qrcode", "commands": { "SELECT": ["id", "code", "licenseeId", "batchId"] } }],
+    "support-status": [{ "tableId": "table-support-ticket", "commands": { "SELECT": ["incidentId", "referenceCode", "status", "slaDueAt", "updatedAt"] } }],
+    "verification-record": [
+      { "tableId": "table-qrcode", "commands": { "UPDATE": ["scannedAt", "scanCount", "signedFirstSeenAt", "lastSignedVerificationAt", "lastSignedVerificationIpHash", "lastSignedVerificationDeviceHash"] } },
+      { "tableId": "table-verification-decision", "commands": { "INSERT": ["decisionVersion", "qrCodeId", "code", "licenseeId", "batchId", "proofSource", "proofTier", "outcome", "classification", "reasonCodes", "riskBand", "replacementStatus", "degradationMode", "customerTrustLevel", "isAuthentic", "scanCount", "riskScore", "actorIpHash", "actorDeviceHash", "metadata"] } },
+      { "tableId": "table-verification-evidence-snapshot", "commands": { "INSERT": ["verificationDecisionId", "scanSummary", "ownershipSnapshot", "riskSignals", "policySnapshot", "lifecycleSnapshot", "metadata"] } }
+    ],
+    "session-start": [
+      { "tableId": "table-verification-evidence-snapshot", "commands": { "SELECT": ["id", "verificationDecisionId", "metadata", "createdAt"] } },
+      { "tableId": "table-customer-verification-session", "commands": { "INSERT": ["verificationDecisionId", "qrCodeId", "code", "entryMethod", "authState", "customerUserId", "customerEmail", "expiresAt", "proofBindingTokenHash", "proofBindingIssuedAt", "proofBindingExpiresAt", "proofBindingReplayEpoch", "metadata"] } }
+    ],
+    "session-read": [
+      { "tableId": "table-customer-verification-session", "commands": { "SELECT": ["id", "verificationDecisionId", "qrCodeId", "code", "entryMethod", "authState", "customerUserId", "intakeCompletedAt", "revealedAt", "expiresAt", "proofBindingTokenHash", "proofBindingExpiresAt", "proofBindingReplayEpoch", "createdAt", "updatedAt"] } },
+      { "tableId": "table-verification-decision", "commands": { "SELECT": ["id", "qrCodeId", "code", "proofSource", "outcome", "classification", "isAuthentic", "createdAt"] } },
+      { "tableId": "table-verification-evidence-snapshot", "commands": { "SELECT": ["verificationDecisionId", "metadata", "createdAt"] } },
+      { "tableId": "table-qrcode", "commands": { "SELECT": ["id", "code", "licenseeId", "batchId", "status", "printedAt", "replayEpoch", "issuanceMode", "customerVerifiableAt"] } }
+    ],
+    "public-incident-followup": [
+      { "tableId": "table-incident-evidence", "commands": { "SELECT": ["id", "incidentId", "storageKey", "fileType"] } },
+      { "tableId": "table-incident", "commands": { "UPDATE": ["tags", "updatedAt"] } },
+      { "tableId": "table-support-ticket", "commands": { "SELECT": ["incidentId", "referenceCode", "status", "slaDueAt"] } }
+    ],
+    "request-access": [{ "tableId": "table-request-access", "commands": { "INSERT": ["referenceCode", "fullName", "workEmail", "companyName", "roleTitle", "country", "monthlyGarmentVolume", "message", "sourcePage", "referrer"], "UPDATE": ["adminEmailDeliveryStatus", "adminEmailErrorCode", "acknowledgementEmailDeliveryStatus", "acknowledgementEmailErrorCode", "updatedAt"] } }],
+    "support-intake": [{ "tableId": "table-support-issue-report", "commands": { "INSERT": ["referenceCode", "publicName", "publicEmail", "issueType", "verificationCode", "productReference", "priority", "title", "description", "sourcePath", "pageUrl", "autoDetected", "diagnostics"], "UPDATE": ["emailDeliveryStatus", "emailErrorCode", "acknowledgementEmailDeliveryStatus", "acknowledgementEmailErrorCode", "updatedAt"] } }]
+  },
+  "workflowClassifications": [
+    { "workflowId": "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode", "primaryClass": "public-qr-verification", "functionId": "public-fn-verify-raw-qr", "projectionProfile": "qr-read", "rateLimitClass": "qr-lookup", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-http-backend-src-controllers-verify-verification-signed-token-resolver-ts-resolve-signed-verification-target", "primaryClass": "signed-scan-verification", "functionId": "public-fn-verify-signed-qr", "projectionProfile": "qr-read", "rateLimitClass": "qr-lookup", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-http-backend-src-controllers-verify-verify-fraud-snapshot-ts-build-fraud-verification-snapshot", "primaryClass": "public-qr-verification", "functionId": "public-fn-verify-raw-qr", "projectionProfile": "qr-read", "rateLimitClass": "qr-lookup", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile", "primaryClass": "public-qr-verification", "functionId": "public-fn-verify-raw-qr", "projectionProfile": "qr-policy", "rateLimitClass": "qr-lookup", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-governance-service-ts-resolve-verify-ux-policy", "primaryClass": "public-qr-verification", "functionId": "public-fn-verify-raw-qr", "projectionProfile": "qr-policy", "rateLimitClass": "qr-lookup", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-replacement-chain-service-ts-resolve-replacement-status", "primaryClass": "public-qr-verification", "functionId": "public-fn-verify-raw-qr", "projectionProfile": "replacement-status", "rateLimitClass": "qr-lookup", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-public-verification-post-scan-service-ts-run-post-scan-verification-flow", "primaryClass": "public-qr-verification", "functionId": "public-fn-record-qr-verification", "projectionProfile": "verification-record", "rateLimitClass": "qr-lookup", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-verification-decision-service-ts-persist-verification-decision", "primaryClass": "public-qr-verification", "functionId": "public-fn-record-qr-verification", "projectionProfile": "verification-record", "rateLimitClass": "qr-lookup", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-verification-decision-service-ts-resolve-public-verification-session-start-token", "primaryClass": "proof-bound-public-status", "functionId": "public-fn-start-verification-session", "projectionProfile": "session-start", "rateLimitClass": "verification-session", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-customer-verification-session-service-ts-create-customer-verification-session", "primaryClass": "proof-bound-public-status", "functionId": "public-fn-start-verification-session", "projectionProfile": "session-start", "rateLimitClass": "verification-session", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-customer-verification-session-service-ts-get-customer-verification-session", "primaryClass": "proof-bound-public-status", "functionId": "public-fn-read-verification-session", "projectionProfile": "session-read", "rateLimitClass": "verification-session", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-customer-verification-session-service-ts-load-decision-presentation", "primaryClass": "proof-bound-public-status", "functionId": "public-fn-read-verification-session", "projectionProfile": "session-read", "rateLimitClass": "verification-session", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-customer-verification-session-service-ts-assert-session-proof-binding", "primaryClass": "proof-bound-public-status", "functionId": "public-fn-read-verification-session", "projectionProfile": "session-read", "rateLimitClass": "verification-session", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-http-backend-src-controllers-support-controller-ts-track-support-ticket-public", "primaryClass": "public-support-tracking", "functionId": "public-fn-track-support-status", "projectionProfile": "support-status", "rateLimitClass": "support-tracking", "implementationStatus": "blocked-schema-proof-version-and-runtime-pending" },
+    { "workflowId": "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-submit-product-feedback", "primaryClass": "public-feedback-submission", "functionId": "public-fn-submit-product-feedback", "projectionProfile": "qr-feedback", "rateLimitClass": "product-feedback", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-report-fraud", "primaryClass": "public-feedback-submission", "functionId": "public-fn-submit-public-incident", "projectionProfile": "public-incident-followup", "rateLimitClass": "fraud-incident-report", "implementationStatus": "blocked-full-call-chain-and-concurrency-pending" },
+    { "workflowId": "workflow-http-backend-src-controllers-incident-controller-ts-report-incident", "primaryClass": "public-feedback-submission", "functionId": "public-fn-submit-public-incident", "projectionProfile": "public-incident-followup", "rateLimitClass": "fraud-incident-report", "implementationStatus": "blocked-full-call-chain-and-concurrency-pending" },
+    { "workflowId": "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-request-access", "primaryClass": "public-feedback-submission", "functionId": "public-fn-submit-request-access", "projectionProfile": "request-access", "rateLimitClass": "request-access", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-support-issue", "primaryClass": "public-feedback-submission", "functionId": "public-fn-submit-public-support", "projectionProfile": "support-intake", "rateLimitClass": "public-support", "implementationStatus": "contract-only-runtime-and-function-pending" },
+    { "workflowId": "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user", "primaryClass": "pre-auth-security-function", "functionId": "preauth-fn-lookup-password-user", "projectionProfile": null, "rateLimitClass": "auth-login", "implementationStatus": "existing-approved-contract-runtime-pending" },
+    { "workflowId": "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure", "primaryClass": "pre-auth-security-function", "functionId": "preauth-fn-record-password-failure", "projectionProfile": null, "rateLimitClass": "auth-login", "implementationStatus": "existing-approved-contract-runtime-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset", "primaryClass": "pre-auth-security-function", "functionId": "preauth-fn-request-password-reset", "projectionProfile": null, "rateLimitClass": "auth-password-reset", "implementationStatus": "existing-approved-contract-runtime-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token", "primaryClass": "one-time-token-consumption", "functionId": "preauth-fn-consume-password-reset", "projectionProfile": null, "rateLimitClass": "auth-password-reset", "implementationStatus": "existing-approved-contract-runtime-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview", "primaryClass": "pre-auth-security-function", "functionId": "preauth-fn-lookup-invitation", "projectionProfile": null, "rateLimitClass": "auth-invite-email", "implementationStatus": "existing-approved-contract-runtime-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite", "primaryClass": "one-time-token-consumption", "functionId": "preauth-fn-consume-invitation", "projectionProfile": null, "rateLimitClass": "auth-invite-email", "implementationStatus": "existing-approved-contract-runtime-pending" },
+    { "workflowId": "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification", "primaryClass": "email-link-verification", "functionId": "preauth-fn-consume-email-verification", "projectionProfile": null, "rateLimitClass": "auth-invite-email", "implementationStatus": "existing-approved-contract-runtime-pending" }
+  ],
+  "affectedWorkflows": [
+    "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode",
+    "workflow-http-backend-src-controllers-verify-verification-signed-token-resolver-ts-resolve-signed-verification-target",
+    "workflow-http-backend-src-controllers-verify-verify-fraud-snapshot-ts-build-fraud-verification-snapshot",
+    "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile",
+    "workflow-internal-backend-src-services-governance-service-ts-resolve-verify-ux-policy",
+    "workflow-internal-backend-src-services-replacement-chain-service-ts-resolve-replacement-status",
+    "workflow-internal-backend-src-services-public-verification-post-scan-service-ts-run-post-scan-verification-flow",
+    "workflow-internal-backend-src-services-verification-decision-service-ts-persist-verification-decision",
+    "workflow-internal-backend-src-services-verification-decision-service-ts-resolve-public-verification-session-start-token",
+    "workflow-internal-backend-src-services-customer-verification-session-service-ts-create-customer-verification-session",
+    "workflow-internal-backend-src-services-customer-verification-session-service-ts-get-customer-verification-session",
+    "workflow-internal-backend-src-services-customer-verification-session-service-ts-load-decision-presentation",
+    "workflow-internal-backend-src-services-customer-verification-session-service-ts-assert-session-proof-binding",
+    "workflow-http-backend-src-controllers-support-controller-ts-track-support-ticket-public",
+    "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-submit-product-feedback",
+    "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-report-fraud",
+    "workflow-http-backend-src-controllers-incident-controller-ts-report-incident",
+    "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-request-access",
+    "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-support-issue",
+    "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user",
+    "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure",
+    "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset",
+    "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token",
+    "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview",
+    "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite",
+    "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
+  ],
+  "namedFunctionSecurity": {
+    "owner": "dedicated NOLOGIN app_public function owner",
+    "executableIdentity": "identity-pre-auth-app",
+    "securityDefiner": true,
+    "fullyQualifiedApplicationObjects": true,
+    "callerSetContextTrusted": false,
+    "transactionRequirements": "Each function executes one exact bounded operation in the caller transaction; proof validation, protected access, attribution/idempotency and result commit or roll back together."
+  },
+  "namedFunctionContracts": [
+    {
+      "id": "public-fn-verify-raw-qr", "schema": "app_public", "name": "verify_raw_qr", "purpose": "Verify one canonical legacy public code and atomically record one redacted decision.",
+      "arguments": ["requested_code text", "checked_at timestamp without time zone", "request_id text", "actor_ip_hash text nullable", "actor_device_hash text nullable"],
+      "returnColumns": ["result text", "messageKey text", "nextAction text", "maskedCode text", "brandName text nullable", "manufacturerName text nullable", "manufacturerWebsite text nullable", "printedAt timestamp nullable", "firstVerifiedAt timestamp nullable", "latestVerifiedAt timestamp nullable", "ownershipClaimAvailable boolean", "sessionStartToken text nullable"],
+      "genericInputsAllowed": false, "dynamicSqlAllowed": false, "publicExecuteAllowed": false, "fixedSearchPath": "pg_catalog", "maximumRows": 1
+    },
+    {
+      "id": "public-fn-verify-signed-qr", "schema": "app_public", "name": "verify_signed_qr", "purpose": "Rebind one application-verified signed QR token to one stored QR and atomically record one redacted decision.",
+      "arguments": ["token_digest text", "qr_id text", "licensee_id text", "batch_id text nullable", "manufacturer_id text nullable", "nonce text", "replay_epoch integer", "key_version text", "issued_at timestamp without time zone", "expires_at timestamp without time zone", "checked_at timestamp without time zone", "request_id text", "actor_ip_hash text nullable", "actor_device_hash text nullable"],
+      "returnColumns": ["result text", "messageKey text", "nextAction text", "verificationMethod text", "maskedCode text", "brandName text nullable", "manufacturerName text nullable", "manufacturerWebsite text nullable", "printedAt timestamp nullable", "firstVerifiedAt timestamp nullable", "latestVerifiedAt timestamp nullable", "ownershipClaimAvailable boolean", "sessionStartToken text nullable"],
+      "genericInputsAllowed": false, "dynamicSqlAllowed": false, "publicExecuteAllowed": false, "fixedSearchPath": "pg_catalog", "maximumRows": 1
+    },
+    {
+      "id": "public-fn-record-qr-verification", "schema": "app_public", "name": "record_qr_verification", "purpose": "Internal exact subcommand for one proof-bound verification decision and scan attribution; not independently exposed to HTTP callers.",
+      "arguments": ["qr_id text", "proof_class text", "outcome_code text", "scanned_at timestamp without time zone", "request_id text", "actor_ip_hash text nullable", "actor_device_hash text nullable"],
+      "returnColumns": ["decision_key text", "recorded boolean"],
+      "genericInputsAllowed": false, "dynamicSqlAllowed": false, "publicExecuteAllowed": false, "fixedSearchPath": "pg_catalog", "maximumRows": 1
+    },
+    {
+      "id": "public-fn-start-verification-session", "schema": "app_public", "name": "start_verification_session", "purpose": "Consume one unexpired session-start proof and create one proof-bound verification session.",
+      "arguments": ["session_start_token_hash text", "entry_method text", "checked_at timestamp without time zone", "request_id text", "customer_user_id text nullable"],
+      "returnColumns": ["sessionId text", "sessionProofToken text", "maskedCode text", "customerFacingState text", "startedAt timestamp", "expiresAt timestamp", "brandName text nullable"],
+      "genericInputsAllowed": false, "dynamicSqlAllowed": false, "publicExecuteAllowed": false, "fixedSearchPath": "pg_catalog", "maximumRows": 1
+    },
+    {
+      "id": "public-fn-read-verification-session", "schema": "app_public", "name": "read_verification_session", "purpose": "Return one minimal session status after hashed proof and optional customer binding validation.",
+      "arguments": ["session_id text", "session_proof_hash text", "checked_at timestamp without time zone", "request_id text", "customer_user_id text nullable"],
+      "returnColumns": ["sessionId text", "maskedCode text", "customerFacingState text", "startedAt timestamp", "expiresAt timestamp", "intakeCompleted boolean", "revealed boolean", "brandName text nullable"],
+      "genericInputsAllowed": false, "dynamicSqlAllowed": false, "publicExecuteAllowed": false, "fixedSearchPath": "pg_catalog", "maximumRows": 1
+    },
+    {
+      "id": "public-fn-track-support-status", "schema": "app_public", "name": "track_support_status", "purpose": "Return one minimal support status after signed proof, purpose, expiry and proof-version validation.",
+      "arguments": ["reference_code text", "proof_digest text", "proof_version integer", "checked_at timestamp without time zone", "request_id text"],
+      "returnColumns": ["referenceCode text", "customerFacingStatus text", "updatedAt timestamp", "slaState text"],
+      "genericInputsAllowed": false, "dynamicSqlAllowed": false, "publicExecuteAllowed": false, "fixedSearchPath": "pg_catalog", "maximumRows": 1
+    },
+    {
+      "id": "public-fn-submit-product-feedback", "schema": "app_public", "name": "submit_product_feedback", "purpose": "Create one attributed feedback record routed only through a verified QR artifact.",
+      "arguments": ["requested_code text", "rating integer", "satisfaction text", "notes text nullable", "observed_status text nullable", "observed_outcome text nullable", "page_url text nullable", "submitted_at timestamp without time zone", "request_id text", "actor_ip_hash text nullable", "idempotency_digest text"],
+      "returnColumns": ["accepted boolean", "publicReference text", "message text"],
+      "genericInputsAllowed": false, "dynamicSqlAllowed": false, "publicExecuteAllowed": false, "fixedSearchPath": "pg_catalog", "maximumRows": 1
+    },
+    {
+      "id": "public-fn-submit-public-incident", "schema": "app_public", "name": "submit_public_incident", "purpose": "Create one bounded fraud/incident intake and its support reference with atomic attribution and idempotency.",
+      "arguments": ["verified_qr_id text nullable", "incident_type text", "description text", "contact_email text nullable", "consent_to_contact boolean", "submitted_at timestamp without time zone", "request_id text", "actor_ip_hash text nullable", "actor_device_hash text nullable", "idempotency_digest text"],
+      "returnColumns": ["accepted boolean", "publicReference text", "message text"],
+      "genericInputsAllowed": false, "dynamicSqlAllowed": false, "publicExecuteAllowed": false, "fixedSearchPath": "pg_catalog", "maximumRows": 1
+    },
+    {
+      "id": "public-fn-submit-request-access", "schema": "app_public", "name": "submit_request_access", "purpose": "Create one bounded platform access request without tenant authority.",
+      "arguments": ["full_name text", "work_email text", "company_name text", "role_title text", "country text", "monthly_volume text", "message text", "source_page text nullable", "referrer text nullable", "submitted_at timestamp without time zone", "request_id text", "idempotency_digest text"],
+      "returnColumns": ["accepted boolean", "publicReference text", "message text"],
+      "genericInputsAllowed": false, "dynamicSqlAllowed": false, "publicExecuteAllowed": false, "fixedSearchPath": "pg_catalog", "maximumRows": 1
+    },
+    {
+      "id": "public-fn-submit-public-support", "schema": "app_public", "name": "submit_public_support", "purpose": "Create one bounded public support intake without caller-selected tenant authority.",
+      "arguments": ["public_name text", "public_email text", "issue_type text", "title text", "description text", "verified_qr_id text nullable", "product_reference text nullable", "source_path text nullable", "page_url text nullable", "submitted_at timestamp without time zone", "request_id text", "idempotency_digest text"],
+      "returnColumns": ["accepted boolean", "publicReference text", "message text"],
+      "genericInputsAllowed": false, "dynamicSqlAllowed": false, "publicExecuteAllowed": false, "fixedSearchPath": "pg_catalog", "maximumRows": 1
+    }
+  ],
+  "allowScenarios": [
+    "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+    "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+    "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+    "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+    "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+    "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+  ],
+  "denyScenarios": [
+    "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+    "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+    "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+    "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+    "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+    "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+  ],
+  "implementationStatus": "workflow-authorization-resolved-runtime-schema-functions-and-postgresql-certification-pending",
+  "architectureFreeze": {
+    "workflowLevelAuthorizationFrozen": true,
+    "unresolvedBlockingContextDecisions": 0,
+    "nextStage": "full-system-runtime-implementation",
+    "newBroadProductDecisionCategoriesAllowed": false,
+    "exception": "A new workflow-level product decision requires a concrete code/schema contradiction to an approved contract and explicit architecture review."
+  },
+  "postgresqlCertificationRequirements": [
+    "Implement the exact app_public and existing app_auth signatures without dynamic SQL.",
+    "NOLOGIN owners, fixed search paths, fully qualified application objects and PUBLIC execution denial.",
+    "identity-pre-auth-app has EXECUTE only and no direct protected-table privilege.",
+    "Malformed input performs no protected read.",
+    "Valid proof permits one exact resource and foreign/blank/ambiguous proof denies.",
+    "Signed-token failure cannot execute the raw-code function.",
+    "One-time token locking, expiry and replay denial are database-enforced.",
+    "QR/session/support attribution and idempotency commit atomically with the result.",
+    "Exact projections contain no prohibited field and nested redaction is recursive.",
+    "Public function result cardinality is at most one and no public list/count is available.",
+    "Role, grant, ownership, function, policy and FORCE RLS catalogs match reviewed full-system artifacts.",
+    "Disposable PostgreSQL certification covers the full intended RLS system; the current four-workflow proof is insufficient."
+  ]
+}

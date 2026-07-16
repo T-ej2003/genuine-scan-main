@@ -6222,11 +6222,10 @@
       "name": "Report Incident",
       "entryPoint": "http:reportIncident",
       "executionSurface": "http",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/incidentController.ts"
@@ -6256,16 +6255,26 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-submit-public-incident through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "authorizationBoundaryType": "authenticated-context",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -6302,25 +6311,72 @@
           "method": "update"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-incident-evidence-select-7b25663aacba",
         "command-incident-update-7b25663aacba",
         "command-support-ticket-select-7b25663aacba"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "mfa-verified",
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-feedback-submission",
+      "publicReadFunctionId": "public-fn-submit-public-incident",
+      "publicReadProjectionProfile": "public-incident-followup",
+      "publicReadRateLimitClass": "fraud-incident-report",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-incident-evidence": {
+          "SELECT": [
+            "id",
+            "incidentId",
+            "storageKey",
+            "fileType"
+          ]
+        },
+        "table-incident": {
+          "UPDATE": [
+            "tags",
+            "updatedAt"
+          ]
+        },
+        "table-support-ticket": {
+          "SELECT": [
+            "incidentId",
+            "referenceCode",
+            "status",
+            "slaDueAt"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "blocked-full-call-chain-and-concurrency-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file",
@@ -9890,9 +9946,10 @@
       "name": "Submit Public Request Access",
       "entryPoint": "http:submitPublicRequestAccess",
       "executionSurface": "http",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/publicIntakeController.ts"
@@ -9909,16 +9966,26 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-submit-request-access through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "authorizationBoundaryType": "authenticated-context",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -9948,32 +10015,80 @@
           "method": "create"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-request-access-insert-e8b066967a4b",
         "command-request-access-update-e8b066967a4b"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-feedback-submission",
+      "publicReadFunctionId": "public-fn-submit-request-access",
+      "publicReadProjectionProfile": "request-access",
+      "publicReadRateLimitClass": "request-access",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-request-access": {
+          "INSERT": [
+            "referenceCode",
+            "fullName",
+            "workEmail",
+            "companyName",
+            "roleTitle",
+            "country",
+            "monthlyGarmentVolume",
+            "message",
+            "sourcePage",
+            "referrer"
+          ],
+          "UPDATE": [
+            "adminEmailDeliveryStatus",
+            "adminEmailErrorCode",
+            "acknowledgementEmailDeliveryStatus",
+            "acknowledgementEmailErrorCode",
+            "updatedAt"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-public-intake-controller-ts-submit-public-support-issue",
       "name": "Submit Public Support Issue",
       "entryPoint": "http:submitPublicSupportIssue",
       "executionSurface": "http",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/publicIntakeController.ts"
@@ -9990,16 +10105,26 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-submit-public-support through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "authorizationBoundaryType": "authenticated-context",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -10029,23 +10154,73 @@
           "method": "create"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-support-issue-report-insert-2cbf3693bde3",
         "command-support-issue-report-update-2cbf3693bde3"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-feedback-submission",
+      "publicReadFunctionId": "public-fn-submit-public-support",
+      "publicReadProjectionProfile": "support-intake",
+      "publicReadRateLimitClass": "public-support",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-support-issue-report": {
+          "INSERT": [
+            "referenceCode",
+            "publicName",
+            "publicEmail",
+            "issueType",
+            "verificationCode",
+            "productReference",
+            "priority",
+            "title",
+            "description",
+            "sourcePath",
+            "pageUrl",
+            "autoDetected",
+            "diagnostics"
+          ],
+          "UPDATE": [
+            "emailDeliveryStatus",
+            "emailErrorCode",
+            "acknowledgementEmailDeliveryStatus",
+            "acknowledgementEmailErrorCode",
+            "updatedAt"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-qr-controller-ts-assign-manufacturer",
@@ -12033,11 +12208,10 @@
       "name": "Track Support Ticket Public",
       "entryPoint": "http:trackSupportTicketPublic",
       "executionSurface": "http",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/supportController.ts"
@@ -12053,16 +12227,26 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-track-support-status through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "authorizationBoundaryType": "authenticated-context",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -12076,9 +12260,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-public-read-contract"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-6d5cc5a7ace9806d",
@@ -12092,31 +12274,52 @@
         "command-support-ticket-select-7a26813adcb6"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
       "semanticStatus": "mapped",
       "contextBoundaryPlanningEvidence": {
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
-        "focusedTestsDeterministic": true
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
       },
       "contextBoundaryBlockers": [
         {
-          "code": "public-command-contract",
-          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
-          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication."
+          "code": "public-proof-schema-pending",
+          "reason": "blocked-schema-proof-version-and-runtime-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
         }
-      ]
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-support-tracking",
+      "publicReadFunctionId": "public-fn-track-support-status",
+      "publicReadProjectionProfile": "support-status",
+      "publicReadRateLimitClass": "support-tracking",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-support-ticket": {
+          "SELECT": [
+            "incidentId",
+            "referenceCode",
+            "status",
+            "slaDueAt",
+            "updatedAt"
+          ]
+        }
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-support-issue-controller-ts-create-support-issue-report",
@@ -14164,9 +14367,10 @@
       "name": "Report Fraud",
       "entryPoint": "http:reportFraud",
       "executionSurface": "http",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/verify/feedbackHandlers.ts"
@@ -14196,17 +14400,27 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-submit-public-incident through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "contextRequirementsSource": "generated-conservative",
-      "authorizationBoundaryType": "authenticated-context",
+      "contextRequirementsSource": "human-reviewed",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -14249,25 +14463,75 @@
         "command-support-ticket-select-ce4cb92a27ec"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "mfa-verified",
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-feedback-submission",
+      "publicReadFunctionId": "public-fn-submit-public-incident",
+      "publicReadProjectionProfile": "public-incident-followup",
+      "publicReadRateLimitClass": "fraud-incident-report",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-incident-evidence": {
+          "SELECT": [
+            "id",
+            "incidentId",
+            "storageKey",
+            "fileType"
+          ]
+        },
+        "table-incident": {
+          "UPDATE": [
+            "tags",
+            "updatedAt"
+          ]
+        },
+        "table-support-ticket": {
+          "SELECT": [
+            "incidentId",
+            "referenceCode",
+            "status",
+            "slaDueAt"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "blocked-full-call-chain-and-concurrency-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-verify-feedback-handlers-ts-submit-product-feedback",
       "name": "Submit Product Feedback",
       "entryPoint": "http:submitProductFeedback",
       "executionSurface": "http",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/verify/feedbackHandlers.ts"
@@ -14283,17 +14547,27 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-submit-product-feedback through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
       "contextRequirementsSource": "human-reviewed",
-      "authorizationBoundaryType": "authenticated-context",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -14307,9 +14581,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-public-read-contract"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-0a85c1c46b6dc9a7",
@@ -14322,38 +14594,61 @@
         "command-qrcode-select-0ab7268a79d3"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
       "semanticStatus": "mapped",
       "contextBoundaryPlanningEvidence": {
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
-        "focusedTestsDeterministic": true
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
       },
       "contextBoundaryBlockers": [
         {
-          "code": "public-command-contract",
-          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
-          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication."
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
         }
-      ]
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-feedback-submission",
+      "publicReadFunctionId": "public-fn-submit-product-feedback",
+      "publicReadProjectionProfile": "qr-feedback",
+      "publicReadRateLimitClass": "product-feedback",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-qrcode": {
+          "SELECT": [
+            "id",
+            "code",
+            "licenseeId",
+            "batchId"
+          ]
+        }
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode",
       "name": "Verify QRCode",
       "entryPoint": "http:verifyQRCode",
       "executionSurface": "http",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/verify/verificationHandlers.ts"
@@ -14369,16 +14664,26 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-verify-raw-qr through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "authorizationBoundaryType": "authenticated-context",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -14401,29 +14706,78 @@
           "method": "findUnique"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-qrcode-select-13870f96bb48"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-qr-verification",
+      "publicReadFunctionId": "public-fn-verify-raw-qr",
+      "publicReadProjectionProfile": "qr-read",
+      "publicReadRateLimitClass": "qr-lookup",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-qrcode": {
+          "SELECT": [
+            "id",
+            "code",
+            "licenseeId",
+            "batchId",
+            "status",
+            "printedAt",
+            "scannedAt",
+            "scanCount",
+            "tokenNonce",
+            "tokenExpiresAt",
+            "tokenHash",
+            "replayEpoch",
+            "issuanceMode",
+            "customerVerifiableAt",
+            "signedFirstSeenAt",
+            "lastSignedVerificationAt"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-verify-verification-signed-token-resolver-ts-resolve-signed-verification-target",
       "name": "Resolve Signed Verification Target",
       "entryPoint": "http:resolveSignedVerificationTarget",
       "executionSurface": "http",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/verify/verificationSignedTokenResolver.ts"
@@ -14439,16 +14793,26 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-verify-signed-qr through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "authorizationBoundaryType": "authenticated-context",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -14471,29 +14835,78 @@
           "method": "findUnique"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-qrcode-select-18a44b49c49e"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "signed-scan-verification",
+      "publicReadFunctionId": "public-fn-verify-signed-qr",
+      "publicReadProjectionProfile": "qr-read",
+      "publicReadRateLimitClass": "qr-lookup",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-qrcode": {
+          "SELECT": [
+            "id",
+            "code",
+            "licenseeId",
+            "batchId",
+            "status",
+            "printedAt",
+            "scannedAt",
+            "scanCount",
+            "tokenNonce",
+            "tokenExpiresAt",
+            "tokenHash",
+            "replayEpoch",
+            "issuanceMode",
+            "customerVerifiableAt",
+            "signedFirstSeenAt",
+            "lastSignedVerificationAt"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-verify-verify-fraud-snapshot-ts-build-fraud-verification-snapshot",
       "name": "Build Fraud Verification Snapshot",
       "entryPoint": "http:buildFraudVerificationSnapshot",
       "executionSurface": "http",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/verify/verifyFraudSnapshot.ts"
@@ -14509,17 +14922,27 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-verify-raw-qr through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "contextRequirementsSource": "generated-conservative",
-      "authorizationBoundaryType": "authenticated-context",
+      "contextRequirementsSource": "human-reviewed",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -14546,15 +14969,63 @@
         "command-qrcode-select-dcc20ed89fa2"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-qr-verification",
+      "publicReadFunctionId": "public-fn-verify-raw-qr",
+      "publicReadProjectionProfile": "qr-read",
+      "publicReadRateLimitClass": "qr-lookup",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-qrcode": {
+          "SELECT": [
+            "id",
+            "code",
+            "licenseeId",
+            "batchId",
+            "status",
+            "printedAt",
+            "scannedAt",
+            "scanCount",
+            "tokenNonce",
+            "tokenExpiresAt",
+            "tokenHash",
+            "replayEpoch",
+            "issuanceMode",
+            "customerVerifiableAt",
+            "signedFirstSeenAt",
+            "lastSignedVerificationAt"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-verify-verify-ownership-ts-expire-pending-ownership-transfers",
@@ -17050,10 +17521,20 @@
       ],
       "authorizationBoundaryType": "pre-auth-security-function",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [
         "No direct table fallback; exact function grants and owner must be certified."
@@ -17131,7 +17612,18 @@
         "functionId": "preauth-fn-consume-email-verification",
         "status": "resolved"
       },
-      "preAuthFunctionId": "preauth-fn-consume-email-verification"
+      "preAuthFunctionId": "preauth-fn-consume-email-verification",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "email-link-verification",
+      "publicReadFunctionId": "preauth-fn-consume-email-verification",
+      "publicReadProjectionProfile": null,
+      "publicReadRateLimitClass": "auth-invite-email",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {}
     },
     {
       "id": "workflow-internal-backend-src-services-auth-email-verification-service-ts-request-email-change-verification",
@@ -17290,10 +17782,20 @@
       ],
       "authorizationBoundaryType": "pre-auth-security-function",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [
         "No direct table fallback; exact function grants and owner must be certified."
@@ -17363,7 +17865,18 @@
         "functionId": "preauth-fn-consume-invitation",
         "status": "resolved"
       },
-      "preAuthFunctionId": "preauth-fn-consume-invitation"
+      "preAuthFunctionId": "preauth-fn-consume-invitation",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "one-time-token-consumption",
+      "publicReadFunctionId": "preauth-fn-consume-invitation",
+      "publicReadProjectionProfile": null,
+      "publicReadRateLimitClass": "auth-invite-email",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {}
     },
     {
       "id": "workflow-internal-backend-src-services-auth-invite-service-ts-create-invite",
@@ -17506,10 +18019,20 @@
       ],
       "authorizationBoundaryType": "pre-auth-security-function",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [
         "No direct table fallback; exact function grants and owner must be certified."
@@ -17563,7 +18086,18 @@
         "functionId": "preauth-fn-lookup-invitation",
         "status": "resolved"
       },
-      "preAuthFunctionId": "preauth-fn-lookup-invitation"
+      "preAuthFunctionId": "preauth-fn-lookup-invitation",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "pre-auth-security-function",
+      "publicReadFunctionId": "preauth-fn-lookup-invitation",
+      "publicReadProjectionProfile": null,
+      "publicReadRateLimitClass": "auth-invite-email",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {}
     },
     {
       "id": "workflow-internal-backend-src-services-auth-invite-service-ts-get-or-create-platform-org-id",
@@ -19032,10 +19566,20 @@
       ],
       "authorizationBoundaryType": "pre-auth-security-function",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [
         "No direct table fallback; exact function grants and owner must be certified."
@@ -19089,7 +19633,18 @@
         "functionId": "preauth-fn-request-password-reset",
         "status": "resolved"
       },
-      "preAuthFunctionId": "preauth-fn-request-password-reset"
+      "preAuthFunctionId": "preauth-fn-request-password-reset",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "pre-auth-security-function",
+      "publicReadFunctionId": "preauth-fn-request-password-reset",
+      "publicReadProjectionProfile": null,
+      "publicReadRateLimitClass": "auth-password-reset",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {}
     },
     {
       "id": "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token",
@@ -19136,10 +19691,20 @@
       ],
       "authorizationBoundaryType": "pre-auth-security-function",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [
         "No direct table fallback; exact function grants and owner must be certified."
@@ -19209,7 +19774,18 @@
         "functionId": "preauth-fn-consume-password-reset",
         "status": "resolved"
       },
-      "preAuthFunctionId": "preauth-fn-consume-password-reset"
+      "preAuthFunctionId": "preauth-fn-consume-password-reset",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "one-time-token-consumption",
+      "publicReadFunctionId": "preauth-fn-consume-password-reset",
+      "publicReadProjectionProfile": null,
+      "publicReadRateLimitClass": "auth-password-reset",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {}
     },
     {
       "id": "workflow-internal-backend-src-services-auth-refresh-token-service-ts-create-refresh-token",
@@ -23069,9 +23645,10 @@
       "name": "Assert Session Proof Binding",
       "entryPoint": "internal:assertSessionProofBinding",
       "executionSurface": "internal",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/customerVerificationSessionService.ts"
@@ -23087,17 +23664,27 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-read-verification-session through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "contextRequirementsSource": "generated-conservative",
-      "authorizationBoundaryType": "unresolved",
+      "contextRequirementsSource": "human-reviewed",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -23124,24 +23711,104 @@
         "command-qrcode-select-6b23b065c6d6"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "proof-bound-public-status",
+      "publicReadFunctionId": "public-fn-read-verification-session",
+      "publicReadProjectionProfile": "session-read",
+      "publicReadRateLimitClass": "verification-session",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-customer-verification-session": {
+          "SELECT": [
+            "id",
+            "verificationDecisionId",
+            "qrCodeId",
+            "code",
+            "entryMethod",
+            "authState",
+            "customerUserId",
+            "intakeCompletedAt",
+            "revealedAt",
+            "expiresAt",
+            "proofBindingTokenHash",
+            "proofBindingExpiresAt",
+            "proofBindingReplayEpoch",
+            "createdAt",
+            "updatedAt"
+          ]
+        },
+        "table-verification-decision": {
+          "SELECT": [
+            "id",
+            "qrCodeId",
+            "code",
+            "proofSource",
+            "outcome",
+            "classification",
+            "isAuthentic",
+            "createdAt"
+          ]
+        },
+        "table-verification-evidence-snapshot": {
+          "SELECT": [
+            "verificationDecisionId",
+            "metadata",
+            "createdAt"
+          ]
+        },
+        "table-qrcode": {
+          "SELECT": [
+            "id",
+            "code",
+            "licenseeId",
+            "batchId",
+            "status",
+            "printedAt",
+            "replayEpoch",
+            "issuanceMode",
+            "customerVerifiableAt"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-customer-verification-session-service-ts-create-customer-verification-session",
       "name": "Create Customer Verification Session",
       "entryPoint": "internal:createCustomerVerificationSession",
       "executionSurface": "internal",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/customerVerificationSessionService.ts"
@@ -23157,17 +23824,27 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-start-verification-session through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "contextRequirementsSource": "generated-conservative",
-      "authorizationBoundaryType": "unresolved",
+      "contextRequirementsSource": "human-reviewed",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -23194,24 +23871,78 @@
         "command-customer-verification-session-insert-b073f0a412d8"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "proof-bound-public-status",
+      "publicReadFunctionId": "public-fn-start-verification-session",
+      "publicReadProjectionProfile": "session-start",
+      "publicReadRateLimitClass": "verification-session",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-verification-evidence-snapshot": {
+          "SELECT": [
+            "id",
+            "verificationDecisionId",
+            "metadata",
+            "createdAt"
+          ]
+        },
+        "table-customer-verification-session": {
+          "INSERT": [
+            "verificationDecisionId",
+            "qrCodeId",
+            "code",
+            "entryMethod",
+            "authState",
+            "customerUserId",
+            "customerEmail",
+            "expiresAt",
+            "proofBindingTokenHash",
+            "proofBindingIssuedAt",
+            "proofBindingExpiresAt",
+            "proofBindingReplayEpoch",
+            "metadata"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-customer-verification-session-service-ts-get-customer-verification-session",
       "name": "Get Customer Verification Session",
       "entryPoint": "internal:getCustomerVerificationSession",
       "executionSurface": "internal",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/customerVerificationSessionService.ts"
@@ -23227,17 +23958,27 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-read-verification-session through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "contextRequirementsSource": "generated-conservative",
-      "authorizationBoundaryType": "unresolved",
+      "contextRequirementsSource": "human-reviewed",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -23264,24 +24005,104 @@
         "command-customer-verification-session-select-e57dd029ba7a"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "proof-bound-public-status",
+      "publicReadFunctionId": "public-fn-read-verification-session",
+      "publicReadProjectionProfile": "session-read",
+      "publicReadRateLimitClass": "verification-session",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-customer-verification-session": {
+          "SELECT": [
+            "id",
+            "verificationDecisionId",
+            "qrCodeId",
+            "code",
+            "entryMethod",
+            "authState",
+            "customerUserId",
+            "intakeCompletedAt",
+            "revealedAt",
+            "expiresAt",
+            "proofBindingTokenHash",
+            "proofBindingExpiresAt",
+            "proofBindingReplayEpoch",
+            "createdAt",
+            "updatedAt"
+          ]
+        },
+        "table-verification-decision": {
+          "SELECT": [
+            "id",
+            "qrCodeId",
+            "code",
+            "proofSource",
+            "outcome",
+            "classification",
+            "isAuthentic",
+            "createdAt"
+          ]
+        },
+        "table-verification-evidence-snapshot": {
+          "SELECT": [
+            "verificationDecisionId",
+            "metadata",
+            "createdAt"
+          ]
+        },
+        "table-qrcode": {
+          "SELECT": [
+            "id",
+            "code",
+            "licenseeId",
+            "batchId",
+            "status",
+            "printedAt",
+            "replayEpoch",
+            "issuanceMode",
+            "customerVerifiableAt"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-customer-verification-session-service-ts-load-decision-presentation",
       "name": "Load Decision Presentation",
       "entryPoint": "internal:loadDecisionPresentation",
       "executionSurface": "internal",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/customerVerificationSessionService.ts"
@@ -23311,17 +24132,27 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-read-verification-session through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "contextRequirementsSource": "generated-conservative",
-      "authorizationBoundaryType": "unresolved",
+      "contextRequirementsSource": "human-reviewed",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -23364,15 +24195,94 @@
         "command-verification-evidence-snapshot-select-f50355963193"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "proof-bound-public-status",
+      "publicReadFunctionId": "public-fn-read-verification-session",
+      "publicReadProjectionProfile": "session-read",
+      "publicReadRateLimitClass": "verification-session",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-customer-verification-session": {
+          "SELECT": [
+            "id",
+            "verificationDecisionId",
+            "qrCodeId",
+            "code",
+            "entryMethod",
+            "authState",
+            "customerUserId",
+            "intakeCompletedAt",
+            "revealedAt",
+            "expiresAt",
+            "proofBindingTokenHash",
+            "proofBindingExpiresAt",
+            "proofBindingReplayEpoch",
+            "createdAt",
+            "updatedAt"
+          ]
+        },
+        "table-verification-decision": {
+          "SELECT": [
+            "id",
+            "qrCodeId",
+            "code",
+            "proofSource",
+            "outcome",
+            "classification",
+            "isAuthentic",
+            "createdAt"
+          ]
+        },
+        "table-verification-evidence-snapshot": {
+          "SELECT": [
+            "verificationDecisionId",
+            "metadata",
+            "createdAt"
+          ]
+        },
+        "table-qrcode": {
+          "SELECT": [
+            "id",
+            "code",
+            "licenseeId",
+            "batchId",
+            "status",
+            "printedAt",
+            "replayEpoch",
+            "issuanceMode",
+            "customerVerifiableAt"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-customer-verification-session-service-ts-reveal-customer-verification-session",
@@ -24959,11 +25869,10 @@
       "name": "Resolve Duplicate Risk Profile",
       "entryPoint": "internal:resolveDuplicateRiskProfile",
       "executionSurface": "internal",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/governanceService.ts"
@@ -24979,16 +25888,26 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-verify-raw-qr through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -25002,9 +25921,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-public-read-contract"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-0f4e2a9f62b3b490",
@@ -25018,29 +25935,29 @@
         "command-tenant-feature-flag-select-84b23ee1039f"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
       "semanticStatus": "mapped",
       "contextBoundaryPlanningEvidence": {
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
-        "focusedTestsDeterministic": true
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
       },
       "contextBoundaryBlockers": [
         {
-          "code": "public-command-contract",
-          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
-          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication."
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
         }
       ],
       "contextBoundaryFamilySplit": {
@@ -25055,12 +25972,32 @@
         ],
         "actorClasses": [
           "anonymous",
-          "authenticated-user"
+          "pre-auth-runtime"
         ],
-        "scopeModel": "Exact licenseeId inherited from the resolved QR verification target; blank returns static defaults and never queries all tenants.",
+        "scopeModel": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; blank scope and caller tenant/role values deny.",
         "executionSurface": "internal",
         "protectedTableBoundary": "TenantFeatureFlag public verification policy projection",
-        "commandSemantics": "Read-only policy lookup inside public verification roots."
+        "commandSemantics": "Execute only public-fn-verify-raw-qr with the exact projection, rate limit, generic failure and atomic attribution contract."
+      },
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-qr-verification",
+      "publicReadFunctionId": "public-fn-verify-raw-qr",
+      "publicReadProjectionProfile": "qr-policy",
+      "publicReadRateLimitClass": "qr-lookup",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-tenant-feature-flag": {
+          "SELECT": [
+            "licenseeId",
+            "key",
+            "enabled",
+            "config"
+          ]
+        }
       }
     },
     {
@@ -25068,11 +26005,10 @@
       "name": "Resolve Verify Ux Policy",
       "entryPoint": "internal:resolveVerifyUxPolicy",
       "executionSurface": "internal",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/governanceService.ts"
@@ -25088,16 +26024,26 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-verify-raw-qr through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -25111,9 +26057,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-public-read-contract"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-e22a336c15545900",
@@ -25127,29 +26071,29 @@
         "command-tenant-feature-flag-select-c90ec6c2be94"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
       "semanticStatus": "mapped",
       "contextBoundaryPlanningEvidence": {
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
-        "focusedTestsDeterministic": true
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
       },
       "contextBoundaryBlockers": [
         {
-          "code": "public-command-contract",
-          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
-          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication."
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
         }
       ],
       "contextBoundaryFamilySplit": {
@@ -25164,12 +26108,32 @@
         ],
         "actorClasses": [
           "anonymous",
-          "authenticated-user"
+          "pre-auth-runtime"
         ],
-        "scopeModel": "Exact licenseeId inherited from the resolved QR verification target; blank returns static defaults and never queries all tenants.",
+        "scopeModel": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; blank scope and caller tenant/role values deny.",
         "executionSurface": "internal",
         "protectedTableBoundary": "TenantFeatureFlag public verification policy projection",
-        "commandSemantics": "Read-only policy lookup inside public verification roots."
+        "commandSemantics": "Execute only public-fn-verify-raw-qr with the exact projection, rate limit, generic failure and atomic attribution contract."
+      },
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-qr-verification",
+      "publicReadFunctionId": "public-fn-verify-raw-qr",
+      "publicReadProjectionProfile": "qr-policy",
+      "publicReadRateLimitClass": "qr-lookup",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-tenant-feature-flag": {
+          "SELECT": [
+            "licenseeId",
+            "key",
+            "enabled",
+            "config"
+          ]
+        }
       }
     },
     {
@@ -36296,9 +37260,10 @@
       "name": "Run Post Scan Verification Flow",
       "entryPoint": "internal:runPostScanVerificationFlow",
       "executionSurface": "internal",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/publicVerificationPostScanService.ts"
@@ -36314,16 +37279,26 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-record-qr-verification through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -36346,20 +37321,93 @@
           "method": "update"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-qrcode-update-1bfc246f4fb0"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-qr-verification",
+      "publicReadFunctionId": "public-fn-record-qr-verification",
+      "publicReadProjectionProfile": "verification-record",
+      "publicReadRateLimitClass": "qr-lookup",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-qrcode": {
+          "UPDATE": [
+            "scannedAt",
+            "scanCount",
+            "signedFirstSeenAt",
+            "lastSignedVerificationAt",
+            "lastSignedVerificationIpHash",
+            "lastSignedVerificationDeviceHash"
+          ]
+        },
+        "table-verification-decision": {
+          "INSERT": [
+            "decisionVersion",
+            "qrCodeId",
+            "code",
+            "licenseeId",
+            "batchId",
+            "proofSource",
+            "proofTier",
+            "outcome",
+            "classification",
+            "reasonCodes",
+            "riskBand",
+            "replacementStatus",
+            "degradationMode",
+            "customerTrustLevel",
+            "isAuthentic",
+            "scanCount",
+            "riskScore",
+            "actorIpHash",
+            "actorDeviceHash",
+            "metadata"
+          ]
+        },
+        "table-verification-evidence-snapshot": {
+          "INSERT": [
+            "verificationDecisionId",
+            "scanSummary",
+            "ownershipSnapshot",
+            "riskSignals",
+            "policySnapshot",
+            "lifecycleSnapshot",
+            "metadata"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-qr-allocation-service-ts-allocate-qr-range",
@@ -37565,9 +38613,10 @@
       "name": "Resolve Replacement Status",
       "entryPoint": "internal:resolveReplacementStatus",
       "executionSurface": "internal",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/replacementChainService.ts"
@@ -37583,17 +38632,27 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-verify-raw-qr through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
       "contextRequirementsSource": "human-reviewed",
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -37608,9 +38667,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-public-read-contract"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-971cec462b5494eb",
@@ -37629,29 +38686,52 @@
         "command-replacement-chain-select-04cbc7d3feb1"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
       "semanticStatus": "mapped",
       "contextBoundaryPlanningEvidence": {
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
-        "focusedTestsDeterministic": true
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
       },
       "contextBoundaryBlockers": [
         {
-          "code": "public-command-contract",
-          "reason": "The registered root is public but the command contract requires an authenticated human actor.",
-          "remediation": "Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication."
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
         }
-      ]
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-qr-verification",
+      "publicReadFunctionId": "public-fn-verify-raw-qr",
+      "publicReadProjectionProfile": "replacement-status",
+      "publicReadRateLimitClass": "qr-lookup",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-replacement-chain": {
+          "SELECT": [
+            "id",
+            "status",
+            "originalQrCodeId",
+            "replacementQrCodeId",
+            "createdAt"
+          ]
+        }
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-sample-scan-policy-service-ts-evaluate-sample-scan-policy",
@@ -40127,9 +41207,10 @@
       "name": "Persist Verification Decision",
       "entryPoint": "internal:persistVerificationDecision",
       "executionSurface": "internal",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/verificationDecisionService.ts"
@@ -40152,17 +41233,27 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-record-qr-verification through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "contextRequirementsSource": "generated-conservative",
-      "authorizationBoundaryType": "unresolved",
+      "contextRequirementsSource": "human-reviewed",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -40197,24 +41288,98 @@
         "command-verification-evidence-snapshot-insert-361832b64dc1"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "public-qr-verification",
+      "publicReadFunctionId": "public-fn-record-qr-verification",
+      "publicReadProjectionProfile": "verification-record",
+      "publicReadRateLimitClass": "qr-lookup",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-qrcode": {
+          "UPDATE": [
+            "scannedAt",
+            "scanCount",
+            "signedFirstSeenAt",
+            "lastSignedVerificationAt",
+            "lastSignedVerificationIpHash",
+            "lastSignedVerificationDeviceHash"
+          ]
+        },
+        "table-verification-decision": {
+          "INSERT": [
+            "decisionVersion",
+            "qrCodeId",
+            "code",
+            "licenseeId",
+            "batchId",
+            "proofSource",
+            "proofTier",
+            "outcome",
+            "classification",
+            "reasonCodes",
+            "riskBand",
+            "replacementStatus",
+            "degradationMode",
+            "customerTrustLevel",
+            "isAuthentic",
+            "scanCount",
+            "riskScore",
+            "actorIpHash",
+            "actorDeviceHash",
+            "metadata"
+          ]
+        },
+        "table-verification-evidence-snapshot": {
+          "INSERT": [
+            "verificationDecisionId",
+            "scanSummary",
+            "ownershipSnapshot",
+            "riskSignals",
+            "policySnapshot",
+            "lifecycleSnapshot",
+            "metadata"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-verification-decision-service-ts-resolve-public-verification-session-start-token",
       "name": "Resolve Public Verification Session Start Token",
       "entryPoint": "internal:resolvePublicVerificationSessionStartToken",
       "executionSurface": "internal",
-      "authenticationStage": "authenticated",
+      "authenticationStage": "pre-authentication",
       "actorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/verificationDecisionService.ts"
@@ -40230,17 +41395,27 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One exact validated public proof or artifact authorizes at most one resource through the approved named function; caller tenant/role fields and blank scope are never authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "EXECUTE only public-fn-start-verification-session through identity-pre-auth-app; no direct protected-table access or caller-set app.* authority."
       ],
-      "contextRequirementsSource": "generated-conservative",
-      "authorizationBoundaryType": "unresolved",
+      "contextRequirementsSource": "human-reviewed",
+      "authorizationBoundaryType": "public-proof-boundary",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -40267,15 +41442,68 @@
         "command-verification-evidence-snapshot-select-373e098fa91c"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "anonymous",
+        "pre-auth-runtime"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "none"
       ],
       "runtimeIdentities": [
-        "identity-authenticated-app"
+        "identity-pre-auth-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "proof-bound-public-status",
+      "publicReadFunctionId": "public-fn-start-verification-session",
+      "publicReadProjectionProfile": "session-start",
+      "publicReadRateLimitClass": "verification-session",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {
+        "table-verification-evidence-snapshot": {
+          "SELECT": [
+            "id",
+            "verificationDecisionId",
+            "metadata",
+            "createdAt"
+          ]
+        },
+        "table-customer-verification-session": {
+          "INSERT": [
+            "verificationDecisionId",
+            "qrCodeId",
+            "code",
+            "entryMethod",
+            "authState",
+            "customerUserId",
+            "customerEmail",
+            "expiresAt",
+            "proofBindingTokenHash",
+            "proofBindingIssuedAt",
+            "proofBindingExpiresAt",
+            "proofBindingReplayEpoch",
+            "metadata"
+          ]
+        }
+      },
+      "contextBoundaryBlockers": [
+        {
+          "code": "public-boundary-runtime-pending",
+          "reason": "contract-only-runtime-and-function-pending; current direct Prisma and response behavior are not certified against public-read-contract-v1.",
+          "remediation": "Implement the exact named function/repository call chain, proof validation, projection, rate limit, generic failure, atomic attribution and disposable PostgreSQL tests in the full-system runtime stage."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
@@ -40462,10 +41690,20 @@
       ],
       "authorizationBoundaryType": "pre-auth-security-function",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [
         "No direct table fallback; exact function grants and owner must be certified."
@@ -40511,7 +41749,18 @@
         "functionId": "preauth-fn-lookup-password-user",
         "status": "resolved"
       },
-      "preAuthFunctionId": "preauth-fn-lookup-password-user"
+      "preAuthFunctionId": "preauth-fn-lookup-password-user",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "pre-auth-security-function",
+      "publicReadFunctionId": "preauth-fn-lookup-password-user",
+      "publicReadProjectionProfile": null,
+      "publicReadRateLimitClass": "auth-login",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {}
     },
     {
       "id": "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure",
@@ -40543,10 +41792,20 @@
       ],
       "authorizationBoundaryType": "pre-auth-security-function",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
       ],
       "preAuthSystemRequirements": [
         "No direct table fallback; exact function grants and owner must be certified."
@@ -40592,7 +41851,18 @@
         "functionId": "preauth-fn-record-password-failure",
         "status": "resolved"
       },
-      "preAuthFunctionId": "preauth-fn-record-password-failure"
+      "preAuthFunctionId": "preauth-fn-record-password-failure",
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "pre-auth-security-function",
+      "publicReadFunctionId": "preauth-fn-record-password-failure",
+      "publicReadProjectionProfile": null,
+      "publicReadRateLimitClass": "auth-login",
+      "publicReadActorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "publicReadRequiredAssurance": "none",
+      "publicReadAllowedColumnsByTableAndCommand": {}
     },
     {
       "id": "workflow-startup-backend-src-services-auth-super-admin-bootstrap-service-ts-bootstrap-configured-super-admin",
