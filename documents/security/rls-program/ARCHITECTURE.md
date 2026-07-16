@@ -108,7 +108,7 @@ The generated `TABLE_OWNERSHIP_REVIEW.md` is the concise table-by-table review. 
 
 ## Unresolved semantic decisions
 
-Ownership classification, policy command semantics, pre-authentication boundaries, worker/job authority, the object-transfer chain, operator administration, and manufacturer authentication/bootstrap now have resolved architecture contracts. The remaining product decisions are bounded platform-read scope, policy-alert actor ceiling, and public-read proof/projection. Implementation and certification remain incomplete; no resolved contract authorizes role, procedure, policy, grant, RLS, infrastructure or database changes.
+Ownership classification, policy command semantics, pre-authentication boundaries, worker/job authority, the object-transfer chain, operator administration, manufacturer authentication/bootstrap, and bounded platform-read scope now have resolved architecture contracts. The remaining product decisions are policy-alert actor ceiling and public-read proof/projection. Implementation and certification remain incomplete; no resolved contract authorizes role, procedure, policy, grant, RLS, infrastructure or database changes.
 
 ## Pre-authentication function rules
 
@@ -127,6 +127,16 @@ Password lookup normalizes once, validates shape, returns the minimum current ve
 The bounded projection returns only manufacturer user ID, database role, licensee ID, organization ID, computed active relationship status, primary flag, licensee display name and link update time as scope version. At most 100 eligible memberships may be returned, ordered by primary descending, creation time ascending and licensee ID ascending; overflow and multiple-primary state fail closed. One link or one unambiguous primary may be selected automatically. Otherwise an actor may select only from the freshly verified set. Manufacturers require password assurance for this bootstrap and MFA assurance before active application access or scope switching.
 
 Actor bootstrap installs transaction-local user, role, manufacturer, assurance, request and purpose keys. Licensee and organization keys are installed only in a fresh transaction after one relationship is verified; blank keys never mean all. Scope switching re-reads membership and scope version, requires MFA, request attribution and the fixed switch purpose, and appends audit evidence without logging the membership list. The future implementation is one transaction-client-only actor-context repository with explicit projections and no global Prisma or catch-to-empty authority fallback. SQL and PostgreSQL certification remain pending.
+
+## Platform administrator read scope
+
+`decision-context-platform-read-scope` is resolved by `platform-read-scope-boundary.json`. A platform role is never a global row predicate. The authenticated application must reload one active database User, verify an active session and fresh MFA, require one allowlisted purpose and request ID, validate every requested selector against active database rows, install transaction-local canonical context, use the exact projection and bounds, and append immutable attribution in the same transaction. Client selectors only narrow server-verified scope; blank scope denies unless the exact approved telemetry aggregate is selected, and conflicting selectors deny.
+
+Ordinary reads are tenant-, organization-, licensee-, manufacturer-, or actor-bounded. Licensee detail returns one row; the licensee directory requires a normalized name/prefix search, keyset pagination and at most 50 minimal rows. The current unrestricted licensee CSV export is prohibited. Support, compliance, feature-flag and incident-evidence reads require one verified tenant and omit customer contacts, raw config/metadata, storage and integrity material, secrets and unrelated personal data. Count and list share one repeatable-read snapshot and identical scope.
+
+The only approved cross-tenant aggregate is the route-transition health summary: at most 31 days, 20 allowlisted route dimensions, counts and averages only, no tenant identity dimension, no raw rows and no tenant-private row materialization in application memory. It remains blocked until a dedicated database-enforceable aggregate projection and disposable PostgreSQL certification exist. Dashboard and analytics helpers do not inherit this approval.
+
+IR alert browsing is `incident-response-read`, not ordinary platform access. It requires an active incident ID, tenant ceiling, step-up assurance, fixed purpose, immutable record and authorization expiry within 60 minutes. The current product lacks that durable authorization model, so the HTTP workflow remains blocked; exact operator incident summaries use `operator-boundary-tenant-incident-summary`. Catalog, readiness, role, grant, ownership, policy and migration diagnostics remain exact operator procedures and never become authenticated application reads.
 
 ## Worker authorization rules
 

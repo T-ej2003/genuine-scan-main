@@ -166,11 +166,11 @@ const decisionDefinitions = [
 const updateManifests = () => {
   const workflowManifest = readJson(workflowManifestPath);
   const decisions = readJson(decisionManifestPath);
-  const manufacturerBootstrapResolved = decisions.decisions.some((decision) => decision.id === "decision-context-manufacturer-bootstrap" && decision.status === "resolved");
+  const resolvedContextDecisions = new Set(decisions.decisions.filter((decision) => decision.id.startsWith("decision-context-") && decision.status === "resolved").map((decision) => decision.id));
   const byId = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
   assert.equal(workflowReviews.size, 24, "review must cover exactly 24 workflows");
   for (const [workflowId, review] of workflowReviews) {
-    if (manufacturerBootstrapResolved && review.decisions?.includes("decision-context-manufacturer-bootstrap")) continue;
+    if (review.decisions?.some((decisionId) => resolvedContextDecisions.has(decisionId))) continue;
     const workflow = byId.get(workflowId);
     assert(workflow, `missing reviewed workflow ${workflowId}`);
     workflow.contextRequirementsSource = "human-reviewed";
@@ -203,9 +203,9 @@ const updateManifests = () => {
   }
   writeJson(workflowManifestPath, workflowManifest);
 
-  decisions.decisions = decisions.decisions.filter((decision) => !decision.id.startsWith("decision-context-") || (manufacturerBootstrapResolved && decision.id === "decision-context-manufacturer-bootstrap"));
+  decisions.decisions = decisions.decisions.filter((decision) => !decision.id.startsWith("decision-context-") || resolvedContextDecisions.has(decision.id));
   for (const definition of decisionDefinitions) {
-    if (manufacturerBootstrapResolved && definition.id === "decision-context-manufacturer-bootstrap") continue;
+    if (resolvedContextDecisions.has(definition.id)) continue;
     const affectedWorkflows = [...workflowReviews].filter(([, review]) => review.decisions?.includes(definition.id)).map(([workflowId]) => workflowId).sort();
     decisions.decisions.push({
       ...definition,

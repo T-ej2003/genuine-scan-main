@@ -357,7 +357,7 @@
       "reviewedRisk": "low",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f"
+        "family-simple-tenant-scoped-reads-compliancepackservice-27fa200139"
       ],
       "canonicalFiles": [
         "backend/src/services/compliancePackService.ts",
@@ -555,7 +555,7 @@
       "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014"
+        "family-simple-tenant-scoped-reads-incidentcontroller-d1709363b9"
       ],
       "canonicalFiles": [
         "backend/src/controllers/incidentController.ts",
@@ -595,7 +595,7 @@
       "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb"
+        "family-simple-tenant-scoped-reads-telemetrycontroller-fd2665de8e"
       ],
       "canonicalFiles": [
         "backend/src/controllers/telemetryController.ts",
@@ -635,7 +635,7 @@
       "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-platform-admin-bounded-reads-iralertcontroller-791acbf282"
+        "family-platform-admin-bounded-reads-iralertcontroller-57de0c27cd"
       ],
       "canonicalFiles": [
         "backend/src/controllers/irAlertController.ts",
@@ -674,7 +674,7 @@
       "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba"
+        "family-platform-admin-bounded-reads-licenseecontroller-d2ec1e6906"
       ],
       "canonicalFiles": [
         "backend/src/controllers/licenseeController.ts",
@@ -714,7 +714,8 @@
       "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-platform-admin-bounded-reads-licenseecontroller-8ea4017392"
+        "family-split-licenseecontroller-platform-licensee-detail-cb52df93f0",
+        "family-split-licenseecontroller-platform-licensee-directory-4135b60f66"
       ],
       "canonicalFiles": [
         "backend/src/controllers/licenseeController.ts",

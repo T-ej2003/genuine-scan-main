@@ -6346,16 +6346,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "The requested file must join through IncidentEvidence.incidentId to one Incident whose licenseeId equals the database-validated canonical licensee. A filename or storage key is never scope authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified active platform actor and database role",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from server-validated selectors"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -6369,9 +6376,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-platform-read-scope"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-81f611458b88afef",
@@ -6389,7 +6394,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -6399,15 +6404,38 @@
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
+        "sameTransactionFeasible": true,
         "focusedTestsDeterministic": true
       },
       "contextBoundaryBlockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+          "code": "platform-read-runtime-pending",
+          "reason": "Current route selects by fileName before an explicit tenant/incident scope and lacks recent MFA, purpose, request attribution, transaction-client-only access, and same-transaction audit.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "tenant-bounded-read",
+      "platformReadRequiredAssurance": "mfa-verified",
+      "platformReadActorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "normal-actor-context",
+      "platformReadPurposeCodes": [
+        "tenant-incident-evidence"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-incident-evidence": [
+          "id",
+          "incidentId",
+          "fileType",
+          "storageKey"
+        ]
+      },
+      "platformReadResponseProjection": [
+        "file bytes",
+        "Content-Type from validated fileType"
       ]
     },
     {
@@ -6433,16 +6461,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "Every alert must match the active incident authorization and its derived tenant scope; optional licensee or manufacturer selectors may only narrow that set.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified active platform actor and database role",
+        "step-up-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from server-validated selectors"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -6457,9 +6492,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-platform-read-scope"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-b5ed86e01eea0aa1",
@@ -6482,7 +6515,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "step-up-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -6492,15 +6525,46 @@
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
+        "sameTransactionFeasible": true,
         "focusedTestsDeterministic": true
       },
       "contextBoundaryBlockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+          "code": "incident-authorization-model-missing",
+          "reason": "No durable incident-read authorization, bounded target set, or expiry exists; the current route allows broad optional filters and rich nested personal data.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "incident-response-read",
+      "platformReadRequiredAssurance": "step-up-verified",
+      "platformReadActorClasses": [
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "incident-bound-actor-context-or-approved-operator-boundary",
+      "platformReadPurposeCodes": [
+        "incident-response-alert-triage"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-policy-alert": [
+          "id",
+          "licenseeId",
+          "alertType",
+          "severity",
+          "message",
+          "score",
+          "policyRuleId",
+          "incidentId",
+          "batchId",
+          "qrCodeId",
+          "manufacturerId",
+          "acknowledgedAt",
+          "createdAt"
+        ]
+      },
+      "platformReadResponseProjection": [
+        "alert identifiers and severity",
+        "approved rule/batch/licensee display names without email, QR payload, or details"
       ]
     },
     {
@@ -7704,16 +7768,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "Unrestricted full-table licensee CSV export is not an approved application read.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified active platform actor and database role",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from server-validated selectors"
       ],
       "authorizationBoundaryType": "platform-admin",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -7727,9 +7798,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-platform-read-scope"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-3cabc590acb1c3df",
@@ -7746,7 +7815,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -7761,11 +7830,25 @@
       },
       "contextBoundaryBlockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+          "code": "prohibited-platform-read",
+          "reason": "Retire the route or replace it in a separate product change with the approved bounded directory page; no bulk export is authorized.",
+          "remediation": "Retire the broad export or design a separately reviewed bounded projection; this boundary authorizes no export implementation."
         }
-      ]
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "prohibited-platform-read",
+      "platformReadRequiredAssurance": "mfa-verified",
+      "platformReadActorClasses": [
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "none",
+      "platformReadPurposeCodes": [
+        "licensee-directory-lookup"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-licensee": []
+      },
+      "platformReadResponseProjection": []
     },
     {
       "id": "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensee",
@@ -7790,16 +7873,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One database-validated active or explicitly reviewed suspended Licensee ID and its Organization define the complete scope.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified active platform actor and database role",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from server-validated selectors"
       ],
       "authorizationBoundaryType": "platform-admin",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -7813,9 +7903,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-platform-read-scope"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-1e6516ac6bc919be",
@@ -7842,16 +7930,69 @@
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
+        "sameTransactionFeasible": true,
         "focusedTestsDeterministic": true
       },
       "contextBoundaryBlockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+          "code": "platform-read-runtime-pending",
+          "reason": "Current detail includes users and QR ranges, lacks recent MFA, purpose, same-transaction attribution, and transaction-client-only access.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
-      ]
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "platformReadRequiredAssurance": "mfa-verified",
+      "platformReadActorClasses": [
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "normal-actor-context",
+      "platformReadPurposeCodes": [
+        "licensee-directory-lookup"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-licensee": [
+          "id",
+          "orgId",
+          "name",
+          "prefix",
+          "brandName",
+          "isActive",
+          "suspendedAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "platformReadResponseProjection": [
+        "id",
+        "organizationId",
+        "name",
+        "prefix",
+        "brandName",
+        "activeState",
+        "suspendedAt",
+        "createdAt",
+        "updatedAt",
+        "bounded counts"
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-platform-admin-bounded-reads-licenseecontroller-8ea4017392",
+        "semanticKey": "platform-licensee-detail",
+        "reason": "Separate the exact one-licensee detail projection from directory search and prohibited export semantics.",
+        "evidence": [
+          "GET /licensees/:id uses an exact UUID route root."
+        ],
+        "actorClasses": [
+          "platform-admin"
+        ],
+        "scopeModel": "One database-validated active or explicitly reviewed suspended Licensee ID and its Organization define the complete scope.",
+        "executionSurface": "http",
+        "protectedTableBoundary": "Licensee exact detail projection",
+        "commandSemantics": "One-row SELECT with fresh MFA, fixed purpose, exact projection and same-transaction attribution.",
+        "routeRoots": [
+          "GET /licensees/:id uses an exact UUID route root."
+        ]
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensees",
@@ -7876,16 +8017,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "A normalized name/prefix search token narrows a dedicated directory projection; absence of search text is denied and no membership, invite, contact, metadata, or QR-range records are returned.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified active platform actor and database role",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from server-validated selectors"
       ],
       "authorizationBoundaryType": "platform-admin",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -7899,9 +8047,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-platform-read-scope"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-ab1db19319608bcd",
@@ -7928,16 +8074,66 @@
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
+        "sameTransactionFeasible": true,
         "focusedTestsDeterministic": true
       },
       "contextBoundaryBlockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+          "code": "dedicated-platform-projection-pending",
+          "reason": "Current route has no search or pagination and returns all licensees with admin users, pending invites, QR ranges, contacts, metadata, and counts.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
-      ]
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "platformReadRequiredAssurance": "mfa-verified",
+      "platformReadActorClasses": [
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "dedicated-directory-projection",
+      "platformReadPurposeCodes": [
+        "licensee-directory-lookup"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-licensee": [
+          "id",
+          "orgId",
+          "name",
+          "prefix",
+          "brandName",
+          "isActive",
+          "suspendedAt",
+          "createdAt"
+        ]
+      },
+      "platformReadResponseProjection": [
+        "id",
+        "organizationId",
+        "name",
+        "prefix",
+        "brandName",
+        "activeState",
+        "suspendedAt",
+        "createdAt"
+      ],
+      "contextBoundaryFamilySplit": {
+        "parentFamilyId": "family-platform-admin-bounded-reads-licenseecontroller-8ea4017392",
+        "semanticKey": "platform-licensee-directory",
+        "reason": "Separate bounded multi-licensee directory search from exact detail and prohibited export semantics.",
+        "evidence": [
+          "GET /licensees is a distinct registered list root and currently has no selector or pagination."
+        ],
+        "actorClasses": [
+          "platform-admin"
+        ],
+        "scopeModel": "A normalized 3-100 character name or prefix token narrows a maximum 50-row keyset directory projection.",
+        "executionSurface": "http",
+        "protectedTableBoundary": "Licensee bounded directory projection",
+        "commandSemantics": "Dedicated directory SELECT with fresh MFA, fixed purpose, no contacts/security state, keyset pagination and same-transaction attribution.",
+        "routeRoots": [
+          "GET /licensees is a distinct registered list root and currently has no selector or pagination."
+        ]
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-licensee-controller-ts-update-licensee",
@@ -11401,16 +11597,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "Ticket ID must match one database-validated canonical licensee; ticket ID alone is never tenant authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified active platform actor and database role",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from server-validated selectors"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -11424,9 +11627,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-platform-read-scope"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-ac38e8160f137e1a",
@@ -11453,14 +11654,14 @@
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
+        "sameTransactionFeasible": true,
         "focusedTestsDeterministic": true
       },
       "contextBoundaryBlockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+          "code": "platform-read-runtime-pending",
+          "reason": "Current platform detail reads by ticket ID without tenant binding, recent MFA, purpose, projection, or same-transaction attribution and includes message/customer details.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
       ],
       "contextBoundaryFamilySplit": {
@@ -11481,7 +11682,39 @@
         "protectedTableBoundary": "SupportTicket administrative read projection",
         "commandSemantics": "Bounded list/detail read with explicit PII projection and attribution.",
         "risk": "medium"
-      }
+      },
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "platformReadRequiredAssurance": "mfa-verified",
+      "platformReadActorClasses": [
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "normal-actor-context",
+      "platformReadPurposeCodes": [
+        "tenant-support-triage"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-support-ticket": [
+          "id",
+          "incidentId",
+          "referenceCode",
+          "licenseeId",
+          "subject",
+          "status",
+          "priority",
+          "assignedToUserId",
+          "slaDueAt",
+          "firstResponseAt",
+          "resolvedAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "platformReadResponseProjection": [
+        "bounded ticket state",
+        "incident severity/status summary",
+        "assigned actor id and display name without email"
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-support-controller-ts-list-support-tickets",
@@ -11506,16 +11739,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One database-validated canonical licensee is mandatory; status, priority, search, and cursor only narrow it.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified active platform actor and database role",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from server-validated selectors"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -11530,9 +11770,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-platform-read-scope"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-80be89de42dd1701",
@@ -11565,14 +11803,14 @@
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
+        "sameTransactionFeasible": true,
         "focusedTestsDeterministic": true
       },
       "contextBoundaryBlockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+          "code": "platform-read-runtime-pending",
+          "reason": "Current platform list permits omitted licensee scope, offset pagination, no date ceiling, no recent MFA/purpose, rich includes, and no same-transaction attribution.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
       ],
       "contextBoundaryFamilySplit": {
@@ -11593,7 +11831,39 @@
         "protectedTableBoundary": "SupportTicket administrative read projection",
         "commandSemantics": "Bounded list/detail read with explicit PII projection and attribution.",
         "risk": "medium"
-      }
+      },
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "platformReadRequiredAssurance": "mfa-verified",
+      "platformReadActorClasses": [
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "normal-actor-context",
+      "platformReadPurposeCodes": [
+        "tenant-support-triage"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-support-ticket": [
+          "id",
+          "incidentId",
+          "referenceCode",
+          "licenseeId",
+          "subject",
+          "status",
+          "priority",
+          "assignedToUserId",
+          "slaDueAt",
+          "firstResponseAt",
+          "resolvedAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "platformReadResponseProjection": [
+        "bounded ticket state",
+        "incident severity/status summary",
+        "assigned actor id and display name without email"
+      ]
     },
     {
       "id": "workflow-http-backend-src-controllers-support-controller-ts-patch-support-ticket",
@@ -12162,16 +12432,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "The platform branch may omit licenseeId only for the exact dedicated aggregate; any supplied licenseeId must be database-validated and narrows the aggregate.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified active platform actor and database role",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from server-validated selectors"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -12187,9 +12464,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-platform-read-scope"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-24026306f11a7da6",
@@ -12219,7 +12494,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -12229,15 +12504,42 @@
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
+        "sameTransactionFeasible": true,
         "focusedTestsDeterministic": true
       },
       "contextBoundaryBlockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling."
+          "code": "dedicated-platform-projection-pending",
+          "reason": "Current route accepts an unbounded date window, uses raw table aggregates through global Prisma, lacks recent MFA/purpose/attribution, and does not prove a database-enforced aggregate boundary.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "platform-aggregate-read",
+      "platformReadRequiredAssurance": "mfa-verified",
+      "platformReadActorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "dedicated-aggregate-projection",
+      "platformReadPurposeCodes": [
+        "platform-telemetry-health"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-route-transition-metric": [
+          "routeTo",
+          "transitionMs",
+          "dropped",
+          "createdAt",
+          "licenseeId"
+        ]
+      },
+      "platformReadResponseProjection": [
+        "transitionCount",
+        "averageTransitionMs",
+        "verifyTransitionCount",
+        "verifyDroppedCount",
+        "at most 20 allowlisted routeTo aggregates"
       ]
     },
     {
@@ -21997,7 +22299,7 @@
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "authenticated-user"
+        "platform-admin"
       ],
       "canonicalSourceFiles": [
         "backend/src/services/compliancePackService.ts"
@@ -22013,16 +22315,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One active database-validated licensee is mandatory; status and time filters only narrow it.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified active platform actor and database role",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from server-validated selectors"
       ],
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -22037,9 +22346,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-platform-read-scope"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-05122d1b13ca3c10",
@@ -22059,10 +22366,10 @@
         "command-compliance-pack-job-select-4ef0f20c1c1d"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -22072,15 +22379,45 @@
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
+        "sameTransactionFeasible": true,
         "focusedTestsDeterministic": true
       },
       "contextBoundaryBlockers": [
         {
-          "code": "platform-admin-scope-contract",
-          "reason": "The route uses role-string platform administration and a query-selected or omitted tenant scope without an approved purpose-attributed ceiling.",
-          "remediation": "Approve a bounded platform-admin contract with trusted scope selection, assurance and same-transaction read attribution."
+          "code": "platform-read-runtime-pending",
+          "reason": "The internal helper accepts optional licensee scope and global Prisma; its registered controller must own verified actor, assurance, purpose, transaction, projection, and attribution.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "platformReadRequiredAssurance": "mfa-verified",
+      "platformReadActorClasses": [
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "normal-actor-context",
+      "platformReadPurposeCodes": [
+        "tenant-compliance-status"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-compliance-pack-job": [
+          "id",
+          "licenseeId",
+          "status",
+          "triggerType",
+          "periodFrom",
+          "periodTo",
+          "fileName",
+          "signatureAlgorithm",
+          "startedByUserId",
+          "startedAt",
+          "finishedAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "platformReadResponseProjection": [
+        "bounded compliance job status and timing without storage, integrity, raw summary, or error payload"
       ]
     },
     {
@@ -24318,8 +24655,6 @@
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -24336,16 +24671,23 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "One active database-validated licensee is mandatory; flag key only narrows it and config is not part of the approved read projection.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "database-verified active platform actor and database role",
+        "mfa-verified within the approved freshness window",
+        "allowlisted purpose and immutable request attribution",
+        "transaction-local canonical scope from server-validated selectors"
       ],
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
@@ -24359,9 +24701,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-context-platform-read-scope"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-9cdaddd5407b3dde",
@@ -24375,12 +24715,10 @@
         "command-tenant-feature-flag-select-70594dbe9cf8"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -24390,14 +24728,14 @@
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
         "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
+        "sameTransactionFeasible": true,
         "focusedTestsDeterministic": true
       },
       "contextBoundaryBlockers": [
         {
-          "code": "platform-admin-scope-contract",
-          "reason": "The route uses role-string platform administration and a query-selected or omitted tenant scope without an approved purpose-attributed ceiling.",
-          "remediation": "Approve a bounded platform-admin contract with trusted scope selection, assurance and same-transaction read attribution."
+          "code": "platform-read-runtime-pending",
+          "reason": "Current route obtains licenseeId from an unverified query value, lacks recent MFA/purpose/attribution, returns config, and uses global Prisma.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification."
         }
       ],
       "contextBoundaryFamilySplit": {
@@ -24418,7 +24756,33 @@
         "protectedTableBoundary": "TenantFeatureFlag administrative projection",
         "commandSemantics": "Bounded read with approved read attribution.",
         "risk": "medium"
-      }
+      },
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "platformReadRequiredAssurance": "mfa-verified",
+      "platformReadActorClasses": [
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "normal-actor-context",
+      "platformReadPurposeCodes": [
+        "tenant-feature-flag-review"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-tenant-feature-flag": [
+          "id",
+          "licenseeId",
+          "key",
+          "enabled",
+          "updatedAt"
+        ]
+      },
+      "platformReadResponseProjection": [
+        "id",
+        "licenseeId",
+        "key",
+        "enabled",
+        "updatedAt"
+      ]
     },
     {
       "id": "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile",

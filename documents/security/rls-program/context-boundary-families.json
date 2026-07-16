@@ -10,12 +10,13 @@
     "documents/security/rls-program/operator-boundaries.json",
     "documents/security/rls-program/system-boundaries.json",
     "documents/security/rls-program/manufacturer-bootstrap-boundary.json",
+    "documents/security/rls-program/platform-read-scope-boundary.json",
     "documents/security/rls-program/policy-dependency-graph.json",
     "documents/security/rls-program/ARCHITECTURE.md",
     "backend/prisma/schema.prisma"
   ],
   "workflowCount": 428,
-  "familyCount": 320,
+  "familyCount": 321,
   "baselineImplementedWorkflowIds": [
     "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv",
     "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports",
@@ -26,7 +27,8 @@
     "workerBoundaries": 3,
     "operatorBoundaries": 29,
     "systemBoundaries": 2,
-    "manufacturerBootstrapBoundaries": 1
+    "manufacturerBootstrapBoundaries": 1,
+    "platformReadScopeBoundaries": 1
   },
   "systemBoundaryContracts": [
     {
@@ -350,7 +352,7 @@
       }
     },
     {
-      "id": "family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f",
+      "id": "family-simple-tenant-scoped-reads-compliancepackservice-27fa200139",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
         "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"
@@ -368,11 +370,11 @@
         "table-compliance-pack-job"
       ],
       "actorClasses": [
-        "authenticated-user"
+        "platform-admin"
       ],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -388,7 +390,7 @@
         "command-compliance-pack-job-select-4ef0f20c1c1d"
       ],
       "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "One active database-validated licensee is mandatory; status and time filters only narrow it."
       ],
       "lifecycleStateRequirements": [
         {
@@ -408,15 +410,18 @@
       "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
       "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
       "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "low",
+      "riskLevel": "medium",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "platform-read-scope-v1"
+      ],
       "blockers": [
         {
-          "code": "platform-admin-scope-contract",
-          "reason": "The route uses role-string platform administration and a query-selected or omitted tenant scope without an approved purpose-attributed ceiling.",
-          "remediation": "Approve a bounded platform-admin contract with trusted scope selection, assurance and same-transaction read attribution.",
-          "id": "blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-platform-admin-scope-contract"
+          "code": "platform-read-runtime-pending",
+          "reason": "The internal helper accepts optional licensee scope and global Prisma; its registered controller must own verified actor, assurance, purpose, transaction, projection, and attribution.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-simple-tenant-scoped-reads-compliancepackservice-27fa200139-platform-read-runtime-pending"
         }
       ],
       "implementationStatus": "blocked",
@@ -755,7 +760,7 @@
       }
     },
     {
-      "id": "family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014",
+      "id": "family-simple-tenant-scoped-reads-incidentcontroller-d1709363b9",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
         "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
@@ -778,7 +783,7 @@
       ],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -794,7 +799,7 @@
         "command-incident-evidence-select-00b44dd2511d"
       ],
       "tenantScopeModel": [
-        "table-incident-evidence row must join through table-incident on incidentId=id; no alternative parent."
+        "The requested file must join through IncidentEvidence.incidentId to one Incident whose licenseeId equals the database-validated canonical licensee. A filename or storage key is never scope authority."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
@@ -804,12 +809,15 @@
       "riskLevel": "medium",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "platform-read-scope-v1"
+      ],
       "blockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
-          "id": "blocker-family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014-unbounded-platform-scope"
+          "code": "platform-read-runtime-pending",
+          "reason": "Current route selects by fileName before an explicit tenant/incident scope and lacks recent MFA, purpose, request attribution, transaction-client-only access, and same-transaction audit.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-simple-tenant-scoped-reads-incidentcontroller-d1709363b9-platform-read-runtime-pending"
         }
       ],
       "implementationStatus": "blocked",
@@ -977,7 +985,7 @@
       }
     },
     {
-      "id": "family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb",
+      "id": "family-simple-tenant-scoped-reads-telemetrycontroller-fd2665de8e",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
         "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary"
@@ -1000,7 +1008,7 @@
       ],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -1016,22 +1024,25 @@
         "command-route-transition-metric-select-1f0ef0300e15"
       ],
       "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "The platform branch may omit licenseeId only for the exact dedicated aggregate; any supplied licenseeId must be database-validated and narrows the aggregate."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
       "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
       "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
       "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "medium",
+      "riskLevel": "high",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "platform-read-scope-v1"
+      ],
       "blockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
-          "id": "blocker-family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb-unbounded-platform-scope"
+          "code": "dedicated-platform-projection-pending",
+          "reason": "Current route accepts an unbounded date window, uses raw table aggregates through global Prisma, lacks recent MFA/purpose/attribution, and does not prove a database-enforced aggregate boundary.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-simple-tenant-scoped-reads-telemetrycontroller-fd2665de8e-dedicated-platform-projection-pending"
         }
       ],
       "implementationStatus": "blocked",
@@ -1420,7 +1431,7 @@
       ],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -1458,12 +1469,15 @@
       "riskLevel": "medium",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "platform-read-scope-v1"
+      ],
       "blockers": [
         {
-          "code": "platform-admin-scope-contract",
-          "reason": "The route uses role-string platform administration and a query-selected or omitted tenant scope without an approved purpose-attributed ceiling.",
-          "remediation": "Approve a bounded platform-admin contract with trusted scope selection, assurance and same-transaction read attribution.",
-          "id": "blocker-family-split-governanceservice-platform-feature-flag-administration-7bb4b15607-platform-admin-scope-contract"
+          "code": "platform-read-runtime-pending",
+          "reason": "Current route obtains licenseeId from an unverified query value, lacks recent MFA/purpose/attribution, returns config, and uses global Prisma.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-split-governanceservice-platform-feature-flag-administration-7bb4b15607-platform-read-runtime-pending"
         }
       ],
       "implementationStatus": "blocked",
@@ -1729,7 +1743,7 @@
       }
     },
     {
-      "id": "family-platform-admin-bounded-reads-iralertcontroller-791acbf282",
+      "id": "family-platform-admin-bounded-reads-iralertcontroller-57de0c27cd",
       "category": "platform-admin bounded reads",
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts"
@@ -1751,7 +1765,7 @@
       ],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "mfa-verified"
+        "step-up-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -1767,7 +1781,7 @@
         "command-policy-alert-select-4456be80d295"
       ],
       "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "Every alert must match the active incident authorization and its derived tenant scope; optional licensee or manufacturer selectors may only narrow that set."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
@@ -1777,12 +1791,15 @@
       "riskLevel": "medium",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "platform-read-scope-v1"
+      ],
       "blockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
-          "id": "blocker-family-platform-admin-bounded-reads-iralertcontroller-791acbf282-unbounded-platform-scope"
+          "code": "incident-authorization-model-missing",
+          "reason": "No durable incident-read authorization, bounded target set, or expiry exists; the current route allows broad optional filters and rich nested personal data.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-platform-admin-bounded-reads-iralertcontroller-57de0c27cd-incident-authorization-model-missing"
         }
       ],
       "implementationStatus": "blocked",
@@ -1793,7 +1810,7 @@
       }
     },
     {
-      "id": "family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba",
+      "id": "family-platform-admin-bounded-reads-licenseecontroller-d2ec1e6906",
       "category": "platform-admin bounded reads",
       "workflowIds": [
         "workflow-http-backend-src-controllers-licensee-controller-ts-export-licensees-csv"
@@ -1815,7 +1832,7 @@
       ],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -1831,7 +1848,7 @@
         "command-licensee-select-6f1d12de6c1e"
       ],
       "tenantScopeModel": [
-        "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "Unrestricted full-table licensee CSV export is not an approved application read."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
@@ -1841,12 +1858,15 @@
       "riskLevel": "medium",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "platform-read-scope-v1"
+      ],
       "blockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
-          "id": "blocker-family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba-unbounded-platform-scope"
+          "code": "prohibited-platform-read",
+          "reason": "Retire the route or replace it in a separate product change with the approved bounded directory page; no bulk export is authorized.",
+          "remediation": "Retire the broad export or design a separately reviewed bounded projection; this boundary authorizes no export implementation.",
+          "id": "blocker-family-platform-admin-bounded-reads-licenseecontroller-d2ec1e6906-prohibited-platform-read"
         }
       ],
       "implementationStatus": "blocked",
@@ -1857,13 +1877,22 @@
       }
     },
     {
-      "id": "family-platform-admin-bounded-reads-licenseecontroller-8ea4017392",
+      "id": "family-split-licenseecontroller-platform-licensee-detail-cb52df93f0",
       "category": "platform-admin bounded reads",
       "workflowIds": [
-        "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensee",
-        "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensees"
+        "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensee"
       ],
       "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-platform-admin-bounded-reads-licenseecontroller-8ea4017392",
+      "splitReason": "Separate the exact one-licensee detail projection from directory search and prohibited export semantics.",
+      "semanticEvidence": [
+        "GET /licensees/:id uses an exact UUID route root."
+      ],
+      "routeRoots": [
+        "GET /licensees/:id uses an exact UUID route root."
+      ],
+      "protectedTableBoundary": "Licensee exact detail projection",
+      "commandSemantics": "One-row SELECT with fresh MFA, fixed purpose, exact projection and same-transaction attribution.",
       "executionSurfaces": [
         "http"
       ],
@@ -1893,11 +1922,10 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-licensee-select-32463a66da3a",
         "command-licensee-select-f1b547f804cd"
       ],
       "tenantScopeModel": [
-        "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "One database-validated active or explicitly reviewed suspended Licensee ID and its Organization define the complete scope."
       ],
       "lifecycleStateRequirements": [],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
@@ -1907,12 +1935,92 @@
       "riskLevel": "medium",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "platform-read-scope-v1"
+      ],
       "blockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
-          "id": "blocker-family-platform-admin-bounded-reads-licenseecontroller-8ea4017392-unbounded-platform-scope"
+          "code": "platform-read-runtime-pending",
+          "reason": "Current detail includes users and QR ranges, lacks recent MFA, purpose, same-transaction attribution, and transaction-client-only access.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-split-licenseecontroller-platform-licensee-detail-cb52df93f0-platform-read-runtime-pending"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-split-licenseecontroller-platform-licensee-directory-4135b60f66",
+      "category": "platform-admin bounded reads",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensees"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-platform-admin-bounded-reads-licenseecontroller-8ea4017392",
+      "splitReason": "Separate bounded multi-licensee directory search from exact detail and prohibited export semantics.",
+      "semanticEvidence": [
+        "GET /licensees is a distinct registered list root and currently has no selector or pagination."
+      ],
+      "routeRoots": [
+        "GET /licensees is a distinct registered list root and currently has no selector or pagination."
+      ],
+      "protectedTableBoundary": "Licensee bounded directory projection",
+      "commandSemantics": "Dedicated directory SELECT with fresh MFA, fixed purpose, no contacts/security state, keyset pagination and same-transaction attribution.",
+      "executionSurfaces": [
+        "http"
+      ],
+      "controllerFiles": [
+        "backend/src/controllers/licenseeController.ts"
+      ],
+      "serviceFiles": [],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-licensee"
+      ],
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-licensee-select-32463a66da3a"
+      ],
+      "tenantScopeModel": [
+        "A normalized 3-100 character name or prefix token narrows a maximum 50-row keyset directory projection."
+      ],
+      "lifecycleStateRequirements": [],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
+      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
+      "riskLevel": "high",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "platform-read-scope-v1"
+      ],
+      "blockers": [
+        {
+          "code": "dedicated-platform-projection-pending",
+          "reason": "Current route has no search or pagination and returns all licensees with admin users, pending invites, QR ranges, contacts, metadata, and counts.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-split-licenseecontroller-platform-licensee-directory-4135b60f66-dedicated-platform-projection-pending"
         }
       ],
       "implementationStatus": "blocked",
@@ -2012,12 +2120,15 @@
       "riskLevel": "medium",
       "automationEligibility": "blocked",
       "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "platform-read-scope-v1"
+      ],
       "blockers": [
         {
-          "code": "unbounded-platform-scope",
-          "reason": "The current platform branch permits an all-tenant fallback without approved scope, purpose and read attribution.",
-          "remediation": "Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling.",
-          "id": "blocker-family-split-supportcontroller-platform-support-ticket-read-4ce4ce4858-unbounded-platform-scope"
+          "code": "platform-read-runtime-pending",
+          "reason": "Current platform list permits omitted licensee scope, offset pagination, no date ceiling, no recent MFA/purpose, rich includes, and no same-transaction attribution.",
+          "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
+          "id": "blocker-family-split-supportcontroller-platform-support-ticket-read-4ce4ce4858-platform-read-runtime-pending"
         }
       ],
       "implementationStatus": "blocked",

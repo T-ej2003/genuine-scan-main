@@ -82,7 +82,45 @@
       ],
       "blockingStatus": "blocking",
       "owner": "Product authorization owner, application security, and domain engineering",
-      "status": "unresolved"
+      "status": "resolved",
+      "resolvedAt": "2026-07-16",
+      "selectedBoundary": "platform-read-scope-v1",
+      "resolution": {
+        "authority": "documents/security/rls-program/platform-read-scope-boundary.json",
+        "boundaryId": "platform-read-scope-v1",
+        "approvedScopeClasses": [
+          "tenant-bounded-read",
+          "organization-bounded-read",
+          "licensee-bounded-read",
+          "manufacturer-bounded-read",
+          "actor-bounded-read",
+          "platform-aggregate-read",
+          "platform-diagnostic-read",
+          "incident-response-read",
+          "operator-procedure-only",
+          "prohibited-platform-read"
+        ],
+        "purposeCodes": [
+          "tenant-incident-evidence",
+          "incident-response-alert-triage",
+          "licensee-directory-lookup",
+          "platform-telemetry-health",
+          "tenant-support-triage",
+          "tenant-compliance-status",
+          "tenant-feature-flag-review"
+        ],
+        "affectedWorkflows": 10,
+        "runtimeImplementationPending": true,
+        "postgresqlCertificationPending": true,
+        "guarantees": [
+          "Platform-admin role alone never authorizes a read",
+          "Blank scope denies unless the exact dedicated aggregate is selected",
+          "Raw global row listing and broad licensee export are prohibited",
+          "Every allowed read has fresh assurance, allowlisted purpose, exact projection, bounds and immutable attribution",
+          "Incident response requires an active expiring incident authorization",
+          "Catalog and database diagnostics remain exact operator procedures"
+        ]
+      }
     },
     {
       "id": "decision-context-policy-alert-actor-ceiling",

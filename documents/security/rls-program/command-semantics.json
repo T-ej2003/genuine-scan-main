@@ -5,6 +5,7 @@
     "documents/security/rls-program/tables.json",
     "documents/security/rls-program/workflows.json",
     "documents/security/rls-program/manufacturer-bootstrap-boundary.json",
+    "documents/security/rls-program/platform-read-scope-boundary.json",
     "backend/src/routes/index.ts"
   ],
   "actorClasses": [
@@ -10741,30 +10742,26 @@
       "tableId": "table-compliance-pack-job",
       "command": "SELECT",
       "actorClasses": [
-        "authenticated-user"
+        "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "minimumAssurance": "mfa-verified",
+      "scopeRule": "One active database-validated licensee is mandatory; status and time filters only narrow it.",
       "allowedColumns": [
-        "createdAt",
-        "errorMessage",
-        "fileName",
-        "finishedAt",
         "id",
-        "integrityHash",
         "licenseeId",
+        "status",
+        "triggerType",
         "periodFrom",
         "periodTo",
+        "fileName",
         "signatureAlgorithm",
-        "startedAt",
         "startedByUserId",
-        "status",
-        "storageKey",
-        "summary",
-        "triggerType",
+        "startedAt",
+        "finishedAt",
+        "createdAt",
         "updatedAt"
       ],
       "protectedColumns": [
@@ -10788,7 +10785,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
+      "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "ordinary-rls",
@@ -10802,12 +10799,18 @@
         "backend/src/services/compliancePackService.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
-      "confidence": "medium",
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {
@@ -15705,17 +15708,13 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
-      "scopeRule": "table-incident-evidence row must join through table-incident on incidentId=id; no alternative parent.",
+      "minimumAssurance": "mfa-verified",
+      "scopeRule": "The requested file must join through IncidentEvidence.incidentId to one Incident whose licenseeId equals the database-validated canonical licensee. A filename or storage key is never scope authority.",
       "allowedColumns": [
-        "createdAt",
-        "fileType",
-        "fileUrl",
         "id",
         "incidentId",
-        "storageKey",
-        "uploadedBy",
-        "uploadedByUserId"
+        "fileType",
+        "storageKey"
       ],
       "protectedColumns": [
         "createdAt",
@@ -15744,11 +15743,17 @@
         "backend/src/routes/index.ts:2265 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
       ],
       "allowScenarios": [
-        "licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "tenant-bounded-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -20786,24 +20791,16 @@
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
-      "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "A normalized name/prefix search token narrows a dedicated directory projection; absence of search text is denied and no membership, invite, contact, metadata, or QR-range records are returned.",
       "allowedColumns": [
-        "brandName",
-        "createdAt",
-        "description",
         "id",
-        "isActive",
-        "location",
-        "metadata",
-        "name",
         "orgId",
+        "name",
         "prefix",
-        "supportEmail",
-        "supportPhone",
+        "brandName",
+        "isActive",
         "suspendedAt",
-        "suspendedReason",
-        "updatedAt",
-        "website"
+        "createdAt"
       ],
       "protectedColumns": [
         "createdAt",
@@ -20819,13 +20816,13 @@
       "forbiddenLifecycleStates": [],
       "lifecycleColumns": [],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dedicated-directory-projection",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "ordinary-rls",
+      "authorizationBoundary": "named-function",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -20837,11 +20834,17 @@
         "backend/src/routes/index.ts:1611 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -21344,26 +21347,9 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
-      "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-      "allowedColumns": [
-        "brandName",
-        "createdAt",
-        "description",
-        "id",
-        "isActive",
-        "location",
-        "metadata",
-        "name",
-        "orgId",
-        "prefix",
-        "supportEmail",
-        "supportPhone",
-        "suspendedAt",
-        "suspendedReason",
-        "updatedAt",
-        "website"
-      ],
+      "minimumAssurance": "mfa-verified",
+      "scopeRule": "Unrestricted full-table licensee CSV export is not an approved application read.",
+      "allowedColumns": [],
       "protectedColumns": [
         "createdAt",
         "id",
@@ -21384,7 +21370,7 @@
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "ordinary-rls",
+      "authorizationBoundary": "prohibited",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -21396,11 +21382,17 @@
         "backend/src/routes/index.ts:1607 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "prohibited-platform-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -21985,24 +21977,17 @@
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
-      "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "One database-validated active or explicitly reviewed suspended Licensee ID and its Organization define the complete scope.",
       "allowedColumns": [
-        "brandName",
-        "createdAt",
-        "description",
         "id",
-        "isActive",
-        "location",
-        "metadata",
-        "name",
         "orgId",
+        "name",
         "prefix",
-        "supportEmail",
-        "supportPhone",
+        "brandName",
+        "isActive",
         "suspendedAt",
-        "suspendedReason",
-        "updatedAt",
-        "website"
+        "createdAt",
+        "updatedAt"
       ],
       "protectedColumns": [
         "createdAt",
@@ -22036,11 +22021,17 @@
         "backend/src/routes/index.ts:1612 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -26899,24 +26890,22 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "minimumAssurance": "step-up-verified",
+      "scopeRule": "Every alert must match the active incident authorization and its derived tenant scope; optional licensee or manufacturer selectors may only narrow that set.",
       "allowedColumns": [
-        "acknowledgedAt",
-        "acknowledgedByUserId",
-        "alertType",
-        "batchId",
-        "createdAt",
-        "details",
         "id",
-        "incidentId",
         "licenseeId",
-        "manufacturerId",
+        "alertType",
+        "severity",
         "message",
-        "policyRuleId",
-        "qrCodeId",
         "score",
-        "severity"
+        "policyRuleId",
+        "incidentId",
+        "batchId",
+        "qrCodeId",
+        "manufacturerId",
+        "acknowledgedAt",
+        "createdAt"
       ],
       "protectedColumns": [
         "createdAt",
@@ -26947,11 +26936,17 @@
         "backend/src/routes/index.ts:2356 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "incident-response-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -64739,24 +64734,14 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "minimumAssurance": "mfa-verified",
+      "scopeRule": "The platform branch may omit licenseeId only for the exact dedicated aggregate; any supplied licenseeId must be database-validated and narrows the aggregate.",
       "allowedColumns": [
-        "createdAt",
-        "deviceType",
-        "dropped",
-        "id",
-        "licenseeId",
-        "networkType",
-        "online",
-        "role",
-        "routeFrom",
         "routeTo",
-        "source",
         "transitionMs",
-        "userId",
-        "verifyCodePresent",
-        "verifyResult"
+        "dropped",
+        "createdAt",
+        "licenseeId"
       ],
       "protectedColumns": [
         "createdAt",
@@ -64768,13 +64753,13 @@
       "forbiddenLifecycleStates": [],
       "lifecycleColumns": [],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dedicated-aggregate-projection",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "ordinary-rls",
+      "authorizationBoundary": "named-function",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -64786,11 +64771,17 @@
         "backend/src/routes/index.ts:2165 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
       ],
       "allowScenarios": [
-        "licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "platform-aggregate-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -67692,21 +67683,20 @@
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
-      "scopeRule": "table-support-ticket row must join through table-incident on incidentId=id; no alternative parent.",
+      "scopeRule": "One database-validated canonical licensee is mandatory; status, priority, search, and cursor only narrow it.",
       "allowedColumns": [
-        "assignedToUserId",
-        "createdAt",
-        "customerEmail",
-        "firstResponseAt",
         "id",
         "incidentId",
-        "licenseeId",
-        "priority",
         "referenceCode",
-        "resolvedAt",
-        "slaDueAt",
-        "status",
+        "licenseeId",
         "subject",
+        "status",
+        "priority",
+        "assignedToUserId",
+        "slaDueAt",
+        "firstResponseAt",
+        "resolvedAt",
+        "createdAt",
         "updatedAt"
       ],
       "protectedColumns": [
@@ -67748,11 +67738,17 @@
         "backend/src/routes/index.ts:2189 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -67767,21 +67763,20 @@
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
-      "scopeRule": "table-support-ticket row must join through table-incident on incidentId=id; no alternative parent.",
+      "scopeRule": "Ticket ID must match one database-validated canonical licensee; ticket ID alone is never tenant authority.",
       "allowedColumns": [
-        "assignedToUserId",
-        "createdAt",
-        "customerEmail",
-        "firstResponseAt",
         "id",
         "incidentId",
-        "licenseeId",
-        "priority",
         "referenceCode",
-        "resolvedAt",
-        "slaDueAt",
-        "status",
+        "licenseeId",
         "subject",
+        "status",
+        "priority",
+        "assignedToUserId",
+        "slaDueAt",
+        "firstResponseAt",
+        "resolvedAt",
+        "createdAt",
         "updatedAt"
       ],
       "protectedColumns": [
@@ -67823,11 +67818,17 @@
         "backend/src/routes/index.ts:2190 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -68431,24 +68432,19 @@
       "tableId": "table-tenant-feature-flag",
       "command": "SELECT",
       "actorClasses": [
-        "operator",
-        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "minimumAssurance": "mfa-verified",
+      "scopeRule": "One active database-validated licensee is mandatory; flag key only narrows it and config is not part of the approved read projection.",
       "allowedColumns": [
-        "config",
-        "createdAt",
-        "enabled",
         "id",
-        "key",
         "licenseeId",
-        "updatedAt",
-        "updatedByUserId"
+        "key",
+        "enabled",
+        "updatedAt"
       ],
       "protectedColumns": [
         "createdAt",
@@ -68483,12 +68479,18 @@
         "backend/src/services/governanceService.ts"
       ],
       "allowScenarios": [
-        "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
       ],
-      "confidence": "medium",
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {
