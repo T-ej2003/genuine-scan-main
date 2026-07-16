@@ -40,7 +40,6 @@ test("stable IDs and references are unique and valid", () => {
 });
 
 test("implemented HTTP context boundaries retain complete certification evidence", () => {
-  const workflowId = "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv";
   const requiredKeys = ["app.auth_assurance", "app.licensee_id", "app.manufacturer_id", "app.organization_id", "app.purpose", "app.request_id", "app.role", "app.user_id"];
   const verify = (workflow) => {
     assert.equal(workflow.contextBoundaryStatus, "implemented", "context boundary status");
@@ -51,9 +50,11 @@ test("implemented HTTP context boundaries retain complete certification evidence
     assert(["pending", "certified"].includes(workflow.postgresqlCertificationStatus), "PostgreSQL certification status");
     assert(workflow.expectedAllowedScenarios.length && workflow.expectedDeniedScenarios.length, "allow and deny scenarios");
   };
-  const workflow = manifests().workflows.workflows.find((item) => item.id === workflowId);
-  assert(workflow, workflowId);
-  verify(workflow);
+  const implemented = manifests().workflows.workflows.filter((item) => item.contextBoundaryStatus === "implemented");
+  assert(implemented.length >= 2, "expected both reviewed context-boundary slices");
+  implemented.forEach(verify);
+  const workflow = implemented.find((item) => item.id === "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports");
+  assert(workflow, "fraud-report workflow context boundary");
   for (const [field, value, pattern] of [
     ["implementationFiles", [], /implementation and test evidence/],
     ["testFiles", [], /implementation and test evidence/],

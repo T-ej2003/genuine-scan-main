@@ -2364,6 +2364,66 @@
       "operatorBoundaryStatus": "resolved"
     },
     {
+      "id": "command-audit-log-insert-80b33bbd591a",
+      "tableId": "table-audit-log",
+      "command": "INSERT",
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "scopeRule": "Validated platform administrators require fresh MFA, one explicit canonical licensee scope, a recorded purpose and request attribution. Query filters only narrow that licensee scope.",
+      "allowedColumns": [
+        "action",
+        "entityId",
+        "entityType",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "details",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "New row preserves trusted actor, tenant, request and purpose context. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "ordinary-rls",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports"
+      ],
+      "supportingEvidence": [
+        "backend/src/controllers/auditController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/services/fraudReportQueryService.ts"
+      ],
+      "allowScenarios": [
+        "platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-audit-log-insert-80f0e7a7985d",
       "tableId": "table-audit-log",
       "command": "INSERT",
@@ -3495,28 +3555,20 @@
       "tableId": "table-audit-log",
       "command": "SELECT",
       "actorClasses": [
-        "operator",
-        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
-      "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "minimumAssurance": "mfa-verified",
+      "scopeRule": "Validated platform administrators require fresh MFA, one explicit canonical licensee scope, a recorded purpose and request attribution. Query filters only narrow that licensee scope.",
       "allowedColumns": [
-        "action",
-        "createdAt",
-        "details",
-        "entityId",
-        "entityType",
         "id",
-        "ipAddress",
-        "ipHash",
+        "createdAt",
+        "userId",
         "licenseeId",
-        "orgId",
-        "userAgent",
-        "userId"
+        "details",
+        "ipAddress"
       ],
       "protectedColumns": [
         "createdAt",
@@ -3546,10 +3598,13 @@
         "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports"
       ],
       "supportingEvidence": [
-        "backend/src/controllers/auditController.ts"
+        "backend/src/controllers/auditController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/services/fraudReportQueryService.ts"
       ],
       "allowScenarios": [
-        "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."

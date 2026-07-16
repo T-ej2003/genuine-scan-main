@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "groupingRule": "One workflow per execution surface, canonical source file, and containing function; repeated table calls within that function remain one functional workflow.",
   "generatedEvidence": {
-    "productionAccessSites": 1022,
+    "productionAccessSites": 1024,
     "testPathsExcluded": [
       "backend/tests",
       "scripts/tests"
@@ -87,7 +87,7 @@
         {
           "method": "POST",
           "path": "/fraud-reports/:id/respond",
-          "source": "backend/src/routes/auditRoutes.ts:225"
+          "source": "backend/src/routes/auditRoutes.ts:226"
         },
         {
           "method": "POST",
@@ -5257,12 +5257,13 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
-        "backend/src/controllers/auditController.ts"
+        "backend/src/controllers/auditController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/services/fraudReportQueryService.ts"
       ],
       "tablesTouched": [
         "table-audit-log"
@@ -5271,28 +5272,44 @@
         {
           "tableId": "table-audit-log",
           "commands": [
+            "INSERT",
             "SELECT"
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "Validated platform administrators require fresh MFA, one explicit canonical licensee scope, a recorded purpose and request attribution. Filters may narrow but never establish or broaden authority.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "fresh platform-administrator MFA",
+        "explicit bounded licensee scope",
+        "explicit purpose and request attribution",
+        "all count, list, response and attribution operations use the installed transaction client"
       ],
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A validated platform administrator with fresh MFA reads fraud reports for one explicit licensee and records the purpose and request ID.",
+        "Status, limit and offset filters narrow the already-authorized licensee scope.",
+        "Report count, report rows, response rows and read-attribution insertion use the same transaction client after canonical context installation.",
+        "The response preserves the bounded fraud-report projection while recursively redacting secret-bearing delivery metadata."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Tenant administrators, manufacturers and ordinary authenticated users are denied because the registered route is platform-administrator-only.",
+        "Missing, blank, malformed or mismatched licensee scope is denied and never treated as platform-wide access.",
+        "Platform-administrator role text without an active actor, fresh MFA, explicit purpose or request attribution is denied.",
+        "A query scope that differs from the installed canonical licensee context is denied before protected reads.",
+        "Unknown assurance values are rejected.",
+        "No protected query may use the global Prisma client or execute outside the canonical transaction.",
+        "Nested password, token, secret, credential, MFA, OTP, hash, authorization, cookie or private-key fields are redacted from response metadata."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-2d74f63d418e6abc",
-        "access-eadf544f207fed94"
+        "access-1f9f41eb072087b4",
+        "access-5894b22bc4c2aea0",
+        "access-c0b389e114498ab7",
+        "access-f2992884dbd0c2f4"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "context-boundary-implemented-postgresql-certification-pending",
+      "implementationStatus": "context-boundary-implemented",
       "requiredUnitTests": [
         "Allowed and denied command contract for this canonical workflow."
       ],
@@ -5302,34 +5319,71 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-2d74f63d418e6abc",
-          "source": "backend/src/controllers/auditController.ts:260",
+          "accessId": "access-1f9f41eb072087b4",
+          "source": "backend/src/services/fraudReportQueryService.ts:76",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "count"
+        },
+        {
+          "accessId": "access-5894b22bc4c2aea0",
+          "source": "backend/src/services/fraudReportQueryService.ts:140",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-c0b389e114498ab7",
+          "source": "backend/src/services/fraudReportQueryService.ts:87",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-eadf544f207fed94",
-          "source": "backend/src/controllers/auditController.ts:275",
+          "accessId": "access-f2992884dbd0c2f4",
+          "source": "backend/src/services/fraudReportQueryService.ts:77",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
+        "command-audit-log-insert-80b33bbd591a",
         "command-audit-log-select-80b33bbd591a"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryStatus": "implemented",
+      "implementationFiles": [
+        "backend/src/controllers/auditController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/routes/auditRoutes.ts",
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/services/fraudReportQueryService.ts"
+      ],
+      "testFiles": [
+        "backend/tests/fraudReportQueryContext.test.js",
+        "backend/tests/routeSecurityContracts.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "postgresqlCertificationStatus": "pending",
+      "platformAdminRequiredAssurance": "mfa-verified",
+      "remainingCertification": "Disposable PostgreSQL tests must prove exact app-role grants, AuditLog policy enforcement, cross-tenant denial and empty-context denial before production certification."
     },
     {
       "id": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
@@ -5369,8 +5423,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-bb9e61bbf80c0272",
-        "access-d5f98e7f4532ac5e"
+        "access-321d19647013807e",
+        "access-4b9aa3d277641e5d"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -5383,14 +5437,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-bb9e61bbf80c0272",
-          "source": "backend/src/controllers/auditController.ts:117",
+          "accessId": "access-321d19647013807e",
+          "source": "backend/src/controllers/auditController.ts:98",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-d5f98e7f4532ac5e",
-          "source": "backend/src/controllers/auditController.ts:83",
+          "accessId": "access-4b9aa3d277641e5d",
+          "source": "backend/src/controllers/auditController.ts:132",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -5450,7 +5504,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-9063aa394801de98"
+        "access-1168db4d90b261e3"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -5463,8 +5517,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-9063aa394801de98",
-          "source": "backend/src/controllers/auditController.ts:367",
+          "accessId": "access-1168db4d90b261e3",
+          "source": "backend/src/controllers/auditController.ts:313",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }

@@ -14,6 +14,13 @@ import {
   isAuditSuperUser,
 } from "../services/auditExportRedactionService";
 import { AuditCsvExportAccessError, readAuditCsvExport } from "../services/auditCsvExportService";
+import { withCanonicalDbContext } from "../lib/canonicalDbContext";
+import {
+  buildFraudReportBoundary,
+  FraudReportAccessError,
+  FraudReportStatus,
+  queryFraudReports,
+} from "../services/fraudReportQueryService";
 
 const fraudResponseSchema = z.object({
   status: z.enum(["REVIEWED", "RESOLVED", "DISMISSED"]).default("REVIEWED"),
@@ -42,6 +49,14 @@ const auditExportQuerySchema = z.object({
   action: z.string().trim().max(160).optional(),
   licenseeId: z.string().uuid().optional(),
   purpose: z.string().trim().min(1).max(240).optional(),
+}).strict();
+
+const fraudReportQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().min(0).max(20_000).optional(),
+  licenseeId: z.string().uuid().trim(),
+  purpose: z.string().trim().min(1).max(240),
+  status: z.string().trim().max(32).optional(),
 }).strict();
 
 const defaultFraudReply = (status: "REVIEWED" | "RESOLVED" | "DISMISSED", code: string) => {
@@ -246,96 +261,27 @@ export const getFraudReports = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ success: false, error: "Access denied" });
     }
 
-    const limit = Math.min(Number(req.query.limit) || 100, 500);
-    const offset = Number(req.query.offset) || 0;
-    const licenseeId = (req.query.licenseeId as string | undefined) || undefined;
-    const statusFilterRaw = String(req.query.status || "ALL").toUpperCase();
-    const statusFilter = ["ALL", "OPEN", "REVIEWED", "RESOLVED", "DISMISSED"].includes(statusFilterRaw)
-      ? statusFilterRaw
-      : "ALL";
-
-    const where: any = { action: "CUSTOMER_FRAUD_REPORT" };
-    if (licenseeId) where.licenseeId = licenseeId;
-
-    const reportLogs = await prisma.auditLog.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: limit,
-      skip: offset,
-    });
-
-    if (reportLogs.length === 0) {
-      return res.json({
-        success: true,
-        data: { reports: [], total: 0, limit, offset },
-      });
-    }
-
-    const reportIds = reportLogs.map((l) => l.id);
-    const responseLogs = await prisma.auditLog.findMany({
-      where: {
-        action: "CUSTOMER_FRAUD_REPORT_RESPONSE",
-        OR: reportIds.map((id) => ({ details: { path: ["reportId"], equals: id } })),
-      },
-      orderBy: { createdAt: "desc" },
-    });
-
-    const latestResponseByReportId = new Map<string, any>();
-    for (const log of responseLogs) {
-      const details = coerceAuditDetails(log.details);
-      const reportId = String(details.reportId || "");
-      if (!reportId || latestResponseByReportId.has(reportId)) continue;
-      latestResponseByReportId.set(reportId, log);
-    }
-
-    const reports = reportLogs
-      .map((reportLog) => {
-        const reportDetails = coerceAuditDetails(reportLog.details);
-        const responseLog = latestResponseByReportId.get(reportLog.id);
-        const responseDetails = coerceAuditDetails(responseLog?.details);
-        const status = String(responseDetails.status || "OPEN").toUpperCase();
-
-        return {
-          id: reportLog.id,
-          createdAt: reportLog.createdAt,
-          licenseeId: reportLog.licenseeId || null,
-          report: {
-            code: reportDetails.code || null,
-            reason: reportDetails.reason || null,
-            notes: reportDetails.notes || null,
-            contactEmail: reportDetails.contactEmail || null,
-            observedStatus: reportDetails.observedStatus || null,
-            observedOutcome: reportDetails.observedOutcome || null,
-            pageUrl: reportDetails.pageUrl || null,
-            userAgent: reportDetails.userAgent || null,
-            ipAddress: reportLog.ipAddress || null,
-          },
-          status,
-          response: responseLog
-            ? {
-                id: responseLog.id,
-                createdAt: responseLog.createdAt,
-                message: responseDetails.message || null,
-                notifyCustomer: Boolean(responseDetails.notifyCustomer),
-                recipientEmail: responseDetails.recipientEmail || null,
-                delivery: responseDetails.delivery || null,
-                actorUserId: responseLog.userId || null,
-              }
-            : null,
-        };
-      })
-      .filter((r) => (statusFilter === "ALL" ? true : r.status === statusFilter));
-
-    return res.json({
-      success: true,
-      data: {
-        reports,
-        total: reports.length,
-        limit,
-        offset,
-      },
-    });
+    const parsed = fraudReportQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    const statusRaw = String(parsed.data.status || "ALL").toUpperCase();
+    const status = (["ALL", "OPEN", "REVIEWED", "RESOLVED", "DISMISSED"].includes(statusRaw) ? statusRaw : "ALL") as FraudReportStatus;
+    const query = {
+      licenseeId: parsed.data.licenseeId,
+      purpose: parsed.data.purpose,
+      status,
+      limit: parsed.data.limit ?? 100,
+      offset: parsed.data.offset ?? 0,
+    };
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "");
+    const context = buildFraudReportBoundary(req.user, query, requestId);
+    const data = await withCanonicalDbContext(prisma, context, (tx, installedContext) =>
+      queryFraudReports(tx, query, installedContext)
+    );
+    return res.json({ success: true, data });
   } catch (err) {
+    if (err instanceof FraudReportAccessError) {
+      return res.status(err.statusCode).json({ success: false, error: err.message });
+    }
     console.error("getFraudReports error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }

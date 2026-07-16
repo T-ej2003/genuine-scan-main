@@ -2,7 +2,7 @@
 
 This is the compact human review of `command-semantics.json`. It defines architecture only: no SQL, grants, roles, RLS state, or runtime behavior are changed.
 
-Rules: 985; workflows mapped: 428/428.
+Rules: 986; workflows mapped: 428/428.
 
 ## Review groups
 
@@ -12,7 +12,7 @@ Rules: 985; workflows mapped: 428/428.
 | B | 3 | 66 | 33 | 15 | 13 | 5 |
 | C | 15 | 241 | 135 | 27 | 61 | 18 |
 | D | 13 | 266 | 134 | 43 | 73 | 16 |
-| E | 18 | 158 | 70 | 42 | 26 | 20 |
+| E | 18 | 159 | 70 | 43 | 26 | 20 |
 | F | 7 | 32 | 9 | 8 | 7 | 8 |
 | G | 0 | 0 | 0 | 0 | 0 | 0 |
 
@@ -23,10 +23,10 @@ Rules: 985; workflows mapped: 428/428.
 | anonymous | 19 |
 | authenticated-user | 292 |
 | manufacturer | 235 |
-| operator | 103 |
+| operator | 102 |
 | checker | 10 |
-| licensee-admin | 138 |
-| platform-admin | 227 |
+| licensee-admin | 137 |
+| platform-admin | 228 |
 | restricted-read | 16 |
 | pre-auth-runtime | 19 |
 | worker | 5 |
@@ -40,9 +40,9 @@ Rules: 985; workflows mapped: 428/428.
 | Value | Rules |
 |---|---:|
 | none | 94 |
-| password-verified | 514 |
+| password-verified | 513 |
 | mfa-bootstrap | 3 |
-| mfa-verified | 239 |
+| mfa-verified | 241 |
 | step-up-verified | 14 |
 | system-verified | 33 |
 | operator-approved | 81 |
@@ -53,7 +53,7 @@ Rules: 985; workflows mapped: 428/428.
 | Value | Rules |
 |---|---:|
 | SELECT | 475 |
-| INSERT | 172 |
+| INSERT | 173 |
 | UPDATE | 245 |
 | DELETE | 93 |
 
@@ -67,7 +67,7 @@ Approval-gated rules: 101.
 |---|---:|
 | actor self-delete | 5 |
 | migration-only | 3 |
-| not-applicable | 892 |
+| not-applicable | 893 |
 | operator-approved | 1 |
 | prohibited | 75 |
 | retention delete | 3 |
