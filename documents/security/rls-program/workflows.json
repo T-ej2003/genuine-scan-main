@@ -5223,6 +5223,7 @@
       ],
       "semanticStatus": "mapped",
       "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-audit-read-context",
       "implementationFiles": [
         "backend/src/routes/auditRoutes.ts",
         "backend/src/controllers/auditController.ts",
@@ -5359,6 +5360,7 @@
       ],
       "semanticStatus": "mapped",
       "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-fraud-report-read",
       "implementationFiles": [
         "backend/src/controllers/auditController.ts",
         "backend/src/lib/canonicalDbContext.ts",
@@ -5508,6 +5510,7 @@
       ],
       "semanticStatus": "mapped",
       "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-audit-read-context",
       "implementationFiles": [
         "backend/src/controllers/auditController.ts",
         "backend/src/lib/canonicalDbContext.ts",

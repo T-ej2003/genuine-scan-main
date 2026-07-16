@@ -3,8 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, operatorAdministrationReviewPath, operatorBoundariesPath, parseSchema, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validateObjectOwnershipChain, validateOperatorBoundaries, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { buildContextBoundaryPlan, contextBoundaryFamiliesPath, contextBoundaryReportPath, validateContextBoundaryPlan } from "../rls/context-boundary-plan.mjs";
 
-const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, objectOwnershipChainPath, objectOwnershipReviewPath, operatorBoundariesPath, operatorAdministrationReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
+const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, objectOwnershipChainPath, objectOwnershipReviewPath, operatorBoundariesPath, operatorAdministrationReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath, contextBoundaryFamiliesPath, contextBoundaryReportPath].map((file) => fs.readFileSync(file, "utf8"));
 
 test("all Prisma models and production access sites are represented exactly and deterministically", () => {
   const before = snapshot();
@@ -44,6 +45,7 @@ test("implemented HTTP context boundaries retain complete certification evidence
   const verify = (workflow) => {
     assert.equal(workflow.contextBoundaryStatus, "implemented", "context boundary status");
     assert.equal(workflow.implementationStatus, "context-boundary-implemented", "implementation status");
+    assert.match(workflow.implementationFamilyId, /^family-[a-z0-9-]+$/, "implementation family");
     assert(workflow.implementationFiles.length && workflow.testFiles.length, "implementation and test evidence");
     assert(workflow.tablesTouched.length, "protected table evidence");
     assert.deepEqual([...workflow.canonicalContextKeys].sort(), requiredKeys, "canonical context keys");
@@ -60,6 +62,7 @@ test("implemented HTTP context boundaries retain complete certification evidence
     ["implementationFiles", [], /implementation and test evidence/],
     ["testFiles", [], /implementation and test evidence/],
     ["tablesTouched", [], /protected table evidence/],
+    ["implementationFamilyId", undefined, /implementation family/],
     ["canonicalContextKeys", workflow.canonicalContextKeys.filter((key) => key !== "app.purpose"), /canonical context keys/],
     ["sameTransactionGuarantee", false, /same transaction guarantee/],
     ["postgresqlCertificationStatus", undefined, /PostgreSQL certification status/],
@@ -68,6 +71,43 @@ test("implemented HTTP context boundaries retain complete certification evidence
     candidate[field] = value;
     assert.throws(() => verify(candidate), pattern);
   }
+});
+
+test("context-boundary families are exhaustive, deterministic, and fail closed", () => {
+  const beforePlan = fs.readFileSync(contextBoundaryFamiliesPath, "utf8");
+  const beforeReport = fs.readFileSync(contextBoundaryReportPath, "utf8");
+  const generated = buildContextBoundaryPlan();
+  assert.equal(fs.readFileSync(contextBoundaryFamiliesPath, "utf8"), beforePlan, "context family plan changed on a second run");
+  assert.equal(fs.readFileSync(contextBoundaryReportPath, "utf8"), beforeReport, "context family report changed on a second run");
+  const { workflows, commandSemantics, tables } = manifests();
+  validateContextBoundaryPlan(generated, workflows, commandSemantics, tables);
+  assert.equal(generated.workflowCount, 428);
+  assert.equal(generated.familyCount, 316);
+  const count = (eligibility) => generated.families.filter((family) => family.automationEligibility === eligibility).reduce((total, family) => total + family.workflowIds.length, 0);
+  assert.equal(count("implemented"), 3);
+  assert.equal(count("contract-only"), 38);
+  assert.equal(count("blocked"), 387);
+  assert.equal(count("auto-implementable"), 0);
+  assert.equal(new Set(generated.families.flatMap((family) => family.workflowIds)).size, workflows.workflows.length);
+  const specialWorkflowIds = new Set([
+    ...workflows.workflows.filter((workflow) => workflow.preAuthBoundary?.boundaryMode === "exact-security-definer-function"),
+    ...workflows.workflows.filter((workflow) => workflow.workerBoundaryId),
+    ...workflows.workflows.filter((workflow) => workflow.operatorBoundaryId),
+    ...workflows.workflows.filter((workflow) => workflow.authorizationBoundaryType === "migration-owner"),
+  ].map((workflow) => workflow.id));
+  for (const family of generated.families.filter((family) => family.workflowIds.some((id) => specialWorkflowIds.has(id)))) assert.equal(family.automationEligibility, "contract-only", family.id);
+
+  const reject = (mutate, pattern) => {
+    const candidate = structuredClone(generated);
+    const candidateWorkflows = structuredClone(workflows);
+    mutate(candidate, candidateWorkflows);
+    assert.throws(() => validateContextBoundaryPlan(candidate, candidateWorkflows, commandSemantics, tables), pattern);
+  };
+  reject((candidate) => candidate.families[1].workflowIds.push(candidate.families[0].workflowIds[0]), /cover every workflow exactly once|multiple context families/);
+  reject((candidate) => { const family = candidate.families.find((item) => item.automationEligibility === "blocked"); family.blockers = []; }, /blocker evidence drifted|lacks exact blockers/);
+  reject((candidate) => { const family = candidate.families.find((item) => item.automationEligibility === "blocked"); family.automationEligibility = "auto-implementable"; family.implementationStatus = "planned"; family.blockers = []; }, /eligibility does not match workflow evidence/);
+  reject((candidate) => { const family = candidate.families.find((item) => item.automationEligibility === "contract-only"); family.canonicalContextKeys = ["app.user_id"]; }, /contract boundary is invalid/);
+  reject((candidate, candidateWorkflows) => { const family = candidate.families.find((item) => item.automationEligibility === "implemented"); const workflow = candidateWorkflows.workflows.find((item) => item.id === family.workflowIds[0]); workflow.postgresqlCertificationStatus = "certified"; }, /falsely PostgreSQL-certified/);
 });
 
 test("all FORCE-table commands and workflows have exact resolved semantics", () => {

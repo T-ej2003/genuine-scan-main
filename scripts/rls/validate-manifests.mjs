@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateObjectOwnershipChain, validateOperatorBoundaries, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
+import { contextBoundaryFamiliesPath, validateContextBoundaryPlan } from "./context-boundary-plan.mjs";
 
 const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries, objectOwnershipChain, operatorBoundaries } = manifests();
 assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries && objectOwnershipChain && operatorBoundaries, "all programme manifests must exist");
@@ -109,6 +110,7 @@ for (const workflow of workflows.workflows) {
   for (const id of workflow.unresolvedDecisions) assert(decisionIds.has(id), `${workflow.id} references missing decision ${id}`);
   if (workflow.contextBoundaryStatus === "implemented") {
     assert.equal(workflow.implementationStatus, "context-boundary-implemented", `${workflow.id} has an inconsistent context-boundary status`);
+    assert(/^family-[a-z0-9-]+$/.test(workflow.implementationFamilyId), `${workflow.id} lacks an implementation family`);
     assert(workflow.implementationFiles?.length && workflow.implementationFiles.every((file) => fs.existsSync(file)), `${workflow.id} lacks implementation files`);
     assert(workflow.testFiles?.length && workflow.testFiles.every((file) => fs.existsSync(file)), `${workflow.id} lacks context-boundary tests`);
     assert(workflow.tablesTouched?.length, `${workflow.id} lacks protected-table evidence`);
@@ -176,5 +178,6 @@ validatePreAuthFunctions(preAuthFunctions, workflows, commandSemantics, identiti
 validateWorkerBoundaries(workerBoundaries, workflows, commandSemantics, identities, tables);
 validateObjectOwnershipChain(objectOwnershipChain, tables, identities, preAuthFunctions, workerBoundaries);
 validateOperatorBoundaries(operatorBoundaries, workflows, commandSemantics, identities);
+validateContextBoundaryPlan(JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8")), workflows, commandSemantics, tables);
 assert(sharedApplyIsBlocked(), "existing shared-table apply must remain blocked before BEGIN");
 console.log(JSON.stringify({ valid: true, tables: tables.tables.length, workflows: workflows.workflows.length, productionAccessSites: mappedAccessIds.size }));
