@@ -2,7 +2,7 @@
 
 This is the compact human review of `command-semantics.json`. It defines architecture only: no SQL, grants, roles, RLS state, or runtime behavior are changed.
 
-Rules: 974; workflows mapped: 428/428.
+Rules: 983; workflows mapped: 428/428.
 
 ## Review groups
 
@@ -12,8 +12,8 @@ Rules: 974; workflows mapped: 428/428.
 | B | 3 | 66 | 33 | 15 | 13 | 5 |
 | C | 15 | 241 | 135 | 27 | 61 | 18 |
 | D | 13 | 266 | 134 | 43 | 73 | 16 |
-| E | 18 | 149 | 66 | 38 | 25 | 20 |
-| F | 7 | 30 | 9 | 7 | 6 | 8 |
+| E | 18 | 156 | 69 | 41 | 26 | 20 |
+| F | 7 | 32 | 9 | 8 | 7 | 8 |
 | G | 0 | 0 | 0 | 0 | 0 | 0 |
 
 ## Actor classes
@@ -21,16 +21,16 @@ Rules: 974; workflows mapped: 428/428.
 | Value | Rules |
 |---|---:|
 | anonymous | 19 |
-| authenticated-user | 288 |
+| authenticated-user | 292 |
 | manufacturer | 235 |
-| operator | 102 |
+| operator | 101 |
 | checker | 10 |
-| licensee-admin | 137 |
-| platform-admin | 226 |
+| licensee-admin | 136 |
+| platform-admin | 225 |
 | restricted-read | 16 |
 | pre-auth-runtime | 19 |
-| worker | 7 |
-| scheduled-job | 2 |
+| worker | 5 |
+| scheduled-job | 10 |
 | migration | 2 |
 | operator-admin | 79 |
 | break-glass | 9 |
@@ -40,11 +40,11 @@ Rules: 974; workflows mapped: 428/428.
 | Value | Rules |
 |---|---:|
 | none | 94 |
-| password-verified | 509 |
+| password-verified | 512 |
 | mfa-bootstrap | 3 |
 | mfa-verified | 239 |
 | step-up-verified | 14 |
-| system-verified | 27 |
+| system-verified | 33 |
 | operator-approved | 79 |
 | dual-approved-break-glass | 9 |
 
@@ -52,22 +52,22 @@ Rules: 974; workflows mapped: 428/428.
 
 | Value | Rules |
 |---|---:|
-| SELECT | 471 |
-| INSERT | 167 |
-| UPDATE | 243 |
+| SELECT | 474 |
+| INSERT | 171 |
+| UPDATE | 245 |
 | DELETE | 93 |
 
 ## Boundary and deletion summary
 
-Named-function rules: 336.
-Restricted-worker rules: 9.
+Named-function rules: 339.
+Restricted-worker rules: 15.
 Approval-gated rules: 101.
 
 | Hard-delete classification | Rules |
 |---|---:|
 | actor self-delete | 5 |
 | migration-only | 3 |
-| not-applicable | 881 |
+| not-applicable | 890 |
 | operator-approved | 1 |
 | prohibited | 75 |
 | retention delete | 3 |

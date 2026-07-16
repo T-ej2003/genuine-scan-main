@@ -4,7 +4,7 @@
 
 This directory is the machine-readable programme authority for taking every Prisma-backed production table and active database workflow toward PostgreSQL `ENABLE ROW LEVEL SECURITY` plus `FORCE ROW LEVEL SECURITY`. It is inventory and harness foundation only. It does not authorize or implement an application authorization change, policy, RLS enablement, database mutation, AWS action, staging action, or production action.
 
-`tables.json` owns table classification and readiness, `workflows.json` owns functional access, `command-semantics.json` owns command authorization, `pre-auth-functions.json` owns exact pre-authentication function contracts, `runtime-identities.json` owns execution identities, and `decisions.json` owns unresolved rules. The scanners regenerate schema/access evidence while retaining human-maintained decisions and status. The shared-table apply at `documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql` remains blocked.
+`tables.json` owns table classification and readiness, `workflows.json` owns functional access, `command-semantics.json` owns command authorization, `pre-auth-functions.json` owns exact pre-authentication function contracts, `worker-boundaries.json` owns non-interactive job authority, `runtime-identities.json` owns execution identities, and `decisions.json` owns unresolved rules. The scanners regenerate schema/access evidence while retaining human-maintained decisions and status. The shared-table apply at `documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql` remains blocked.
 
 ## Final database role model
 
@@ -18,7 +18,7 @@ This directory is the machine-readable programme authority for taking every Pris
 | Worker | `mscqr_{dev,staging,prod}_worker` | LOGIN | `public`, `app_rls` | CONNECT, USAGE, workflow-generated commands and worker helpers | None | No | No | Approved worker signatures only | Dedicated worker secret per environment | Managed independently from scheduled/app credentials |
 | Scheduled job | `mscqr_{dev,staging,prod}_scheduled` | LOGIN | `public`, `app_rls` | CONNECT, USAGE, schedule-generated commands and helpers | None | No | No | Approved scheduled signatures only | Dedicated scheduled secret per environment | Managed independently from worker/app credentials |
 | Migration | `mscqr_{dev,staging,prod}_migration` | LOGIN | Reviewed deployment schemas | CONNECT, USAGE, reviewed DDL, mandatory ownership transfer | No enduring protected-object ownership | No | Approved deployment only | None | Dedicated deployment secret per environment | Deployment-only retrieval and managed rotation |
-| Table owner | `mscqr_{dev,staging,prod}_owner` | NOLOGIN | `public` | Protected table/policy ownership | Protected tables and policies | No | No | None | None | Not applicable |
+| Table owner | `mscqr_{dev,staging,prod}_owner` | NOLOGIN | `public`, `app_rls` | Protected table/policy and approved worker-function ownership | Protected tables, policies, and exact `app_rls` worker functions | No | No | Owns SECURITY INVOKER functions; never executes as runtime | None | Not applicable |
 | Authentication-function owner | `mscqr_{dev,staging,prod}_auth_owner` | NOLOGIN | `app_auth`, `pg_catalog` | Function/schema ownership and exact required column privileges | `app_auth` and approved functions only; no application tables | No | No | Owns functions; never executes as a runtime identity | None | Not applicable |
 | Operator administration | `mscqr_{dev,staging,prod}_operator` | Broker-controlled LOGIN | Approved schemas only | Broker command allowlist and temporary narrow grants | None | No | No | Approved operator signatures only | Ephemeral broker credential per environment | Automatic expiry and revocation after each operation |
 | Production break-glass | `mscqr_prod_breakglass_<incident>_<nonce>` or equivalent temporary grant | Ephemeral LOGIN only | Incident-approved only | Incident command allowlist only | None | No | No | Incident-approved exact signatures only | Broker-issued after dual approval and strong MFA; no standing credential | Hard expiry plus automatic revocation on completion or failure |
@@ -30,6 +30,8 @@ Migration may perform required DDL only through an explicitly approved deploymen
 ## Canonical transaction context
 
 Authenticated database work occurs inside one transaction that validates and sets the six transaction-local settings already used by the prototype: actor/user ID, normalized role, licensee ID, organization ID, manufacturer ID, and platform-administrator boolean. Context is derived from authenticated server state, never accepted directly from request or queue payloads, and the transaction client cannot escape its callback. Missing, malformed, forged, stale, or cross-tenant context fails closed.
+
+Worker transactions use a separate system context: `app.system_identity`, `app.job_id`, `app.job_type`, `app.organization_id`, `app.licensee_id`, `app.manufacturer_id`, `app.initiating_user_id`, `app.request_id`, and `app.auth_assurance=system-verified`. Every value is transaction-local, installed in the same transaction as protected commands, derived from verified durable job evidence, and automatically cleared at transaction end. Worker context never sets `app.role`, platform-admin state, or a human executor identity.
 
 `decision-policy-command-semantics` is resolved by `command-semantics.json`. Future changes should reuse the existing transaction-context primitive after it is promoted and certified; no second context implementation is needed.
 
@@ -94,7 +96,7 @@ The generated `TABLE_OWNERSHIP_REVIEW.md` is the concise table-by-table review. 
 
 ## Unresolved semantic decisions
 
-Ownership, policy command semantics and pre-authentication boundaries have no unresolved table or workflow decision. Durable worker/job authority (`decision-worker-identity-model`), the executable object-transfer chain (`decision-object-ownership-chain`), and broker/operator implementation (`decision-operator-administration`) remain blocking implementation decisions. They do not reopen the approved category, owner, FORCE target, parent DAG, command contract, pre-auth function contract, or administrator ceiling.
+Ownership, policy command semantics, pre-authentication boundaries, and worker/job authority have no unresolved architecture decision. The executable object-transfer chain (`decision-object-ownership-chain`) and broker/operator implementation (`decision-operator-administration`) remain blocking. They do not reopen the approved category, owner, FORCE target, parent DAG, command contract, pre-auth function contract, worker contract, or administrator ceiling.
 
 ## Pre-authentication function rules
 
@@ -108,7 +110,13 @@ Password lookup normalizes once, validates shape, returns the minimum current ve
 
 ## Worker authorization rules
 
-Workers and schedules do not receive global tenant bypass. They verify job identity, tenant and authorization version against durable data, establish transaction-local scope, use a restricted job-family role, and record idempotency/retry evidence. Cross-tenant aggregation or maintenance requires a separately reviewed narrow function or operator workflow. Queue payload scope alone is insufficient. The remaining design is `decision-worker-identity-model`.
+`decision-worker-identity-model` is resolved by `worker-boundaries.json`. Registration evidence identifies three non-interactive execution workflows: actor-derived audit-outbox recovery and platform-scoped SIEM delivery use `identity-worker`; scheduled compliance maintenance uses the distinct `identity-scheduled-job`. The scanner now classifies the synchronous attention-queue dashboard read as HTTP and `queueAuditLogOutbox`/`queueSecurityEvent` as durable producers rather than consumers. Names containing “queue” are not worker-registration evidence.
+
+Every job is loaded from a durable row, checks an allowlisted job type, immutable canonical payload digest, correlation ID, maximum age and idempotency key, and revalidates tenant/actor references before context installation. JSON tenant, actor, role, or platform-admin claims are never authority. Actor-derived audit work preserves the initiating actor as origin evidence while recording `identity-worker` as executor. SIEM delivery uses the outbox row ID as its stable external event ID. Scheduled compliance partitions by verified licensee/organization and must remove its current platform-user lookup rather than impersonate a human administrator.
+
+Retries keep the same job ID, digest and idempotency key; conflicting payloads are denied and terminal results are returned instead of repeated. Database row locks/CAS or unique schedule keys enforce one logical winner; Redis/process leases are optimizations only. Retry exhaustion retains immutable dead-letter evidence, cancellation stops new claims without publishing partial success, and audit records system identity, job/type, tenant, initiating actor when present, request ID, outcome and attempt.
+
+Two exact future `app_rls` SECURITY INVOKER functions are required: `consume_audit_log_outbox(text,text,timestamp without time zone)` atomically inserts immutable audit evidence and consumes one row; `claim_compliance_pack_slice(text,timestamp without time zone,integer)` performs bounded tenant partition claims. They are owned by the NOLOGIN table-owner identity, execute with the caller's exact grants and RLS context, and grant no bypass. Neither accepts JSON queries, table/column names, predicates, roles or tenant authority. SIEM uses exact table commands plus a database compare-and-set because external delivery cannot be made atomic by a database function. These contracts create no SQL or runtime grant.
 
 ## Administrator ceilings
 

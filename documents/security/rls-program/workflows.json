@@ -13928,6 +13928,172 @@
       "semanticStatus": "mapped"
     },
     {
+      "id": "workflow-http-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached",
+      "name": "Get Attention Queue Snapshot Uncached",
+      "entryPoint": "http:getAttentionQueueSnapshotUncached",
+      "executionSurface": "http",
+      "authenticationStage": "authenticated",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "canonicalSourceFiles": [
+        "backend/src/services/attentionQueueService.ts"
+      ],
+      "tablesTouched": [
+        "table-audit-log",
+        "table-incident",
+        "table-policy-alert",
+        "table-print-job",
+        "table-support-ticket"
+      ],
+      "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-incident",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-policy-alert",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-print-job",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-support-ticket",
+          "commands": [
+            "SELECT"
+          ]
+        }
+      ],
+      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "contextRequirements": [
+        "transaction-local canonical actor context"
+      ],
+      "contextRequirementsSource": "generated-conservative",
+      "authorizationBoundaryType": "authenticated-context",
+      "expectedAllowedScenarios": [
+        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+      ],
+      "expectedDeniedScenarios": [
+        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+      ],
+      "preAuthSystemRequirements": [],
+      "currentDirectPrismaUsage": [
+        "access-17bb8db393006064",
+        "access-2ab257fb6c534bfa",
+        "access-3db9354ddd7e4068",
+        "access-a624685f8e527da0",
+        "access-bff7629a21a8f5c7",
+        "access-c6d72dde9aa36dd0",
+        "access-cf51354e9689262c",
+        "access-e9ad38cc915d3d69",
+        "access-ef62b535496d3842",
+        "access-f199f12cdb52c3f4"
+      ],
+      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
+      "implementationStatus": "inventory-only",
+      "requiredUnitTests": [
+        "Allowed and denied command contract for this canonical workflow."
+      ],
+      "requiredDisposablePostgresqlTests": [
+        "Exact role, context, command, cross-tenant denial, and empty-context denial."
+      ],
+      "unresolvedDecisions": [],
+      "supportingEvidence": [
+        {
+          "accessId": "access-17bb8db393006064",
+          "source": "backend/src/services/attentionQueueService.ts:270",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "count"
+        },
+        {
+          "accessId": "access-2ab257fb6c534bfa",
+          "source": "backend/src/services/attentionQueueService.ts:266",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "count"
+        },
+        {
+          "accessId": "access-3db9354ddd7e4068",
+          "source": "backend/src/services/attentionQueueService.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "count"
+        },
+        {
+          "accessId": "access-a624685f8e527da0",
+          "source": "backend/src/services/attentionQueueService.ts:276",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findFirst"
+        },
+        {
+          "accessId": "access-bff7629a21a8f5c7",
+          "source": "backend/src/services/attentionQueueService.ts:268",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "count"
+        },
+        {
+          "accessId": "access-c6d72dde9aa36dd0",
+          "source": "backend/src/services/attentionQueueService.ts:271",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findFirst"
+        },
+        {
+          "accessId": "access-cf51354e9689262c",
+          "source": "backend/src/services/attentionQueueService.ts:267",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "count"
+        },
+        {
+          "accessId": "access-e9ad38cc915d3d69",
+          "source": "backend/src/services/attentionQueueService.ts:286",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findFirst"
+        },
+        {
+          "accessId": "access-ef62b535496d3842",
+          "source": "backend/src/services/attentionQueueService.ts:291",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findFirst"
+        },
+        {
+          "accessId": "access-f199f12cdb52c3f4",
+          "source": "backend/src/services/attentionQueueService.ts:281",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findFirst"
+        }
+      ],
+      "commandRuleIds": [
+        "command-audit-log-select-7691bd31cd81",
+        "command-incident-select-7691bd31cd81",
+        "command-policy-alert-select-7691bd31cd81",
+        "command-print-job-select-7691bd31cd81",
+        "command-support-ticket-select-7691bd31cd81"
+      ],
+      "commandActorClasses": [
+        "authenticated-user"
+      ],
+      "requiredAssurance": [
+        "password-verified"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "semanticStatus": "mapped",
+      "workerClassificationEvidence": "Synchronous authenticated dashboard read reached from dashboardController; the word Queue is a product noun, not worker registration evidence."
+    },
+    {
       "id": "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-discover-printer-capabilities",
       "name": "Discover Printer Capabilities",
       "entryPoint": "internal:discoverPrinterCapabilities",
@@ -14949,9 +15115,9 @@
       "semanticStatus": "mapped"
     },
     {
-      "id": "workflow-internal-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox",
-      "name": "Flush Audit Log Outbox",
-      "entryPoint": "internal:flushAuditLogOutbox",
+      "id": "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox",
+      "name": "Queue Audit Log Outbox",
+      "entryPoint": "internal:queueAuditLogOutbox",
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
@@ -14969,8 +15135,7 @@
         {
           "tableId": "table-audit-log-outbox",
           "commands": [
-            "SELECT",
-            "UPDATE"
+            "INSERT"
           ]
         }
       ],
@@ -14988,9 +15153,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-a65f68d63fc11a52",
-        "access-af6c55ccb69ae750",
-        "access-e41955be45cf50ea"
+        "access-b209f411a6fafdd9"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -15003,27 +15166,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-a65f68d63fc11a52",
-          "source": "backend/src/services/auditLogOutboxService.ts:84",
+          "accessId": "access-b209f411a6fafdd9",
+          "source": "backend/src/services/auditLogOutboxService.ts:32",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "update"
-        },
-        {
-          "accessId": "access-af6c55ccb69ae750",
-          "source": "backend/src/services/auditLogOutboxService.ts:71",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "update"
-        },
-        {
-          "accessId": "access-e41955be45cf50ea",
-          "source": "backend/src/services/auditLogOutboxService.ts:53",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "create"
         }
       ],
       "commandRuleIds": [
-        "command-audit-log-outbox-select-5104bbf7c766",
-        "command-audit-log-outbox-update-5104bbf7c766"
+        "command-audit-log-outbox-insert-0c52b3004f35"
       ],
       "commandActorClasses": [
         "licensee-admin",
@@ -15031,13 +15181,14 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified",
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "producesWorkerBoundaryId": "worker-boundary-audit-outbox-delivery",
+      "workerClassificationEvidence": "Durable enqueue producer; executes under its originating request/system identity and is not the non-interactive consumer."
     },
     {
       "id": "workflow-internal-backend-src-services-audit-service-ts-create-audit-log",
@@ -37249,9 +37400,9 @@
       "semanticStatus": "mapped"
     },
     {
-      "id": "workflow-internal-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox",
-      "name": "Flush Security Event Outbox",
-      "entryPoint": "internal:flushSecurityEventOutbox",
+      "id": "workflow-internal-backend-src-services-siem-outbox-service-ts-queue-security-event",
+      "name": "Queue Security Event",
+      "entryPoint": "internal:queueSecurityEvent",
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
@@ -37267,8 +37418,7 @@
         {
           "tableId": "table-security-event-outbox",
           "commands": [
-            "SELECT",
-            "UPDATE"
+            "INSERT"
           ]
         }
       ],
@@ -37276,6 +37426,7 @@
       "contextRequirements": [
         "transaction-local canonical actor context"
       ],
+      "contextRequirementsSource": "generated-conservative",
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
@@ -37285,9 +37436,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-43c25c20bc0761af",
-        "access-486c1e83e848ae6a",
-        "access-ba0c330e5f57a04d"
+        "access-4d84e06db9f21f2f"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -37300,28 +37449,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-43c25c20bc0761af",
-          "source": "backend/src/services/siemOutboxService.ts:92",
+          "accessId": "access-4d84e06db9f21f2f",
+          "source": "backend/src/services/siemOutboxService.ts:35",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
-        },
-        {
-          "accessId": "access-486c1e83e848ae6a",
-          "source": "backend/src/services/siemOutboxService.ts:104",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "update"
-        },
-        {
-          "accessId": "access-ba0c330e5f57a04d",
-          "source": "backend/src/services/siemOutboxService.ts:117",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "update"
+          "method": "create"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
-        "command-security-event-outbox-select-1a6a98934236",
-        "command-security-event-outbox-update-1a6a98934236"
+        "command-security-event-outbox-insert-1eae14f8fc5b"
       ],
       "commandActorClasses": [
         "authenticated-user"
@@ -37332,7 +37467,9 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "producesWorkerBoundaryId": "worker-boundary-siem-outbox-delivery",
+      "workerClassificationEvidence": "Durable enqueue producer; executes under its originating request/system identity and is not the non-interactive consumer."
     },
     {
       "id": "workflow-internal-backend-src-services-soar-service-ts-run-incident-auto-containment",
@@ -38699,10 +38836,48 @@
         "backend/src/services/compliancePackService.ts"
       ],
       "tablesTouched": [
+        "table-audit-log",
+        "table-compliance-pack-job",
+        "table-evidence-retention-policy",
+        "table-incident",
+        "table-incident-handoff",
         "table-licensee",
         "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-compliance-pack-job",
+          "commands": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-evidence-retention-policy",
+          "commands": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-incident",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-incident-handoff",
+          "commands": [
+            "SELECT"
+          ]
+        },
         {
           "tableId": "table-licensee",
           "commands": [
@@ -38723,10 +38898,10 @@
       ],
       "authorizationBoundaryType": "restricted-worker",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "worker-boundary-scheduled-compliance-packs executes only an allowlisted job with verified durable scope, system identity and exact commands."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Unverified JSON scope, unknown job type, stale/replayed job, conflicting idempotency payload, platform-admin context, human impersonation or wrong runtime identity is denied."
       ],
       "preAuthSystemRequirements": [
         "No superuser, ownership execution, or BYPASSRLS."
@@ -38743,9 +38918,7 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-worker-identity-model"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
           "accessId": "access-216d647effdbeb6f",
@@ -38762,6 +38935,14 @@
       ],
       "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
+        "command-audit-log-insert-worker-boundary-scheduled-compliance-packs",
+        "command-audit-log-select-worker-boundary-scheduled-compliance-packs",
+        "command-compliance-pack-job-insert-worker-boundary-scheduled-compliance-packs",
+        "command-compliance-pack-job-update-worker-boundary-scheduled-compliance-packs",
+        "command-evidence-retention-policy-insert-worker-boundary-scheduled-compliance-packs",
+        "command-evidence-retention-policy-update-worker-boundary-scheduled-compliance-packs",
+        "command-incident-handoff-select-worker-boundary-scheduled-compliance-packs",
+        "command-incident-select-worker-boundary-scheduled-compliance-packs",
         "command-licensee-select-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ],
@@ -38774,7 +38955,28 @@
       "runtimeIdentities": [
         "identity-scheduled-job"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs",
+      "workerClass": "scheduled-maintenance-job",
+      "scopeVerificationMethod": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "requiredTransactionContext": [
+        "app.system_identity",
+        "app.job_id",
+        "app.job_type",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.initiating_user_id",
+        "app.request_id",
+        "app.auth_assurance"
+      ],
+      "idempotencyStrategy": {
+        "keySource": "compliance-pack + licensee_id + UTC schedule stamp + report period",
+        "uniquenessBoundary": "job_type + licensee_id + schedule stamp",
+        "conflictBehavior": "reject a different tenant/period/digest for the same key",
+        "replayResult": "return the existing job/result; RELEASED/COMPLETED work is not regenerated",
+        "conflictingPayloadDenied": true
+      }
     },
     {
       "id": "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user",
@@ -39026,179 +39228,9 @@
       "semanticStatus": "mapped"
     },
     {
-      "id": "workflow-worker-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached",
-      "name": "Get Attention Queue Snapshot Uncached",
-      "entryPoint": "worker:getAttentionQueueSnapshotUncached",
-      "executionSurface": "worker",
-      "authenticationStage": "system",
-      "actorClasses": [
-        "worker"
-      ],
-      "canonicalSourceFiles": [
-        "backend/src/services/attentionQueueService.ts"
-      ],
-      "tablesTouched": [
-        "table-audit-log",
-        "table-incident",
-        "table-policy-alert",
-        "table-print-job",
-        "table-support-ticket"
-      ],
-      "commandsPerTable": [
-        {
-          "tableId": "table-audit-log",
-          "commands": [
-            "SELECT"
-          ]
-        },
-        {
-          "tableId": "table-incident",
-          "commands": [
-            "SELECT"
-          ]
-        },
-        {
-          "tableId": "table-policy-alert",
-          "commands": [
-            "SELECT"
-          ]
-        },
-        {
-          "tableId": "table-print-job",
-          "commands": [
-            "SELECT"
-          ]
-        },
-        {
-          "tableId": "table-support-ticket",
-          "commands": [
-            "SELECT"
-          ]
-        }
-      ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
-      "contextRequirements": [
-        "approved restricted system identity",
-        "job-bound tenant scope"
-      ],
-      "authorizationBoundaryType": "restricted-worker",
-      "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
-      ],
-      "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
-      ],
-      "preAuthSystemRequirements": [
-        "No superuser, ownership execution, or BYPASSRLS."
-      ],
-      "currentDirectPrismaUsage": [
-        "access-17bb8db393006064",
-        "access-2ab257fb6c534bfa",
-        "access-3db9354ddd7e4068",
-        "access-a624685f8e527da0",
-        "access-bff7629a21a8f5c7",
-        "access-c6d72dde9aa36dd0",
-        "access-cf51354e9689262c",
-        "access-e9ad38cc915d3d69",
-        "access-ef62b535496d3842",
-        "access-f199f12cdb52c3f4"
-      ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
-      "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
-      ],
-      "requiredDisposablePostgresqlTests": [
-        "Exact role, context, command, cross-tenant denial, and empty-context denial."
-      ],
-      "unresolvedDecisions": [
-        "decision-worker-identity-model"
-      ],
-      "supportingEvidence": [
-        {
-          "accessId": "access-17bb8db393006064",
-          "source": "backend/src/services/attentionQueueService.ts:270",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "count"
-        },
-        {
-          "accessId": "access-2ab257fb6c534bfa",
-          "source": "backend/src/services/attentionQueueService.ts:266",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "count"
-        },
-        {
-          "accessId": "access-3db9354ddd7e4068",
-          "source": "backend/src/services/attentionQueueService.ts:269",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "count"
-        },
-        {
-          "accessId": "access-a624685f8e527da0",
-          "source": "backend/src/services/attentionQueueService.ts:276",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findFirst"
-        },
-        {
-          "accessId": "access-bff7629a21a8f5c7",
-          "source": "backend/src/services/attentionQueueService.ts:268",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "count"
-        },
-        {
-          "accessId": "access-c6d72dde9aa36dd0",
-          "source": "backend/src/services/attentionQueueService.ts:271",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findFirst"
-        },
-        {
-          "accessId": "access-cf51354e9689262c",
-          "source": "backend/src/services/attentionQueueService.ts:267",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "count"
-        },
-        {
-          "accessId": "access-e9ad38cc915d3d69",
-          "source": "backend/src/services/attentionQueueService.ts:286",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findFirst"
-        },
-        {
-          "accessId": "access-ef62b535496d3842",
-          "source": "backend/src/services/attentionQueueService.ts:291",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findFirst"
-        },
-        {
-          "accessId": "access-f199f12cdb52c3f4",
-          "source": "backend/src/services/attentionQueueService.ts:281",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findFirst"
-        }
-      ],
-      "contextRequirementsSource": "generated-conservative",
-      "commandRuleIds": [
-        "command-audit-log-select-4eee08cf7559",
-        "command-incident-select-4eee08cf7559",
-        "command-policy-alert-select-4eee08cf7559",
-        "command-print-job-select-4eee08cf7559",
-        "command-support-ticket-select-4eee08cf7559"
-      ],
-      "commandActorClasses": [
-        "worker"
-      ],
-      "requiredAssurance": [
-        "system-verified"
-      ],
-      "runtimeIdentities": [
-        "identity-worker"
-      ],
-      "semanticStatus": "mapped"
-    },
-    {
-      "id": "workflow-worker-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox",
-      "name": "Queue Audit Log Outbox",
-      "entryPoint": "worker:queueAuditLogOutbox",
+      "id": "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox",
+      "name": "Flush Audit Log Outbox",
+      "entryPoint": "worker:flushAuditLogOutbox",
       "executionSurface": "worker",
       "authenticationStage": "system",
       "actorClasses": [
@@ -39208,13 +39240,21 @@
         "backend/src/services/auditLogOutboxService.ts"
       ],
       "tablesTouched": [
+        "table-audit-log",
         "table-audit-log-outbox"
       ],
       "commandsPerTable": [
         {
-          "tableId": "table-audit-log-outbox",
+          "tableId": "table-audit-log",
           "commands": [
             "INSERT"
+          ]
+        },
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "SELECT",
+            "UPDATE"
           ]
         }
       ],
@@ -39226,16 +39266,18 @@
       "contextRequirementsSource": "generated-conservative",
       "authorizationBoundaryType": "restricted-worker",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "worker-boundary-audit-outbox-delivery executes only an allowlisted job with verified durable scope, system identity and exact commands."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Unverified JSON scope, unknown job type, stale/replayed job, conflicting idempotency payload, platform-admin context, human impersonation or wrong runtime identity is denied."
       ],
       "preAuthSystemRequirements": [
         "No superuser, ownership execution, or BYPASSRLS."
       ],
       "currentDirectPrismaUsage": [
-        "access-b209f411a6fafdd9"
+        "access-a65f68d63fc11a52",
+        "access-af6c55ccb69ae750",
+        "access-e41955be45cf50ea"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -39245,19 +39287,31 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-worker-identity-model"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-b209f411a6fafdd9",
-          "source": "backend/src/services/auditLogOutboxService.ts:32",
+          "accessId": "access-a65f68d63fc11a52",
+          "source": "backend/src/services/auditLogOutboxService.ts:84",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "create"
+          "method": "update"
+        },
+        {
+          "accessId": "access-af6c55ccb69ae750",
+          "source": "backend/src/services/auditLogOutboxService.ts:71",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "update"
+        },
+        {
+          "accessId": "access-e41955be45cf50ea",
+          "source": "backend/src/services/auditLogOutboxService.ts:53",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
         }
       ],
       "commandRuleIds": [
-        "command-audit-log-outbox-insert-6d7807a75681"
+        "command-audit-log-insert-worker-boundary-audit-outbox-delivery",
+        "command-audit-log-outbox-select-bbebad8a8023",
+        "command-audit-log-outbox-update-bbebad8a8023"
       ],
       "commandActorClasses": [
         "worker"
@@ -39268,12 +39322,33 @@
       "runtimeIdentities": [
         "identity-worker"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "workerBoundaryId": "worker-boundary-audit-outbox-delivery",
+      "workerClass": "actor-derived-job",
+      "scopeVerificationMethod": "Load the durable row by job ID, verify its canonical payload digest, re-resolve the initiating actor and tenant relationship, and reject any payload/row mismatch before installing context.",
+      "requiredTransactionContext": [
+        "app.system_identity",
+        "app.job_id",
+        "app.job_type",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.initiating_user_id",
+        "app.request_id",
+        "app.auth_assurance"
+      ],
+      "idempotencyStrategy": {
+        "keySource": "durable idempotency_key derived from the original audit request/correlation and canonical payload digest",
+        "uniquenessBoundary": "job_type + tenant scope + idempotency_key",
+        "conflictBehavior": "reject same key with a different digest",
+        "replayResult": "return the existing flushedAuditLogId without inserting another audit event",
+        "conflictingPayloadDenied": true
+      }
     },
     {
-      "id": "workflow-worker-backend-src-services-siem-outbox-service-ts-queue-security-event",
-      "name": "Queue Security Event",
-      "entryPoint": "worker:queueSecurityEvent",
+      "id": "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox",
+      "name": "Flush Security Event Outbox",
+      "entryPoint": "worker:flushSecurityEventOutbox",
       "executionSurface": "worker",
       "authenticationStage": "system",
       "actorClasses": [
@@ -39289,7 +39364,8 @@
         {
           "tableId": "table-security-event-outbox",
           "commands": [
-            "INSERT"
+            "SELECT",
+            "UPDATE"
           ]
         }
       ],
@@ -39298,18 +39374,21 @@
         "approved restricted system identity",
         "job-bound tenant scope"
       ],
+      "contextRequirementsSource": "generated-conservative",
       "authorizationBoundaryType": "restricted-worker",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "worker-boundary-siem-outbox-delivery executes only an allowlisted job with verified durable scope, system identity and exact commands."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Unverified JSON scope, unknown job type, stale/replayed job, conflicting idempotency payload, platform-admin context, human impersonation or wrong runtime identity is denied."
       ],
       "preAuthSystemRequirements": [
         "No superuser, ownership execution, or BYPASSRLS."
       ],
       "currentDirectPrismaUsage": [
-        "access-4d84e06db9f21f2f"
+        "access-43c25c20bc0761af",
+        "access-486c1e83e848ae6a",
+        "access-ba0c330e5f57a04d"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -39319,20 +39398,30 @@
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
       ],
-      "unresolvedDecisions": [
-        "decision-worker-identity-model"
-      ],
+      "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-4d84e06db9f21f2f",
-          "source": "backend/src/services/siemOutboxService.ts:35",
+          "accessId": "access-43c25c20bc0761af",
+          "source": "backend/src/services/siemOutboxService.ts:92",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "create"
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-486c1e83e848ae6a",
+          "source": "backend/src/services/siemOutboxService.ts:104",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "update"
+        },
+        {
+          "accessId": "access-ba0c330e5f57a04d",
+          "source": "backend/src/services/siemOutboxService.ts:117",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "update"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
-        "command-security-event-outbox-insert-5c1b78e7a3d3"
+        "command-security-event-outbox-select-76e162f16ff9",
+        "command-security-event-outbox-update-76e162f16ff9"
       ],
       "commandActorClasses": [
         "worker"
@@ -39343,7 +39432,28 @@
       "runtimeIdentities": [
         "identity-worker"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "workerBoundaryId": "worker-boundary-siem-outbox-delivery",
+      "workerClass": "platform-scoped-system-job",
+      "scopeVerificationMethod": "Load the durable outbox row, validate its allowlisted event type and canonical digest, and resolve any tenant/actor references from authoritative tables; JSON claims never grant authority.",
+      "requiredTransactionContext": [
+        "app.system_identity",
+        "app.job_id",
+        "app.job_type",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.initiating_user_id",
+        "app.request_id",
+        "app.auth_assurance"
+      ],
+      "idempotencyStrategy": {
+        "keySource": "SecurityEventOutbox.id used as the stable external event ID plus immutable payload digest",
+        "uniquenessBoundary": "SIEM sink + outbox row ID",
+        "conflictBehavior": "reject the same row ID with a different digest",
+        "replayResult": "return/retain the existing SENT result; never send a second logical event",
+        "conflictingPayloadDenied": true
+      }
     }
   ]
 }

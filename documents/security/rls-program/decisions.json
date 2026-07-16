@@ -142,6 +142,7 @@
         "workflow-http-backend-src-controllers-verify-verify-ownership-ts-load-ownership-transfer-by-raw-token",
         "workflow-http-backend-src-controllers-verify-verify-ownership-ts-load-pending-ownership-transfer-for-qr",
         "workflow-http-backend-src-middleware-auth-ts-hydrate-tenant-if-needed",
+        "workflow-http-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached",
         "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-discover-printer-capabilities",
         "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-ensure-printer-profile-for-printer",
         "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-get-printer-profile-for-printer",
@@ -154,7 +155,7 @@
         "workflow-internal-backend-src-services-analytics-rollup-service-ts-set-checkpoint-date",
         "workflow-internal-backend-src-services-analytics-service-ts-get-batch-sla-analytics",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
-        "workflow-internal-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox",
+        "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox",
         "workflow-internal-backend-src-services-audit-service-ts-create-audit-log",
         "workflow-internal-backend-src-services-audit-service-ts-get-audit-logs",
         "workflow-internal-backend-src-services-audit-service-ts-resolve-org-id",
@@ -407,7 +408,7 @@
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-expire-if-needed",
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-list-sensitive-action-approvals",
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-reject-sensitive-action-approval",
-        "workflow-internal-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox",
+        "workflow-internal-backend-src-services-siem-outbox-service-ts-queue-security-event",
         "workflow-internal-backend-src-services-soar-service-ts-run-incident-auto-containment",
         "workflow-internal-backend-src-services-support-workflow-service-ts-add-support-ticket-message",
         "workflow-internal-backend-src-services-support-workflow-service-ts-ensure-incident-workflow-artifacts",
@@ -429,9 +430,8 @@
         "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user",
         "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure",
         "workflow-startup-backend-src-services-auth-super-admin-bootstrap-service-ts-bootstrap-configured-super-admin",
-        "workflow-worker-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached",
-        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox",
-        "workflow-worker-backend-src-services-siem-outbox-service-ts-queue-security-event"
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox",
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
       ],
       "affectedTables": [
         "table-action-idempotency-key",
@@ -793,6 +793,7 @@
         "workflow-http-backend-src-controllers-verify-verify-ownership-ts-load-ownership-transfer-by-raw-token",
         "workflow-http-backend-src-controllers-verify-verify-ownership-ts-load-pending-ownership-transfer-for-qr",
         "workflow-http-backend-src-middleware-auth-ts-hydrate-tenant-if-needed",
+        "workflow-http-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached",
         "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-discover-printer-capabilities",
         "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-ensure-printer-profile-for-printer",
         "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-get-printer-profile-for-printer",
@@ -805,7 +806,7 @@
         "workflow-internal-backend-src-services-analytics-rollup-service-ts-set-checkpoint-date",
         "workflow-internal-backend-src-services-analytics-service-ts-get-batch-sla-analytics",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
-        "workflow-internal-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox",
+        "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox",
         "workflow-internal-backend-src-services-audit-service-ts-create-audit-log",
         "workflow-internal-backend-src-services-audit-service-ts-get-audit-logs",
         "workflow-internal-backend-src-services-audit-service-ts-resolve-org-id",
@@ -1058,7 +1059,7 @@
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-expire-if-needed",
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-list-sensitive-action-approvals",
         "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-reject-sensitive-action-approval",
-        "workflow-internal-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox",
+        "workflow-internal-backend-src-services-siem-outbox-service-ts-queue-security-event",
         "workflow-internal-backend-src-services-soar-service-ts-run-incident-auto-containment",
         "workflow-internal-backend-src-services-support-workflow-service-ts-add-support-ticket-message",
         "workflow-internal-backend-src-services-support-workflow-service-ts-ensure-incident-workflow-artifacts",
@@ -1080,9 +1081,8 @@
         "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user",
         "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure",
         "workflow-startup-backend-src-services-auth-super-admin-bootstrap-service-ts-bootstrap-configured-super-admin",
-        "workflow-worker-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached",
-        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox",
-        "workflow-worker-backend-src-services-siem-outbox-service-ts-queue-security-event"
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox",
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
       ],
       "affectedTables": [
         "table-action-idempotency-key",
@@ -1175,7 +1175,7 @@
       "resolvedAt": "2026-07-16",
       "resolution": {
         "authority": "documents/security/rls-program/command-semantics.json",
-        "rules": 974,
+        "rules": 983,
         "forceRlsTables": 75,
         "workflowsMapped": 428,
         "commandVocabulary": [
@@ -1248,20 +1248,19 @@
     {
       "id": "decision-worker-identity-model",
       "affectedWorkflows": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox",
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
-        "workflow-worker-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached",
-        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox",
-        "workflow-worker-backend-src-services-siem-outbox-service-ts-queue-security-event"
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
       ],
       "affectedTables": [
         "table-audit-log",
         "table-audit-log-outbox",
+        "table-compliance-pack-job",
+        "table-evidence-retention-policy",
         "table-incident",
+        "table-incident-handoff",
         "table-licensee",
-        "table-policy-alert",
-        "table-print-job",
         "table-security-event-outbox",
-        "table-support-ticket",
         "table-user"
       ],
       "question": "How does each worker and scheduled job obtain independently verifiable tenant scope and least-privilege database authority?",
@@ -1274,7 +1273,22 @@
       "recommendedOption": "Verify tenant/job authorization from durable data, then use a restricted job-family identity and transaction-local scope.",
       "blockingStatus": "blocking",
       "owner": "Platform engineering and application security",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-07-16",
+      "resolution": {
+        "authority": "documents/security/rls-program/worker-boundaries.json",
+        "boundaries": 3,
+        "workerWorkflows": 2,
+        "scheduledWorkflows": 1,
+        "namedFunctions": 2,
+        "guarantees": [
+          "Durable or cryptographically authenticated job evidence is authority; JSON payload scope is not",
+          "Worker and scheduled credentials remain distinct",
+          "Transaction-local system context never impersonates a human or platform administrator",
+          "Every mutation is idempotent, replay-protected, concurrency-protected and auditable",
+          "No generic worker function or platform-wide bypass"
+        ]
+      }
     },
     {
       "id": "decision-object-ownership-chain",

@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, parseSchema, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validatePreAuthFunctions, validateRuntimeIdentities, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, parseSchema, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 
-const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
+const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
 
 test("all Prisma models and production access sites are represented exactly and deterministically", () => {
   const before = snapshot();
@@ -84,7 +84,7 @@ test("command semantics mutation guards fail closed", () => {
   rejects((rule) => rule.actorClasses.includes("licensee-admin") && ["INSERT", "UPDATE"].includes(rule.command) && ["User", "Invite"].includes(tableById.get(rule.tableId).prismaModel), (rule) => { rule.protectedColumns = rule.protectedColumns.filter((column) => column !== "role"); }, /platform role assignable/);
   rejects((rule) => rule.actorClasses.includes("platform-admin"), (rule) => { rule.minimumAssurance = "none"; }, /unconditional platform admin/);
   rejects((rule) => rule.requiresNamedFunction && !rule.requiresRestrictedWorkerBoundary, (rule) => { rule.authorizationBoundary = "ordinary-rls"; }, /named function degraded/);
-  rejects((rule) => rule.requiresRestrictedWorkerBoundary, (rule) => { rule.authorizationBoundary = "ordinary-rls"; }, /worker boundary degraded/);
+  rejects((rule) => rule.requiresRestrictedWorkerBoundary && !rule.requiresNamedFunction, (rule) => { rule.authorizationBoundary = "ordinary-rls"; }, /worker boundary degraded/);
   rejects((rule) => rule.lifecycleColumns.length && rule.authorizationBoundary !== "prohibited", (rule) => { rule.allowedLifecycleStates = []; }, /lifecycle omitted/);
   rejects((rule) => rule.command === "DELETE" && rule.hardDeleteSemantics === "prohibited", (rule, candidate) => { candidate.rules.splice(candidate.rules.indexOf(rule), 1); }, /general hard delete enabled/);
 });
@@ -121,6 +121,37 @@ test("pre-auth function mutation guards fail closed", () => {
   rejects((candidate) => { delete candidate.workflows.workflows.find((workflow) => workflow.authorizationBoundaryType === "pre-auth-security-function").preAuthBoundary; }, /pre-auth workflow lacks a boundary/);
   rejects((candidate) => { candidate.workflows.workflows.find((workflow) => workflow.preAuthBoundary?.boundaryMode === "ordinary-authenticated-context").runtimeIdentities = ["identity-pre-auth-app"]; }, /moved workflow retains pre-auth access/);
   rejects((candidate) => { candidate.preAuthFunctions.functions.find((fn) => fn.secretColumnExposures.length).secretColumnExposures[0].justification = ""; }, /secret without justification/);
+});
+
+test("worker and scheduled workflows use exact durable boundaries", () => {
+  const { workerBoundaries, workflows, commandSemantics, identities, tables, decisions } = manifests();
+  assert.equal(workerBoundaries.boundaries.length, 3);
+  assert.equal(workerBoundaries.boundaries.filter((boundary) => boundary.runtimeIdentity === "identity-worker").length, 2);
+  assert.equal(workerBoundaries.boundaries.filter((boundary) => boundary.runtimeIdentity === "identity-scheduled-job").length, 1);
+  assert(validateWorkerBoundaries(workerBoundaries, workflows, commandSemantics, identities, tables));
+  assert.equal(decisions.decisions.find((decision) => decision.id === "decision-worker-identity-model")?.status, "resolved");
+  assert(workflows.workflows.find((workflow) => workflow.id.includes("attention-queue-service-ts-get-attention-queue-snapshot-uncached")).workerClassificationEvidence.includes("Synchronous authenticated"));
+});
+
+test("worker boundary mutation guards fail closed", () => {
+  const current = manifests();
+  const rejects = (mutate, pattern) => {
+    const candidate = structuredClone(current);
+    mutate(candidate);
+    assert.throws(() => validateWorkerBoundaries(candidate.workerBoundaries, candidate.workflows, candidate.commandSemantics, candidate.identities, candidate.tables), pattern);
+  };
+  rejects((candidate) => { const boundary = candidate.workerBoundaries.boundaries[0]; boundary.scopeVerificationMethod = "Trust the JSON payload"; candidate.workflows.workflows.find((workflow) => workflow.workerBoundaryId === boundary.id).scopeVerificationMethod = boundary.scopeVerificationMethod; }, /unverified payload/);
+  rejects((candidate) => { candidate.workerBoundaries.boundaries[0].idempotencyStrategy = null; }, /lacks idempotency/);
+  rejects((candidate) => { candidate.workerBoundaries.boundaries[0].concurrencyControl.databaseEnforced = false; }, /concurrency enforcement/);
+  rejects((candidate) => { candidate.workerBoundaries.boundaries[0].assurance = "mfa-verified"; }, /human assurance/);
+  rejects((candidate) => { candidate.workerBoundaries.boundaries[0].platformAdminContextAllowed = true; }, /platform-admin context/);
+  rejects((candidate) => { const boundary = candidate.workerBoundaries.boundaries.find((item) => item.runtimeIdentity === "identity-scheduled-job"); boundary.runtimeIdentity = "identity-worker"; boundary.auditEventRequirement.executorAttribution = "identity-worker"; const workflow = candidate.workflows.workflows.find((item) => item.workerBoundaryId === boundary.id); workflow.runtimeIdentities = ["identity-worker"]; for (const id of boundary.exactCommandRuleIds) candidate.commandSemantics.rules.find((rule) => rule.id === id).runtimeIdentities = ["identity-worker"]; }, /scheduled job uses worker identity/);
+  rejects((candidate) => { candidate.workerBoundaries.boundaries[0].auditEventRequirement.fields = candidate.workerBoundaries.boundaries[0].auditEventRequirement.fields.filter((field) => field !== "job_id"); }, /audit lacks job identity/);
+  rejects((candidate) => { candidate.workerBoundaries.boundaries[0].maximumJobAgeSeconds = 0; }, /maximum job age/);
+  rejects((candidate) => { candidate.workerBoundaries.boundaries.find((boundary) => boundary.namedFunctionRequirement.required).namedFunctionRequirement.genericQueryInputsAllowed = true; }, /generic worker function/);
+  rejects((candidate) => { candidate.workerBoundaries.boundaries[0].idempotencyStrategy.conflictingPayloadDenied = false; }, /conflicting replay payloads/);
+  rejects((candidate) => { candidate.workerBoundaries.boundaries.find((boundary) => boundary.workerClass === "actor-derived-job").actorFields = ["initiating_user_id"]; }, /initiating actor and executor identity/);
+  rejects((candidate) => { delete candidate.workflows.workflows.find((workflow) => workflow.workerBoundaryId).workerBoundaryId; }, /lacks worker-boundary ID/);
 });
 
 test("tests do not inflate production totals and repeated technical calls remain one functional workflow", () => {
@@ -242,4 +273,6 @@ test("human manifests are present and parseable", () => {
   assert(fs.readFileSync(commandSemanticsReviewPath, "utf8").includes("Boundary and deletion summary"));
   assert.equal(JSON.parse(fs.readFileSync(preAuthFunctionsPath, "utf8")).functions.length, 7);
   assert(fs.readFileSync(preAuthBoundaryReviewPath, "utf8").includes("Exact function families"));
+  assert.equal(JSON.parse(fs.readFileSync(workerBoundariesPath, "utf8")).boundaries.length, 3);
+  assert(fs.readFileSync(workerIdentityReviewPath, "utf8").includes("Approved boundaries"));
 });

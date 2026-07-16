@@ -17,6 +17,8 @@ export const commandSemanticsPath = path.join(programDir, "command-semantics.jso
 export const commandSemanticsReviewPath = path.join(programDir, "COMMAND_SEMANTICS_REVIEW.md");
 export const preAuthFunctionsPath = path.join(programDir, "pre-auth-functions.json");
 export const preAuthBoundaryReviewPath = path.join(programDir, "PRE_AUTH_BOUNDARY_REVIEW.md");
+export const workerBoundariesPath = path.join(programDir, "worker-boundaries.json");
+export const workerIdentityReviewPath = path.join(programDir, "WORKER_IDENTITY_REVIEW.md");
 export const blockedApplyPath = "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql";
 
 export const commands = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "UPSERT", "COUNT", "RAW_SQL"]);
@@ -380,8 +382,16 @@ const rawCommandsFor = (method, sql) => {
   const matches = [...sql.matchAll(/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b/gi)].map((match) => match[1].split(/\s/)[0].toUpperCase());
   return [...new Set(matches.length ? matches : ["UPDATE"])];
 };
+const WORKFLOW_SURFACE_OVERRIDES = new Map([
+  ["backend/src/services/attentionQueueService.ts:getAttentionQueueSnapshotUncached", "http"],
+  ["backend/src/services/auditLogOutboxService.ts:queueAuditLogOutbox", "internal"],
+  ["backend/src/services/siemOutboxService.ts:queueSecurityEvent", "internal"],
+  ["backend/src/services/auditLogOutboxService.ts:flushAuditLogOutbox", "worker"],
+  ["backend/src/services/siemOutboxService.ts:flushSecurityEventOutbox", "worker"],
+]);
 const surfaceFor = (file, fn) => {
   const value = `${rel(file)}:${fn}`;
+  if (WORKFLOW_SURFACE_OVERRIDES.has(value)) return WORKFLOW_SURFACE_OVERRIDES.get(value);
   if (file === path.join(repoRoot, "backend/src/worker.ts") || /(?:worker|processor|consumer|queue)/i.test(value)) return "worker";
   if (/(?:scheduler|scheduled|cron|startCompliancePackScheduler)/i.test(value)) return "scheduled";
   if (file === path.join(repoRoot, "backend/src/index.ts") || /(?:bootstrap|startup|superAdminBootstrap)/i.test(value)) return "startup";
@@ -1052,6 +1062,238 @@ export const buildPreAuthProgramme = () => {
   return manifest;
 };
 
+const WORKER_BOUNDARY_DEFINITIONS = Object.freeze({
+  "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox": {
+    id: "worker-boundary-audit-outbox-delivery",
+    workerClass: "actor-derived-job",
+    runtimeIdentity: "identity-worker",
+    entrypoint: "backend/src/worker.ts -> startAuditLogOutboxWorker -> flushAuditLogOutbox",
+    queueOrScheduleSource: "AuditLogOutbox polling started by the registered backend worker script",
+    producerIdentity: ["identity-authenticated-app", "identity-worker", "identity-scheduled-job"],
+    durableJobTableOrPayloadSource: "table-audit-log-outbox; the row ID, immutable canonical payload digest, scope fields, job type, request ID, expiry and idempotency key are authority; payload JSON alone is not",
+    tenantScopeFields: ["organization_id", "licensee_id"],
+    actorFields: ["initiating_user_id", "initiating_actor_role_snapshot", "executing_system_identity"],
+    scopeVerificationMethod: "Load the durable row by job ID, verify its canonical payload digest, re-resolve the initiating actor and tenant relationship, and reject any payload/row mismatch before installing context.",
+    authorizationRevalidationRules: ["Initiating actor still exists", "Tenant relationship still exists", "Required audit action remains allowlisted", "Caller-controlled platform-admin flags are ignored"],
+    tablesRead: ["table-audit-log-outbox"],
+    tablesWritten: ["table-audit-log-outbox", "table-audit-log"],
+    tableCommands: [{ tableId: "table-audit-log-outbox", commands: ["SELECT", "UPDATE"] }, { tableId: "table-audit-log", commands: ["INSERT"], authority: "worker-fn-consume-audit-outbox" }],
+    idempotencyStrategy: { keySource: "durable idempotency_key derived from the original audit request/correlation and canonical payload digest", uniquenessBoundary: "job_type + tenant scope + idempotency_key", conflictBehavior: "reject same key with a different digest", replayResult: "return the existing flushedAuditLogId without inserting another audit event", conflictingPayloadDenied: true },
+    replayProtection: "One durable row, immutable digest, maximum age, row lock and QUEUED/FAILED-to-SENT compare-and-set; SENT is terminal.",
+    retryPolicy: { maxAttempts: 10, backoffSeconds: "bounded exponential 10..300", duplicateSideEffectsAllowed: false, retryableStates: ["QUEUED", "FAILED"] },
+    deadLetterBehavior: "After maxAttempts, retain the row as terminal FAILED/dead-letter evidence, stop automatic delivery, and require an audited operator requeue with a new execution claim.",
+    concurrencyControl: { type: "row-lock-plus-compare-and-set", databaseEnforced: true, rule: "Lock one row and transition only the expected status; the distributed lease is an optimization, not authority." },
+    leaseOrLockSemantics: "Global poller lease plus per-row FOR UPDATE/CAS; lease expiry cannot permit duplicate AuditLog insertion.",
+    maximumJobAgeSeconds: 86400,
+    cancellationSemantics: "Shutdown stops claiming new rows; an in-transaction row completes or rolls back. Terminal SENT rows cannot be cancelled.",
+    acceptedJobTypes: ["AUDIT_LOG_RECOVERY"],
+    namedFunctionRequirement: { required: true, functionId: "worker-fn-consume-audit-outbox", sqlSchema: "app_rls", sqlFunctionName: "consume_audit_log_outbox", arguments: [{ name: "job_id", type: "text" }, { name: "payload_digest", type: "text" }, { name: "attempted_at", type: "timestamp without time zone" }], genericQueryInputsAllowed: false, reason: "Audit insertion and durable one-time completion must be atomic and column-narrow." },
+  },
+  "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox": {
+    id: "worker-boundary-siem-outbox-delivery",
+    workerClass: "platform-scoped-system-job",
+    runtimeIdentity: "identity-worker",
+    entrypoint: "backend/src/worker.ts -> startSecurityEventOutboxWorker -> flushSecurityEventOutbox",
+    queueOrScheduleSource: "SecurityEventOutbox polling started by the registered backend worker script",
+    producerIdentity: ["identity-authenticated-app", "identity-worker", "identity-scheduled-job"],
+    durableJobTableOrPayloadSource: "table-security-event-outbox; durable row ID, allowlisted event type, immutable payload digest, scope version, request ID, expiry and idempotency key are authority",
+    tenantScopeFields: ["organization_id when the event is tenant-scoped", "licensee_id when the event is tenant-scoped"],
+    actorFields: ["initiating_user_id when present", "executing_system_identity"],
+    scopeVerificationMethod: "Load the durable outbox row, validate its allowlisted event type and canonical digest, and resolve any tenant/actor references from authoritative tables; JSON claims never grant authority.",
+    authorizationRevalidationRules: ["Event type is allowlisted", "Any referenced tenant still exists", "Any actor attribution matches the durable event", "No human role is installed or impersonated"],
+    tablesRead: ["table-security-event-outbox"],
+    tablesWritten: ["table-security-event-outbox"],
+    tableCommands: [{ tableId: "table-security-event-outbox", commands: ["SELECT", "UPDATE"] }],
+    idempotencyStrategy: { keySource: "SecurityEventOutbox.id used as the stable external event ID plus immutable payload digest", uniquenessBoundary: "SIEM sink + outbox row ID", conflictBehavior: "reject the same row ID with a different digest", replayResult: "return/retain the existing SENT result; never send a second logical event", conflictingPayloadDenied: true },
+    replayProtection: "Stable webhook event ID, immutable digest, expiry, attempt counter and QUEUED/FAILED-to-SENT compare-and-set.",
+    retryPolicy: { maxAttempts: 10, backoffSeconds: "bounded exponential 5..300", duplicateSideEffectsAllowed: false, retryableStates: ["QUEUED", "FAILED"] },
+    deadLetterBehavior: "After maxAttempts, retain terminal FAILED evidence and require an audited operator requeue; never mutate the original event ID or payload.",
+    concurrencyControl: { type: "lease-plus-row-claim", databaseEnforced: true, rule: "Use a database compare-and-set claim per row in addition to the distributed poller lease." },
+    leaseOrLockSemantics: "Global SIEM poller lease plus database row claim; queue delivery or Redis lease alone is insufficient.",
+    maximumJobAgeSeconds: 86400,
+    cancellationSemantics: "Shutdown stops new claims; an in-flight external request records a retryable outcome unless SENT was durably committed.",
+    acceptedJobTypes: ["AUDIT_LOG", "CSP_VIOLATION"],
+    namedFunctionRequirement: { required: false, functionId: null, genericQueryInputsAllowed: false, reason: "Exact table SELECT/UPDATE plus a database CAS claim is sufficient; network delivery cannot be made atomic by a database function." },
+  },
+  "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler": {
+    id: "worker-boundary-scheduled-compliance-packs",
+    workerClass: "scheduled-maintenance-job",
+    runtimeIdentity: "identity-scheduled-job",
+    entrypoint: "backend/src/worker.ts -> startCompliancePackScheduler",
+    queueOrScheduleSource: "UTC hour/minute schedule configured for the registered backend worker process",
+    producerIdentity: ["identity-scheduled-job"],
+    durableJobTableOrPayloadSource: "table-compliance-pack-job plus a durable schedule-run key; each tenant partition is claimed before report generation",
+    tenantScopeFields: ["licensee_id", "organization_id resolved from licensee_id", "schedule_scope_version"],
+    actorFields: ["executing_system_identity; no human actor or platform-admin impersonation"],
+    scopeVerificationMethod: "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+    authorizationRevalidationRules: ["Licensee remains active", "Licensee-to-organization binding matches", "Schedule ID and UTC partition are allowlisted", "Current platform-user lookup and human impersonation are removed before activation"],
+    tablesRead: ["table-licensee", "table-user", "table-compliance-pack-job", "table-incident", "table-incident-handoff", "table-audit-log", "table-evidence-retention-policy"],
+    tablesWritten: ["table-compliance-pack-job", "table-audit-log", "table-evidence-retention-policy"],
+    tableCommands: [{ tableId: "table-licensee", commands: ["SELECT"], authority: "worker-fn-claim-compliance-pack-slice" }, { tableId: "table-user", commands: ["SELECT"], disposition: "remove-before-activation; system jobs must not impersonate a platform user" }, { tableId: "table-compliance-pack-job", commands: ["INSERT", "UPDATE"] }, { tableId: "table-incident", commands: ["SELECT"] }, { tableId: "table-incident-handoff", commands: ["SELECT"] }, { tableId: "table-audit-log", commands: ["SELECT", "INSERT"] }, { tableId: "table-evidence-retention-policy", commands: ["INSERT", "UPDATE"] }],
+    idempotencyStrategy: { keySource: "compliance-pack + licensee_id + UTC schedule stamp + report period", uniquenessBoundary: "job_type + licensee_id + schedule stamp", conflictBehavior: "reject a different tenant/period/digest for the same key", replayResult: "return the existing job/result; RELEASED/COMPLETED work is not regenerated", conflictingPayloadDenied: true },
+    replayProtection: "Unique schedule-partition key, durable job state, maximum age and RUNNING-to-COMPLETED/FAILED compare-and-set.",
+    retryPolicy: { maxAttempts: 3, backoffSeconds: "bounded exponential 60..900 within maximum job age", duplicateSideEffectsAllowed: false, retryableStates: ["FAILED"] },
+    deadLetterBehavior: "After maxAttempts or maximum age, retain FAILED job/evidence and require an operator-approved new job ID; never overwrite a completed pack.",
+    concurrencyControl: { type: "unique-schedule-key-plus-compare-and-set", databaseEnforced: true, rule: "Unique tenant/schedule partition and durable RUNNING claim; process-level lastRunStamp is not authority." },
+    leaseOrLockSemantics: "One bounded schedule claim (maximum 100 tenant partitions) followed by one tenant transaction at a time; safe cancellation leaves unclaimed partitions for retry.",
+    maximumJobAgeSeconds: 7200,
+    cancellationSemantics: "Stop after the current tenant transaction, leave unclaimed partitions retryable, and never publish a partial artifact as COMPLETED.",
+    acceptedJobTypes: ["SCHEDULED_COMPLIANCE_PACK"],
+    namedFunctionRequirement: { required: true, functionId: "worker-fn-claim-compliance-pack-slice", sqlSchema: "app_rls", sqlFunctionName: "claim_compliance_pack_slice", arguments: [{ name: "schedule_id", type: "text" }, { name: "due_at", type: "timestamp without time zone" }, { name: "batch_size", type: "integer" }], genericQueryInputsAllowed: false, reason: "Platform-wide tenant enumeration must be an exact bounded claim, after which all report work is tenant-scoped." },
+  },
+});
+
+const WORKER_CONTEXT_KEYS = ["app.system_identity", "app.job_id", "app.job_type", "app.organization_id", "app.licensee_id", "app.manufacturer_id", "app.initiating_user_id", "app.request_id", "app.auth_assurance"];
+const buildWorkerBoundaryManifest = (workflowManifest, commandManifest, currentTableManifest = null) => {
+  const tableManifest = currentTableManifest || readJson(tableManifestPath);
+  const selected = workflowManifest.workflows.filter((workflow) => ["worker", "scheduled"].includes(workflow.executionSurface) && workflow.authorizationBoundaryType === "restricted-worker");
+  assert.deepEqual(selected.map((workflow) => workflow.id).sort(), Object.keys(WORKER_BOUNDARY_DEFINITIONS).sort(), "worker workflow selector drifted; classify the registered execution path, not queue-named producers");
+  const boundaries = [];
+  for (const workflow of selected) {
+    const definition = WORKER_BOUNDARY_DEFINITIONS[workflow.id];
+    const rules = commandManifest.rules.filter((rule) => rule.supportingWorkflowIds.includes(workflow.id));
+    for (const tableCommand of definition.tableCommands) {
+      const existing = workflow.commandsPerTable.find((item) => item.tableId === tableCommand.tableId);
+      if (existing) existing.commands = [...new Set([...existing.commands, ...tableCommand.commands])].sort();
+      else workflow.commandsPerTable.push({ tableId: tableCommand.tableId, commands: [...tableCommand.commands].sort() });
+      for (const command of tableCommand.commands) {
+        if (rules.some((rule) => rule.tableId === tableCommand.tableId && rule.command === command)) continue;
+        const source = commandManifest.rules.find((rule) => rule.tableId === tableCommand.tableId && rule.command === command && rule.authorizationBoundary !== "prohibited");
+        assert(source, `${definition.id} cannot derive ${tableCommand.tableId}:${command} command semantics`);
+        const rule = structuredClone(source);
+        rule.id = `command-${slug(tableCommand.tableId.replace(/^table-/, ""))}-${command.toLowerCase()}-${definition.id}`;
+        rule.supportingWorkflowIds = [workflow.id];
+        rule.supportingEvidence = [definition.entrypoint, `Transitive worker contract in ${workerBoundariesPath.slice(repoRoot.length + 1)}`];
+        rule.status = "architecture-resolved";
+        commandManifest.rules.push(rule);
+        rules.push(rule);
+      }
+    }
+    workflow.commandsPerTable.sort((a, b) => a.tableId.localeCompare(b.tableId));
+    workflow.tablesTouched = workflow.commandsPerTable.map((item) => item.tableId);
+    for (const rule of rules) {
+      rule.workerBoundaryId = definition.id;
+      rule.actorClasses = [definition.runtimeIdentity === "identity-scheduled-job" ? "scheduled-job" : "worker"];
+      rule.runtimeIdentities = [definition.runtimeIdentity];
+      rule.minimumAssurance = "system-verified";
+      rule.requiresRestrictedWorkerBoundary = true;
+      rule.authorizationBoundary = "restricted-worker";
+      rule.scopeRule = definition.scopeVerificationMethod;
+      rule.allowScenarios = [`${definition.id} uses ${definition.runtimeIdentity} at system-verified with a fresh verified durable job, exact context and command.`];
+      rule.denyScenarios = ["Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."];
+      const requirement = definition.tableCommands.find((item) => item.tableId === rule.tableId && item.commands.includes(rule.command));
+      if (requirement?.authority?.startsWith("worker-fn-")) {
+        rule.requiresNamedFunction = true;
+        rule.namedFunctionClass = requirement.authority;
+      }
+      if (definition.id === "worker-boundary-scheduled-compliance-packs" && rule.tableId === "table-user") rule.workerAccessDisposition = "remove-before-activation; no human impersonation";
+      if (definition.id === "worker-boundary-scheduled-compliance-packs" && rule.tableId === "table-licensee") {
+        rule.requiresNamedFunction = true;
+        rule.namedFunctionClass = "worker-fn-claim-compliance-pack-slice";
+        rule.workerAccessDisposition = "replace-direct-enumeration-with-exact-function";
+      }
+    }
+    workflow.workerBoundaryId = definition.id;
+    workflow.workerClass = definition.workerClass;
+    workflow.runtimeIdentities = [definition.runtimeIdentity];
+    workflow.actorClasses = [definition.runtimeIdentity === "identity-scheduled-job" ? "scheduled-job" : "worker"];
+    workflow.commandActorClasses = [...workflow.actorClasses];
+    workflow.requiredAssurance = ["system-verified"];
+    workflow.commandRuleIds = rules.map((rule) => rule.id).sort();
+    workflow.scopeVerificationMethod = definition.scopeVerificationMethod;
+    workflow.requiredTransactionContext = WORKER_CONTEXT_KEYS;
+    workflow.idempotencyStrategy = definition.idempotencyStrategy;
+    workflow.expectedAllowedScenarios = [`${definition.id} executes only an allowlisted job with verified durable scope, system identity and exact commands.`];
+    workflow.expectedDeniedScenarios = ["Unverified JSON scope, unknown job type, stale/replayed job, conflicting idempotency payload, platform-admin context, human impersonation or wrong runtime identity is denied."];
+    workflow.unresolvedDecisions = workflow.unresolvedDecisions.filter((id) => id !== "decision-worker-identity-model");
+    boundaries.push({
+      ...definition,
+      workflowIds: [workflow.id],
+      requiredTransactionContext: { keys: WORKER_CONTEXT_KEYS, transactionLocal: true, sameTransactionAsProtectedQueries: true, derivedFromVerifiedServerEvidence: true, clearsAtTransactionEnd: true, fixedAssurance: "system-verified", humanRoleContextAllowed: false, platformAdminContextAllowed: false },
+      exactCommandRuleIds: rules.map((rule) => rule.id).sort(),
+      namedFunctionRequirement: { ...definition.namedFunctionRequirement, ownerIdentity: definition.namedFunctionRequirement.required ? "identity-table-owner" : null, securityMode: "INVOKER", fixedSearchPath: "pg_catalog", publicExecutionDenied: true, executableRuntimeIdentity: definition.runtimeIdentity },
+      auditEventRequirement: { required: true, fields: ["system_identity", "job_id", "job_type", "initiating_user_id_when_present", "tenant_scope", "request_id", "outcome", "retry_attempt"], executorAttribution: definition.runtimeIdentity, humanActorIsInitiatorOnly: true, immutable: true },
+      correlationIdRequirement: "A validated UUID request/correlation ID is mandatory in the durable record and every audit/retry event.",
+      allowedScenarios: ["An accepted job type with a fresh durable record, verified scope, matching digest/idempotency key and exact runtime identity executes once."],
+      deniedScenarios: ["Unknown type, missing or payload-only scope, actor/tenant mismatch, expired job, replay conflict, malformed correlation ID, unexpected command, platform-admin flag or wrong identity is denied."],
+      implementationStatus: "contract-resolved; runtime/schema implementation required before activation",
+      p2TestRequirements: ["verified durable scope and empty/payload-only denial", "idempotent replay and conflicting digest denial", "concurrent single winner", "maximum-age and unknown-type denial", "audit executor/job attribution", "retry/dead-letter/cancellation state machine"],
+      assurance: "system-verified",
+      platformAdminContextAllowed: false,
+      humanImpersonationAllowed: false,
+      unknownJobTypesRejected: true,
+      conflictingReplayPayloadDenied: true,
+      sideEffectsDeduplicated: true,
+    });
+  }
+  for (const [workflowId, boundaryId] of [["workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox", "worker-boundary-audit-outbox-delivery"], ["workflow-internal-backend-src-services-siem-outbox-service-ts-queue-security-event", "worker-boundary-siem-outbox-delivery"]]) {
+    const producer = workflowManifest.workflows.find((workflow) => workflow.id === workflowId);
+    assert(producer, `${workflowId} producer workflow missing`);
+    producer.producesWorkerBoundaryId = boundaryId;
+    producer.workerClassificationEvidence = "Durable enqueue producer; executes under its originating request/system identity and is not the non-interactive consumer.";
+  }
+  const attention = workflowManifest.workflows.find((workflow) => workflow.id === "workflow-http-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached");
+  assert(attention, "attention queue authenticated workflow missing");
+  attention.workerClassificationEvidence = "Synchronous authenticated dashboard read reached from dashboardController; the word Queue is a product noun, not worker registration evidence.";
+  commandManifest.rules.sort((a, b) => a.id.localeCompare(b.id));
+  for (const table of tableManifest.tables) {
+    const touching = workflowManifest.workflows.filter((workflow) => workflow.tablesTouched.includes(table.id));
+    table.productionRuntimeReaders = touching.filter((workflow) => workflow.commandsPerTable.find((item) => item.tableId === table.id)?.commands.includes("SELECT")).map((workflow) => workflow.id);
+    table.productionRuntimeWriters = touching.filter((workflow) => workflow.commandsPerTable.find((item) => item.tableId === table.id)?.commands.some((command) => ["INSERT", "UPDATE", "DELETE"].includes(command))).map((workflow) => workflow.id);
+    table.requiredCommands = [...new Set(touching.flatMap((workflow) => workflow.commandsPerTable.find((item) => item.tableId === table.id)?.commands || []))].sort();
+    applyRuntimeCommandMatrix(table, workflowManifest.workflows);
+    table.commandRuleIds = commandManifest.rules.filter((rule) => rule.tableId === table.id).map((rule) => rule.id).sort();
+  }
+  if (!currentTableManifest) writeJson(tableManifestPath, tableManifest);
+  return { schemaVersion: 1, generatedFrom: ["documents/security/rls-program/workflows.json", "documents/security/rls-program/command-semantics.json", "backend/src/worker.ts"], boundaryCount: boundaries.length, contextKeys: WORKER_CONTEXT_KEYS, securityInvariants: ["Durable or cryptographically authenticated job evidence is authority; JSON payload scope is not", "Worker and scheduled credentials remain distinct", "Transaction-local system context never impersonates a human or platform administrator", "Every mutation is idempotent, replay-protected, concurrency-protected and auditable", "No generic worker function or platform-wide bypass"], boundaries: boundaries.sort((a, b) => a.id.localeCompare(b.id)) };
+};
+
+export const writeWorkerIdentityReview = (manifest) => {
+  const lines = ["# MSCQR worker and scheduled-job identity review", "", "This review defines authorization contracts only. It changes no worker runtime, SQL function, database role, policy, RLS state, queue, schedule or database.", "", `Selected execution workflows: ${manifest.boundaries.length} (workers: ${manifest.boundaries.filter((item) => item.runtimeIdentity === "identity-worker").length}; scheduled: ${manifest.boundaries.filter((item) => item.runtimeIdentity === "identity-scheduled-job").length}).`, "", "## Approved boundaries", "", "| Boundary | Class | Runtime | Durable authority | Tables read | Tables written | Named function |", "|---|---|---|---|---|---|---|"];
+  for (const boundary of manifest.boundaries) lines.push(`| ${boundary.id} | ${boundary.workerClass} | ${boundary.runtimeIdentity} | ${boundary.durableJobTableOrPayloadSource} | ${boundary.tablesRead.join(", ")} | ${boundary.tablesWritten.join(", ")} | ${boundary.namedFunctionRequirement.required ? boundary.namedFunctionRequirement.functionId : "none"} |`);
+  const contextKeys = manifest.contextKeys.map((key) => "`" + key + "`").join(", ");
+  lines.push("", "## Context, idempotency and audit", "", "Every protected transaction installs only these transaction-local keys from verified durable evidence: " + contextKeys + ". Human role and platform-admin context are forbidden; `app.auth_assurance` is fixed to `system-verified`.", "", "Audit-outbox delivery preserves the initiating actor as origin evidence while recording `identity-worker` as executor. SIEM delivery uses the durable outbox ID as the stable external event ID. Scheduled compliance uses a unique licensee/schedule partition and `identity-scheduled-job`; its current platform-user lookup must be removed rather than converted into impersonation.", "", "All retries retain the same job ID, digest and idempotency key. Conflicting payloads are denied, terminal results are returned rather than repeated, database row/CAS or unique constraints enforce concurrency, and retry exhaustion retains immutable dead-letter evidence.", "", "## Remaining implementation work", "", "Before activation, add the durable scope/digest/idempotency/expiry fields described by the contracts, implement the two exact `app_rls` SECURITY INVOKER functions, replace scheduled platform-user lookup, add database claims/uniqueness, migrate callers, and certify allow/deny/replay/concurrency/cancellation behavior in disposable PostgreSQL. No generic query function or broad worker grant is permitted.", "");
+  fs.writeFileSync(workerIdentityReviewPath, `${lines.join("\n")}\n`);
+};
+
+const writeWorkerIdentityAuthority = (manifest) => {
+  const identities = readJson(identityManifestPath);
+  for (const identityId of ["identity-worker", "identity-scheduled-job"]) {
+    const identity = identities.identities.find((item) => item.id === identityId);
+    identity.approvedWorkerBoundaryIds = manifest.boundaries.filter((boundary) => boundary.runtimeIdentity === identityId).map((boundary) => boundary.id);
+    identity.requiredTransactionContextKeys = WORKER_CONTEXT_KEYS;
+    identity.directPreAuthFunctionExecution = false;
+    identity.publicSchemaCreate = false;
+    identity.resolvedDecisions = [...new Set([...identity.resolvedDecisions, "decision-worker-identity-model"])].sort();
+    identity.unresolvedDecisions = identity.unresolvedDecisions.filter((id) => id !== "decision-worker-identity-model");
+  }
+  const owner = identities.identities.find((item) => item.id === "identity-table-owner");
+  owner.allowedSchemas = [...new Set([...owner.allowedSchemas, "app_rls"])].sort();
+  owner.approvedWorkerFunctionIds = manifest.boundaries.filter((boundary) => boundary.namedFunctionRequirement.required).map((boundary) => boundary.namedFunctionRequirement.functionId).sort();
+  owner.resolvedDecisions = [...new Set([...owner.resolvedDecisions, "decision-worker-identity-model"])].sort();
+  writeJson(identityManifestPath, identities);
+};
+
+export const buildWorkerProgramme = () => {
+  const workflowManifest = readJson(workflowManifestPath);
+  const commandManifest = readJson(commandSemanticsPath);
+  const manifest = buildWorkerBoundaryManifest(workflowManifest, commandManifest);
+  writeJson(workerBoundariesPath, manifest);
+  writeWorkerIdentityReview(manifest);
+  writeJson(workflowManifestPath, workflowManifest);
+  writeJson(commandSemanticsPath, commandManifest);
+  writeWorkerIdentityAuthority(manifest);
+  const decisions = readJson(decisionManifestPath);
+  const decision = decisions.decisions.find((item) => item.id === "decision-worker-identity-model");
+  decision.status = "resolved";
+  decision.resolvedAt = "2026-07-16";
+  decision.affectedWorkflows = manifest.boundaries.flatMap((boundary) => boundary.workflowIds);
+  decision.affectedTables = [...new Set(manifest.boundaries.flatMap((boundary) => [...boundary.tablesRead, ...boundary.tablesWritten]))].sort();
+  decision.resolution = { authority: "documents/security/rls-program/worker-boundaries.json", boundaries: manifest.boundaries.length, workerWorkflows: manifest.boundaries.filter((item) => item.runtimeIdentity === "identity-worker").length, scheduledWorkflows: manifest.boundaries.filter((item) => item.runtimeIdentity === "identity-scheduled-job").length, namedFunctions: manifest.boundaries.filter((item) => item.namedFunctionRequirement.required).length, guarantees: manifest.securityInvariants };
+  writeJson(decisionManifestPath, decisions);
+  return manifest;
+};
+
 export const buildWorkflowManifest = () => {
   const scan = scanProductionAccess();
   const existing = readJson(workflowManifestPath, { schemaVersion: 1, workflows: [] });
@@ -1119,8 +1361,12 @@ export const buildWorkflowManifest = () => {
   }
   const commandManifest = buildCommandSemantics(tableManifest, result);
   const preAuthManifest = buildPreAuthBoundary(result, commandManifest, tableManifest);
+  const workerManifest = buildWorkerBoundaryManifest(result, commandManifest, tableManifest);
   writeCommandSemanticsReview(commandManifest, tableManifest, result);
   writePreAuthBoundaryReview(preAuthManifest, result.workflows);
+  writeJson(workerBoundariesPath, workerManifest);
+  writeWorkerIdentityReview(workerManifest);
+  writeWorkerIdentityAuthority(workerManifest);
   writeJson(commandSemanticsPath, commandManifest);
   writeJson(workflowManifestPath, result);
   writeJson(tableManifestPath, tableManifest);
@@ -1154,6 +1400,14 @@ export const buildWorkflowManifest = () => {
         decision.resolution = { authority: "documents/security/rls-program/pre-auth-functions.json", selectedWorkflows: selected.length, exactFunctions: preAuthManifest.functions.length, movedBehindContext: selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context").length, operatorOnly: 0, retired: 0, guarantees: preAuthManifest.securityInvariants };
         continue;
       }
+      if (decision.id === "decision-worker-identity-model") {
+        decision.status = "resolved";
+        decision.resolvedAt = "2026-07-16";
+        decision.affectedWorkflows = workerManifest.boundaries.flatMap((boundary) => boundary.workflowIds);
+        decision.affectedTables = [...new Set(workerManifest.boundaries.flatMap((boundary) => [...boundary.tablesRead, ...boundary.tablesWritten]))].sort();
+        decision.resolution = { authority: "documents/security/rls-program/worker-boundaries.json", boundaries: workerManifest.boundaries.length, workerWorkflows: workerManifest.boundaries.filter((item) => item.runtimeIdentity === "identity-worker").length, scheduledWorkflows: workerManifest.boundaries.filter((item) => item.runtimeIdentity === "identity-scheduled-job").length, namedFunctions: workerManifest.boundaries.filter((item) => item.namedFunctionRequirement.required).length, guarantees: workerManifest.securityInvariants };
+        continue;
+      }
       decision.affectedWorkflows = workflows.filter((workflow) => workflow.unresolvedDecisions.includes(decision.id)
         || decision.id === "decision-runtime-role-split"
         || (decision.id === "decision-operator-administration" && workflow.authorizationBoundaryType === "operator-break-glass")).map((workflow) => workflow.id);
@@ -1167,7 +1421,7 @@ export const buildWorkflowManifest = () => {
   return result;
 };
 
-export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath) });
+export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath), workerBoundaries: readJson(workerBoundariesPath) });
 export const validatePreAuthFunctions = (manifest, workflowManifest, commandManifest, identityManifest, tableManifest) => {
   assert(manifest?.functions?.length, "pre-auth function manifest is missing");
   const workflows = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
@@ -1250,6 +1504,83 @@ export const validatePreAuthFunctions = (manifest, workflowManifest, commandMani
       for (const rule of commandManifest.rules.filter((item) => item.supportingWorkflowIds.includes(workflow.id))) assert(!rule.actorClasses.includes("pre-auth-runtime") && !rule.runtimeIdentities.includes("identity-pre-auth-app"), `${workflow.id} moved rule retains pre-auth access`);
     }
   }
+  return true;
+};
+export const validateWorkerBoundaries = (manifest, workflowManifest, commandManifest, identityManifest, tableManifest) => {
+  assert.equal(manifest?.boundaries?.length, 3, "worker boundary manifest must contain the three registered execution paths");
+  const boundaryIds = new Set(manifest.boundaries.map((boundary) => boundary.id));
+  assert.equal(boundaryIds.size, manifest.boundaries.length, "worker boundary IDs must be unique");
+  const workflows = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
+  const rules = new Map(commandManifest.rules.map((rule) => [rule.id, rule]));
+  const identities = new Map(identityManifest.identities.map((identity) => [identity.id, identity]));
+  const tables = new Set(tableManifest.tables.map((table) => table.id));
+  const selected = workflowManifest.workflows.filter((workflow) => ["worker", "scheduled"].includes(workflow.executionSurface) && workflow.authorizationBoundaryType === "restricted-worker");
+  assert.deepEqual(selected.map((workflow) => workflow.id).sort(), manifest.boundaries.flatMap((boundary) => boundary.workflowIds).sort(), "a worker workflow lacks a boundary");
+  const classes = new Set(["actor-derived-job", "tenant-scoped-system-job", "platform-scoped-system-job", "scheduled-maintenance-job", "operator-triggered-job", "migration-or-bootstrap-job", "legacy-or-retire"]);
+  const genericInput = /(?:query|json|sql|table|column|predicate|role|tenant)/i;
+  for (const boundary of manifest.boundaries) {
+    assert(classes.has(boundary.workerClass), `${boundary.id} has unresolved worker class`);
+    assert(["identity-worker", "identity-scheduled-job"].includes(boundary.runtimeIdentity), `${boundary.id} has invalid runtime identity`);
+    assert.equal(boundary.assurance, "system-verified", `${boundary.id} uses human assurance`);
+    assert.equal(boundary.platformAdminContextAllowed, false, `${boundary.id} sets platform-admin context`);
+    assert.equal(boundary.humanImpersonationAllowed, false, `${boundary.id} impersonates a human actor`);
+    assert(boundary.workflowIds.length === 1 && boundary.workflowIds.every((id) => workflows.has(id)), `${boundary.id} references unknown workflows`);
+    const workflow = workflows.get(boundary.workflowIds[0]);
+    assert.equal(workflow.workerBoundaryId, boundary.id, `${workflow.id} lacks worker-boundary ID`);
+    assert.equal(workflow.scopeVerificationMethod, boundary.scopeVerificationMethod, `${workflow.id} scope verification drifted`);
+    assert.match(boundary.durableJobTableOrPayloadSource, /durable|table-/i, `${boundary.id} trusts an unverified payload`);
+    assert(!/payload (?:is|alone is) authority|trust (?:the )?json/i.test(boundary.scopeVerificationMethod), `${boundary.id} trusts an unverified payload`);
+    assert(boundary.idempotencyStrategy?.keySource && boundary.idempotencyStrategy?.uniquenessBoundary && boundary.idempotencyStrategy?.conflictBehavior && boundary.idempotencyStrategy?.replayResult, `${boundary.id} lacks idempotency`);
+    assert.equal(boundary.idempotencyStrategy.conflictingPayloadDenied, true, `${boundary.id} permits conflicting replay payloads`);
+    assert.equal(boundary.conflictingReplayPayloadDenied, true, `${boundary.id} permits conflicting replay payloads`);
+    assert(boundary.concurrencyControl?.type && boundary.concurrencyControl?.rule && boundary.concurrencyControl?.databaseEnforced, `${boundary.id} mutation lacks concurrency enforcement`);
+    assert(boundary.retryPolicy?.maxAttempts > 0 && boundary.retryPolicy?.backoffSeconds && boundary.retryPolicy?.retryableStates?.length, `${boundary.id} lacks bounded retry semantics`);
+    assert.equal(boundary.retryPolicy.duplicateSideEffectsAllowed, false, `${boundary.id} retries can duplicate side effects`);
+    assert.equal(boundary.sideEffectsDeduplicated, true, `${boundary.id} retries can duplicate side effects`);
+    assert(boundary.deadLetterBehavior && boundary.cancellationSemantics && boundary.replayProtection, `${boundary.id} lacks replay/dead-letter/cancellation semantics`);
+    assert(Number.isInteger(boundary.maximumJobAgeSeconds) && boundary.maximumJobAgeSeconds > 0, `${boundary.id} lacks maximum job age`);
+    assert.equal(boundary.unknownJobTypesRejected, true, `${boundary.id} accepts unknown job types`);
+    assert(boundary.acceptedJobTypes.length && new Set(boundary.acceptedJobTypes).size === boundary.acceptedJobTypes.length, `${boundary.id} lacks exact job types`);
+    assert(boundary.auditEventRequirement?.required && boundary.auditEventRequirement.fields.includes("job_id") && boundary.auditEventRequirement.fields.includes("system_identity"), `${boundary.id} audit lacks job identity`);
+    assert.equal(boundary.auditEventRequirement.executorAttribution, boundary.runtimeIdentity, `${boundary.id} audit executor identity drifted`);
+    assert.deepEqual(boundary.requiredTransactionContext.keys, WORKER_CONTEXT_KEYS, `${boundary.id} worker context keys drifted`);
+    assert(boundary.requiredTransactionContext.transactionLocal && boundary.requiredTransactionContext.sameTransactionAsProtectedQueries && boundary.requiredTransactionContext.derivedFromVerifiedServerEvidence && boundary.requiredTransactionContext.clearsAtTransactionEnd, `${boundary.id} context is not transaction-local verified evidence`);
+    assert.equal(boundary.requiredTransactionContext.platformAdminContextAllowed, false, `${boundary.id} sets platform-admin context`);
+    assert(!boundary.requiredTransactionContext.keys.includes("app.role"), `${boundary.id} overloads human role context`);
+    assert(boundary.exactCommandRuleIds.length && boundary.exactCommandRuleIds.every((id) => rules.has(id)), `${boundary.id} lacks exact command rules`);
+    for (const tableCommand of boundary.tableCommands) for (const command of tableCommand.commands) assert(boundary.exactCommandRuleIds.some((id) => rules.get(id)?.tableId === tableCommand.tableId && rules.get(id)?.command === command), `${boundary.id} lacks exact ${tableCommand.tableId}:${command} command rule`);
+    for (const ruleId of boundary.exactCommandRuleIds) {
+      const rule = rules.get(ruleId);
+      assert.equal(rule.workerBoundaryId, boundary.id, `${ruleId} lacks worker-boundary ID`);
+      assert.equal(rule.minimumAssurance, "system-verified", `${ruleId} uses human assurance`);
+      assert.deepEqual(rule.runtimeIdentities, [boundary.runtimeIdentity], `${ruleId} uses wrong runtime identity`);
+    }
+    for (const tableId of [...boundary.tablesRead, ...boundary.tablesWritten]) assert(tables.has(tableId), `${boundary.id} references unknown table ${tableId}`);
+    if (boundary.runtimeIdentity === "identity-scheduled-job") assert.equal(workflow.executionSurface, "scheduled", `${boundary.id} scheduled boundary has wrong surface`);
+    if (workflow.executionSurface === "scheduled") assert.equal(boundary.runtimeIdentity, "identity-scheduled-job", `${boundary.id} scheduled job uses worker identity`);
+    if (boundary.id === "worker-boundary-scheduled-compliance-packs") assert(boundary.tableCommands.find((item) => item.tableId === "table-user")?.disposition?.includes("remove-before-activation"), `${boundary.id} retains human impersonation`);
+    if (boundary.workerClass === "actor-derived-job") assert(boundary.actorFields.some((field) => /initiating_user_id/.test(field)) && boundary.actorFields.some((field) => /executing_system_identity/.test(field)), `${boundary.id} lacks initiating actor and executor identity`);
+    const fn = boundary.namedFunctionRequirement;
+    assert.equal(fn.genericQueryInputsAllowed, false, `${boundary.id} permits a generic worker function`);
+    if (fn.required) {
+      assert(/^worker-fn-[a-z0-9-]+$/.test(fn.functionId) && fn.sqlSchema === "app_rls" && /^[a-z][a-z0-9_]*$/.test(fn.sqlFunctionName), `${boundary.id} has invalid named worker function`);
+      assert(fn.arguments.length && fn.arguments.every((item) => item.name && item.type && !genericInput.test(item.name) && !/^(?:json|jsonb|regclass|name)$/i.test(item.type)), `${boundary.id} permits a generic worker function`);
+      assert.equal(fn.securityMode, "INVOKER", `${boundary.id} worker function may bypass caller RLS`);
+      assert.equal(identities.get(fn.ownerIdentity)?.loginExpectation, "NOLOGIN", `${boundary.id} worker function owner may LOGIN`);
+      assert.equal(fn.publicExecutionDenied, true, `${boundary.id} worker function allows PUBLIC execute`);
+      assert.equal(fn.fixedSearchPath, "pg_catalog", `${boundary.id} worker function search_path is not fixed`);
+      assert.equal(fn.executableRuntimeIdentity, boundary.runtimeIdentity, `${boundary.id} worker function executor drifted`);
+    }
+    assert(boundary.allowedScenarios.length && boundary.deniedScenarios.length && boundary.p2TestRequirements.length, `${boundary.id} lacks scenarios or P2 tests`);
+  }
+  for (const rule of commandManifest.rules.filter((rule) => rule.requiresRestrictedWorkerBoundary || rule.actorClasses.some((actor) => ["worker", "scheduled-job"].includes(actor)))) assert(boundaryIds.has(rule.workerBoundaryId), `${rule.id} references worker access without a worker-boundary ID`);
+  for (const identityId of ["identity-worker", "identity-scheduled-job"]) {
+    const identity = identities.get(identityId);
+    assert.deepEqual(new Set(identity.approvedWorkerBoundaryIds), new Set(manifest.boundaries.filter((boundary) => boundary.runtimeIdentity === identityId).map((boundary) => boundary.id)), `${identityId} boundary allowlist drifted`);
+    assert.match(identity.tablePrivilegeMode, /command-specific/i, `${identityId} has broad table access`);
+    assert.equal(identity.directPreAuthFunctionExecution, false, `${identityId} may execute pre-auth functions`);
+  }
+  assert.notEqual(identities.get("identity-worker").credentialSource, identities.get("identity-scheduled-job").credentialSource, "scheduled identity collapsed into worker identity");
   return true;
 };
 export const validateRuntimeIdentities = (manifest, decisionManifest) => {

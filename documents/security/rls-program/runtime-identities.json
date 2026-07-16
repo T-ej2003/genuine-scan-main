@@ -192,11 +192,27 @@
         "Record job ID/type, durably verified tenant, authorization version, attempts, result, and idempotency key."
       ],
       "resolvedDecisions": [
-        "decision-runtime-role-split"
-      ],
-      "unresolvedDecisions": [
+        "decision-runtime-role-split",
         "decision-worker-identity-model"
-      ]
+      ],
+      "unresolvedDecisions": [],
+      "approvedWorkerBoundaryIds": [
+        "worker-boundary-audit-outbox-delivery",
+        "worker-boundary-siem-outbox-delivery"
+      ],
+      "requiredTransactionContextKeys": [
+        "app.system_identity",
+        "app.job_id",
+        "app.job_type",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.initiating_user_id",
+        "app.request_id",
+        "app.auth_assurance"
+      ],
+      "directPreAuthFunctionExecution": false,
+      "publicSchemaCreate": false
     },
     {
       "id": "identity-scheduled-job",
@@ -238,11 +254,26 @@
         "Record schedule revision, durably verified tenant/job scope, counts, failures, retries, and idempotency evidence."
       ],
       "resolvedDecisions": [
-        "decision-runtime-role-split"
-      ],
-      "unresolvedDecisions": [
+        "decision-runtime-role-split",
         "decision-worker-identity-model"
-      ]
+      ],
+      "unresolvedDecisions": [],
+      "approvedWorkerBoundaryIds": [
+        "worker-boundary-scheduled-compliance-packs"
+      ],
+      "requiredTransactionContextKeys": [
+        "app.system_identity",
+        "app.job_id",
+        "app.job_type",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.initiating_user_id",
+        "app.request_id",
+        "app.auth_assurance"
+      ],
+      "directPreAuthFunctionExecution": false,
+      "publicSchemaCreate": false
     },
     {
       "id": "identity-migration",
@@ -302,6 +333,7 @@
       "purpose": "Own protected tables and policies without providing an execution identity.",
       "loginExpectation": "NOLOGIN",
       "allowedSchemas": [
+        "app_rls",
         "public"
       ],
       "allowedCommands": [
@@ -323,10 +355,15 @@
         "Catalog tests prove NOLOGIN, NOSUPERUSER, NOBYPASSRLS, exact ownership, and absence of membership or SET ROLE reachability."
       ],
       "resolvedDecisions": [
-        "decision-runtime-role-split"
+        "decision-runtime-role-split",
+        "decision-worker-identity-model"
       ],
       "unresolvedDecisions": [
         "decision-object-ownership-chain"
+      ],
+      "approvedWorkerFunctionIds": [
+        "worker-fn-claim-compliance-pack-slice",
+        "worker-fn-consume-audit-outbox"
       ]
     },
     {

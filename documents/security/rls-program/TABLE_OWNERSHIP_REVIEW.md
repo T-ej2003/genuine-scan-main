@@ -79,7 +79,7 @@ Tables: 13; resolved: 13; unresolved: 0; dependency edges: 11; confidence high/m
 | PrinterRegistration | actor-owned | Direct actor scope using userId; tenant/platform administration requires an explicit reviewed command boundary. | — | yes | identity-authenticated-app, identity-restricted-read | identity-authenticated-app, identity-staging-operator-admin | medium | none |
 | PrintItem | parent-inherited | Single-parent authorization inherited from PrintSession through printSessionId=id. | table-print-session | yes | identity-authenticated-app, identity-restricted-read, identity-staging-operator-admin | identity-authenticated-app | high | none |
 | PrintItemEvent | append-only-audit | Append-only evidence inherits read scope from PrintItem through printItemId=id; writes use the append boundary. | table-print-item | yes | none | identity-authenticated-app | high | none |
-| PrintJob | parent-inherited | Single-parent authorization inherited from Batch through batchId=id. | table-batch | yes | identity-authenticated-app, identity-restricted-read, identity-worker | identity-authenticated-app, identity-staging-operator-admin | high | none |
+| PrintJob | parent-inherited | Single-parent authorization inherited from Batch through batchId=id. | table-batch | yes | identity-authenticated-app, identity-restricted-read | identity-authenticated-app, identity-staging-operator-admin | high | none |
 | PrintJobChunk | parent-inherited | Single-parent authorization inherited from PrintJob through printJobId=id. | table-print-job | yes | identity-authenticated-app | identity-authenticated-app | high | none |
 | PrintReissueRequest | parent-inherited | Single-parent authorization inherited from PrintJob through originalPrintJobId=id. | table-print-job | yes | identity-authenticated-app | identity-authenticated-app | high | none |
 | PrintSession | parent-inherited | Single-parent authorization inherited from PrintJob through printJobId=id. | table-print-job | yes | identity-authenticated-app, identity-restricted-read | identity-authenticated-app | high | none |
@@ -90,22 +90,22 @@ Tables: 18; resolved: 18; unresolved: 0; dependency edges: 7; confidence high/me
 
 | Table | Category | Row scope | Parent | FORCE RLS | Readers | Writers | Confidence | Blocker |
 |---|---|---|---|---:|---|---|---|---|
-| AuditLog | append-only-audit | Append-only evidence is scoped directly by orgId + licenseeId; NULL/platform events require the restricted audit boundary. | — | yes | identity-authenticated-app, identity-staging-operator-admin, identity-worker | identity-authenticated-app, identity-staging-operator-admin | medium | none |
-| EvidenceRetentionPolicy | tenant-owned | Direct transaction-context scope using licenseeId; platform-admin access remains command-specific. | — | yes | none | identity-authenticated-app | high | none |
+| AuditLog | append-only-audit | Append-only evidence is scoped directly by orgId + licenseeId; NULL/platform events require the restricted audit boundary. | — | yes | identity-authenticated-app, identity-scheduled-job, identity-staging-operator-admin | identity-authenticated-app, identity-scheduled-job, identity-staging-operator-admin, identity-worker | medium | none |
+| EvidenceRetentionPolicy | tenant-owned | Direct transaction-context scope using licenseeId; platform-admin access remains command-specific. | — | yes | none | identity-authenticated-app, identity-scheduled-job | high | none |
 | ForensicEventChain | append-only-audit | Append-only evidence is scoped directly by licenseeId; NULL/platform events require the restricted audit boundary. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
-| Incident | security-sensitive | Special security repository using explicit licenseeId scope and command-specific platform administration. | — | yes | identity-authenticated-app, identity-worker | identity-authenticated-app | medium | none |
+| Incident | security-sensitive | Special security repository using explicit licenseeId scope and command-specific platform administration. | — | yes | identity-authenticated-app, identity-scheduled-job | identity-authenticated-app | medium | none |
 | IncidentCommunication | append-only-audit | Append-only evidence inherits read scope from Incident through incidentId=id; writes use the append boundary. | table-incident | yes | none | identity-authenticated-app | high | none |
 | IncidentEvent | append-only-audit | Append-only evidence inherits read scope from Incident through incidentId=id; writes use the append boundary. | table-incident | yes | none | identity-authenticated-app | high | none |
 | IncidentEvidence | append-only-audit | Append-only evidence inherits read scope from Incident through incidentId=id; writes use the append boundary. | table-incident | yes | identity-authenticated-app | identity-authenticated-app | high | none |
 | IncidentEvidenceFingerprint | operational-system | Restricted system coordination inherited from IncidentEvidence. | table-incident-evidence | yes | identity-authenticated-app | identity-authenticated-app | high | none |
-| IncidentHandoff | parent-inherited | Single-parent authorization inherited from Incident through incidentId=id. | table-incident | yes | identity-authenticated-app | identity-authenticated-app | high | none |
+| IncidentHandoff | parent-inherited | Single-parent authorization inherited from Incident through incidentId=id. | table-incident | yes | identity-authenticated-app, identity-scheduled-job | identity-authenticated-app | high | none |
 | Notification | actor-owned | Direct actor scope using userId; tenant/platform administration requires an explicit reviewed command boundary. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
-| PolicyAlert | tenant-owned | Direct transaction-context scope using licenseeId; platform-admin access remains command-specific. | — | yes | identity-authenticated-app, identity-worker | identity-authenticated-app | high | none |
+| PolicyAlert | tenant-owned | Direct transaction-context scope using licenseeId; platform-admin access remains command-specific. | — | yes | identity-authenticated-app | identity-authenticated-app | high | none |
 | PolicyRule | security-sensitive | Special actor-owned repository/function boundary using manufacturerId; administrator access is command-specific and audited. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
 | RequestAccess | security-sensitive | Special named function, restricted repository, or operator boundary; ordinary authenticated broad-table access is forbidden. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
 | SecurityPolicy | security-sensitive | Special security repository using explicit licenseeId scope and command-specific platform administration. | — | yes | none | identity-authenticated-app | medium | none |
 | SupportIssueReport | security-sensitive | Special actor-owned repository/function boundary using reporterUserId; administrator access is command-specific and audited. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
-| SupportTicket | parent-inherited | Single-parent authorization inherited from Incident through incidentId=id. | table-incident | yes | identity-authenticated-app, identity-worker | identity-authenticated-app | high | none |
+| SupportTicket | parent-inherited | Single-parent authorization inherited from Incident through incidentId=id. | table-incident | yes | identity-authenticated-app | identity-authenticated-app | high | none |
 | SupportTicketMessage | parent-inherited | Single-parent authorization inherited from SupportTicket through ticketId=id. | table-support-ticket | yes | none | identity-authenticated-app | high | none |
 | TenantFeatureFlag | tenant-owned | Direct transaction-context scope using licenseeId; platform-admin access remains command-specific. | — | yes | identity-authenticated-app | identity-authenticated-app | high | none |
 
@@ -116,11 +116,11 @@ Tables: 7; resolved: 7; unresolved: 0; dependency edges: 0; confidence high/medi
 | Table | Category | Row scope | Parent | FORCE RLS | Readers | Writers | Confidence | Blocker |
 |---|---|---|---|---:|---|---|---|---|
 | ActionIdempotencyKey | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
-| AuditLogOutbox | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-authenticated-app | identity-authenticated-app, identity-worker | medium | none |
-| CompliancePackJob | operational-system | Restricted worker/scheduled coordination scoped by licenseeId; no platform-global bypass. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
+| AuditLogOutbox | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-worker | identity-authenticated-app, identity-worker | medium | none |
+| CompliancePackJob | operational-system | Restricted worker/scheduled coordination scoped by licenseeId; no platform-global bypass. | — | yes | identity-authenticated-app | identity-authenticated-app, identity-scheduled-job | medium | none |
 | EvidenceRetentionJob | operational-system | Restricted worker/scheduled coordination scoped by licenseeId; no platform-global bypass. | — | yes | none | identity-authenticated-app | medium | none |
 | RouteTransitionMetric | append-only-audit | Append-only evidence is scoped directly by licenseeId; NULL/platform events require the restricted audit boundary. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
-| SecurityEventOutbox | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-authenticated-app | identity-authenticated-app, identity-worker | medium | none |
+| SecurityEventOutbox | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-worker | identity-authenticated-app, identity-worker | medium | none |
 | SystemCheckpoint | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
 
 ## Group G — Reference and remaining

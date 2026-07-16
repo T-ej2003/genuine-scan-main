@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import { manifests, policyDependencyGraphPath } from "./lib/program-inventory.mjs";
 
-const { tables, workflows, decisions, commandSemantics, preAuthFunctions, identities } = manifests();
+const { tables, workflows, decisions, commandSemantics, preAuthFunctions, workerBoundaries, identities } = manifests();
 const graph = JSON.parse(fs.readFileSync(policyDependencyGraphPath, "utf8"));
 const bySurface = Object.fromEntries([...new Set(workflows.workflows.map((workflow) => workflow.executionSurface))].sort().map((surface) => [surface, workflows.workflows.filter((workflow) => workflow.executionSurface === surface).length]));
 const byCategory = Object.fromEntries([...new Set(tables.tables.map((table) => table.primaryCategory))].sort().map((category) => [category, tables.tables.filter((table) => table.primaryCategory === category).length]));
@@ -47,6 +47,19 @@ console.log(JSON.stringify({
   oneTimeTokenFunctions: preAuthFunctions.functions.filter((fn) => fn.oneTimeToken).length,
   publicExecuteViolations: preAuthFunctions.functions.filter((fn) => !fn.publicExecutionDenied).length,
   directTablePrivilegeViolations: preAuthIdentity.tablePrivilegeMode === "none" && preAuthIdentity.directTablePrivileges.length === 0 ? 0 : 1,
+  workerWorkflowsTotal: workerBoundaries.boundaries.filter((boundary) => boundary.runtimeIdentity === "identity-worker").length,
+  scheduledWorkflowsTotal: workerBoundaries.boundaries.filter((boundary) => boundary.runtimeIdentity === "identity-scheduled-job").length,
+  workerBoundariesTotal: workerBoundaries.boundaries.length,
+  actorDerivedJobs: workerBoundaries.boundaries.filter((boundary) => boundary.workerClass === "actor-derived-job").length,
+  tenantScopedJobs: workerBoundaries.boundaries.filter((boundary) => boundary.workerClass === "tenant-scoped-system-job").length,
+  platformScopedJobs: workerBoundaries.boundaries.filter((boundary) => boundary.workerClass === "platform-scoped-system-job").length,
+  operatorTriggeredJobs: workerBoundaries.boundaries.filter((boundary) => boundary.workerClass === "operator-triggered-job").length,
+  namedWorkerFunctionsRequired: workerBoundaries.boundaries.filter((boundary) => boundary.namedFunctionRequirement.required).length,
+  idempotentMutationWorkflows: workerBoundaries.boundaries.filter((boundary) => boundary.tablesWritten.length && boundary.idempotencyStrategy?.keySource).length,
+  replayProtectedWorkflows: workerBoundaries.boundaries.filter((boundary) => boundary.replayProtection && boundary.conflictingReplayPayloadDenied).length,
+  concurrencyProtectedWorkflows: workerBoundaries.boundaries.filter((boundary) => boundary.concurrencyControl?.databaseEnforced).length,
+  scopeVerificationViolations: workerBoundaries.boundaries.filter((boundary) => !/durable|table-/i.test(boundary.durableJobTableOrPayloadSource) || /trust (?:the )?json/i.test(boundary.scopeVerificationMethod)).length,
+  unresolvedWorkerBoundaries: workflows.workflows.filter((workflow) => ["worker", "scheduled"].includes(workflow.executionSurface) && workflow.authorizationBoundaryType === "restricted-worker" && !workflow.workerBoundaryId).length,
   workflowsTotal: workflows.workflows.length,
   workflowsByExecutionSurface: bySurface,
   workflowsCompatible: compatible,
