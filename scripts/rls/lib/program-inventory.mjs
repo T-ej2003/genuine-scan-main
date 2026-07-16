@@ -19,6 +19,8 @@ export const preAuthFunctionsPath = path.join(programDir, "pre-auth-functions.js
 export const preAuthBoundaryReviewPath = path.join(programDir, "PRE_AUTH_BOUNDARY_REVIEW.md");
 export const workerBoundariesPath = path.join(programDir, "worker-boundaries.json");
 export const workerIdentityReviewPath = path.join(programDir, "WORKER_IDENTITY_REVIEW.md");
+export const objectOwnershipChainPath = path.join(programDir, "object-ownership-chain.json");
+export const objectOwnershipReviewPath = path.join(programDir, "OBJECT_OWNERSHIP_REVIEW.md");
 export const blockedApplyPath = "documents/security/mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql";
 
 export const commands = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "UPSERT", "COUNT", "RAW_SQL"]);
@@ -1294,6 +1296,162 @@ export const buildWorkerProgramme = () => {
   return manifest;
 };
 
+const OWNER_ATTRIBUTES = Object.freeze({ login: false, superuser: false, createDatabase: false, createRole: false, replication: false, bypassRls: false, inherit: false });
+const ENVIRONMENT_ROLES = Object.freeze({
+  development: { tableOwner: "mscqr_dev_owner", authOwner: "mscqr_dev_auth_owner", migration: "mscqr_dev_migration" },
+  staging: { tableOwner: "mscqr_staging_owner", authOwner: "mscqr_staging_auth_owner", migration: "mscqr_staging_migration" },
+  production: { tableOwner: "mscqr_prod_owner", authOwner: "mscqr_prod_auth_owner", migration: "mscqr_prod_migration" },
+});
+
+const ownershipRule = (id, objectClass, expectedOwner, creationIdentity, transferMechanism, verification, rollbackBehavior, extra = {}) => ({
+  id, objectClass, expectedOwner, creationIdentity, transferMechanism, temporaryMembershipRequirements: "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.", postTransferVerification: verification, rollbackBehavior, forbiddenOwnershipStates: ["owned by any runtime LOGIN identity", "owned by identity-migration at deployment success", "owned by an environment administrator LOGIN"], ...extra,
+});
+
+export const buildObjectOwnershipManifest = (tableManifest, identityManifest, preAuthManifest, workerManifest) => {
+  const safeRollback = "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.";
+  const perObjectTransfer = "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.";
+  const tableOwner = "identity-table-owner";
+  const authOwner = "identity-auth-function-owner";
+  const rules = [
+    ownershipRule("ownership-tables", "tables", tableOwner, "identity-migration", perObjectTransfer, "Every Prisma table has relowner=environment table owner; all 75 FORCE targets and both migration-only tables are included.", safeRollback),
+    ownershipRule("ownership-table-owned-sequences", "table-owned-sequences", tableOwner, "identity-migration", perObjectTransfer, "Every identity/serial sequence linked through pg_depend has the same owner as its owning table.", safeRollback),
+    ownershipRule("ownership-standalone-sequences", "standalone-sequences", tableOwner, "identity-migration", perObjectTransfer, "Every non-extension application sequence has the table owner; no orphan migration-owned sequence remains.", safeRollback),
+    ownershipRule("ownership-indexes", "indexes", "owning-table-owner", "identity-migration", "Index ownership follows its owning table and is normalized by the table transfer.", "Every application index resolves to a table whose relowner is the table owner.", safeRollback),
+    ownershipRule("ownership-constraints", "constraints", "owning-table-owner", "identity-migration", "Constraint authority follows the owning table; no independent runtime ownership exists.", "Every constraint belongs to a table certified to the table owner; referenced tables are also certified.", safeRollback),
+    ownershipRule("ownership-policies", "policies", "owning-table-owner", "identity-migration", "Policies have no independent owner; only the owning table owner may create, alter, or drop them through the reviewed deployment path.", "Every policy's table relowner is the table owner and no policy command is installed by startup/runtime.", safeRollback),
+    ownershipRule("ownership-schemas", "schemas", "schema-specific", "identity-migration", "Explicit ALTER SCHEMA OWNER through the broker path: public and app_rls to table owner; app_auth to auth owner; extension-owned schemas remain extension-managed.", "pg_namespace proves exact schema owners and PUBLIC/runtime CREATE is absent on protected schemas.", safeRollback),
+    ownershipRule("ownership-functions", "functions", "schema-and-function-specific", "identity-migration", perObjectTransfer, "app_auth exact pre-auth signatures have auth owner; approved app_rls worker helpers have table owner and SECURITY INVOKER; no migration/runtime-owned application function remains.", safeRollback),
+    ownershipRule("ownership-procedures", "procedures", tableOwner, "identity-migration", perObjectTransfer, "Every application procedure is owned by the table owner; app_auth procedures are forbidden unless separately added to the exact auth manifest.", safeRollback),
+    ownershipRule("ownership-enum-types", "enum-types", tableOwner, "identity-migration", perObjectTransfer, "Every non-extension application enum type has typowner=table owner.", safeRollback),
+    ownershipRule("ownership-composite-types", "composite-types", tableOwner, "identity-migration", perObjectTransfer, "Every standalone non-extension composite type has typowner=table owner; table row types follow their table.", safeRollback),
+    ownershipRule("ownership-views", "views", tableOwner, "identity-migration", perObjectTransfer, "Every application view has relowner=table owner and uses an explicitly reviewed security option.", safeRollback),
+    ownershipRule("ownership-materialized-views", "materialized-views", tableOwner, "identity-migration", perObjectTransfer, "Every application materialized view has relowner=table owner and an exact refresh authority.", safeRollback),
+    ownershipRule("ownership-triggers", "triggers", "owning-table-owner", "identity-migration", "Trigger authority follows the table; its called function is separately certified under the function rule.", "Every non-internal trigger is attached to a table-owner table and calls an approved-owner function.", safeRollback),
+    ownershipRule("ownership-publications", "publications", "external-managed-service-owner", "controlled-platform-administration-only", "Application migrations may not create publications. If introduced, a separately approved non-runtime administrative owner is required.", "No MSCQR application publication is present; future presence fails verification until allowlisted.", safeRollback, { presence: "not-detected" }),
+    ownershipRule("ownership-subscriptions", "subscriptions", "external-managed-service-owner", "controlled-platform-administration-only", "Application migrations may not create subscriptions. If introduced, a separately approved non-runtime administrative owner is required.", "No MSCQR application subscription is present; future presence fails verification until allowlisted.", safeRollback, { presence: "not-detected" }),
+    ownershipRule("ownership-extensions", "extensions", "managed-service-extension-owner", "controlled-platform-administration-only", "Extension installation and update are outside Prisma migrations; extension-owned objects/schemas are identified by extension dependencies and excluded from application transfer.", "Every extension and extension-owned object is on an explicit platform allowlist and is not owned by a runtime role.", safeRollback, { presence: "catalog-discovery-required-per-environment" }),
+  ];
+  const manifest = {
+    schemaVersion: 1,
+    decisionId: "decision-object-ownership-chain",
+    status: "architecture-resolved",
+    postgresVersion: "18",
+    environments: ENVIRONMENT_ROLES,
+    logicalOwnerIdentities: [
+      { identityId: tableOwner, environmentRoleNames: Object.fromEntries(Object.entries(ENVIRONMENT_ROLES).map(([environment, roles]) => [environment, roles.tableOwner])), attributes: OWNER_ATTRIBUTES, owns: ["all 77 Prisma tables", "application sequences", "public and app_rls schemas", "table-bound objects", "approved app_rls SECURITY INVOKER helpers"], forbiddenMemberships: "No runtime role and no standing migration membership." },
+      { identityId: authOwner, environmentRoleNames: Object.fromEntries(Object.entries(ENVIRONMENT_ROLES).map(([environment, roles]) => [environment, roles.authOwner])), attributes: OWNER_ATTRIBUTES, owns: ["app_auth schema", "the seven exact pre-auth function signatures"], forbiddenOwnership: ["application tables", "application sequences", "app_rls", "non-approved functions"], forbiddenMemberships: "No runtime role and no standing migration membership." },
+      { identityId: "identity-migration", environmentRoleNames: Object.fromEntries(Object.entries(ENVIRONMENT_ROLES).map(([environment, roles]) => [environment, roles.migration])), attributes: { login: true, superuser: false, bypassRls: false, inherit: false }, ownsAtSuccess: [], credentialPurpose: "deployment-only", createAuthority: "Reviewed DDL during the migration window only", ownerMembershipAtSuccess: [] },
+    ],
+    postgres18CapabilityPrerequisites: [
+      "CREATEROLE alone is not blanket authority to transfer ownership or grant arbitrary membership.",
+      "The transfer executor must be the current owner or otherwise have the required object authority and must be able to SET ROLE to the new owner; role membership SET, INHERIT and ADMIN options are independent.",
+      "Any temporary membership uses ADMIN FALSE, INHERIT FALSE, SET TRUE and is revoked before success; INHERIT FALSE prevents automatic privileges but SET TRUE remains powerful until revocation.",
+      "ALTER DEFAULT PRIVILEGES applies to objects subsequently created by the named/current creator, not inherited role defaults, so every possible creation identity is normalized explicitly.",
+    ],
+    recommendedTransferModel: { id: "broker-per-object-transfer", recommended: true, migrationOwnerMembership: false, transferExecutor: "audited broker-controlled administrative executor", grantorAuthority: "Managed database administrator or exact role member holding ADMIN option for the target owner; CREATEROLE without the required ADMIN/SET path is insufficient.", executorTemporaryMembership: { permitted: true, roles: [tableOwner, authOwner], admin: false, inherit: false, set: true, grantedOneAtATime: true, revokedBeforeSuccess: true, auditRequired: true }, reason: "Keeps owner-role reachability out of the migration credential while allowing deterministic per-object transfer." },
+    fallbackTransferModel: { id: "temporary-noninheriting-migration-membership", recommended: false, activation: "Separate reviewed exception when broker separation is unavailable", membership: { member: "identity-migration", roles: [tableOwner, authOwner], admin: false, inherit: false, set: true, oneOwnerAtATime: true }, requirements: ["Exact grantor authority verified before migration", "Grant and revoke recorded in immutable deployment audit", "Failure handler revokes membership even after partial DDL", "Catalog gate proves no membership or ownership residue"], successWithActiveMembershipAllowed: false },
+    objectClasses: rules,
+    schemaOwnershipRules: [
+      { schema: "public", expectedOwner: tableOwner, publicCreate: false, runtimeCreate: false, notes: "USAGE is grant-generated; upgraded databases are checked because PUBLIC CREATE may predate secure defaults." },
+      { schema: "app_rls", expectedOwner: tableOwner, publicCreate: false, runtimeCreate: false, notes: "Contains only approved transaction helpers and SECURITY INVOKER worker helpers." },
+      { schema: "app_auth", expectedOwner: authOwner, publicCreate: false, runtimeCreate: false, notes: "Only exact pre-auth functions; identity-pre-auth-app receives USAGE and exact EXECUTE." },
+      { schema: "prisma-created", expectedOwner: tableOwner, publicCreate: false, runtimeCreate: false, notes: "Any additional Prisma application schema must be declared before migration." },
+      { schema: "extension-owned", expectedOwner: "managed-service-extension-owner", publicCreate: false, runtimeCreate: false, notes: "Discovered by extension dependency and allowlisted; never reassigned by application migration." },
+    ],
+    approvedFunctionOwnerBoundaries: {
+      preAuth: preAuthManifest.functions.map((fn) => ({ functionId: fn.id, schema: fn.sqlSchema, name: fn.sqlFunctionName, argumentTypes: fn.arguments.map((argument) => argument.type), owner: authOwner, securityMode: "DEFINER" })),
+      worker: workerManifest.boundaries.filter((boundary) => boundary.namedFunctionRequirement.required).map((boundary) => ({ functionId: boundary.namedFunctionRequirement.functionId, schema: boundary.namedFunctionRequirement.sqlSchema, name: boundary.namedFunctionRequirement.sqlFunctionName, argumentTypes: boundary.namedFunctionRequirement.arguments.map((argument) => argument.type), owner: tableOwner, securityMode: "INVOKER" })),
+    },
+    sequenceOwnershipRules: { tableOwned: "Owner must equal the owning table owner; dependency must identify exactly one owning column/table.", standalone: "Non-extension application sequences use identity-table-owner and exact command grants; migration ownership is residue.", extensionOwned: "Remain with the allowlisted extension owner and are excluded only through catalog dependency evidence." },
+    enumAndTypeOwnershipRules: { applicationEnums: tableOwner, applicationCompositeTypes: tableOwner, tableRowTypes: "follow owning table", extensionTypes: "managed-service-extension-owner by catalog dependency" },
+    policyOwnershipSemantics: "PostgreSQL policies have no independent owner field. Their authority is the owning table's relowner; all policy lifecycle operations therefore remain with identity-table-owner through the deployment path.",
+    defaultPrivilegeRules: { creationIdentities: ["identity-migration", tableOwner, authOwner], publicGrants: [], runtimeGrants: [], revokePublicByDefault: ["EXECUTE on functions/procedures", "USAGE on types", "all privileges on tables, sequences and schemas"], commandGrantSource: "documents/security/rls-program/command-semantics.json", notes: "Defaults affect future objects only and are normalized for each possible creator. Exact runtime grants are applied after ownership transfer; no app, read, worker, scheduled or pre-auth access is inherited from defaults." },
+    migrationLifecycle: [
+      { step: 1, id: "authenticate", requirement: "identity-migration authenticates with the deployment-only environment credential." },
+      { step: 2, id: "preflight", requirement: "Verify expected database/environment, current user, role attributes, owner attributes, schema baseline, clean membership state, and capture an exact object-owner snapshot." },
+      { step: 3, id: "temporary-authority", requirement: "Broker obtains only the exact transfer authority; recommended path grants no owner membership to migration." },
+      { step: 4, id: "migrate", requirement: "Migration creates/alters only reviewed objects and records the created/changed object set." },
+      { step: 5, id: "transfer", requirement: "Broker transfers each object to its class owner using the deterministic object manifest." },
+      { step: 6, id: "normalize-privileges", requirement: "Normalize schema privileges, exact grants, routine EXECUTE, and creator-specific default privileges." },
+      { step: 7, id: "revoke-temporary-authority", requirement: "Revoke every temporary membership/authority in the success and failure paths." },
+      { step: 8, id: "catalog-verification", requirement: "Run the complete catalog contract and compare the created/changed set with expected owners and grants." },
+      { step: 9, id: "completion-gate", requirement: "Fail deployment if ownership, membership, grant, security-mode, or verification residue exists." },
+    ],
+    catalogVerification: [
+      { id: "verify-table-owners", catalogs: ["pg_class", "pg_namespace", "pg_roles"], proves: "All 75 FORCE RLS tables and both migration-only tables have the environment table owner; relrowsecurity/relforcerowsecurity are checked separately without changing state." },
+      { id: "verify-sequence-owners", catalogs: ["pg_class", "pg_depend"], proves: "Table-owned and standalone application sequences have the correct owner and dependency." },
+      { id: "verify-schema-owners-and-create", catalogs: ["pg_namespace", "aclexplode"], proves: "public/app_rls belong to table owner, app_auth to auth owner, and PUBLIC/runtime roles lack CREATE." },
+      { id: "verify-function-owners-and-modes", catalogs: ["pg_proc", "pg_namespace", "aclexplode"], proves: "Exact pre-auth functions have auth owner and SECURITY DEFINER; approved app_rls helpers have table owner and SECURITY INVOKER; PUBLIC/unexpected EXECUTE is absent." },
+      { id: "verify-type-owners", catalogs: ["pg_type", "pg_depend"], proves: "Non-extension enum/composite types have table owner and extension-owned types match the allowlist." },
+      { id: "verify-no-owner-residue", catalogs: ["pg_class", "pg_namespace", "pg_proc", "pg_type", "pg_roles"], proves: "Migration, runtime and environment admin LOGIN roles own no protected object." },
+      { id: "verify-membership-closure", catalogs: ["pg_auth_members", "pg_roles"], proves: "Runtime roles cannot reach owners; migration has no remaining owner membership; temporary rows are absent." },
+      { id: "verify-default-and-object-privileges", catalogs: ["pg_default_acl", "information_schema", "aclexplode"], proves: "PUBLIC and runtime roles have no broad defaults or unexpected application-object privileges." },
+      { id: "verify-optional-object-classes", catalogs: ["pg_publication", "pg_subscription", "pg_extension", "pg_depend"], proves: "Optional platform-owned objects are absent or exactly allowlisted and never runtime/migration owned." },
+    ],
+    forbiddenOwnershipStates: ["LOGIN owner for a protected object", "migration-owned object at success", "runtime-owned application object", "runtime membership in table or auth owner", "migration owner membership after transfer", "PUBLIC CREATE on a protected schema", "broad runtime grants from default privileges", "SECURITY DEFINER app_rls worker helper"],
+    migrationCompletionGate: { catalogVerificationRequired: true, transferFailureReportsSuccess: false, revocationFailureReportsSuccess: false, ownershipResidueAllowed: 0, migrationMembershipResidueAllowed: 0, runtimeOwnedObjectsAllowed: 0, transactionRule: "Use transactional DDL where supported; concurrent/nontransactional changes require the same preflight snapshot, explicit compensation, unconditional revocation and final catalog gate.", failClosed: true },
+    migrationOnlyTables: tableManifest.tables.filter((table) => table.primaryCategory === "migration-only").map((table) => ({ tableId: table.id, owner: tableOwner, forceRlsTarget: false, runtimeGrants: [], decision: "No production runtime access; physical ownership is still normalized to the table owner." })),
+    evidence: ["documents/security/mscqr_staging_database_role_separation_template_2026-07-10.sql", "documents/security/mscqr_staging_database_role_separation_rollback_2026-07-10.sql", "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql", "scripts/run-disposable-role-separation-harness.mjs", "backend/tests/rlsAuthBootstrapP2.test.js", "backend/prisma/migrations"],
+  };
+  return manifest;
+};
+
+const applyObjectOwnershipAuthority = (manifest, tables, identities, decisions) => {
+  const runtimeIds = identities.identities.filter((identity) => identity.loginExpectation !== "NOLOGIN").map((identity) => identity.id);
+  for (const identity of identities.identities) {
+    identity.mayOwnProtectedObjects = ["identity-table-owner", "identity-auth-function-owner"].includes(identity.id);
+    identity.ownerRoleMemberships = [];
+    identity.objectOwnershipDecision = "decision-object-ownership-chain";
+    if (runtimeIds.includes(identity.id)) identity.protectedObjectOwnershipAllowed = false;
+  }
+  const tableOwner = identities.identities.find((identity) => identity.id === "identity-table-owner");
+  Object.assign(tableOwner, { roleAttributes: OWNER_ATTRIBUTES, ownedObjectClasses: ["tables", "sequences", "public/app_rls schemas", "indexes/constraints/policies/triggers through tables", "application types/views/materialized views", "approved app_rls SECURITY INVOKER functions"], mayOwnProtectedObjects: true });
+  const authOwner = identities.identities.find((identity) => identity.id === "identity-auth-function-owner");
+  Object.assign(authOwner, { roleAttributes: OWNER_ATTRIBUTES, ownedObjectClasses: ["app_auth schema", "exact approved pre-auth functions"], mayOwnProtectedObjects: true });
+  const migration = identities.identities.find((identity) => identity.id === "identity-migration");
+  Object.assign(migration, { maySetRole: false, enduringObjectOwnershipAllowed: false, temporaryOwnerMembershipRecommended: false, migrationCompletionRequiresCatalogVerification: true, ownerMembershipResidueAllowed: false });
+  for (const identity of [tableOwner, authOwner, migration]) {
+    identity.resolvedDecisions = [...new Set([...identity.resolvedDecisions, "decision-object-ownership-chain"])].sort();
+    identity.unresolvedDecisions = identity.unresolvedDecisions.filter((id) => id !== "decision-object-ownership-chain");
+  }
+  for (const table of tables.tables) {
+    table.physicalOwnerRole = "identity-table-owner";
+    table.objectOwnershipRuleId = "ownership-tables";
+    table.migrationOwnershipAllowedAtCompletion = false;
+    table.ownershipTransferStatus = "architecture-resolved";
+    table.unresolvedDecisionIds = table.unresolvedDecisionIds.filter((id) => id !== "decision-object-ownership-chain");
+    table.unresolvedDecisions = table.unresolvedDecisions.filter((id) => id !== "decision-object-ownership-chain");
+  }
+  const decision = decisions.decisions.find((item) => item.id === "decision-object-ownership-chain");
+  decision.status = "resolved";
+  decision.resolvedAt = "2026-07-16";
+  decision.affectedTables = tables.tables.map((table) => table.id);
+  decision.resolution = { authority: "documents/security/rls-program/object-ownership-chain.json", protectedObjectClasses: manifest.objectClasses.length, tableOwner: "identity-table-owner", authOwner: "identity-auth-function-owner", migrationOwnershipResidueAllowed: 0, runtimeOwnershipAllowed: 0, recommendedTransferModel: manifest.recommendedTransferModel.id, catalogVerificationRequired: true };
+};
+
+const writeObjectOwnershipReview = (manifest) => {
+  const lines = ["# MSCQR Object Ownership Review", "", "This is the human review of `object-ownership-chain.json`. It changes no database owner, role, grant, policy, RLS state, SQL artifact, or runtime behavior.", "", "## Role and object ownership matrix", "", "| Object class | Enduring owner | Creation identity | Transfer | Verification |", "|---|---|---|---|---|"];
+  for (const rule of manifest.objectClasses) lines.push(`| ${rule.objectClass} | ${rule.expectedOwner} | ${rule.creationIdentity} | ${rule.transferMechanism} | ${rule.postTransferVerification} |`);
+  lines.push("", "## Migration lifecycle", "");
+  for (const step of manifest.migrationLifecycle) lines.push(`${step.step}. **${step.id}:** ${step.requirement}`);
+  lines.push("", "## Temporary authority model", "", "The approved path separates DDL execution from ownership transfer. `identity-migration` never joins an owner role: an audited broker executor transfers the exact changed objects and may receive one target-owner membership at a time with `ADMIN FALSE`, `INHERIT FALSE`, `SET TRUE`. That membership is itself privileged and is revoked before catalog verification. PostgreSQL 18 `CREATEROLE` is not treated as blanket authority; the grantor must have the exact membership administration authority and the transfer executor must be able to assume the target owner for the transfer.", "", "The fallback allows the migration identity the same non-inheriting, SET-only membership one owner at a time only under a separate reviewed exception. Success is impossible until membership is revoked and both ownership and membership residue are zero.", "", "## Schema, sequence, type, function and policy ownership", "", "`public` and `app_rls` belong to the table owner; `app_auth` belongs to the auth owner. PUBLIC and runtime CREATE are denied. Prisma-created application schemas must be declared and table-owner owned. Extension schemas remain with the allowlisted managed extension owner. Table-owned and standalone application sequences, enums, composite types, views and materialized views use the table owner. Indexes, constraints, policies and triggers follow the owning table; called functions are verified independently.", "", `The seven approved pre-auth functions are auth-owner SECURITY DEFINER functions. The ${manifest.approvedFunctionOwnerBoundaries.worker.length} approved worker helpers are table-owner SECURITY INVOKER functions. Policies have no independent PostgreSQL owner: their authority follows the table owner.`, "", "## Default privileges", "", "Every possible creator—migration, table owner and auth owner—has explicit future-object defaults. PUBLIC receives no application-object privilege; runtime roles receive no default table, sequence, schema, type or routine access. Exact runtime grants come only from command semantics after transfer. Defaults are not relied on retroactively and inherited-role defaults are not assumed.", "", "## Failure, rollback and catalog verification", "", "Preflight records exact owners and changed objects. Transfer, privilege normalization, revocation and catalog verification are a single fail-closed deployment gate. Transactional DDL rolls back together; nontransactional operations require explicit compensation. Rollback may restore only a previously approved NOLOGIN owner and never restores runtime or migration ownership. Failure handling always attempts revocation and cannot report success with residue.", "", "Catalog certification covers all 77 tables (75 FORCE targets plus two migration-only tables), sequences/dependencies, schemas/CREATE ACLs, exact function owners/security modes/EXECUTE ACLs, types, owner membership closure, default ACLs and optional publications/subscriptions/extensions. Migration, runtime and environment-admin LOGIN ownership must all be zero.", "", "## Environment differences", "", "The contract is identical in development, staging and production; only the `mscqr_dev_*`, `mscqr_staging_*` and `mscqr_prod_*` role names differ. Production uses the same deployment-only migration credential and broker gate, with no standing break-glass ownership path.", "", "## Remaining implementation work", "", "Implement reviewed role/bootstrap and ownership-transfer artifacts later, add disposable PostgreSQL catalog tests for every query contract, capture environment-specific preflight evidence, and rehearse partial-failure compensation before staging activation. This architecture decision does not authorize those changes.", "");
+  fs.writeFileSync(objectOwnershipReviewPath, `${lines.join("\n")}\n`);
+};
+
+export const buildObjectOwnershipProgramme = () => {
+  const tables = readJson(tableManifestPath);
+  const identities = readJson(identityManifestPath);
+  const decisions = readJson(decisionManifestPath);
+  const manifest = buildObjectOwnershipManifest(tables, identities, readJson(preAuthFunctionsPath), readJson(workerBoundariesPath));
+  applyObjectOwnershipAuthority(manifest, tables, identities, decisions);
+  writeJson(objectOwnershipChainPath, manifest);
+  writeObjectOwnershipReview(manifest);
+  writeJson(tableManifestPath, tables);
+  writeJson(identityManifestPath, identities);
+  writeJson(decisionManifestPath, decisions);
+  return manifest;
+};
+
 export const buildWorkflowManifest = () => {
   const scan = scanProductionAccess();
   const existing = readJson(workflowManifestPath, { schemaVersion: 1, workflows: [] });
@@ -1416,12 +1574,19 @@ export const buildWorkflowManifest = () => {
         || decision.id === "decision-object-ownership-chain"
         || decision.affectedWorkflows.some((workflowId) => table.productionRuntimeReaders.includes(workflowId) || table.productionRuntimeWriters.includes(workflowId))).map((table) => table.id);
     }
+    const identityManifest = readJson(identityManifestPath);
+    const ownershipManifest = buildObjectOwnershipManifest(tableManifest, identityManifest, preAuthManifest, workerManifest);
+    applyObjectOwnershipAuthority(ownershipManifest, tableManifest, identityManifest, decisionManifest);
+    writeJson(objectOwnershipChainPath, ownershipManifest);
+    writeObjectOwnershipReview(ownershipManifest);
+    writeJson(tableManifestPath, tableManifest);
+    writeJson(identityManifestPath, identityManifest);
     writeJson(decisionManifestPath, decisionManifest);
   }
   return result;
 };
 
-export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath), workerBoundaries: readJson(workerBoundariesPath) });
+export const manifests = () => ({ tables: readJson(tableManifestPath), workflows: readJson(workflowManifestPath), identities: readJson(identityManifestPath), decisions: readJson(decisionManifestPath), commandSemantics: readJson(commandSemanticsPath), preAuthFunctions: readJson(preAuthFunctionsPath), workerBoundaries: readJson(workerBoundariesPath), objectOwnershipChain: readJson(objectOwnershipChainPath) });
 export const validatePreAuthFunctions = (manifest, workflowManifest, commandManifest, identityManifest, tableManifest) => {
   assert(manifest?.functions?.length, "pre-auth function manifest is missing");
   const workflows = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
@@ -1581,6 +1746,77 @@ export const validateWorkerBoundaries = (manifest, workflowManifest, commandMani
     assert.equal(identity.directPreAuthFunctionExecution, false, `${identityId} may execute pre-auth functions`);
   }
   assert.notEqual(identities.get("identity-worker").credentialSource, identities.get("identity-scheduled-job").credentialSource, "scheduled identity collapsed into worker identity");
+  return true;
+};
+export const validateObjectOwnershipChain = (manifest, tableManifest, identityManifest, preAuthManifest, workerManifest) => {
+  assert.equal(manifest?.status, "architecture-resolved", "object ownership chain is unresolved");
+  assert.equal(manifest.postgresVersion, "18", "ownership contract must target PostgreSQL 18");
+  const identities = new Map(identityManifest.identities.map((identity) => [identity.id, identity]));
+  const ownerIds = new Set(["identity-table-owner", "identity-auth-function-owner"]);
+  for (const ownerId of ownerIds) {
+    const identity = identities.get(ownerId);
+    assert.equal(identity.loginExpectation, "NOLOGIN", `${ownerId} protected table owner is LOGIN`);
+    assert.equal(identity.roleAttributes?.login, false, `${ownerId} protected table owner is LOGIN`);
+    assert.equal(identity.roleAttributes?.superuser, false, `${ownerId} owner may be superuser`);
+    assert.equal(identity.roleAttributes?.bypassRls, false, `${ownerId} owner may use BYPASSRLS`);
+  }
+  const runtime = identityManifest.identities.filter((identity) => identity.loginExpectation !== "NOLOGIN");
+  for (const identity of runtime) {
+    assert.equal(identity.protectedObjectOwnershipAllowed, false, `${identity.id} runtime role receives ownership`);
+    assert.deepEqual(identity.ownerRoleMemberships, [], `${identity.id} runtime role is a member of owner role`);
+  }
+  const migration = identities.get("identity-migration");
+  assert.equal(migration.enduringObjectOwnershipAllowed, false, "migration is allowed to remain owner");
+  assert.equal(migration.ownerMembershipResidueAllowed, false, "migration may retain owner membership");
+  assert.equal(migration.migrationCompletionRequiresCatalogVerification, true, "migration catalog verification is removed");
+  for (const table of tableManifest.tables) {
+    assert.equal(table.physicalOwnerRole, "identity-table-owner", `${table.id} runtime or migration role receives ownership`);
+    assert.equal(table.migrationOwnershipAllowedAtCompletion, false, `${table.id} migration is allowed to remain owner`);
+    assert.equal(table.objectOwnershipRuleId, "ownership-tables", `${table.id} lacks ownership rule`);
+  }
+  assert.equal(manifest.objectClasses.length, 17, "a sequence/type/view ownership rule is missing");
+  const classes = new Map(manifest.objectClasses.map((rule) => [rule.objectClass, rule]));
+  for (const objectClass of ["tables", "table-owned-sequences", "standalone-sequences", "indexes", "constraints", "policies", "schemas", "functions", "procedures", "enum-types", "composite-types", "views", "materialized-views", "triggers", "publications", "subscriptions", "extensions"]) {
+    const rule = classes.get(objectClass);
+    assert(rule?.creationIdentity && rule.expectedOwner && rule.transferMechanism && rule.postTransferVerification && rule.rollbackBehavior, `${objectClass} ownership rule is missing`);
+  }
+  assert.equal(manifest.recommendedTransferModel.migrationOwnerMembership, false, "recommended transfer grants owner membership to migration");
+  assert.equal(manifest.recommendedTransferModel.executorTemporaryMembership.revokedBeforeSuccess, true, "revocation step is removed");
+  assert.equal(manifest.fallbackTransferModel.successWithActiveMembershipAllowed, false, "migration failure may leave membership active");
+  assert.equal(manifest.fallbackTransferModel.membership.inherit, false, "temporary migration membership is inheriting");
+  assert.equal(manifest.fallbackTransferModel.membership.admin, false, "temporary migration membership has ADMIN");
+  assert.equal(manifest.fallbackTransferModel.membership.set, true, "temporary migration transfer lacks exact SET authority");
+  const schemas = new Map(manifest.schemaOwnershipRules.map((rule) => [rule.schema, rule]));
+  assert.equal(schemas.get("app_auth")?.expectedOwner, "identity-auth-function-owner", "app_auth ownership changes");
+  assert.equal(schemas.get("app_rls")?.expectedOwner, "identity-table-owner", "app_rls has the wrong owner");
+  for (const schema of ["public", "app_rls", "app_auth", "prisma-created"]) {
+    assert.equal(schemas.get(schema)?.publicCreate, false, `${schema} PUBLIC CREATE is restored`);
+    assert.equal(schemas.get(schema)?.runtimeCreate, false, `${schema} runtime CREATE is allowed`);
+  }
+  const preAuth = new Map(manifest.approvedFunctionOwnerBoundaries.preAuth.map((fn) => [fn.functionId, fn]));
+  assert.equal(preAuth.size, preAuthManifest.functions.length, "pre-auth function ownership allowlist drifted");
+  for (const fn of preAuthManifest.functions) {
+    assert.equal(preAuth.get(fn.id)?.owner, "identity-auth-function-owner", `${fn.id} pre-auth function has the wrong owner`);
+    assert.equal(preAuth.get(fn.id)?.securityMode, "DEFINER", `${fn.id} pre-auth function security mode drifted`);
+  }
+  const workers = new Map(manifest.approvedFunctionOwnerBoundaries.worker.map((fn) => [fn.functionId, fn]));
+  for (const boundary of workerManifest.boundaries.filter((item) => item.namedFunctionRequirement.required)) {
+    const fn = workers.get(boundary.namedFunctionRequirement.functionId);
+    assert.equal(fn?.owner, "identity-table-owner", `${boundary.id} worker function has the wrong owner`);
+    assert.equal(fn?.securityMode, "INVOKER", `${boundary.id} SECURITY INVOKER helper becomes SECURITY DEFINER`);
+  }
+  assert.deepEqual(manifest.defaultPrivilegeRules.publicGrants, [], "default privileges grant PUBLIC access broadly");
+  assert.deepEqual(manifest.defaultPrivilegeRules.runtimeGrants, [], "default privileges grant table access broadly");
+  assert.equal(manifest.defaultPrivilegeRules.commandGrantSource, "documents/security/rls-program/command-semantics.json", "runtime grants do not come from command semantics");
+  assert.equal(manifest.migrationCompletionGate.catalogVerificationRequired, true, "migration catalog verification is removed");
+  assert.equal(manifest.migrationCompletionGate.transferFailureReportsSuccess, false, "ownership-transfer failure can report success");
+  assert.equal(manifest.migrationCompletionGate.revocationFailureReportsSuccess, false, "migration failure may leave membership active");
+  assert.equal(manifest.migrationCompletionGate.ownershipResidueAllowed, 0, "migration is allowed to remain owner");
+  assert.equal(manifest.migrationCompletionGate.runtimeOwnedObjectsAllowed, 0, "runtime role receives ownership");
+  assert(manifest.catalogVerification.length >= 9, "migration catalog verification is removed");
+  assert(manifest.catalogVerification.some((check) => /membership/i.test(`${check.id} ${check.proves}`)), "membership catalog verification is removed");
+  assert.deepEqual(manifest.migrationOnlyTables.map((item) => item.tableId).sort(), ["table-batch-print-pack-token", "table-print-render-token"], "migration-only table ownership is unresolved");
+  for (const table of manifest.migrationOnlyTables) assert.equal(table.owner, "identity-table-owner", `${table.tableId} remains migration-owned`);
   return true;
 };
 export const validateRuntimeIdentities = (manifest, decisionManifest) => {

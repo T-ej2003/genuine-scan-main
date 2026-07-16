@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, parseSchema, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, parseSchema, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, tableManifestPath, tableOwnershipReviewPath, validateObjectOwnershipChain, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 
-const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
+const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, objectOwnershipChainPath, objectOwnershipReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath].map((file) => fs.readFileSync(file, "utf8"));
 
 test("all Prisma models and production access sites are represented exactly and deterministically", () => {
   const before = snapshot();
@@ -154,6 +154,37 @@ test("worker boundary mutation guards fail closed", () => {
   rejects((candidate) => { delete candidate.workflows.workflows.find((workflow) => workflow.workerBoundaryId).workerBoundaryId; }, /lacks worker-boundary ID/);
 });
 
+test("object ownership chain covers every protected class and resolves the architecture decision", () => {
+  const { objectOwnershipChain, tables, identities, preAuthFunctions, workerBoundaries, decisions } = manifests();
+  assert.equal(objectOwnershipChain.objectClasses.length, 17);
+  assert.equal(objectOwnershipChain.migrationCompletionGate.ownershipResidueAllowed, 0);
+  assert.equal(objectOwnershipChain.migrationCompletionGate.runtimeOwnedObjectsAllowed, 0);
+  assert.equal(objectOwnershipChain.migrationOnlyTables.length, 2);
+  assert(validateObjectOwnershipChain(objectOwnershipChain, tables, identities, preAuthFunctions, workerBoundaries));
+  assert.equal(decisions.decisions.find((decision) => decision.id === "decision-object-ownership-chain")?.status, "resolved");
+});
+
+test("object ownership mutation guards fail closed", () => {
+  const current = manifests();
+  const rejects = (mutate, pattern) => {
+    const candidate = structuredClone(current);
+    mutate(candidate);
+    assert.throws(() => validateObjectOwnershipChain(candidate.objectOwnershipChain, candidate.tables, candidate.identities, candidate.preAuthFunctions, candidate.workerBoundaries), pattern);
+  };
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-table-owner").loginExpectation = "LOGIN"; }, /protected table owner is LOGIN/);
+  rejects((candidate) => { candidate.objectOwnershipChain.migrationCompletionGate.ownershipResidueAllowed = 1; }, /migration is allowed to remain owner/);
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-authenticated-app").protectedObjectOwnershipAllowed = true; }, /runtime role receives ownership/);
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-authenticated-app").ownerRoleMemberships = ["identity-table-owner"]; }, /runtime role is a member of owner role/);
+  rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-pre-auth-app").ownerRoleMemberships = ["identity-auth-function-owner"]; }, /runtime role is a member of owner role/);
+  rejects((candidate) => { candidate.objectOwnershipChain.recommendedTransferModel.executorTemporaryMembership.revokedBeforeSuccess = false; }, /revocation step is removed/);
+  rejects((candidate) => { candidate.objectOwnershipChain.schemaOwnershipRules.find((rule) => rule.schema === "public").publicCreate = true; }, /PUBLIC CREATE is restored/);
+  rejects((candidate) => { candidate.objectOwnershipChain.schemaOwnershipRules.find((rule) => rule.schema === "app_auth").expectedOwner = "identity-table-owner"; }, /app_auth ownership changes/);
+  rejects((candidate) => { candidate.objectOwnershipChain.approvedFunctionOwnerBoundaries.worker[0].securityMode = "DEFINER"; }, /SECURITY INVOKER helper becomes SECURITY DEFINER/);
+  rejects((candidate) => { candidate.objectOwnershipChain.defaultPrivilegeRules.runtimeGrants = ["identity-authenticated-app:ALL TABLES"]; }, /default privileges grant table access broadly/);
+  rejects((candidate) => { candidate.objectOwnershipChain.migrationCompletionGate.catalogVerificationRequired = false; }, /catalog verification is removed/);
+  rejects((candidate) => { candidate.objectOwnershipChain.migrationCompletionGate.revocationFailureReportsSuccess = true; }, /migration failure may leave membership active/);
+});
+
 test("tests do not inflate production totals and repeated technical calls remain one functional workflow", () => {
   const { accesses } = scanProductionAccess();
   assert(accesses.every((item) => !/(?:^|\/)tests?\//.test(item.sourceFile)), "test-only access leaked into production totals");
@@ -275,4 +306,6 @@ test("human manifests are present and parseable", () => {
   assert(fs.readFileSync(preAuthBoundaryReviewPath, "utf8").includes("Exact function families"));
   assert.equal(JSON.parse(fs.readFileSync(workerBoundariesPath, "utf8")).boundaries.length, 3);
   assert(fs.readFileSync(workerIdentityReviewPath, "utf8").includes("Approved boundaries"));
+  assert.equal(JSON.parse(fs.readFileSync(objectOwnershipChainPath, "utf8")).objectClasses.length, 17);
+  assert(fs.readFileSync(objectOwnershipReviewPath, "utf8").includes("Migration lifecycle"));
 });

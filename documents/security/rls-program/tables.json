@@ -188,7 +188,10 @@
         "prohibited",
         "retention delete"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-admin-mfa-credential",
@@ -435,7 +438,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-admin-web-authn-credential",
@@ -660,7 +666,10 @@
         "actor self-delete",
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-allocation-event",
@@ -851,7 +860,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-audit-log",
@@ -1135,7 +1147,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-audit-log-outbox",
@@ -1317,7 +1332,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-auth-mfa-challenge",
@@ -1580,7 +1598,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-auth-session-risk-signal",
@@ -1757,7 +1778,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-auth-web-authn-challenge",
@@ -1996,7 +2020,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-batch",
@@ -2543,7 +2570,10 @@
         "prohibited",
         "tenant-admin delete"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-batch-print-pack-token",
@@ -2684,7 +2714,10 @@
         "Registration proof: no active production workflow or registered package/startup entry accesses this table; 2 unregistered access site(s) are retained separately in workflows.json."
       ],
       "classificationStatus": "resolved",
-      "commandRuleIds": []
+      "commandRuleIds": [],
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-compliance-pack-job",
@@ -2965,7 +2998,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-customer-trust-credential",
@@ -3249,7 +3285,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-customer-trust-intake",
@@ -3540,7 +3579,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-customer-verification-session",
@@ -3823,7 +3865,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-customer-web-authn-challenge",
@@ -4044,7 +4089,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-customer-web-authn-credential",
@@ -4257,7 +4305,10 @@
         "actor self-delete",
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-degradation-event",
@@ -4419,7 +4470,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-email-verification-token",
@@ -4665,7 +4719,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-evidence-retention-job",
@@ -4871,7 +4928,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-evidence-retention-policy",
@@ -5074,7 +5134,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-forensic-event-chain",
@@ -5267,7 +5330,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-incident",
@@ -5859,7 +5925,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-incident-communication",
@@ -6081,7 +6150,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-incident-event",
@@ -6264,7 +6336,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-incident-evidence",
@@ -6474,7 +6549,10 @@
         "prohibited",
         "retention delete"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-incident-evidence-fingerprint",
@@ -6704,7 +6782,10 @@
         "prohibited",
         "retention delete"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-incident-handoff",
@@ -6931,7 +7012,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-inventory-status-rollup",
@@ -7196,7 +7280,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-invite",
@@ -7471,7 +7558,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-licensee",
@@ -8039,7 +8129,10 @@
         "operator-approved",
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-manufacturer-licensee-link",
@@ -8252,7 +8345,10 @@
         "prohibited",
         "tenant-admin delete"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-mfa-login-challenge",
@@ -8507,7 +8603,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-notification",
@@ -8779,7 +8878,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-organization",
@@ -9040,7 +9142,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-ownership",
@@ -9250,7 +9355,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-ownership-transfer",
@@ -9516,7 +9624,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-password-reset",
@@ -9732,7 +9843,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-policy-alert",
@@ -10046,7 +10160,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-policy-rule",
@@ -10336,7 +10453,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-print-audit-event",
@@ -10527,7 +10647,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-print-item",
@@ -10977,7 +11100,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-print-item-event",
@@ -11186,7 +11312,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-print-job",
@@ -11741,7 +11870,10 @@
         "migration-only",
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-print-job-chunk",
@@ -12102,7 +12234,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-print-reissue-request",
@@ -12441,7 +12576,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-print-render-token",
@@ -12582,7 +12720,10 @@
         "Registration proof: no active production workflow or registered package/startup entry accesses this table; 0 unregistered access site(s) are retained separately in workflows.json."
       ],
       "classificationStatus": "resolved",
-      "commandRuleIds": []
+      "commandRuleIds": [],
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-print-session",
@@ -12946,7 +13087,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-printer",
@@ -13502,7 +13646,10 @@
         "prohibited",
         "tenant-admin delete"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-printer-agent-session",
@@ -13846,7 +13993,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-printer-attestation",
@@ -14102,7 +14252,10 @@
         "migration-only",
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-printer-profile",
@@ -14517,7 +14670,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-printer-profile-snapshot",
@@ -14703,7 +14859,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-printer-registration",
@@ -15030,7 +15189,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-qr-allocation-request",
@@ -15313,7 +15475,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-qr-scan-log",
@@ -15650,7 +15815,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-qrcode",
@@ -16320,7 +16488,10 @@
         "prohibited",
         "tenant-admin delete"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-qrrange",
@@ -16515,7 +16686,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-refresh-token",
@@ -16804,7 +16978,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-replacement-chain",
@@ -17002,7 +17179,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-request-access",
@@ -17305,7 +17485,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-route-transition-metric",
@@ -17542,7 +17725,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-scan-metrics-hourly-rollup",
@@ -17797,7 +17983,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-security-event-outbox",
@@ -17987,7 +18176,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-security-policy",
@@ -18174,7 +18366,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-sensitive-action-approval",
@@ -18492,7 +18687,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-support-issue-report",
@@ -18890,7 +19088,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-support-ticket",
@@ -19164,7 +19365,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-support-ticket-message",
@@ -19339,7 +19543,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-system-checkpoint",
@@ -19468,7 +19675,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-tenant-feature-flag",
@@ -19656,7 +19866,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-trace-event",
@@ -19886,7 +20099,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-user",
@@ -20843,7 +21059,10 @@
         "prohibited",
         "tenant-admin delete"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-user-backup-code",
@@ -21031,7 +21250,10 @@
         "migration-only",
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-user-mfa-factor",
@@ -21341,7 +21563,10 @@
         "actor self-delete",
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-verification-decision",
@@ -21638,7 +21863,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     },
     {
       "id": "table-verification-evidence-snapshot",
@@ -21841,7 +22069,10 @@
       "deleteSemantics": [
         "prohibited"
       ],
-      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json"
+      "commandSemanticsAuthority": "documents/security/rls-program/command-semantics.json",
+      "objectOwnershipRuleId": "ownership-tables",
+      "migrationOwnershipAllowedAtCompletion": false,
+      "ownershipTransferStatus": "architecture-resolved"
     }
   ]
 }

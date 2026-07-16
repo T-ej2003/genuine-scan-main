@@ -6,7 +6,7 @@ const decisionSections = {
   "decision-policy-command-semantics": ["Canonical transaction context", "Policy generation strategy"],
   "decision-pre-auth-boundary": ["Pre-authentication function rules"],
   "decision-worker-identity-model": ["Worker authorization rules"],
-  "decision-object-ownership-chain": ["Physical ownership and row-ownership taxonomy"],
+  "decision-object-ownership-chain": ["Physical ownership and row-ownership taxonomy", "Object ownership and migration authority chain"],
   "decision-operator-administration": ["Administrator ceilings"],
 };
 const priority = [
@@ -22,7 +22,7 @@ const priority = [
 const manifestSelectors = {
   "decision-pre-auth-boundary": { commandRuleActor: "pre-auth-runtime", workflowBoundary: "pre-auth-security-function", preAuthFunctionIds: "all" },
   "decision-worker-identity-model": { commandRuleBoundary: "restricted-worker", executionSurfaces: ["worker", "scheduled"], workerBoundaryIds: "all" },
-  "decision-object-ownership-chain": { physicalOwnerRole: "identity-table-owner" },
+  "decision-object-ownership-chain": { objectOwnershipRuleIds: "all", physicalOwnerRole: "identity-table-owner" },
   "decision-operator-administration": { commandRuleActors: ["operator-admin", "break-glass"] },
 };
 for (const [phase, find] of priority) {

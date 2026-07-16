@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
+import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateObjectOwnershipChain, validatePreAuthFunctions, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
 
-const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries } = manifests();
-assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries, "all programme manifests must exist");
+const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries, objectOwnershipChain } = manifests();
+assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries && objectOwnershipChain, "all programme manifests must exist");
 const modelNames = parseSchema().map((model) => model.name);
 assert.deepEqual([...tables.tables.map((table) => table.prismaModel)].sort(), [...modelNames].sort(), "every Prisma model must appear exactly once");
 assert.equal(new Set(tables.tables.map((table) => table.id)).size, tables.tables.length, "table IDs must be unique");
@@ -160,5 +160,6 @@ for (const access of scanProductionAccess().accesses) assert(mappedAccessIds.has
 validateRuntimeIdentities(identities, decisions);
 validatePreAuthFunctions(preAuthFunctions, workflows, commandSemantics, identities, tables);
 validateWorkerBoundaries(workerBoundaries, workflows, commandSemantics, identities, tables);
+validateObjectOwnershipChain(objectOwnershipChain, tables, identities, preAuthFunctions, workerBoundaries);
 assert(sharedApplyIsBlocked(), "existing shared-table apply must remain blocked before BEGIN");
 console.log(JSON.stringify({ valid: true, tables: tables.tables.length, workflows: workflows.workflows.length, productionAccessSites: mappedAccessIds.size }));

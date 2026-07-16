@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import { manifests, policyDependencyGraphPath } from "./lib/program-inventory.mjs";
 
-const { tables, workflows, decisions, commandSemantics, preAuthFunctions, workerBoundaries, identities } = manifests();
+const { tables, workflows, decisions, commandSemantics, preAuthFunctions, workerBoundaries, identities, objectOwnershipChain } = manifests();
 const graph = JSON.parse(fs.readFileSync(policyDependencyGraphPath, "utf8"));
 const bySurface = Object.fromEntries([...new Set(workflows.workflows.map((workflow) => workflow.executionSurface))].sort().map((surface) => [surface, workflows.workflows.filter((workflow) => workflow.executionSurface === surface).length]));
 const byCategory = Object.fromEntries([...new Set(tables.tables.map((table) => table.primaryCategory))].sort().map((category) => [category, tables.tables.filter((table) => table.primaryCategory === category).length]));
@@ -60,6 +60,16 @@ console.log(JSON.stringify({
   concurrencyProtectedWorkflows: workerBoundaries.boundaries.filter((boundary) => boundary.concurrencyControl?.databaseEnforced).length,
   scopeVerificationViolations: workerBoundaries.boundaries.filter((boundary) => !/durable|table-/i.test(boundary.durableJobTableOrPayloadSource) || /trust (?:the )?json/i.test(boundary.scopeVerificationMethod)).length,
   unresolvedWorkerBoundaries: workflows.workflows.filter((workflow) => ["worker", "scheduled"].includes(workflow.executionSurface) && workflow.authorizationBoundaryType === "restricted-worker" && !workflow.workerBoundaryId).length,
+  protectedObjectClasses: objectOwnershipChain.objectClasses.length,
+  expectedOwners: Object.fromEntries(objectOwnershipChain.objectClasses.map((rule) => [rule.objectClass, rule.expectedOwner])),
+  tableOwnerObjects: objectOwnershipChain.objectClasses.filter((rule) => ["identity-table-owner", "owning-table-owner"].includes(rule.expectedOwner) || /table owner/.test(rule.expectedOwner)).length,
+  authOwnerObjects: objectOwnershipChain.approvedFunctionOwnerBoundaries.preAuth.length + 1,
+  migrationOwnedResidueAllowed: objectOwnershipChain.migrationCompletionGate.ownershipResidueAllowed,
+  runtimeOwnedObjectsAllowed: objectOwnershipChain.migrationCompletionGate.runtimeOwnedObjectsAllowed,
+  temporaryMemberships: objectOwnershipChain.recommendedTransferModel.executorTemporaryMembership.roles.length,
+  schemaCreateViolations: objectOwnershipChain.schemaOwnershipRules.filter((rule) => rule.publicCreate || rule.runtimeCreate).length,
+  defaultPrivilegeViolations: objectOwnershipChain.defaultPrivilegeRules.publicGrants.length + objectOwnershipChain.defaultPrivilegeRules.runtimeGrants.length,
+  unresolvedOwnershipChainItems: objectOwnershipChain.status === "architecture-resolved" && decisions.decisions.find((decision) => decision.id === objectOwnershipChain.decisionId)?.status === "resolved" ? 0 : 1,
   workflowsTotal: workflows.workflows.length,
   workflowsByExecutionSurface: bySurface,
   workflowsCompatible: compatible,

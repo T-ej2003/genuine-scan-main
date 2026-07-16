@@ -1381,7 +1381,18 @@
       "recommendedOption": "Dedicated NOLOGIN/NOBYPASSRLS table owner, non-owning LOGIN migrator, and catalog tests for all membership paths.",
       "blockingStatus": "blocking",
       "owner": "Database security and platform engineering",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-07-16",
+      "resolution": {
+        "authority": "documents/security/rls-program/object-ownership-chain.json",
+        "protectedObjectClasses": 17,
+        "tableOwner": "identity-table-owner",
+        "authOwner": "identity-auth-function-owner",
+        "migrationOwnershipResidueAllowed": 0,
+        "runtimeOwnershipAllowed": 0,
+        "recommendedTransferModel": "broker-per-object-transfer",
+        "catalogVerificationRequired": true
+      }
     },
     {
       "id": "decision-operator-administration",

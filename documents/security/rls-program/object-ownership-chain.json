@@ -1,0 +1,759 @@
+{
+  "schemaVersion": 1,
+  "decisionId": "decision-object-ownership-chain",
+  "status": "architecture-resolved",
+  "postgresVersion": "18",
+  "environments": {
+    "development": {
+      "tableOwner": "mscqr_dev_owner",
+      "authOwner": "mscqr_dev_auth_owner",
+      "migration": "mscqr_dev_migration"
+    },
+    "staging": {
+      "tableOwner": "mscqr_staging_owner",
+      "authOwner": "mscqr_staging_auth_owner",
+      "migration": "mscqr_staging_migration"
+    },
+    "production": {
+      "tableOwner": "mscqr_prod_owner",
+      "authOwner": "mscqr_prod_auth_owner",
+      "migration": "mscqr_prod_migration"
+    }
+  },
+  "logicalOwnerIdentities": [
+    {
+      "identityId": "identity-table-owner",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_owner",
+        "staging": "mscqr_staging_owner",
+        "production": "mscqr_prod_owner"
+      },
+      "attributes": {
+        "login": false,
+        "superuser": false,
+        "createDatabase": false,
+        "createRole": false,
+        "replication": false,
+        "bypassRls": false,
+        "inherit": false
+      },
+      "owns": [
+        "all 77 Prisma tables",
+        "application sequences",
+        "public and app_rls schemas",
+        "table-bound objects",
+        "approved app_rls SECURITY INVOKER helpers"
+      ],
+      "forbiddenMemberships": "No runtime role and no standing migration membership."
+    },
+    {
+      "identityId": "identity-auth-function-owner",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_auth_owner",
+        "staging": "mscqr_staging_auth_owner",
+        "production": "mscqr_prod_auth_owner"
+      },
+      "attributes": {
+        "login": false,
+        "superuser": false,
+        "createDatabase": false,
+        "createRole": false,
+        "replication": false,
+        "bypassRls": false,
+        "inherit": false
+      },
+      "owns": [
+        "app_auth schema",
+        "the seven exact pre-auth function signatures"
+      ],
+      "forbiddenOwnership": [
+        "application tables",
+        "application sequences",
+        "app_rls",
+        "non-approved functions"
+      ],
+      "forbiddenMemberships": "No runtime role and no standing migration membership."
+    },
+    {
+      "identityId": "identity-migration",
+      "environmentRoleNames": {
+        "development": "mscqr_dev_migration",
+        "staging": "mscqr_staging_migration",
+        "production": "mscqr_prod_migration"
+      },
+      "attributes": {
+        "login": true,
+        "superuser": false,
+        "bypassRls": false,
+        "inherit": false
+      },
+      "ownsAtSuccess": [],
+      "credentialPurpose": "deployment-only",
+      "createAuthority": "Reviewed DDL during the migration window only",
+      "ownerMembershipAtSuccess": []
+    }
+  ],
+  "postgres18CapabilityPrerequisites": [
+    "CREATEROLE alone is not blanket authority to transfer ownership or grant arbitrary membership.",
+    "The transfer executor must be the current owner or otherwise have the required object authority and must be able to SET ROLE to the new owner; role membership SET, INHERIT and ADMIN options are independent.",
+    "Any temporary membership uses ADMIN FALSE, INHERIT FALSE, SET TRUE and is revoked before success; INHERIT FALSE prevents automatic privileges but SET TRUE remains powerful until revocation.",
+    "ALTER DEFAULT PRIVILEGES applies to objects subsequently created by the named/current creator, not inherited role defaults, so every possible creation identity is normalized explicitly."
+  ],
+  "recommendedTransferModel": {
+    "id": "broker-per-object-transfer",
+    "recommended": true,
+    "migrationOwnerMembership": false,
+    "transferExecutor": "audited broker-controlled administrative executor",
+    "grantorAuthority": "Managed database administrator or exact role member holding ADMIN option for the target owner; CREATEROLE without the required ADMIN/SET path is insufficient.",
+    "executorTemporaryMembership": {
+      "permitted": true,
+      "roles": [
+        "identity-table-owner",
+        "identity-auth-function-owner"
+      ],
+      "admin": false,
+      "inherit": false,
+      "set": true,
+      "grantedOneAtATime": true,
+      "revokedBeforeSuccess": true,
+      "auditRequired": true
+    },
+    "reason": "Keeps owner-role reachability out of the migration credential while allowing deterministic per-object transfer."
+  },
+  "fallbackTransferModel": {
+    "id": "temporary-noninheriting-migration-membership",
+    "recommended": false,
+    "activation": "Separate reviewed exception when broker separation is unavailable",
+    "membership": {
+      "member": "identity-migration",
+      "roles": [
+        "identity-table-owner",
+        "identity-auth-function-owner"
+      ],
+      "admin": false,
+      "inherit": false,
+      "set": true,
+      "oneOwnerAtATime": true
+    },
+    "requirements": [
+      "Exact grantor authority verified before migration",
+      "Grant and revoke recorded in immutable deployment audit",
+      "Failure handler revokes membership even after partial DDL",
+      "Catalog gate proves no membership or ownership residue"
+    ],
+    "successWithActiveMembershipAllowed": false
+  },
+  "objectClasses": [
+    {
+      "id": "ownership-tables",
+      "objectClass": "tables",
+      "expectedOwner": "identity-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every Prisma table has relowner=environment table owner; all 75 FORCE targets and both migration-only tables are included.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-table-owned-sequences",
+      "objectClass": "table-owned-sequences",
+      "expectedOwner": "identity-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every identity/serial sequence linked through pg_depend has the same owner as its owning table.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-standalone-sequences",
+      "objectClass": "standalone-sequences",
+      "expectedOwner": "identity-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every non-extension application sequence has the table owner; no orphan migration-owned sequence remains.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-indexes",
+      "objectClass": "indexes",
+      "expectedOwner": "owning-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "Index ownership follows its owning table and is normalized by the table transfer.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every application index resolves to a table whose relowner is the table owner.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-constraints",
+      "objectClass": "constraints",
+      "expectedOwner": "owning-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "Constraint authority follows the owning table; no independent runtime ownership exists.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every constraint belongs to a table certified to the table owner; referenced tables are also certified.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-policies",
+      "objectClass": "policies",
+      "expectedOwner": "owning-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "Policies have no independent owner; only the owning table owner may create, alter, or drop them through the reviewed deployment path.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every policy's table relowner is the table owner and no policy command is installed by startup/runtime.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-schemas",
+      "objectClass": "schemas",
+      "expectedOwner": "schema-specific",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "Explicit ALTER SCHEMA OWNER through the broker path: public and app_rls to table owner; app_auth to auth owner; extension-owned schemas remain extension-managed.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "pg_namespace proves exact schema owners and PUBLIC/runtime CREATE is absent on protected schemas.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-functions",
+      "objectClass": "functions",
+      "expectedOwner": "schema-and-function-specific",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "app_auth exact pre-auth signatures have auth owner; approved app_rls worker helpers have table owner and SECURITY INVOKER; no migration/runtime-owned application function remains.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-procedures",
+      "objectClass": "procedures",
+      "expectedOwner": "identity-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every application procedure is owned by the table owner; app_auth procedures are forbidden unless separately added to the exact auth manifest.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-enum-types",
+      "objectClass": "enum-types",
+      "expectedOwner": "identity-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every non-extension application enum type has typowner=table owner.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-composite-types",
+      "objectClass": "composite-types",
+      "expectedOwner": "identity-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every standalone non-extension composite type has typowner=table owner; table row types follow their table.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-views",
+      "objectClass": "views",
+      "expectedOwner": "identity-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every application view has relowner=table owner and uses an explicitly reviewed security option.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-materialized-views",
+      "objectClass": "materialized-views",
+      "expectedOwner": "identity-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every application materialized view has relowner=table owner and an exact refresh authority.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-triggers",
+      "objectClass": "triggers",
+      "expectedOwner": "owning-table-owner",
+      "creationIdentity": "identity-migration",
+      "transferMechanism": "Trigger authority follows the table; its called function is separately certified under the function rule.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every non-internal trigger is attached to a table-owner table and calls an approved-owner function.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ]
+    },
+    {
+      "id": "ownership-publications",
+      "objectClass": "publications",
+      "expectedOwner": "external-managed-service-owner",
+      "creationIdentity": "controlled-platform-administration-only",
+      "transferMechanism": "Application migrations may not create publications. If introduced, a separately approved non-runtime administrative owner is required.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "No MSCQR application publication is present; future presence fails verification until allowlisted.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ],
+      "presence": "not-detected"
+    },
+    {
+      "id": "ownership-subscriptions",
+      "objectClass": "subscriptions",
+      "expectedOwner": "external-managed-service-owner",
+      "creationIdentity": "controlled-platform-administration-only",
+      "transferMechanism": "Application migrations may not create subscriptions. If introduced, a separately approved non-runtime administrative owner is required.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "No MSCQR application subscription is present; future presence fails verification until allowlisted.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ],
+      "presence": "not-detected"
+    },
+    {
+      "id": "ownership-extensions",
+      "objectClass": "extensions",
+      "expectedOwner": "managed-service-extension-owner",
+      "creationIdentity": "controlled-platform-administration-only",
+      "transferMechanism": "Extension installation and update are outside Prisma migrations; extension-owned objects/schemas are identified by extension dependencies and excluded from application transfer.",
+      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "postTransferVerification": "Every extension and extension-owned object is on an explicit platform allowlist and is not owned by a runtime role.",
+      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "forbiddenOwnershipStates": [
+        "owned by any runtime LOGIN identity",
+        "owned by identity-migration at deployment success",
+        "owned by an environment administrator LOGIN"
+      ],
+      "presence": "catalog-discovery-required-per-environment"
+    }
+  ],
+  "schemaOwnershipRules": [
+    {
+      "schema": "public",
+      "expectedOwner": "identity-table-owner",
+      "publicCreate": false,
+      "runtimeCreate": false,
+      "notes": "USAGE is grant-generated; upgraded databases are checked because PUBLIC CREATE may predate secure defaults."
+    },
+    {
+      "schema": "app_rls",
+      "expectedOwner": "identity-table-owner",
+      "publicCreate": false,
+      "runtimeCreate": false,
+      "notes": "Contains only approved transaction helpers and SECURITY INVOKER worker helpers."
+    },
+    {
+      "schema": "app_auth",
+      "expectedOwner": "identity-auth-function-owner",
+      "publicCreate": false,
+      "runtimeCreate": false,
+      "notes": "Only exact pre-auth functions; identity-pre-auth-app receives USAGE and exact EXECUTE."
+    },
+    {
+      "schema": "prisma-created",
+      "expectedOwner": "identity-table-owner",
+      "publicCreate": false,
+      "runtimeCreate": false,
+      "notes": "Any additional Prisma application schema must be declared before migration."
+    },
+    {
+      "schema": "extension-owned",
+      "expectedOwner": "managed-service-extension-owner",
+      "publicCreate": false,
+      "runtimeCreate": false,
+      "notes": "Discovered by extension dependency and allowlisted; never reassigned by application migration."
+    }
+  ],
+  "approvedFunctionOwnerBoundaries": {
+    "preAuth": [
+      {
+        "functionId": "preauth-fn-consume-email-verification",
+        "schema": "app_auth",
+        "name": "consume_email_verification_token",
+        "argumentTypes": [
+          "text[]",
+          "timestamp without time zone"
+        ],
+        "owner": "identity-auth-function-owner",
+        "securityMode": "DEFINER"
+      },
+      {
+        "functionId": "preauth-fn-consume-invitation",
+        "schema": "app_auth",
+        "name": "consume_invitation_token",
+        "argumentTypes": [
+          "text[]",
+          "text",
+          "text",
+          "timestamp without time zone"
+        ],
+        "owner": "identity-auth-function-owner",
+        "securityMode": "DEFINER"
+      },
+      {
+        "functionId": "preauth-fn-consume-password-reset",
+        "schema": "app_auth",
+        "name": "consume_password_reset_token",
+        "argumentTypes": [
+          "text[]",
+          "text",
+          "timestamp without time zone"
+        ],
+        "owner": "identity-auth-function-owner",
+        "securityMode": "DEFINER"
+      },
+      {
+        "functionId": "preauth-fn-lookup-invitation",
+        "schema": "app_auth",
+        "name": "lookup_invitation_token",
+        "argumentTypes": [
+          "text[]",
+          "timestamp without time zone"
+        ],
+        "owner": "identity-auth-function-owner",
+        "securityMode": "DEFINER"
+      },
+      {
+        "functionId": "preauth-fn-lookup-password-user",
+        "schema": "app_auth",
+        "name": "lookup_password_user",
+        "argumentTypes": [
+          "text"
+        ],
+        "owner": "identity-auth-function-owner",
+        "securityMode": "DEFINER"
+      },
+      {
+        "functionId": "preauth-fn-record-password-failure",
+        "schema": "app_auth",
+        "name": "record_password_failure",
+        "argumentTypes": [
+          "text",
+          "timestamp without time zone",
+          "integer",
+          "integer"
+        ],
+        "owner": "identity-auth-function-owner",
+        "securityMode": "DEFINER"
+      },
+      {
+        "functionId": "preauth-fn-request-password-reset",
+        "schema": "app_auth",
+        "name": "request_password_reset",
+        "argumentTypes": [
+          "text",
+          "text",
+          "timestamp without time zone",
+          "timestamp without time zone",
+          "text",
+          "text"
+        ],
+        "owner": "identity-auth-function-owner",
+        "securityMode": "DEFINER"
+      }
+    ],
+    "worker": [
+      {
+        "functionId": "worker-fn-consume-audit-outbox",
+        "schema": "app_rls",
+        "name": "consume_audit_log_outbox",
+        "argumentTypes": [
+          "text",
+          "text",
+          "timestamp without time zone"
+        ],
+        "owner": "identity-table-owner",
+        "securityMode": "INVOKER"
+      },
+      {
+        "functionId": "worker-fn-claim-compliance-pack-slice",
+        "schema": "app_rls",
+        "name": "claim_compliance_pack_slice",
+        "argumentTypes": [
+          "text",
+          "timestamp without time zone",
+          "integer"
+        ],
+        "owner": "identity-table-owner",
+        "securityMode": "INVOKER"
+      }
+    ]
+  },
+  "sequenceOwnershipRules": {
+    "tableOwned": "Owner must equal the owning table owner; dependency must identify exactly one owning column/table.",
+    "standalone": "Non-extension application sequences use identity-table-owner and exact command grants; migration ownership is residue.",
+    "extensionOwned": "Remain with the allowlisted extension owner and are excluded only through catalog dependency evidence."
+  },
+  "enumAndTypeOwnershipRules": {
+    "applicationEnums": "identity-table-owner",
+    "applicationCompositeTypes": "identity-table-owner",
+    "tableRowTypes": "follow owning table",
+    "extensionTypes": "managed-service-extension-owner by catalog dependency"
+  },
+  "policyOwnershipSemantics": "PostgreSQL policies have no independent owner field. Their authority is the owning table's relowner; all policy lifecycle operations therefore remain with identity-table-owner through the deployment path.",
+  "defaultPrivilegeRules": {
+    "creationIdentities": [
+      "identity-migration",
+      "identity-table-owner",
+      "identity-auth-function-owner"
+    ],
+    "publicGrants": [],
+    "runtimeGrants": [],
+    "revokePublicByDefault": [
+      "EXECUTE on functions/procedures",
+      "USAGE on types",
+      "all privileges on tables, sequences and schemas"
+    ],
+    "commandGrantSource": "documents/security/rls-program/command-semantics.json",
+    "notes": "Defaults affect future objects only and are normalized for each possible creator. Exact runtime grants are applied after ownership transfer; no app, read, worker, scheduled or pre-auth access is inherited from defaults."
+  },
+  "migrationLifecycle": [
+    {
+      "step": 1,
+      "id": "authenticate",
+      "requirement": "identity-migration authenticates with the deployment-only environment credential."
+    },
+    {
+      "step": 2,
+      "id": "preflight",
+      "requirement": "Verify expected database/environment, current user, role attributes, owner attributes, schema baseline, clean membership state, and capture an exact object-owner snapshot."
+    },
+    {
+      "step": 3,
+      "id": "temporary-authority",
+      "requirement": "Broker obtains only the exact transfer authority; recommended path grants no owner membership to migration."
+    },
+    {
+      "step": 4,
+      "id": "migrate",
+      "requirement": "Migration creates/alters only reviewed objects and records the created/changed object set."
+    },
+    {
+      "step": 5,
+      "id": "transfer",
+      "requirement": "Broker transfers each object to its class owner using the deterministic object manifest."
+    },
+    {
+      "step": 6,
+      "id": "normalize-privileges",
+      "requirement": "Normalize schema privileges, exact grants, routine EXECUTE, and creator-specific default privileges."
+    },
+    {
+      "step": 7,
+      "id": "revoke-temporary-authority",
+      "requirement": "Revoke every temporary membership/authority in the success and failure paths."
+    },
+    {
+      "step": 8,
+      "id": "catalog-verification",
+      "requirement": "Run the complete catalog contract and compare the created/changed set with expected owners and grants."
+    },
+    {
+      "step": 9,
+      "id": "completion-gate",
+      "requirement": "Fail deployment if ownership, membership, grant, security-mode, or verification residue exists."
+    }
+  ],
+  "catalogVerification": [
+    {
+      "id": "verify-table-owners",
+      "catalogs": [
+        "pg_class",
+        "pg_namespace",
+        "pg_roles"
+      ],
+      "proves": "All 75 FORCE RLS tables and both migration-only tables have the environment table owner; relrowsecurity/relforcerowsecurity are checked separately without changing state."
+    },
+    {
+      "id": "verify-sequence-owners",
+      "catalogs": [
+        "pg_class",
+        "pg_depend"
+      ],
+      "proves": "Table-owned and standalone application sequences have the correct owner and dependency."
+    },
+    {
+      "id": "verify-schema-owners-and-create",
+      "catalogs": [
+        "pg_namespace",
+        "aclexplode"
+      ],
+      "proves": "public/app_rls belong to table owner, app_auth to auth owner, and PUBLIC/runtime roles lack CREATE."
+    },
+    {
+      "id": "verify-function-owners-and-modes",
+      "catalogs": [
+        "pg_proc",
+        "pg_namespace",
+        "aclexplode"
+      ],
+      "proves": "Exact pre-auth functions have auth owner and SECURITY DEFINER; approved app_rls helpers have table owner and SECURITY INVOKER; PUBLIC/unexpected EXECUTE is absent."
+    },
+    {
+      "id": "verify-type-owners",
+      "catalogs": [
+        "pg_type",
+        "pg_depend"
+      ],
+      "proves": "Non-extension enum/composite types have table owner and extension-owned types match the allowlist."
+    },
+    {
+      "id": "verify-no-owner-residue",
+      "catalogs": [
+        "pg_class",
+        "pg_namespace",
+        "pg_proc",
+        "pg_type",
+        "pg_roles"
+      ],
+      "proves": "Migration, runtime and environment admin LOGIN roles own no protected object."
+    },
+    {
+      "id": "verify-membership-closure",
+      "catalogs": [
+        "pg_auth_members",
+        "pg_roles"
+      ],
+      "proves": "Runtime roles cannot reach owners; migration has no remaining owner membership; temporary rows are absent."
+    },
+    {
+      "id": "verify-default-and-object-privileges",
+      "catalogs": [
+        "pg_default_acl",
+        "information_schema",
+        "aclexplode"
+      ],
+      "proves": "PUBLIC and runtime roles have no broad defaults or unexpected application-object privileges."
+    },
+    {
+      "id": "verify-optional-object-classes",
+      "catalogs": [
+        "pg_publication",
+        "pg_subscription",
+        "pg_extension",
+        "pg_depend"
+      ],
+      "proves": "Optional platform-owned objects are absent or exactly allowlisted and never runtime/migration owned."
+    }
+  ],
+  "forbiddenOwnershipStates": [
+    "LOGIN owner for a protected object",
+    "migration-owned object at success",
+    "runtime-owned application object",
+    "runtime membership in table or auth owner",
+    "migration owner membership after transfer",
+    "PUBLIC CREATE on a protected schema",
+    "broad runtime grants from default privileges",
+    "SECURITY DEFINER app_rls worker helper"
+  ],
+  "migrationCompletionGate": {
+    "catalogVerificationRequired": true,
+    "transferFailureReportsSuccess": false,
+    "revocationFailureReportsSuccess": false,
+    "ownershipResidueAllowed": 0,
+    "migrationMembershipResidueAllowed": 0,
+    "runtimeOwnedObjectsAllowed": 0,
+    "transactionRule": "Use transactional DDL where supported; concurrent/nontransactional changes require the same preflight snapshot, explicit compensation, unconditional revocation and final catalog gate.",
+    "failClosed": true
+  },
+  "migrationOnlyTables": [
+    {
+      "tableId": "table-batch-print-pack-token",
+      "owner": "identity-table-owner",
+      "forceRlsTarget": false,
+      "runtimeGrants": [],
+      "decision": "No production runtime access; physical ownership is still normalized to the table owner."
+    },
+    {
+      "tableId": "table-print-render-token",
+      "owner": "identity-table-owner",
+      "forceRlsTarget": false,
+      "runtimeGrants": [],
+      "decision": "No production runtime access; physical ownership is still normalized to the table owner."
+    }
+  ],
+  "evidence": [
+    "documents/security/mscqr_staging_database_role_separation_template_2026-07-10.sql",
+    "documents/security/mscqr_staging_database_role_separation_rollback_2026-07-10.sql",
+    "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql",
+    "scripts/run-disposable-role-separation-harness.mjs",
+    "backend/tests/rlsAuthBootstrapP2.test.js",
+    "backend/prisma/migrations"
+  ]
+}
