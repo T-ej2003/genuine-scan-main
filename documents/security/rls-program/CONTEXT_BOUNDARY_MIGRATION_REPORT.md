@@ -5,11 +5,11 @@ This deterministic pass groups every canonical workflow and fails closed where e
 ## Outcome
 
 - Canonical workflows: 428
-- Families: 316
+- Families: 320
 - Already implemented: 3
 - Newly implemented in this pass: 1
-- Contract-only: 38
-- Blocked: 386
+- Contract-only: 40
+- Blocked: 384
 - Auto-implementable but pending: 0
 - PostgreSQL certification pending: 4
 
@@ -19,40 +19,50 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 
 | Blocker code | Affected workflows | Required remediation |
 |---|---:|---|
+| actor-command-contract | 1 | Choose the product actor ceiling and require matching tenant scope, assurance, purpose and immutable read attribution. |
+| authentication-bootstrap-scope-model | 1 | Approve an actor-bound authentication-bootstrap lookup and propagate one supplied transaction client; no blank tenant wildcard. |
+| incompatible-shared-auth-roots | 1 | Split or parameterize the owning roots so each supplies its verified actor, assurance and transaction client. |
+| incomplete-root-transaction | 1 | Move every protected snapshot query for each compatible root into one canonical transaction before implementing this leaf read. |
 | mutation-concurrency-proof | 204 | Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation. |
 | named-function-prerequisite | 179 | Implement and certify the exact approved function contract before replacing ordinary Prisma access. |
-| unresolved-boundary | 269 | Reconcile middleware, actor classes and command rules into one approved boundary type. |
-| unreviewed-scope | 386 | Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code. |
-| unverified-execution-path | 386 | Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests. |
-| unverified-root-call-chain | 277 | Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client. |
+| out-of-scope-mutation-root | 1 | Review the complete message mutation, idempotency, audit and transaction boundary in a later high-risk batch. |
+| out-of-scope-shared-mutation-root | 1 | Move organization resolution into each owning audit transaction or an approved audit system boundary in a mutation-focused batch. |
+| platform-admin-scope-contract | 2 | Approve a bounded platform-admin contract with trusted scope selection, assurance and same-transaction read attribution. |
+| public-command-contract | 5 | Approve an exact token/reference-bound public projection and abuse controls, or move the product behavior behind authentication. |
+| unbounded-platform-scope | 8 | Require a bounded organization/licensee/manufacturer scope, purpose, assurance, attribution, projection and pagination/date ceiling. |
+| unregistered-dead-path | 1 | Delete it after a separate dead-code review, or attach it to one registered root with exact scope and transaction evidence. |
+| unresolved-boundary | 257 | Reconcile middleware, actor classes and command rules into one approved boundary type. |
+| unreviewed-scope | 362 | Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code. |
+| unverified-execution-path | 362 | Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests. |
+| unverified-root-call-chain | 265 | Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client. |
 
 ## Families
 
 | Family | Category | Workflows | Risk | Eligibility | Status | Governing boundary/blocker |
 |---|---|---:|---|---|---|---|
-| family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-analyticsrollupservice-b5739f1d6f-unverified-root-call-chain |
 | family-simple-tenant-scoped-reads-analyticsservice-2c20deef24 | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unverified-root-call-chain |
 | family-simple-tenant-scoped-reads-auditcontroller-627bac35ff | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-auditcontroller-627bac35ff-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-auditcontroller-627bac35ff-unverified-execution-path |
-| family-simple-tenant-scoped-reads-auditservice-964272fbb7 | simple tenant-scoped reads | 2 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-auditservice-964272fbb7-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-auditservice-964272fbb7-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-auditservice-964272fbb7-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-auditservice-964272fbb7-unverified-root-call-chain |
-| family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-unverified-root-call-chain |
-| family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887 | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unverified-root-call-chain |
-| family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e-unverified-execution-path |
+| family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-compliancepackservice-86ca2e5d6f-platform-admin-scope-contract |
+| family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887 | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-incomplete-root-transaction |
+| family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e-public-command-contract |
 | family-simple-tenant-scoped-reads-governancecontroller-96e2eb4bcd | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-governancecontroller-96e2eb4bcd-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-governancecontroller-96e2eb4bcd-unverified-execution-path |
-| family-simple-tenant-scoped-reads-governanceservice-e3aa1df885 | simple tenant-scoped reads | 3 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-governanceservice-e3aa1df885-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-governanceservice-e3aa1df885-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-governanceservice-e3aa1df885-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-governanceservice-e3aa1df885-unverified-root-call-chain |
 | family-simple-tenant-scoped-reads-idempotencyservice-555b944311 | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-idempotencyservice-555b944311-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-idempotencyservice-555b944311-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-idempotencyservice-555b944311-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-idempotencyservice-555b944311-unverified-root-call-chain |
-| family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014 | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014-unverified-execution-path |
-| family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-localagentclaimservice-47404e413d-unverified-root-call-chain |
-| family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1 | simple tenant-scoped reads | 2 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1-unverified-root-call-chain |
-| family-simple-tenant-scoped-reads-replacementchainservice-768679140d | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-unverified-root-call-chain |
-| family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a-unverified-execution-path |
-| family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb-unverified-execution-path |
+| family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014 | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-incidentcontroller-83ab27a014-unbounded-platform-scope |
+| family-simple-tenant-scoped-reads-replacementchainservice-768679140d | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-replacementchainservice-768679140d-public-command-contract |
+| family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a-public-command-contract |
+| family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb-unbounded-platform-scope |
 | family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f | simple tenant-scoped reads | 1 | medium | implemented | implemented | none |
 | family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20 | simple tenant-scoped reads | 2 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unverified-root-call-chain |
-| family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827 | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827-unverified-execution-path |
-| family-platform-admin-bounded-reads-iralertcontroller-791acbf282 | platform-admin bounded reads | 1 | medium | blocked | blocked | blocker-family-platform-admin-bounded-reads-iralertcontroller-791acbf282-unreviewed-scope, blocker-family-platform-admin-bounded-reads-iralertcontroller-791acbf282-unverified-execution-path |
-| family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba | platform-admin bounded reads | 1 | medium | blocked | blocked | blocker-family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba-unreviewed-scope, blocker-family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba-unverified-execution-path |
-| family-platform-admin-bounded-reads-licenseecontroller-8ea4017392 | platform-admin bounded reads | 2 | medium | blocked | blocked | blocker-family-platform-admin-bounded-reads-licenseecontroller-8ea4017392-unreviewed-scope, blocker-family-platform-admin-bounded-reads-licenseecontroller-8ea4017392-unverified-execution-path |
-| family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa | platform-admin bounded reads | 3 | medium | blocked | blocked | blocker-family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa-unreviewed-scope, blocker-family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa-unverified-execution-path |
+| family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827 | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-tracepolicycontroller-9b0e52a827-actor-command-contract |
+| family-split-auditservice-unregistered-audit-reader-bfe36f6eba | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-split-auditservice-unregistered-audit-reader-bfe36f6eba-unregistered-dead-path |
+| family-split-governanceservice-platform-feature-flag-administration-7bb4b15607 | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-split-governanceservice-platform-feature-flag-administration-7bb4b15607-platform-admin-scope-contract |
+| family-split-governanceservice-public-verification-policy-80f0c95935 | simple tenant-scoped reads | 2 | medium | blocked | blocked | blocker-family-split-governanceservice-public-verification-policy-80f0c95935-public-command-contract |
+| family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46 | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46-authentication-bootstrap-scope-model |
+| family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef-incompatible-shared-auth-roots |
+| family-platform-admin-bounded-reads-iralertcontroller-791acbf282 | platform-admin bounded reads | 1 | medium | blocked | blocked | blocker-family-platform-admin-bounded-reads-iralertcontroller-791acbf282-unbounded-platform-scope |
+| family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba | platform-admin bounded reads | 1 | medium | blocked | blocked | blocker-family-platform-admin-bounded-reads-licenseecontroller-7e833e80ba-unbounded-platform-scope |
+| family-platform-admin-bounded-reads-licenseecontroller-8ea4017392 | platform-admin bounded reads | 2 | medium | blocked | blocked | blocker-family-platform-admin-bounded-reads-licenseecontroller-8ea4017392-unbounded-platform-scope |
+| family-split-supportcontroller-platform-support-ticket-read-4ce4ce4858 | platform-admin bounded reads | 2 | medium | blocked | blocked | blocker-family-split-supportcontroller-platform-support-ticket-read-4ce4ce4858-unbounded-platform-scope |
 | family-tenant-scoped-creates-degradationeventservice-07539a2788 | tenant-scoped creates | 1 | medium | blocked | blocked | blocker-family-tenant-scoped-creates-degradationeventservice-07539a2788-mutation-concurrency-proof, blocker-family-tenant-scoped-creates-degradationeventservice-07539a2788-unresolved-boundary, blocker-family-tenant-scoped-creates-degradationeventservice-07539a2788-unreviewed-scope, blocker-family-tenant-scoped-creates-degradationeventservice-07539a2788-unverified-execution-path, blocker-family-tenant-scoped-creates-degradationeventservice-07539a2788-unverified-root-call-chain |
 | family-tenant-scoped-creates-supportworkflowservice-7ea92feec9 | tenant-scoped creates | 1 | medium | blocked | blocked | blocker-family-tenant-scoped-creates-supportworkflowservice-7ea92feec9-mutation-concurrency-proof, blocker-family-tenant-scoped-creates-supportworkflowservice-7ea92feec9-unresolved-boundary, blocker-family-tenant-scoped-creates-supportworkflowservice-7ea92feec9-unreviewed-scope, blocker-family-tenant-scoped-creates-supportworkflowservice-7ea92feec9-unverified-execution-path, blocker-family-tenant-scoped-creates-supportworkflowservice-7ea92feec9-unverified-root-call-chain |
 | family-tenant-scoped-updates-licenseecontroller-7561bbb487 | tenant-scoped updates | 1 | medium | blocked | blocked | blocker-family-tenant-scoped-updates-licenseecontroller-7561bbb487-mutation-concurrency-proof, blocker-family-tenant-scoped-updates-licenseecontroller-7561bbb487-unreviewed-scope, blocker-family-tenant-scoped-updates-licenseecontroller-7561bbb487-unverified-execution-path |
@@ -150,6 +160,7 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 | family-batch-qr-lifecycle-verificationsignedtokenresolver-94121d05ea | batch/QR lifecycle | 1 | high | blocked | blocked | blocker-family-batch-qr-lifecycle-verificationsignedtokenresolver-94121d05ea-unreviewed-scope, blocker-family-batch-qr-lifecycle-verificationsignedtokenresolver-94121d05ea-unverified-execution-path |
 | family-batch-qr-lifecycle-verifyfraudsnapshot-1a282f204b | batch/QR lifecycle | 1 | high | blocked | blocked | blocker-family-batch-qr-lifecycle-verifyfraudsnapshot-1a282f204b-unreviewed-scope, blocker-family-batch-qr-lifecycle-verifyfraudsnapshot-1a282f204b-unverified-execution-path |
 | family-batch-qr-lifecycle-verifyownership-f5c613fe78 | batch/QR lifecycle | 2 | high | blocked | blocked | blocker-family-batch-qr-lifecycle-verifyownership-f5c613fe78-unreviewed-scope, blocker-family-batch-qr-lifecycle-verifyownership-f5c613fe78-unverified-execution-path |
+| family-contract-system-boundary-local-agent-device-claim | print lifecycle | 1 | low | contract-only | contract-ready | system-boundary-local-agent-device-claim |
 | family-print-lifecycle-createprintjobhandler-c2ecbbec09 | print lifecycle | 1 | high | blocked | blocked | blocker-family-print-lifecycle-createprintjobhandler-c2ecbbec09-unreviewed-scope, blocker-family-print-lifecycle-createprintjobhandler-c2ecbbec09-unverified-execution-path |
 | family-print-lifecycle-directprintconfirmationhandlers-7beadaa77a | print lifecycle | 1 | high | blocked | blocked | blocker-family-print-lifecycle-directprintconfirmationhandlers-7beadaa77a-unreviewed-scope, blocker-family-print-lifecycle-directprintconfirmationhandlers-7beadaa77a-unverified-execution-path |
 | family-print-lifecycle-localagentprintermappingservice-5f47f8b38c | print lifecycle | 1 | high | blocked | blocked | blocker-family-print-lifecycle-localagentprintermappingservice-5f47f8b38c-mutation-concurrency-proof, blocker-family-print-lifecycle-localagentprintermappingservice-5f47f8b38c-named-function-prerequisite, blocker-family-print-lifecycle-localagentprintermappingservice-5f47f8b38c-unresolved-boundary, blocker-family-print-lifecycle-localagentprintermappingservice-5f47f8b38c-unreviewed-scope, blocker-family-print-lifecycle-localagentprintermappingservice-5f47f8b38c-unverified-execution-path, blocker-family-print-lifecycle-localagentprintermappingservice-5f47f8b38c-unverified-root-call-chain |
@@ -328,6 +339,8 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 | family-incident-governance-workflows-policyengineservice-b21299e6f9 | incident/governance workflows | 1 | medium | blocked | blocked | blocker-family-incident-governance-workflows-policyengineservice-b21299e6f9-mutation-concurrency-proof, blocker-family-incident-governance-workflows-policyengineservice-b21299e6f9-unresolved-boundary, blocker-family-incident-governance-workflows-policyengineservice-b21299e6f9-unreviewed-scope, blocker-family-incident-governance-workflows-policyengineservice-b21299e6f9-unverified-execution-path, blocker-family-incident-governance-workflows-policyengineservice-b21299e6f9-unverified-root-call-chain |
 | family-incident-governance-workflows-policyruleengineservice-438bdd13eb | incident/governance workflows | 1 | medium | blocked | blocked | blocker-family-incident-governance-workflows-policyruleengineservice-438bdd13eb-mutation-concurrency-proof, blocker-family-incident-governance-workflows-policyruleengineservice-438bdd13eb-unresolved-boundary, blocker-family-incident-governance-workflows-policyruleengineservice-438bdd13eb-unreviewed-scope, blocker-family-incident-governance-workflows-policyruleengineservice-438bdd13eb-unverified-execution-path, blocker-family-incident-governance-workflows-policyruleengineservice-438bdd13eb-unverified-root-call-chain |
 | family-incident-governance-workflows-tracepolicycontroller-e3498294c8 | incident/governance workflows | 1 | medium | blocked | blocked | blocker-family-incident-governance-workflows-tracepolicycontroller-e3498294c8-mutation-concurrency-proof, blocker-family-incident-governance-workflows-tracepolicycontroller-e3498294c8-unreviewed-scope, blocker-family-incident-governance-workflows-tracepolicycontroller-e3498294c8-unverified-execution-path |
+| family-split-auditservice-audit-write-org-resolution-60e107aefa | incident/governance workflows | 1 | high | blocked | blocked | blocker-family-split-auditservice-audit-write-org-resolution-60e107aefa-out-of-scope-shared-mutation-root |
+| family-split-supportcontroller-platform-support-message-mutation-2b4b2be0d0 | incident/governance workflows | 1 | high | blocked | blocked | blocker-family-split-supportcontroller-platform-support-message-mutation-2b4b2be0d0-out-of-scope-mutation-root |
 | family-contract-preauth-fn-consume-email-verification | pre-auth function-backed workflows | 1 | critical | contract-only | contract-ready | preauth-fn-consume-email-verification |
 | family-contract-preauth-fn-consume-invitation | pre-auth function-backed workflows | 1 | critical | contract-only | contract-ready | preauth-fn-consume-invitation |
 | family-contract-preauth-fn-consume-password-reset | pre-auth function-backed workflows | 1 | critical | contract-only | contract-ready | preauth-fn-consume-password-reset |
@@ -335,6 +348,7 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 | family-contract-preauth-fn-lookup-password-user | pre-auth function-backed workflows | 1 | critical | contract-only | contract-ready | preauth-fn-lookup-password-user |
 | family-contract-preauth-fn-record-password-failure | pre-auth function-backed workflows | 1 | critical | contract-only | contract-ready | preauth-fn-record-password-failure |
 | family-contract-preauth-fn-request-password-reset | pre-auth function-backed workflows | 1 | critical | contract-only | contract-ready | preauth-fn-request-password-reset |
+| family-contract-system-boundary-analytics-rollup-worker | worker/scheduled workflows | 1 | low | contract-only | contract-ready | system-boundary-analytics-rollup-worker |
 | family-contract-worker-boundary-audit-outbox-delivery | worker/scheduled workflows | 1 | high | contract-only | contract-ready | worker-boundary-audit-outbox-delivery |
 | family-contract-worker-boundary-scheduled-compliance-packs | worker/scheduled workflows | 1 | high | contract-only | contract-ready | worker-boundary-scheduled-compliance-packs |
 | family-contract-worker-boundary-siem-outbox-delivery | worker/scheduled workflows | 1 | high | contract-only | contract-ready | worker-boundary-siem-outbox-delivery |
@@ -349,15 +363,16 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 
 ## Bounded read-only batch
 
-- Families considered: 23
-- Workflows considered: 31
-- Families implemented: 1
-- Workflows implemented: 1
-- Families retained as blocked: 22
-- Workflows retained as blocked: 30
-- The implemented trace-timeline read installs canonical context before explicit-projection list/count queries on one REPEATABLE READ transaction client.
-- Blocked entries retain the exact root, scope, hidden-mutation or special-boundary evidence needed for their next review.
-- No workflow in this batch is PostgreSQL-certified; disposable database evidence remains required.
+- Families considered: 17
+- Workflows considered: 24
+- Families reclassified: 2
+- Families split: 4
+- Child families created: 8
+- Workflows implemented: 0
+- Workflows retained as blocked: 22
+- Special identities remain contract-only; no human context was synthesized.
+- Split and blocked entries retain exact root, scope, command and product-decision evidence.
+- The four implemented programme workflows remain pending disposable PostgreSQL certification.
 
 ## Shared primitives
 
