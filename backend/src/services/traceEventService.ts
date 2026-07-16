@@ -1,9 +1,93 @@
-import { TraceEventType } from "@prisma/client";
+import { Prisma, TraceEventType, UserRole } from "@prisma/client";
 import prisma from "../config/database";
+import { CanonicalDbContext } from "../lib/canonicalDbContext";
+import { AuthenticatedSessionClaims } from "../types";
 import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
+import { getAdminStepUpWindowMinutes } from "./auth/authService";
+import { redactAuditDetails } from "./auditExportRedactionService";
 
 const backfillState = new Map<string, number>();
 const BACKFILL_COOLDOWN_MS = 5 * 60_000;
+const platformRoles = new Set<UserRole>([UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN]);
+const manufacturerRoles = new Set<UserRole>([UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER]);
+
+export class TraceTimelineAccessError extends Error {
+  constructor(message: string, readonly statusCode = 403) {
+    super(message);
+  }
+}
+
+export type TraceTimelineQuery = {
+  licenseeId?: string;
+  eventType?: TraceEventType;
+  batchId?: string;
+  manufacturerId?: string;
+  qrCodeId?: string;
+  limit: number;
+  offset: number;
+  cursor?: string | null;
+  purpose?: string;
+};
+
+export const buildTraceTimelineBoundary = (
+  user: AuthenticatedSessionClaims,
+  query: TraceTimelineQuery,
+  requestId: string
+): { context: CanonicalDbContext; query: TraceTimelineQuery } => {
+  const userId = String(user?.userId || "").trim();
+  const normalizedRequestId = String(requestId || "").trim();
+  const actorLicenseeId = String(user?.licenseeId || "").trim();
+  const requestedLicenseeId = String(query.licenseeId || "").trim();
+  const requestedManufacturerId = String(query.manufacturerId || "").trim();
+  const isPlatform = platformRoles.has(user?.role);
+  const isManufacturer = manufacturerRoles.has(user?.role);
+  if (!userId || !normalizedRequestId || user?.sessionStage !== "ACTIVE") {
+    throw new TraceTimelineAccessError("Authenticated actor context is required", 401);
+  }
+  if (user.authAssurance !== "PASSWORD" && user.authAssurance !== "ADMIN_MFA") {
+    throw new TraceTimelineAccessError("Unsupported authentication assurance");
+  }
+
+  let licenseeId: string;
+  let manufacturerId = requestedManufacturerId || undefined;
+  if (isPlatform) {
+    if (user.authAssurance !== "ADMIN_MFA") throw new TraceTimelineAccessError("Fresh administrator MFA is required");
+    const verifiedAt = Date.parse(String(user.mfaVerifiedAt || ""));
+    if (!Number.isFinite(verifiedAt) || Date.now() - verifiedAt > getAdminStepUpWindowMinutes() * 60_000) {
+      throw new TraceTimelineAccessError("Fresh administrator MFA is required");
+    }
+    if (!requestedLicenseeId) throw new TraceTimelineAccessError("A bounded licensee scope is required");
+    licenseeId = requestedLicenseeId;
+  } else if (isManufacturer) {
+    const linked = new Set([actorLicenseeId, ...(user.linkedLicenseeIds || [])].map((value) => String(value || "").trim()).filter(Boolean));
+    licenseeId = requestedLicenseeId || actorLicenseeId;
+    if (!licenseeId || !linked.has(licenseeId)) throw new TraceTimelineAccessError("Access denied to this licensee");
+    if (requestedManufacturerId && requestedManufacturerId !== userId) throw new TraceTimelineAccessError("Access denied to this manufacturer");
+    manufacturerId = userId;
+  } else {
+    if (!actorLicenseeId) throw new TraceTimelineAccessError("A tenant scope is required");
+    if (requestedLicenseeId && requestedLicenseeId !== actorLicenseeId) throw new TraceTimelineAccessError("Access denied to this licensee");
+    licenseeId = actorLicenseeId;
+  }
+
+  const purpose = String(query.purpose || (isPlatform ? "" : "trace-timeline-read")).trim();
+  if (!purpose) throw new TraceTimelineAccessError("An explicit trace-read purpose is required");
+  if (purpose.length > 240) throw new TraceTimelineAccessError("Trace-read purpose is too long", 400);
+
+  return {
+    context: {
+      userId,
+      role: String(user.role),
+      organizationId: user.orgId || null,
+      licenseeId,
+      manufacturerId: isManufacturer ? userId : null,
+      authAssurance: user.authAssurance === "ADMIN_MFA" ? "mfa-verified" : "password-verified",
+      requestId: normalizedRequestId,
+      purpose,
+    },
+    query: { ...query, licenseeId, manufacturerId },
+  };
+};
 
 export type TraceEventInput = {
   eventType: TraceEventType;
@@ -205,16 +289,17 @@ export const backfillTraceEventsFromAuditLogs = async (opts?: {
   }
 };
 
-export const getTraceTimeline = async (opts: {
-  licenseeId?: string;
-  eventType?: TraceEventType;
-  batchId?: string;
-  manufacturerId?: string;
-  qrCodeId?: string;
-  limit: number;
-  offset: number;
-  cursor?: string | null;
-}) => {
+export const getTraceTimeline = async (
+  tx: Prisma.TransactionClient,
+  opts: TraceTimelineQuery,
+  context: CanonicalDbContext
+) => {
+  if (!context.licenseeId || opts.licenseeId !== context.licenseeId) {
+    throw new TraceTimelineAccessError("Trace scope does not match canonical context");
+  }
+  if (context.manufacturerId && opts.manufacturerId !== context.manufacturerId) {
+    throw new TraceTimelineAccessError("Manufacturer scope does not match canonical context");
+  }
   const where: any = {};
   if (opts.licenseeId) where.licenseeId = opts.licenseeId;
   if (opts.eventType) where.eventType = opts.eventType;
@@ -232,21 +317,31 @@ export const getTraceTimeline = async (opts: {
   }
 
   const [events, total] = await Promise.all([
-    prisma.traceEvent.findMany({
+    tx.traceEvent.findMany({
       where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: opts.limit,
       skip: opts.cursor ? 0 : opts.offset,
-      include: {
+      select: {
+        id: true,
+        eventType: true,
+        licenseeId: true,
+        batchId: true,
+        qrCodeId: true,
+        manufacturerId: true,
+        userId: true,
+        sourceAction: true,
+        details: true,
+        createdAt: true,
         user: { select: { id: true, name: true, email: true } },
         manufacturer: { select: { id: true, name: true, email: true } },
         batch: { select: { id: true, name: true } },
         qrCode: { select: { id: true, code: true } },
       },
     }),
-    opts.cursor ? Promise.resolve<number | null>(null) : prisma.traceEvent.count({ where }),
+    opts.cursor ? Promise.resolve<number | null>(null) : tx.traceEvent.count({ where }),
   ]);
 
   const nextCursor = events.length === opts.limit ? encodeDateCursor(events[events.length - 1]) : null;
-  return { events, total, nextCursor };
+  return { events: events.map((event) => ({ ...event, details: redactAuditDetails(event.details) })), total, nextCursor };
 };

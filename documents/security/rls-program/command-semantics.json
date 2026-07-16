@@ -68912,13 +68912,16 @@
       "tableId": "table-trace-event",
       "command": "SELECT",
       "actorClasses": [
-        "authenticated-user"
+        "authenticated-user",
+        "manufacturer",
+        "licensee-admin",
+        "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "password-verified",
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "Authenticated tenant actors require their canonical licensee; manufacturers additionally require their own actor ID and one linked licensee; platform administrators require fresh MFA, one explicit licensee and purpose. Filters only narrow scope.",
       "allowedColumns": [
         "batchId",
         "createdAt",
@@ -68944,7 +68947,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
+      "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "ordinary-rls",
@@ -68955,10 +68958,12 @@
         "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline"
       ],
       "supportingEvidence": [
+        "backend/src/routes/index.ts",
+        "backend/src/controllers/tracePolicyController.ts",
         "backend/src/services/traceEventService.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "authenticated-user or manufacturer or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."

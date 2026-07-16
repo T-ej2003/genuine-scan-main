@@ -1,14 +1,16 @@
 import { Response } from "express";
-import { AlertSeverity, NotificationAudience, NotificationChannel, PolicyAlertType, TraceEventType, UserRole } from "@prisma/client";
+import { AlertSeverity, NotificationAudience, NotificationChannel, PolicyAlertType, Prisma, TraceEventType, UserRole } from "@prisma/client";
 import { z } from "zod";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { getTraceTimeline } from "../services/traceEventService";
+import { buildTraceTimelineBoundary, getTraceTimeline, TraceTimelineAccessError } from "../services/traceEventService";
 import { getBatchSlaAnalytics, getRiskAnalytics } from "../services/analyticsService";
 import { getOrCreateSecurityPolicy } from "../services/policyEngineService";
 import { createAuditLog } from "../services/auditService";
 import { buildImmutableBatchAuditPackage } from "../services/immutableAuditExportService";
 import { createRoleNotifications } from "../services/notificationService";
+import { withCanonicalDbContext } from "../lib/canonicalDbContext";
+import { decodeDateCursor } from "../utils/cursorPagination";
 
 const policyUpdateSchema = z
   .object({
@@ -49,6 +51,7 @@ const traceTimelineQuerySchema = z.object({
   batchId: z.string().uuid().optional(),
   manufacturerId: z.string().uuid().optional(),
   qrCodeId: z.string().uuid().optional(),
+  purpose: z.string().trim().min(1).max(240).optional(),
 }).strict();
 
 const batchSlaQuerySchema = z.object({
@@ -89,12 +92,6 @@ const asInt = (value: unknown, fallback: number, min: number, max: number) => {
   return Math.min(Math.max(n, min), max);
 };
 
-const asOptionalString = (value: unknown) => {
-  if (typeof value !== "string") return undefined;
-  const s = value.trim();
-  return s || undefined;
-};
-
 const asOptionalBool = (value: unknown): boolean | undefined => {
   if (typeof value === "boolean") return value;
   if (typeof value !== "string") return undefined;
@@ -131,28 +128,29 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
     const limit = parsed.data.limit ?? 50;
     const offset = parsed.data.offset ?? 0;
     const cursor = parsed.data.cursor;
-    const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
-    const eventType = parsed.data.eventType;
-
-    let manufacturerId = asOptionalString(req.query.manufacturerId);
-    if (
-      req.user.role === UserRole.MANUFACTURER ||
-      req.user.role === UserRole.MANUFACTURER_ADMIN ||
-      req.user.role === UserRole.MANUFACTURER_USER
-    ) {
-      manufacturerId = req.user.userId;
+    if (cursor && !decodeDateCursor(cursor)) {
+      return res.status(400).json({ success: false, error: "Invalid trace cursor" });
     }
-
-    const result = await getTraceTimeline({
-      licenseeId,
+    const eventType = parsed.data.eventType;
+    const query = {
+      licenseeId: parsed.data.licenseeId,
       eventType,
       batchId: parsed.data.batchId,
-      manufacturerId,
+      manufacturerId: parsed.data.manufacturerId,
       qrCodeId: parsed.data.qrCodeId,
       limit,
       offset,
       cursor,
-    });
+      purpose: parsed.data.purpose,
+    };
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+    const boundary = buildTraceTimelineBoundary(req.user, query, requestId);
+    const result = await withCanonicalDbContext(
+      prisma,
+      boundary.context,
+      (tx) => getTraceTimeline(tx, boundary.query, boundary.context),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+    );
 
     return res.json({
       success: true,
@@ -166,6 +164,9 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
       },
     });
   } catch (e) {
+    if (e instanceof TraceTimelineAccessError) {
+      return res.status(e.statusCode).json({ success: false, error: e.message });
+    }
     console.error("getTraceTimelineController error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }

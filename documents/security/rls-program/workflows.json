@@ -1188,6 +1188,26 @@
         },
         {
           "packageFile": "package.json",
+          "name": "rls:context-check",
+          "command": "node scripts/rls/validate-manifests.mjs && node --test scripts/tests/full-database-rls-program.test.mjs"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "rls:context-next",
+          "command": "node scripts/rls/context-boundary-next-family.mjs"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "rls:context-plan",
+          "command": "node scripts/rls/context-boundary-plan.mjs"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "rls:context-status",
+          "command": "node scripts/rls/context-boundary-status.mjs"
+        },
+        {
+          "packageFile": "package.json",
           "name": "security:release-gate",
           "command": "git diff --check && npm --prefix backend run build && node backend/tests/accessControlIsolation.test.js && node backend/tests/tenantIsolationExtended.test.js && node backend/tests/securityResponseSurface.test.js && node backend/tests/securityRouteSurface.test.js && node scripts/check-prisma-scope-guardrails.mjs && node --test scripts/tests/prisma-scope-guardrails.test.mjs && npm --prefix backend run test:trust-critical:compiled && npm run typecheck && npm run build && npm run lint:security-scope"
         },
@@ -12057,13 +12077,13 @@
       "supportingEvidence": [
         {
           "accessId": "access-3600d8039296e7ac",
-          "source": "backend/src/controllers/tracePolicyController.ts:371",
+          "source": "backend/src/controllers/tracePolicyController.ts:372",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
         },
         {
           "accessId": "access-77f8da454fc3882d",
-          "source": "backend/src/controllers/tracePolicyController.ts:360",
+          "source": "backend/src/controllers/tracePolicyController.ts:361",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }
@@ -12136,7 +12156,7 @@
       "supportingEvidence": [
         {
           "accessId": "access-53fbc3b78235ea52",
-          "source": "backend/src/controllers/tracePolicyController.ts:439",
+          "source": "backend/src/controllers/tracePolicyController.ts:440",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }
@@ -12208,13 +12228,13 @@
       "supportingEvidence": [
         {
           "accessId": "access-9aba912d4d4e84ac",
-          "source": "backend/src/controllers/tracePolicyController.ts:331",
+          "source": "backend/src/controllers/tracePolicyController.ts:332",
           "registration": "reachable-from-registered-entrypoint",
           "method": "count"
         },
         {
           "accessId": "access-cda286a36221c918",
-          "source": "backend/src/controllers/tracePolicyController.ts:319",
+          "source": "backend/src/controllers/tracePolicyController.ts:320",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -12285,7 +12305,7 @@
       "supportingEvidence": [
         {
           "accessId": "access-cc65fa8e36dcd281",
-          "source": "backend/src/controllers/tracePolicyController.ts:268",
+          "source": "backend/src/controllers/tracePolicyController.ts:269",
           "registration": "reachable-from-registered-entrypoint",
           "method": "upsert"
         }
@@ -38233,7 +38253,7 @@
       "supportingEvidence": [
         {
           "accessId": "access-dc407597d0c3fad8",
-          "source": "backend/src/services/traceEventService.ts:183",
+          "source": "backend/src/services/traceEventService.ts:267",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -38305,7 +38325,7 @@
       "supportingEvidence": [
         {
           "accessId": "access-3c497ff2225a1169",
-          "source": "backend/src/services/traceEventService.ts:107",
+          "source": "backend/src/services/traceEventService.ts:191",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
         }
@@ -38377,7 +38397,7 @@
       "supportingEvidence": [
         {
           "accessId": "access-3dbdad593f660835",
-          "source": "backend/src/services/traceEventService.ts:138",
+          "source": "backend/src/services/traceEventService.ts:222",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }
@@ -38406,9 +38426,14 @@
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "authenticated-user"
+        "authenticated-user",
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
       ],
       "canonicalSourceFiles": [
+        "backend/src/routes/index.ts",
+        "backend/src/controllers/tracePolicyController.ts",
         "backend/src/services/traceEventService.ts"
       ],
       "tablesTouched": [
@@ -38422,26 +38447,36 @@
           ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "The registered /trace/timeline route supplies an ACTIVE authenticated actor. Tenant actors use their trusted licenseeId; manufacturers use only a linked licensee and their own manufacturer actor ID; platform administrators require fresh MFA, an explicit purpose, and an explicit bounded licenseeId. Query filters may only narrow that scope.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "ACTIVE authenticated request actor and request ID",
+        "trusted nonblank licensee scope",
+        "fresh MFA, purpose, and bounded licensee scope for platform administration"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "An authenticated tenant actor reads trace events for their own licensee within bounded pagination.",
+        "A manufacturer reads only its own events within a verified linked licensee.",
+        "A freshly MFA-verified platform administrator reads one explicit licensee for an explicit purpose.",
+        "Event, batch, QR and manufacturer filters narrow the canonical tenant scope."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Foreign, missing or blank tenant scope is denied.",
+        "A manufacturer cannot select another manufacturer or an unlinked licensee.",
+        "Platform administration without fresh MFA, purpose, request ID or bounded licensee scope is denied.",
+        "A protected query before context installation, through a different/global client, or with a scope inconsistent with list/count is denied.",
+        "Secret-bearing nested detail fields are recursively redacted."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
         "access-85a7267ca4607825",
         "access-d82b039104408003"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "context-boundary-implemented-postgresql-certification-pending",
+      "implementationStatus": "context-boundary-implemented",
       "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
+        "backend/tests/traceTimelineContext.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
@@ -38450,31 +38485,88 @@
       "supportingEvidence": [
         {
           "accessId": "access-85a7267ca4607825",
-          "source": "backend/src/services/traceEventService.ts:235",
+          "source": "backend/src/services/traceEventService.ts:320",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
           "accessId": "access-d82b039104408003",
-          "source": "backend/src/services/traceEventService.ts:247",
+          "source": "backend/src/services/traceEventService.ts:342",
           "registration": "reachable-from-registered-entrypoint",
           "method": "count"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
         "command-trace-event-select-f571cd9ea8dd"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "authenticated-user",
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f",
+      "implementationFiles": [
+        "backend/src/routes/index.ts",
+        "backend/src/controllers/tracePolicyController.ts",
+        "backend/src/services/traceEventService.ts",
+        "backend/src/lib/canonicalDbContext.ts"
+      ],
+      "testFiles": [
+        "backend/tests/traceTimelineContext.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "protectedQueryClient": "transaction-client-only",
+      "consistentReadScopeGuarantee": true,
+      "routeRootVerified": true,
+      "aggregateScopeStatus": "not-applicable",
+      "postgresqlCertificationStatus": "pending",
+      "platformAdminRequiredAssurance": "mfa-verified",
+      "contextBoundaryPlanningEvidence": {
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": true,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true
+      },
+      "resolvedContextBlockerIds": [
+        "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unresolved-boundary",
+        "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unreviewed-scope",
+        "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unverified-execution-path",
+        "blocker-family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f-unverified-root-call-chain"
+      ],
+      "rootCallChainEvidence": [
+        "backend/src/routes/index.ts registers GET /trace/timeline with authenticate, protected-read rate limiting and enforceTenantIsolation before getTraceTimelineController.",
+        "getTraceTimelineController is the only production caller of getTraceTimeline."
+      ],
+      "scopeEvidence": [
+        "authenticate hydrates actor licensee, organization and linked-licensee claims from trusted server-side state.",
+        "enforceTenantIsolation denies foreign requested licensees for non-platform actors.",
+        "buildTraceTimelineBoundary independently fails closed on foreign/blank scope and requires bounded MFA-verified platform access."
+      ],
+      "responseProjection": [
+        "Explicit TraceEvent scalar and named relation projections only.",
+        "Nested details recursively redact secret-bearing keys before serialization."
+      ]
     },
     {
       "id": "workflow-internal-backend-src-services-verification-decision-read-service-ts-list-latest-decision-by-batch-ids",

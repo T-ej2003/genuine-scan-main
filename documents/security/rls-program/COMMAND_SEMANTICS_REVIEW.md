@@ -22,11 +22,11 @@ Rules: 988; workflows mapped: 428/428.
 |---|---:|
 | anonymous | 19 |
 | authenticated-user | 292 |
-| manufacturer | 238 |
+| manufacturer | 239 |
 | operator | 101 |
 | checker | 10 |
-| licensee-admin | 139 |
-| platform-admin | 230 |
+| licensee-admin | 140 |
+| platform-admin | 231 |
 | restricted-read | 16 |
 | pre-auth-runtime | 19 |
 | worker | 5 |
