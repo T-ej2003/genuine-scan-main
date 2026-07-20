@@ -1,0 +1,227 @@
+{
+  "schemaVersion": 2,
+  "mode": "clean-room-expected-after-apply",
+  "rows": [
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "command": "INSERT",
+      "columns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-509547f03abe",
+        "command-audit-log-insert-97535583a8fe"
+      ]
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "command": "SELECT",
+      "columns": [
+        "action",
+        "createdAt",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-select-97535583a8fe"
+      ]
+    },
+    {
+      "tableId": "table-batch",
+      "table": "Batch",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "manufacturerId",
+        "name"
+      ],
+      "sourceCommandRuleIds": [
+        "command-batch-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-incident",
+      "table": "Incident",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-incident-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive",
+        "orgId",
+        "suspendedAt"
+      ],
+      "sourceCommandRuleIds": [
+        "command-licensee-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-manufacturer-licensee-link",
+      "table": "ManufacturerLicenseeLink",
+      "command": "SELECT",
+      "columns": [
+        "licenseeId",
+        "manufacturerId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-manufacturer-licensee-link-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "sourceCommandRuleIds": [
+        "command-organization-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-policy-alert",
+      "table": "PolicyAlert",
+      "command": "SELECT",
+      "columns": [
+        "acknowledgedAt",
+        "batchId",
+        "id",
+        "incidentId",
+        "licenseeId",
+        "manufacturerId",
+        "policyRuleId",
+        "qrCodeId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-policy-alert-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-policy-rule",
+      "table": "PolicyRule",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive",
+        "licenseeId",
+        "manufacturerId",
+        "orgId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-policy-rule-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-qrcode",
+      "table": "QRCode",
+      "command": "SELECT",
+      "columns": [
+        "batchId",
+        "id",
+        "licenseeId",
+        "scanCount"
+      ],
+      "sourceCommandRuleIds": [
+        "command-qrcode-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-qr-scan-log",
+      "table": "QrScanLog",
+      "command": "SELECT",
+      "columns": [
+        "batchId",
+        "id",
+        "latitude",
+        "licenseeId",
+        "longitude",
+        "qrCodeId",
+        "scannedAt"
+      ],
+      "sourceCommandRuleIds": [
+        "command-qr-scan-log-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-security-policy",
+      "table": "SecurityPolicy",
+      "command": "SELECT",
+      "columns": [
+        "geoDriftThresholdKm",
+        "licenseeId",
+        "multiScanThreshold",
+        "velocitySpikeThresholdPerMin"
+      ],
+      "sourceCommandRuleIds": [
+        "command-security-policy-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-trace-event",
+      "table": "TraceEvent",
+      "command": "SELECT",
+      "columns": [
+        "batchId",
+        "createdAt",
+        "details",
+        "eventType",
+        "id",
+        "licenseeId",
+        "manufacturerId",
+        "qrCodeId",
+        "sourceAction",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-trace-event-select-f571cd9ea8dd"
+      ]
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "deletedAt",
+        "disabledAt",
+        "id",
+        "isActive",
+        "licenseeId",
+        "name",
+        "orgId",
+        "role",
+        "status"
+      ],
+      "sourceCommandRuleIds": [
+        "command-user-select-509547f03abe",
+        "command-user-select-97535583a8fe"
+      ]
+    }
+  ],
+  "legacyAclRestoration": false
+}

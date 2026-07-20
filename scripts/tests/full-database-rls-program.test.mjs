@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manufacturerBootstrapBoundaryPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, operatorAdministrationReviewPath, operatorBoundariesPath, parseSchema, platformReadScopeBoundaryPath, policyAlertActorCeilingPath, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, publicReadContractPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, systemBoundariesPath, tableManifestPath, tableOwnershipReviewPath, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validatePublicReadContract, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 import { buildContextBoundaryPlan, contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, contextBoundaryReportPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch, validateSystemBoundaryContracts } from "../rls/context-boundary-plan.mjs";
+import { validateGeneratedPackage } from "../rls/verify-full-rls-package.mjs";
 
 const snapshot = () => [tableManifestPath, workflowManifestPath, commandSemanticsPath, commandSemanticsReviewPath, preAuthFunctionsPath, preAuthBoundaryReviewPath, workerBoundariesPath, workerIdentityReviewPath, objectOwnershipChainPath, objectOwnershipReviewPath, operatorBoundariesPath, operatorAdministrationReviewPath, decisionManifestPath, identityManifestPath, policyDependencyGraphPath, tableOwnershipReviewPath, systemBoundariesPath, manufacturerBootstrapBoundaryPath, platformReadScopeBoundaryPath, policyAlertActorCeilingPath, publicReadContractPath, contextBoundaryFamiliesPath, contextBoundaryReportPath].map((file) => fs.readFileSync(file, "utf8"));
 
@@ -83,12 +84,23 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   validateSystemBoundaryContracts(systemBoundaries, workflows);
   validateContextBoundaryPlan(generated, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract);
   assert.equal(generated.workflowCount, 428);
-  assert.equal(generated.familyCount, 316);
+  assert.equal(generated.familyCount, 318);
   const count = (eligibility) => generated.families.filter((family) => family.automationEligibility === eligibility).reduce((total, family) => total + family.workflowIds.length, 0);
-  assert.equal(count("implemented"), 4);
+  assert.equal(count("implemented"), 5);
   assert.equal(count("contract-only"), 59);
-  assert.equal(count("blocked"), 365);
+  assert.equal(count("blocked"), 364);
   assert.equal(count("auto-implementable"), 0);
+  const mfaDisableWorkflowId = "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa";
+  const mfaDisableFamily = generated.families.find((family) => family.workflowIds.includes(mfaDisableWorkflowId));
+  assert(mfaDisableFamily, "complete MFA disablement lacks an exact family");
+  assert.deepEqual(mfaDisableFamily.protectedTables, [
+    "table-admin-mfa-credential",
+    "table-admin-web-authn-credential",
+    "table-audit-log-outbox",
+    "table-user-backup-code",
+    "table-user-mfa-factor",
+  ]);
+  assert.equal(mfaDisableFamily.workflowIds.length, 1, "MFA disablement is grouped with an incompatible security mutation");
   assert.equal(new Set(generated.families.flatMap((family) => family.workflowIds)).size, workflows.workflows.length);
   const specialWorkflowIds = new Set([
     ...workflows.workflows.filter((workflow) => workflow.preAuthBoundary?.boundaryMode === "exact-security-definer-function"),
@@ -122,6 +134,38 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   reject((candidate) => { const family = candidate.families.find((item) => item.parentFamilyId); family.parentFamilyId = family.id; }, /invalid parent lineage|circular parent lineage/);
   reject((candidate) => { const family = candidate.families.find((item) => item.parentFamilyId); family.semanticEvidence = []; }, /split lacks semantic evidence/);
   reject((candidate, candidateWorkflows) => { const family = candidate.families.find((item) => item.workflowIds.length > 1 && item.parentFamilyId); candidateWorkflows.workflows.find((item) => item.id === family.workflowIds[1]).contextBoundaryFamilySplit.scopeModel = "different scope"; }, /incompatible actor or scope models/);
+
+  const riskWorkflowId = "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics";
+  const riskFamily = generated.families.find((family) => family.id === "family-simple-tenant-scoped-reads-analyticsservice-2c20deef24");
+  const riskWorkflow = workflows.workflows.find((workflow) => workflow.id === riskWorkflowId);
+  assert(riskFamily && riskWorkflow, "risk analytics runtime family evidence");
+  assert.deepEqual(riskFamily.workflowIds, [riskWorkflowId]);
+  assert.equal(riskFamily.automationEligibility, "implemented");
+  assert.deepEqual(riskFamily.actorClasses, ["licensee-admin", "platform-admin"]);
+  assert.deepEqual(riskWorkflow.runtimeImplementedActorClasses, ["licensee-admin", "platform-admin"]);
+  assert.deepEqual(riskWorkflow.runtimeBlockedActorClasses, []);
+  assert.equal(riskWorkflow.platformRuntimeStatus, "implemented-postgresql-pending");
+  assert.deepEqual(riskWorkflow.platformRuntimeBlockers, []);
+  assert.equal(riskWorkflow.platformReadScopeBoundaryId, "platform-read-scope-v1");
+  assert.deepEqual(riskWorkflow.platformReadRequiredAssuranceByActorClass, { "licensee-admin": "password-verified", "platform-admin": "mfa-verified" });
+  assert.deepEqual(riskWorkflow.platformReadPurposeCodes, ["tenant-risk-analytics"]);
+  assert.equal(riskWorkflow.postgresqlCertificationStatus, "pending");
+  assert.equal(riskWorkflow.protectedQueryClient, "transaction-client-only");
+  const riskUserRule = commandSemantics.rules.find((rule) => rule.tableId === "table-user" && rule.supportingWorkflowIds.includes(riskWorkflowId));
+  assert(riskUserRule, "risk analytics User projection command rule");
+  assert.equal(riskUserRule.requiresNamedFunction, false);
+  assert.deepEqual(riskUserRule.actorClasses, ["licensee-admin", "platform-admin"]);
+  assert.deepEqual(riskUserRule.minimumAssuranceByActorClass, { "licensee-admin": "password-verified", "platform-admin": "mfa-verified" });
+  assert.deepEqual(riskUserRule.allowedColumns, ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"]);
+  for (const prohibited of ["email", "pendingEmail", "passwordHash", "metadata", "failedLoginAttempts", "lockedUntil", "emailVerifiedAt"]) {
+    assert(!riskUserRule.allowedColumns.includes(prohibited), `risk analytics exposes prohibited User.${prohibited}`);
+  }
+  assert(!workflows.workflows.some((workflow) => /load-risk-policy|record-risk-analytics-read/.test(workflow.id)), "transaction helpers must remain part of the registered risk workflow");
+  reject((candidate, candidateWorkflows) => {
+    const workflow = candidateWorkflows.workflows.find((item) => item.id === riskWorkflowId);
+    workflow.actorClasses.push("authenticated-user");
+    candidate.families.find((item) => item.id === riskFamily.id).actorClasses.push("authenticated-user");
+  }, /eligibility does not match workflow evidence|actor ceiling|family evidence drifted/);
 });
 
 test("manufacturer bootstrap is actor-bound, minimal, deterministic, and fail closed", () => {
@@ -179,6 +223,10 @@ test("platform read scope is finite, attributed, projected, and fail closed", ()
   reject((boundary) => { boundary.selectorValidation.conflictingSelectorsAccepted = true; }, /conflicting selectors are accepted/);
   reject((boundary) => { boundary.selectorValidation.unsupportedSelectorCombinationsAccepted = true; }, /unsupported selector combinations are accepted/);
   reject((boundary) => { boundary.workflowClassifications.find((item) => item.primaryClass === "tenant-bounded-read").requiredSelectors = []; }, /raw global listing is approved without a specific class/);
+  reject((boundary) => { boundary.workflowClassifications.find((item) => item.workflowId === "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics").requiredAssuranceByActorClass["platform-admin"] = "password-verified"; }, /platform actor lacks fresh MFA/);
+  const riskClassification = platformReadScopeBoundary.workflowClassifications.find((item) => item.workflowId === "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics");
+  assert.deepEqual(riskClassification.blockers, []);
+  assert(riskClassification.runtimeImplementedActorClasses.includes("platform-admin"));
   reject((_boundary, candidateWorkflows) => { delete candidateWorkflows.workflows.find((workflow) => workflow.platformReadScopeBoundaryId).platformReadScopeBoundaryId; }, /lacks platform read-scope boundary ID/);
   reject((_boundary, _workflows, _rules, candidateDecisions) => { candidateDecisions.decisions.find((decision) => decision.id === "decision-context-platform-read-scope").status = "unresolved"; }, /decision is unresolved/);
 });
@@ -307,7 +355,10 @@ test("command semantics mutation guards fail closed", () => {
       }
       assert(!(table.appendOnly && rule.command === "UPDATE" && rule.authorizationBoundary !== "prohibited"), "append-only update");
       if (rule.actorClasses.includes("licensee-admin") && ["User", "Invite"].includes(table.prismaModel) && ["INSERT", "UPDATE"].includes(rule.command)) assert(rule.protectedColumns.includes("role"), "platform role assignable");
-      if (rule.actorClasses.includes("platform-admin")) assert(rule.minimumAssurance !== "none" && rule.requiresAuditEvent, "unconditional platform admin");
+      if (rule.actorClasses.length > 1 || rule.actorClasses.includes("platform-admin")) {
+        assert.deepEqual(Object.keys(rule.minimumAssuranceByActorClass || {}).sort(), [...rule.actorClasses].sort(), "actor assurance missing");
+      }
+      if (rule.actorClasses.includes("platform-admin")) assert(["mfa-verified", "step-up-verified", "operator-approved", "dual-approved-break-glass"].includes(rule.minimumAssuranceByActorClass["platform-admin"]) && rule.requiresAuditEvent, "platform MFA missing");
       if (rule.requiresNamedFunction) assert.notEqual(rule.authorizationBoundary, "ordinary-rls", "named function degraded");
       if (rule.requiresRestrictedWorkerBoundary) assert.equal(rule.authorizationBoundary, "restricted-worker", "worker boundary degraded");
       if (rule.lifecycleColumns.length && rule.authorizationBoundary !== "prohibited") assert(rule.allowedLifecycleStates.length, "lifecycle omitted");
@@ -325,7 +376,8 @@ test("command semantics mutation guards fail closed", () => {
   rejects((rule) => rule.command === "SELECT" && !rule.publicFunctionId && tableById.get(rule.tableId).primaryCategory === "security-sensitive" && tableById.get(rule.tableId).sensitiveColumns.length, (rule) => { rule.allowedColumns.push(tableById.get(rule.tableId).sensitiveColumns[0]); }, /secret selectable/);
   rejects((rule) => rule.command === "SELECT" && tableById.get(rule.tableId).appendOnly, (rule) => { rule.command = "UPDATE"; rule.authorizationBoundary = "ordinary-rls"; }, /append-only update/);
   rejects((rule) => rule.actorClasses.includes("licensee-admin") && ["INSERT", "UPDATE"].includes(rule.command) && ["User", "Invite"].includes(tableById.get(rule.tableId).prismaModel), (rule) => { rule.protectedColumns = rule.protectedColumns.filter((column) => column !== "role"); }, /platform role assignable/);
-  rejects((rule) => rule.actorClasses.includes("platform-admin"), (rule) => { rule.minimumAssurance = "none"; }, /unconditional platform admin/);
+  rejects((rule) => rule.actorClasses.includes("platform-admin"), (rule) => { rule.minimumAssuranceByActorClass["platform-admin"] = "password-verified"; }, /platform MFA missing/);
+  rejects((rule) => rule.actorClasses.length > 1, (rule) => { delete rule.minimumAssuranceByActorClass; }, /actor assurance missing/);
   rejects((rule) => rule.requiresNamedFunction && !rule.requiresRestrictedWorkerBoundary, (rule) => { rule.authorizationBoundary = "ordinary-rls"; }, /named function degraded/);
   rejects((rule) => rule.requiresRestrictedWorkerBoundary && !rule.requiresNamedFunction, (rule) => { rule.authorizationBoundary = "ordinary-rls"; }, /worker boundary degraded/);
   rejects((rule) => rule.lifecycleColumns.length && rule.authorizationBoundary !== "prohibited", (rule) => { rule.allowedLifecycleStates = []; }, /lifecycle omitted/);
@@ -419,7 +471,8 @@ test("object ownership mutation guards fail closed", () => {
   rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-authenticated-app").protectedObjectOwnershipAllowed = true; }, /runtime role receives ownership/);
   rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-authenticated-app").ownerRoleMemberships = ["identity-table-owner"]; }, /runtime role is a member of owner role/);
   rejects((candidate) => { candidate.identities.identities.find((identity) => identity.id === "identity-pre-auth-app").ownerRoleMemberships = ["identity-auth-function-owner"]; }, /runtime role is a member of owner role/);
-  rejects((candidate) => { candidate.objectOwnershipChain.recommendedTransferModel.executorTemporaryMembership.revokedBeforeSuccess = false; }, /revocation step is removed/);
+  rejects((candidate) => { candidate.objectOwnershipChain.recommendedTransferModel.temporaryMembership.revokedBeforeSuccess = false; }, /revocation step is removed/);
+  rejects((candidate) => { candidate.objectOwnershipChain.objectClasses[0].rollbackBehavior = "restore the prior object owner"; }, /retains object-level rollback/);
   rejects((candidate) => { candidate.objectOwnershipChain.schemaOwnershipRules.find((rule) => rule.schema === "public").publicCreate = true; }, /PUBLIC CREATE is restored/);
   rejects((candidate) => { candidate.objectOwnershipChain.schemaOwnershipRules.find((rule) => rule.schema === "app_auth").expectedOwner = "identity-table-owner"; }, /app_auth ownership changes/);
   rejects((candidate) => { candidate.objectOwnershipChain.approvedFunctionOwnerBoundaries.worker[0].securityMode = "DEFINER"; }, /SECURITY INVOKER helper becomes SECURITY DEFINER/);
@@ -469,6 +522,10 @@ test("tests do not inflate production totals and repeated technical calls remain
   const { accesses } = scanProductionAccess();
   assert(accesses.every((item) => !/(?:^|\/)tests?\//.test(item.sourceFile)), "test-only access leaked into production totals");
   const workflows = manifests().workflows.workflows;
+  assert.equal(workflows.length, 428, "frozen workflow inventory drifted");
+  const refreshRotation = workflows.find((workflow) => workflow.id === "workflow-internal-backend-src-services-auth-refresh-token-service-ts-rotate-refresh-token");
+  assert(refreshRotation?.supportingEvidence.some((item) => item.accessId === "access-bad63221832878a6"), "nested refresh revocation escaped its rotation workflow");
+  assert(!workflows.some((workflow) => workflow.id === "workflow-internal-backend-src-services-auth-refresh-token-service-ts-revoke"), "private refresh revocation became a standalone workflow");
   const keys = workflows.map((workflow) => `${workflow.executionSurface}:${workflow.canonicalSourceFiles.join(",")}:${workflow.entryPoint}`);
   assert.equal(new Set(keys).size, keys.length, "duplicate canonical workflows exist");
   assert(workflows.some((workflow) => workflow.supportingEvidence.length > workflow.tablesTouched.length), "technical call sites were not deduplicated");
@@ -575,6 +632,31 @@ test("activation remains manual and the shared-table apply remains blocked", () 
     const file = path.join(repoRoot, "backend/prisma/migrations", migrationDirectory, "migration.sql");
     if (fs.existsSync(file)) assert(!fs.readFileSync(file, "utf8").includes("Shared batch RLS apply blocked"), `${file} embeds the blocked apply`);
   }
+});
+
+test("clean-room full-RLS foundation remains exact and fail closed", () => {
+  const allowlist = JSON.parse(fs.readFileSync(path.join(repoRoot, "documents/security/rls-program/essential-workflow-allowlist.json"), "utf8"));
+  const shutdown = JSON.parse(fs.readFileSync(path.join(repoRoot, "documents/security/rls-program/unsupported-workflow-shutdown.json"), "utf8"));
+  const generated = JSON.parse(fs.readFileSync(path.join(repoRoot, "documents/security/rls-program/generated/full-rls-implementation-manifest.json"), "utf8"));
+  const policies = JSON.parse(fs.readFileSync(path.join(repoRoot, "documents/security/rls-program/generated/policy-inventory-report.json"), "utf8"));
+  const privileges = JSON.parse(fs.readFileSync(path.join(repoRoot, "documents/security/rls-program/generated/column-privilege-report.json"), "utf8"));
+  const commandSemantics = JSON.parse(fs.readFileSync(commandSemanticsPath, "utf8"));
+  assert.equal(allowlist.launchBlocked, true);
+  assert.equal(allowlist.certification.enabledWorkflowCount, 0);
+  assert.deepEqual(allowlist.protectedRouteGate.enabledRoutes, shutdown.enabledProtectedRoutes);
+  assert.equal(generated.tables.length, 77);
+  assert.equal(generated.tables.filter((entry) => entry.rls === "ENABLE AND FORCE").length, 75);
+  assert.equal(generated.tables.filter((entry) => entry.disposition === "migration-only-no-runtime-grant").length, 2);
+  assert.deepEqual(validateGeneratedPackage({ manifest: generated, policies, privileges, commandSemantics }), {
+    tables: 77,
+    forceRlsTargets: 75,
+    policies: 39,
+    directPolicySlices: 34,
+    columnPrivilegeCells: 78,
+  });
+  const platformPolicies = policies.rows.filter((entry) => !entry.internalHelperOnly && entry.actors.includes("platform-admin"));
+  assert(platformPolicies.length > 0);
+  assert(platformPolicies.every((entry) => entry.assurance === "mfa-verified" && ["workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics", "workflow-http-backend-src-controllers-audit-controller-ts-get-logs"].includes(entry.workflowId)));
 });
 
 test("human manifests are present and parseable", () => {

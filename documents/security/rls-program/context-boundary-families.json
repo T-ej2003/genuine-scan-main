@@ -18,7 +18,7 @@
     "backend/prisma/schema.prisma"
   ],
   "workflowCount": 428,
-  "familyCount": 316,
+  "familyCount": 318,
   "baselineImplementedWorkflowIds": [
     "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv",
     "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports",
@@ -147,20 +147,33 @@
       "executionSurfaces": [
         "internal"
       ],
-      "controllerFiles": [],
+      "controllerFiles": [
+        "backend/src/controllers/tracePolicyController.ts"
+      ],
       "serviceFiles": [
         "backend/src/services/analyticsService.ts"
       ],
       "repositoryFiles": [],
       "protectedTables": [
+        "table-audit-log",
         "table-batch",
+        "table-incident",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
         "table-policy-alert",
+        "table-policy-rule",
         "table-qr-scan-log",
-        "table-qrcode"
+        "table-qrcode",
+        "table-security-policy",
+        "table-user"
       ],
       "actorClasses": [
-        "authenticated-user"
+        "licensee-admin",
+        "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -176,13 +189,21 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
+        "command-audit-log-insert-509547f03abe",
         "command-batch-select-509547f03abe",
+        "command-incident-select-509547f03abe",
+        "command-licensee-select-509547f03abe",
+        "command-manufacturer-licensee-link-select-509547f03abe",
+        "command-organization-select-509547f03abe",
         "command-policy-alert-select-509547f03abe",
+        "command-policy-rule-select-509547f03abe",
         "command-qr-scan-log-select-509547f03abe",
-        "command-qrcode-select-509547f03abe"
+        "command-qrcode-select-509547f03abe",
+        "command-security-policy-select-509547f03abe",
+        "command-user-select-509547f03abe"
       ],
       "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "An ACTIVE database-hydrated LICENSEE_ADMIN or ORG_ADMIN uses its nonblank User.licenseeId and User.orgId; a selector may only equal that scope. An ACTIVE database-hydrated platform administrator requires fresh MFA and one requested Licensee that is revalidated with its active Organization in the same transaction. Blank, foreign, inactive or inconsistent scope is denied."
       ],
       "lifecycleStateRequirements": [
         {
@@ -202,6 +223,29 @@
             "lifecycleState=VOIDED",
             "releasedAt=NULL",
             "releasedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-incident-select-509547f03abe",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=NEW",
+            "status=TRIAGED",
+            "status=TRIAGE",
+            "status=INVESTIGATING",
+            "status=CONTAINMENT",
+            "status=ERADICATION",
+            "status=RECOVERY",
+            "status=AWAITING_CUSTOMER",
+            "status=AWAITING_LICENSEE",
+            "status=MITIGATED",
+            "status=RESOLVED",
+            "status=CLOSED",
+            "status=REOPENED",
+            "status=REJECTED_SPAM"
           ],
           "forbidden": []
         },
@@ -241,42 +285,108 @@
             "tokenExpiresAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": []
+        },
+        {
+          "commandRuleId": "command-security-policy-select-509547f03abe",
+          "columns": [
+            "autoBlockEnabled"
+          ],
+          "allowed": [
+            "autoBlockEnabled=false",
+            "autoBlockEnabled=true"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-509547f03abe",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
         }
       ],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
       "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
+      "implementationStrategy": "Retain the reviewed transaction-client-only service and focused contract tests; do not broaden the boundary.",
       "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "low",
-      "automationEligibility": "blocked",
+      "riskLevel": "medium",
+      "automationEligibility": "implemented",
       "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unverified-root-call-chain"
-        }
+      "approvedBoundaryIds": [
+        "platform-read-scope-v1"
       ],
-      "implementationStatus": "blocked",
+      "blockers": [],
+      "implementationStatus": "implemented",
+      "resolvedBlockerIds": [
+        "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unresolved-boundary",
+        "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unreviewed-scope",
+        "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unverified-execution-path",
+        "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unverified-root-call-chain"
+      ],
+      "rootCallChainEvidence": [
+        "authenticate performs exact actor-self User hydration first; tenant scope is database authoritative, while platform scope starts empty and one requested Licensee and Organization are revalidated before tenant data is accepted.",
+        "backend/src/routes/index.ts registers GET /analytics/risk-scores with authenticate, requireAnyAdmin, bounded read limiters and enforceTenantIsolation before getRiskAnalyticsController.",
+        "getRiskAnalyticsController is the only production caller of getRiskAnalytics; tenant and freshly MFA-verified platform paths share the same repeatable-read analytics transaction."
+      ],
+      "scopeEvidence": [
+        "Every populated PolicyAlert batch, QR, manufacturer, incident and policy-rule parent must resolve to the same active canonical tenant before candidate scoring.",
+        "Every protected analytics predicate contains the validated tenant licensee; every scoped tenant Batch forms the bounded candidate set, preserving zero-activity rows, while in-window scans and every unresolved alert supply risk signals.",
+        "Every scan row must prove matching canonical Licensee, QR and Batch parentage before it can affect a ceiling, candidate, dimension or score.",
+        "buildRiskAnalyticsBoundary accepts database-hydrated LICENSEE_ADMIN/ORG_ADMIN claims and fresh-MFA platform claims; platform authority is narrowed to one requested Licensee and its active Organization before analytics data is accepted."
+      ],
+      "implementationFiles": [
+        "backend/src/controllers/tracePolicyController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/routes/index.ts",
+        "backend/src/services/analyticsService.ts"
+      ],
+      "testFiles": [
+        "backend/tests/riskAnalyticsContext.test.js"
+      ],
+      "contextKeys": [
+        "app.auth_assurance",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.organization_id",
+        "app.purpose",
+        "app.request_id",
+        "app.role",
+        "app.user_id"
+      ],
+      "sameTransactionGuarantee": true,
+      "responseProjection": [
+        "Explicit tenant-safe batch and manufacturer aggregate fields; User.id/name are the only returned manufacturer fields, while role/licenseeId/orgId/isActive/status/deletedAt/disabledAt are actor/scope/predicate validation columns and are never serialized. Email, password, token, MFA, WebAuthn, recovery, metadata and platform-security fields remain unreadable.",
+        "Risk rows are deterministically ordered by score and stable ID; policy thresholds and bounded result summaries only."
+      ],
+      "allowScenarios": [
+        "A database-hydrated LICENSEE_ADMIN or ORG_ADMIN reads bounded risk analytics for its active licensee and organization.",
+        "A database-hydrated platform administrator with fresh MFA reads one requested active licensee after its Licensee and Organization are revalidated in the same attributed transaction.",
+        "An optional query licensee equal to canonical scope narrows nothing and is accepted.",
+        "Batch, QR, scan-log, alert and policy reads share the same licensee and bounded lookback snapshot.",
+        "The immutable RISK_ANALYTICS_READ attribution commits in the same transaction before serialization."
+      ],
+      "denyScenarios": [
+        "A platform actor with blank, malformed, foreign, inactive, suspended or organization-inconsistent selector scope is denied before analytics or RISK_ANALYTICS_READ attribution.",
+        "A protected query before context, global Prisma use, unbounded input, inconsistent tenant predicate, nested User projection or non-atomic attribution is denied.",
+        "Blank, missing, foreign, inactive, suspended or organization-inconsistent scope is denied.",
+        "Out-of-range date/page inputs and context purpose, actor, assurance or scope mismatch are denied before analytics reads.",
+        "Password-only or stale-MFA platform, manufacturer, anonymous, inactive-session or unsupported-role actors are denied."
+      ],
+      "postgresqlCertificationStatus": [
+        "pending"
+      ],
       "changeSizeGuard": {
         "maximumProductionFiles": 15,
         "maximumTestFiles": 10,
@@ -306,6 +416,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -336,16 +448,10 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-auditcontroller-627bac35ff-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-auditcontroller-627bac35ff-unverified-execution-path"
+          "code": "incompatible-read-mutation-root",
+          "reason": "POST /audit/fraud-reports/:id/respond is a platform-admin mutation: it reads a report through global Prisma, appends a response audit record through another global client path, and constructs a customer-delivery side effect. It lacks one bounded licensee/purpose context, transaction-client propagation, immutable ownership guards, idempotency and concurrency enforcement.",
+          "remediation": "Move this workflow to a focused platform mutation batch: require one database-validated licensee/report scope and purpose, then perform report lookup, compare-and-set/idempotency, immutable response attribution and durable delivery enqueue in one canonical transaction with focused replay/concurrency tests.",
+          "id": "blocker-family-simple-tenant-scoped-reads-auditcontroller-627bac35ff-incompatible-read-mutation-root"
         }
       ],
       "implementationStatus": "blocked",
@@ -376,6 +482,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -456,6 +564,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -522,6 +632,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -605,6 +717,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -700,6 +814,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -768,6 +884,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -840,6 +958,8 @@
         "manufacturer",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -957,6 +1077,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -1041,6 +1163,8 @@
       "actorClasses": [
         "licensee-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -1120,6 +1244,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -1194,6 +1320,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -1285,6 +1413,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -1342,83 +1472,6 @@
       }
     },
     {
-      "id": "family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46",
-      "category": "simple tenant-scoped reads",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "parentFamilyId": "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
-      "splitReason": "Separate minimal linked-licensee ID hydration from richer link/detail projections.",
-      "semanticEvidence": [
-        "hydrateTenantIfNeeded supplies its transaction client after JWT verification; fallback application callers may not."
-      ],
-      "routeRoots": [
-        "hydrateTenantIfNeeded supplies its transaction client after JWT verification; fallback application callers may not."
-      ],
-      "protectedTableBoundary": "ManufacturerLicenseeLink actor-bound ID projection",
-      "commandSemantics": "Password-verified actor-only SELECT with explicit projection, maximum 100 eligible links, deterministic ordering and same-transaction attribution; no blank tenant wildcard.",
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/manufacturerScopeService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-manufacturer-licensee-link"
-      ],
-      "actorClasses": [
-        "manufacturer"
-      ],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-manufacturer-licensee-link-select-1d1bc0babd5d"
-      ],
-      "tenantScopeModel": [
-        "Database-verified manufacturer User.id is actor authority; eligible link rows are the bounded result, and licensee/organization context is installed only after server verification selects one link."
-      ],
-      "lifecycleStateRequirements": [],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
-      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "low",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "approvedBoundaryIds": [
-        "manufacturer-bootstrap-post-password-actor"
-      ],
-      "blockers": [
-        {
-          "code": "manufacturer-bootstrap-runtime-pending",
-          "reason": "The actor bootstrap contract is resolved, but the current helper still permits global Prisma, catch-to-empty fallback and claim-carried membership reuse.",
-          "remediation": "Implement the transaction-client-only actor-context repository and its deterministic membership, projection, attribution and denial tests in a focused runtime batch.",
-          "id": "blocker-family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46-manufacturer-bootstrap-runtime-pending"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
@@ -1450,6 +1503,8 @@
         "manufacturer",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -1517,6 +1572,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "step-up-verified"
@@ -1585,6 +1642,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -1662,6 +1721,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -1739,6 +1800,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -1817,6 +1880,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -1914,6 +1979,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -2004,6 +2071,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -2092,6 +2161,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -2170,6 +2241,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -2308,6 +2381,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -2441,6 +2516,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -2576,6 +2653,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -2676,6 +2755,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -2778,6 +2859,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -2912,6 +2995,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -3027,6 +3112,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -3131,6 +3218,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -3348,6 +3437,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -3473,6 +3564,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -3587,6 +3680,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -3690,6 +3785,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -3850,6 +3947,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -3951,6 +4050,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -4059,6 +4160,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -4171,6 +4274,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -4268,6 +4373,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -4356,6 +4463,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -4432,6 +4541,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -4520,6 +4631,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -4609,6 +4722,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "step-up-verified"
@@ -4677,6 +4792,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -4766,6 +4883,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -4858,6 +4977,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -4983,6 +5104,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -5115,6 +5238,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -5251,6 +5376,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -5363,6 +5490,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -5554,6 +5683,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -5686,6 +5817,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -5889,6 +6022,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -6018,6 +6153,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -6121,6 +6258,8 @@
       "actorClasses": [
         "checker"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -6224,6 +6363,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -6344,6 +6485,8 @@
         "authenticated-user",
         "checker"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -6508,6 +6651,8 @@
         "authenticated-user",
         "checker"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -6659,6 +6804,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -6778,6 +6925,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -6938,6 +7087,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -7042,6 +7193,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -7147,6 +7300,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -7281,6 +7436,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -7443,6 +7600,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "step-up-verified"
@@ -7603,6 +7762,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -7734,6 +7895,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -7859,6 +8022,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -7996,6 +8161,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -8146,6 +8313,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -8280,6 +8449,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -8414,6 +8585,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -9058,6 +9231,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -9209,6 +9384,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -9317,6 +9494,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -9486,6 +9665,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "step-up-verified"
@@ -9599,6 +9780,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -9691,6 +9874,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -9811,6 +9996,8 @@
       "actorClasses": [
         "checker"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "step-up-verified"
@@ -9904,6 +10091,8 @@
       "actorClasses": [
         "licensee-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -10103,6 +10292,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -10205,6 +10396,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -10340,6 +10533,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -10539,6 +10734,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -10704,6 +10901,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -10816,6 +11015,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -10948,6 +11149,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -11038,6 +11241,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -11195,6 +11400,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -11289,6 +11496,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -11453,6 +11662,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -11602,6 +11813,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -11706,6 +11919,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -11810,6 +12025,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -11947,6 +12164,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -12121,6 +12340,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -12250,6 +12471,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -12355,6 +12578,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -12457,6 +12682,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -12590,6 +12817,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -12722,6 +12951,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -12810,6 +13041,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -12925,6 +13158,8 @@
         "authenticated-user",
         "checker"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -13034,6 +13269,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -13130,6 +13367,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -13265,6 +13504,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -13365,6 +13606,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -13460,6 +13703,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -13592,6 +13837,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -13686,6 +13933,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -13765,6 +14014,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -13873,6 +14124,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -13949,6 +14202,8 @@
       "actorClasses": [
         "device"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "pending-device-claim-runtime-contract",
       "requiredAssurance": [
         "signed-device-request"
@@ -14035,6 +14290,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "step-up-verified"
@@ -14162,6 +14419,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "step-up-verified"
@@ -14267,6 +14526,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -14401,6 +14662,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -14556,6 +14819,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -14824,6 +15089,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -14951,6 +15218,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -15177,6 +15446,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -15577,6 +15848,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -15794,6 +16067,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -15924,6 +16199,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -16217,6 +16494,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -16378,6 +16657,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -16544,6 +16825,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -16821,6 +17104,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -16938,6 +17223,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -17088,6 +17375,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -17290,6 +17579,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -17464,6 +17755,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -17605,6 +17898,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -17730,6 +18025,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -17843,6 +18140,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -18029,6 +18328,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -18466,6 +18767,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -18715,6 +19018,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -18838,6 +19143,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -19000,6 +19307,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -19148,6 +19457,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -19261,6 +19572,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -19357,6 +19670,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -19498,6 +19813,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -19600,6 +19917,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -19750,6 +20069,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -19954,6 +20275,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -20085,6 +20408,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -20187,6 +20512,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -20284,6 +20611,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -20408,6 +20737,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -20562,6 +20893,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -20767,6 +21100,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -20881,6 +21216,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -20998,6 +21335,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -21158,6 +21497,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -21273,6 +21614,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -21405,6 +21748,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -21632,6 +21977,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -22276,6 +22623,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -22388,6 +22737,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -22548,6 +22899,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -22665,6 +23018,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -22786,6 +23141,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -23013,6 +23370,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -23218,6 +23577,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -23307,6 +23668,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -23469,6 +23832,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -23572,6 +23937,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -23704,6 +24071,8 @@
       "actorClasses": [
         "checker"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -23810,6 +24179,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -24016,6 +24387,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -24316,6 +24689,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -24504,6 +24879,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -24606,6 +24983,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -24712,6 +25091,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "step-up-verified"
@@ -24878,6 +25259,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -25031,6 +25414,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -25127,6 +25512,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -25221,6 +25608,97 @@
       }
     },
     {
+      "id": "family-account-and-security-mutations-authadminsecuritycontroller-b45b6347a3",
+      "category": "account and security mutations",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-complete-admin-mfa-challenge-controller"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "http"
+      ],
+      "controllerFiles": [
+        "backend/src/controllers/authAdminSecurityController.ts"
+      ],
+      "serviceFiles": [],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-audit-log-outbox"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-audit-log-outbox-insert-0b4b95c51d1e"
+      ],
+      "tenantScopeModel": [
+        "approved-system boundary from tables.json; empty or forged context is denied."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-0b4b95c51d1e",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        }
+      ],
+      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "critical",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "mutation-concurrency-proof",
+          "reason": "The mutation lacks family-level database concurrency and replay proof.",
+          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
+          "id": "blocker-family-account-and-security-mutations-authadminsecuritycontroller-b45b6347a3-mutation-concurrency-proof"
+        },
+        {
+          "code": "unreviewed-scope",
+          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
+          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
+          "id": "blocker-family-account-and-security-mutations-authadminsecuritycontroller-b45b6347a3-unreviewed-scope"
+        },
+        {
+          "code": "unverified-execution-path",
+          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
+          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
+          "id": "blocker-family-account-and-security-mutations-authadminsecuritycontroller-b45b6347a3-unverified-execution-path"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-account-and-security-mutations-authcontroller-4c176fcd6f",
       "category": "account and security mutations",
       "workflowIds": [
@@ -25241,6 +25719,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -25336,6 +25816,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -25437,6 +25919,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -25523,7 +26007,7 @@
       "id": "family-account-and-security-mutations-authservice-34dbfd41c2",
       "category": "account and security mutations",
       "workflowIds": [
-        "workflow-internal-backend-src-services-auth-auth-service-ts-issue-session-for-user",
+        "workflow-internal-backend-src-services-auth-auth-service-ts-load-active-session-state",
         "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
       ],
       "reclassifiedFromFamilyIds": [],
@@ -25541,6 +26025,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -25557,7 +26043,7 @@
       ],
       "readWriteCommandRuleIds": [
         "command-user-select-65b85bc0759d",
-        "command-user-select-d8e5bdf36b53"
+        "command-user-select-def90113be13"
       ],
       "tenantScopeModel": [
         "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
@@ -25582,7 +26068,7 @@
           "forbidden": []
         },
         {
-          "commandRuleId": "command-user-select-d8e5bdf36b53",
+          "commandRuleId": "command-user-select-def90113be13",
           "columns": [
             "deletedAt",
             "disabledAt",
@@ -25667,6 +26153,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -25764,6 +26252,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -25873,7 +26363,7 @@
       "id": "family-account-and-security-mutations-backupcodemfaprovider-7734b03e7e",
       "category": "account and security mutations",
       "workflowIds": [
-        "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-replace-user-backup-codes"
+        "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-replace-user-backup-codes-with-client"
       ],
       "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
@@ -25890,6 +26380,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -25905,15 +26397,15 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-user-backup-code-delete-4d336fb890ba",
-        "command-user-backup-code-insert-4d336fb890ba"
+        "command-user-backup-code-delete-fcba06b77bbf",
+        "command-user-backup-code-insert-fcba06b77bbf"
       ],
       "tenantScopeModel": [
         "table-user-backup-code row must join through table-user on userId=id; no alternative parent."
       ],
       "lifecycleStateRequirements": [
         {
-          "commandRuleId": "command-user-backup-code-delete-4d336fb890ba",
+          "commandRuleId": "command-user-backup-code-delete-fcba06b77bbf",
           "columns": [
             "usedAt"
           ],
@@ -25926,7 +26418,7 @@
           ]
         },
         {
-          "commandRuleId": "command-user-backup-code-insert-4d336fb890ba",
+          "commandRuleId": "command-user-backup-code-insert-fcba06b77bbf",
           "columns": [
             "usedAt"
           ],
@@ -26011,6 +26503,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -26157,6 +26651,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -26288,6 +26784,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -26393,6 +26891,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -26503,6 +27003,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -26620,6 +27122,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -26769,6 +27273,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -26890,6 +27396,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -27011,6 +27519,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -27125,6 +27635,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -27280,6 +27792,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -27398,6 +27912,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -27560,6 +28076,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -27783,6 +28301,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -27893,6 +28413,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -28001,6 +28523,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -28126,6 +28650,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -28315,6 +28841,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -28448,6 +28976,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -28534,6 +29064,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -28644,6 +29176,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -28811,6 +29345,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -28908,6 +29444,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -29041,6 +29579,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -29161,6 +29701,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -29358,6 +29900,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -29442,6 +29986,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -29525,6 +30071,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -29597,6 +30145,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -29724,6 +30274,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -29872,6 +30424,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -29970,6 +30524,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -30076,11 +30632,500 @@
       }
     },
     {
+      "id": "family-account-and-security-mutations-mfaadapter-0829cccd99",
+      "category": "account and security mutations",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/auth/mfaAdapter.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-audit-log-outbox",
+        "table-mfa-login-challenge"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-bootstrap"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-audit-log-outbox-insert-986a6bc31b69",
+        "command-mfa-login-challenge-select-986a6bc31b69",
+        "command-mfa-login-challenge-update-986a6bc31b69"
+      ],
+      "tenantScopeModel": [
+        "approved-system boundary from tables.json; empty or forged context is denied.",
+        "table-mfa-login-challenge row must join through table-user on userId=id; no alternative parent."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-986a6bc31b69",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-mfa-login-challenge-select-986a6bc31b69",
+          "columns": [
+            "consumedAt",
+            "expiresAt"
+          ],
+          "allowed": [
+            "consumedAt=NULL",
+            "consumedAt=SERVER_TIMESTAMP_SET",
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-mfa-login-challenge-update-986a6bc31b69",
+          "columns": [
+            "consumedAt",
+            "expiresAt"
+          ],
+          "allowed": [
+            "consumedAt=NULL",
+            "consumedAt=SERVER_TIMESTAMP_SET",
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        }
+      ],
+      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "critical",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "mutation-concurrency-proof",
+          "reason": "The mutation lacks family-level database concurrency and replay proof.",
+          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
+          "id": "blocker-family-account-and-security-mutations-mfaadapter-0829cccd99-mutation-concurrency-proof"
+        },
+        {
+          "code": "unreviewed-scope",
+          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
+          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
+          "id": "blocker-family-account-and-security-mutations-mfaadapter-0829cccd99-unreviewed-scope"
+        },
+        {
+          "code": "unverified-execution-path",
+          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
+          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
+          "id": "blocker-family-account-and-security-mutations-mfaadapter-0829cccd99-unverified-execution-path"
+        },
+        {
+          "code": "unverified-root-call-chain",
+          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
+          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
+          "id": "blocker-family-account-and-security-mutations-mfaadapter-0829cccd99-unverified-root-call-chain"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-account-and-security-mutations-mfaadapter-16c125afd2",
+      "category": "account and security mutations",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-auth-mfa-adapter-ts-begin-totp-mfa-enrollment",
+        "workflow-internal-backend-src-services-auth-mfa-adapter-ts-confirm-totp-mfa-enrollment"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/auth/mfaAdapter.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
+        "table-audit-log-outbox",
+        "table-user-backup-code",
+        "table-user-mfa-factor"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified",
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-admin-mfa-credential-insert-19248b1c58f5",
+        "command-admin-mfa-credential-select-19248b1c58f5",
+        "command-admin-mfa-credential-select-62fc51366420",
+        "command-admin-mfa-credential-update-19248b1c58f5",
+        "command-admin-mfa-credential-update-62fc51366420",
+        "command-admin-web-authn-credential-select-19248b1c58f5",
+        "command-admin-web-authn-credential-select-62fc51366420",
+        "command-audit-log-outbox-insert-62fc51366420",
+        "command-user-backup-code-delete-62fc51366420",
+        "command-user-backup-code-insert-19248b1c58f5",
+        "command-user-backup-code-insert-62fc51366420",
+        "command-user-mfa-factor-delete-19248b1c58f5",
+        "command-user-mfa-factor-insert-19248b1c58f5",
+        "command-user-mfa-factor-select-19248b1c58f5",
+        "command-user-mfa-factor-select-62fc51366420",
+        "command-user-mfa-factor-update-19248b1c58f5",
+        "command-user-mfa-factor-update-62fc51366420"
+      ],
+      "tenantScopeModel": [
+        "approved-system boundary from tables.json; empty or forged context is denied.",
+        "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent.",
+        "table-admin-web-authn-credential row must join through table-user on userId=id; no alternative parent.",
+        "table-user-backup-code row must join through table-user on userId=id; no alternative parent.",
+        "table-user-mfa-factor row must join through table-user on userId=id; no alternative parent."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-admin-mfa-credential-insert-19248b1c58f5",
+          "columns": [
+            "isEnabled",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "isEnabled=false",
+            "lastUsedAt=NULL_OR_SERVER_INITIALIZED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-admin-mfa-credential-select-19248b1c58f5",
+          "columns": [
+            "isEnabled",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "isEnabled=false",
+            "isEnabled=true",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-admin-mfa-credential-select-62fc51366420",
+          "columns": [
+            "isEnabled",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "isEnabled=false",
+            "isEnabled=true",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-admin-mfa-credential-update-19248b1c58f5",
+          "columns": [
+            "isEnabled",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "isEnabled=false",
+            "isEnabled=true",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        },
+        {
+          "commandRuleId": "command-admin-mfa-credential-update-62fc51366420",
+          "columns": [
+            "isEnabled",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "isEnabled=false",
+            "isEnabled=true",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        },
+        {
+          "commandRuleId": "command-admin-web-authn-credential-select-19248b1c58f5",
+          "columns": [
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-admin-web-authn-credential-select-62fc51366420",
+          "columns": [
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-62fc51366420",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-backup-code-delete-62fc51366420",
+          "columns": [
+            "usedAt"
+          ],
+          "allowed": [
+            "usedAt=NULL",
+            "usedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "LEGAL_HOLD_OR_UNSATISFIED_PARENT_LIFECYCLE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-backup-code-insert-19248b1c58f5",
+          "columns": [
+            "usedAt"
+          ],
+          "allowed": [
+            "usedAt=NULL_OR_SERVER_INITIALIZED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-backup-code-insert-62fc51366420",
+          "columns": [
+            "usedAt"
+          ],
+          "allowed": [
+            "usedAt=NULL_OR_SERVER_INITIALIZED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-mfa-factor-delete-19248b1c58f5",
+          "columns": [
+            "disabledAt",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "LEGAL_HOLD_OR_UNSATISFIED_PARENT_LIFECYCLE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-mfa-factor-insert-19248b1c58f5",
+          "columns": [
+            "disabledAt",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "disabledAt=NULL_OR_SERVER_INITIALIZED",
+            "lastUsedAt=NULL_OR_SERVER_INITIALIZED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-mfa-factor-select-19248b1c58f5",
+          "columns": [
+            "disabledAt",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-mfa-factor-select-62fc51366420",
+          "columns": [
+            "disabledAt",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-mfa-factor-update-19248b1c58f5",
+          "columns": [
+            "disabledAt",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-mfa-factor-update-62fc51366420",
+          "columns": [
+            "disabledAt",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        }
+      ],
+      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "critical",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "mutation-concurrency-proof",
+          "reason": "The mutation lacks family-level database concurrency and replay proof.",
+          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
+          "id": "blocker-family-account-and-security-mutations-mfaadapter-16c125afd2-mutation-concurrency-proof"
+        },
+        {
+          "code": "named-function-prerequisite",
+          "reason": "At least one command rule requires a named function boundary.",
+          "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
+          "id": "blocker-family-account-and-security-mutations-mfaadapter-16c125afd2-named-function-prerequisite"
+        },
+        {
+          "code": "unresolved-boundary",
+          "reason": "The workflow authorization-boundary type is unresolved.",
+          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
+          "id": "blocker-family-account-and-security-mutations-mfaadapter-16c125afd2-unresolved-boundary"
+        },
+        {
+          "code": "unreviewed-scope",
+          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
+          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
+          "id": "blocker-family-account-and-security-mutations-mfaadapter-16c125afd2-unreviewed-scope"
+        },
+        {
+          "code": "unverified-execution-path",
+          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
+          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
+          "id": "blocker-family-account-and-security-mutations-mfaadapter-16c125afd2-unverified-execution-path"
+        },
+        {
+          "code": "unverified-root-call-chain",
+          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
+          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
+          "id": "blocker-family-account-and-security-mutations-mfaadapter-16c125afd2-unverified-root-call-chain"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-account-and-security-mutations-mfaadapter-36d6a1ee12",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-get-admin-mfa-adapter-status",
-        "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-mfa-code-with-adapter"
+        "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-mfa-code-with-client"
       ],
       "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
@@ -30100,6 +31145,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -30116,10 +31163,10 @@
       ],
       "readWriteCommandRuleIds": [
         "command-admin-mfa-credential-select-1f3181acb5d1",
-        "command-admin-mfa-credential-select-a427b28f2ce4",
+        "command-admin-mfa-credential-select-528a31845fa4",
         "command-admin-web-authn-credential-select-1f3181acb5d1",
         "command-user-backup-code-select-1f3181acb5d1",
-        "command-user-backup-code-select-a427b28f2ce4",
+        "command-user-backup-code-select-528a31845fa4",
         "command-user-mfa-factor-select-1f3181acb5d1"
       ],
       "tenantScopeModel": [
@@ -30144,7 +31191,7 @@
           "forbidden": []
         },
         {
-          "commandRuleId": "command-admin-mfa-credential-select-a427b28f2ce4",
+          "commandRuleId": "command-admin-mfa-credential-select-528a31845fa4",
           "columns": [
             "isEnabled",
             "lastUsedAt"
@@ -30180,7 +31227,7 @@
           "forbidden": []
         },
         {
-          "commandRuleId": "command-user-backup-code-select-a427b28f2ce4",
+          "commandRuleId": "command-user-backup-code-select-528a31845fa4",
           "columns": [
             "usedAt"
           ],
@@ -30272,6 +31319,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-bootstrap"
@@ -30349,199 +31398,9 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-mfaadapter-99b35b897d",
-      "category": "account and security mutations",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-auth-mfa-adapter-ts-begin-totp-mfa-enrollment"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-admin-mfa-credential",
-        "table-user-backup-code",
-        "table-user-mfa-factor"
-      ],
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "mfa-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-admin-mfa-credential-insert-19248b1c58f5",
-        "command-admin-mfa-credential-update-19248b1c58f5",
-        "command-user-backup-code-delete-19248b1c58f5",
-        "command-user-backup-code-insert-19248b1c58f5",
-        "command-user-mfa-factor-delete-19248b1c58f5",
-        "command-user-mfa-factor-insert-19248b1c58f5"
-      ],
-      "tenantScopeModel": [
-        "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent.",
-        "table-user-backup-code row must join through table-user on userId=id; no alternative parent.",
-        "table-user-mfa-factor row must join through table-user on userId=id; no alternative parent."
-      ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-admin-mfa-credential-insert-19248b1c58f5",
-          "columns": [
-            "isEnabled",
-            "lastUsedAt"
-          ],
-          "allowed": [
-            "isEnabled=false",
-            "lastUsedAt=NULL_OR_SERVER_INITIALIZED"
-          ],
-          "forbidden": [
-            "CLIENT_SELECTED_INITIAL_STATE"
-          ]
-        },
-        {
-          "commandRuleId": "command-admin-mfa-credential-update-19248b1c58f5",
-          "columns": [
-            "isEnabled",
-            "lastUsedAt"
-          ],
-          "allowed": [
-            "isEnabled=false",
-            "isEnabled=true",
-            "lastUsedAt=NULL",
-            "lastUsedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": [
-            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
-          ]
-        },
-        {
-          "commandRuleId": "command-user-backup-code-delete-19248b1c58f5",
-          "columns": [
-            "usedAt"
-          ],
-          "allowed": [
-            "usedAt=NULL",
-            "usedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": [
-            "LEGAL_HOLD_OR_UNSATISFIED_PARENT_LIFECYCLE"
-          ]
-        },
-        {
-          "commandRuleId": "command-user-backup-code-insert-19248b1c58f5",
-          "columns": [
-            "usedAt"
-          ],
-          "allowed": [
-            "usedAt=NULL_OR_SERVER_INITIALIZED"
-          ],
-          "forbidden": [
-            "CLIENT_SELECTED_INITIAL_STATE"
-          ]
-        },
-        {
-          "commandRuleId": "command-user-mfa-factor-delete-19248b1c58f5",
-          "columns": [
-            "disabledAt",
-            "lastUsedAt"
-          ],
-          "allowed": [
-            "disabledAt=NULL",
-            "disabledAt=SERVER_TIMESTAMP_SET",
-            "lastUsedAt=NULL",
-            "lastUsedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": [
-            "LEGAL_HOLD_OR_UNSATISFIED_PARENT_LIFECYCLE"
-          ]
-        },
-        {
-          "commandRuleId": "command-user-mfa-factor-insert-19248b1c58f5",
-          "columns": [
-            "disabledAt",
-            "lastUsedAt"
-          ],
-          "allowed": [
-            "disabledAt=NULL_OR_SERVER_INITIALIZED",
-            "lastUsedAt=NULL_OR_SERVER_INITIALIZED"
-          ],
-          "forbidden": [
-            "CLIENT_SELECTED_INITIAL_STATE"
-          ]
-        }
-      ],
-      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
-      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
-      "riskLevel": "critical",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "mutation-concurrency-proof",
-          "reason": "The mutation lacks family-level database concurrency and replay proof.",
-          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
-          "id": "blocker-family-account-and-security-mutations-mfaadapter-99b35b897d-mutation-concurrency-proof"
-        },
-        {
-          "code": "named-function-prerequisite",
-          "reason": "At least one command rule requires a named function boundary.",
-          "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-mfaadapter-99b35b897d-named-function-prerequisite"
-        },
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-account-and-security-mutations-mfaadapter-99b35b897d-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-mfaadapter-99b35b897d-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-mfaadapter-99b35b897d-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-mfaadapter-99b35b897d-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-account-and-security-mutations-mfaadapter-a0380c2d48",
       "category": "account and security mutations",
       "workflowIds": [
-        "workflow-internal-backend-src-services-auth-mfa-adapter-ts-record-failure",
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-rotate-mfa-backup-codes-with-adapter"
       ],
       "reclassifiedFromFamilyIds": [],
@@ -30554,12 +31413,13 @@
       ],
       "repositoryFiles": [],
       "protectedTables": [
-        "table-admin-mfa-credential",
-        "table-mfa-login-challenge"
+        "table-admin-mfa-credential"
       ],
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -30575,12 +31435,10 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-admin-mfa-credential-update-62c7e75a1df0",
-        "command-mfa-login-challenge-update-0767280f618f"
+        "command-admin-mfa-credential-update-62c7e75a1df0"
       ],
       "tenantScopeModel": [
-        "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent.",
-        "table-mfa-login-challenge row must join through table-user on userId=id; no alternative parent."
+        "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent."
       ],
       "lifecycleStateRequirements": [
         {
@@ -30594,22 +31452,6 @@
             "isEnabled=true",
             "lastUsedAt=NULL",
             "lastUsedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": [
-            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
-          ]
-        },
-        {
-          "commandRuleId": "command-mfa-login-challenge-update-0767280f618f",
-          "columns": [
-            "consumedAt",
-            "expiresAt"
-          ],
-          "allowed": [
-            "consumedAt=NULL",
-            "consumedAt=SERVER_TIMESTAMP_SET",
-            "expiresAt=NULL",
-            "expiresAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": [
             "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
@@ -30672,7 +31514,6 @@
       "id": "family-account-and-security-mutations-mfaadapter-cfcb2970c9",
       "category": "account and security mutations",
       "workflowIds": [
-        "workflow-internal-backend-src-services-auth-mfa-adapter-ts-confirm-totp-mfa-enrollment",
         "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-totp-against-new-factor"
       ],
       "reclassifiedFromFamilyIds": [],
@@ -30685,12 +31526,13 @@
       ],
       "repositoryFiles": [],
       "protectedTables": [
-        "table-admin-mfa-credential",
         "table-user-mfa-factor"
       ],
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -30707,47 +31549,13 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-admin-mfa-credential-update-62fc51366420",
-        "command-user-mfa-factor-select-62fc51366420",
         "command-user-mfa-factor-select-d476162c6c00",
-        "command-user-mfa-factor-update-62fc51366420",
         "command-user-mfa-factor-update-d476162c6c00"
       ],
       "tenantScopeModel": [
-        "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent.",
         "table-user-mfa-factor row must join through table-user on userId=id; no alternative parent."
       ],
       "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-admin-mfa-credential-update-62fc51366420",
-          "columns": [
-            "isEnabled",
-            "lastUsedAt"
-          ],
-          "allowed": [
-            "isEnabled=false",
-            "isEnabled=true",
-            "lastUsedAt=NULL",
-            "lastUsedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": [
-            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
-          ]
-        },
-        {
-          "commandRuleId": "command-user-mfa-factor-select-62fc51366420",
-          "columns": [
-            "disabledAt",
-            "lastUsedAt"
-          ],
-          "allowed": [
-            "disabledAt=NULL",
-            "disabledAt=SERVER_TIMESTAMP_SET",
-            "lastUsedAt=NULL",
-            "lastUsedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        },
         {
           "commandRuleId": "command-user-mfa-factor-select-d476162c6c00",
           "columns": [
@@ -30761,22 +31569,6 @@
             "lastUsedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": []
-        },
-        {
-          "commandRuleId": "command-user-mfa-factor-update-62fc51366420",
-          "columns": [
-            "disabledAt",
-            "lastUsedAt"
-          ],
-          "allowed": [
-            "disabledAt=NULL",
-            "disabledAt=SERVER_TIMESTAMP_SET",
-            "lastUsedAt=NULL",
-            "lastUsedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": [
-            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
-          ]
         },
         {
           "commandRuleId": "command-user-mfa-factor-update-d476162c6c00",
@@ -30848,120 +31640,6 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-mfaadapter-d9914bc4e4",
-      "category": "account and security mutations",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-mfa-login-challenge"
-      ],
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "mfa-bootstrap"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-mfa-login-challenge-select-986a6bc31b69",
-        "command-mfa-login-challenge-update-986a6bc31b69"
-      ],
-      "tenantScopeModel": [
-        "table-mfa-login-challenge row must join through table-user on userId=id; no alternative parent."
-      ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-mfa-login-challenge-select-986a6bc31b69",
-          "columns": [
-            "consumedAt",
-            "expiresAt"
-          ],
-          "allowed": [
-            "consumedAt=NULL",
-            "consumedAt=SERVER_TIMESTAMP_SET",
-            "expiresAt=NULL",
-            "expiresAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-mfa-login-challenge-update-986a6bc31b69",
-          "columns": [
-            "consumedAt",
-            "expiresAt"
-          ],
-          "allowed": [
-            "consumedAt=NULL",
-            "consumedAt=SERVER_TIMESTAMP_SET",
-            "expiresAt=NULL",
-            "expiresAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": [
-            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
-          ]
-        }
-      ],
-      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
-      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
-      "riskLevel": "critical",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "mutation-concurrency-proof",
-          "reason": "The mutation lacks family-level database concurrency and replay proof.",
-          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
-          "id": "blocker-family-account-and-security-mutations-mfaadapter-d9914bc4e4-mutation-concurrency-proof"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-mfaadapter-d9914bc4e4-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-mfaadapter-d9914bc4e4-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-mfaadapter-d9914bc4e4-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-account-and-security-mutations-mfaadapter-f123b09c17",
       "category": "account and security mutations",
       "workflowIds": [
@@ -30983,6 +31661,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -31123,11 +31803,154 @@
       }
     },
     {
+      "id": "family-account-and-security-mutations-mfaservice-69e7677edd",
+      "category": "account and security mutations",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-auth-mfa-service-ts-complete-admin-mfa-challenge"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/auth/mfaService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-audit-log-outbox",
+        "table-auth-mfa-challenge"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified",
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-audit-log-outbox-insert-c4febf718039",
+        "command-auth-mfa-challenge-select-c4febf718039",
+        "command-auth-mfa-challenge-update-c4febf718039"
+      ],
+      "tenantScopeModel": [
+        "approved-system boundary from tables.json; empty or forged context is denied.",
+        "table-auth-mfa-challenge row must join through table-user on userId=id; no alternative parent."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-c4febf718039",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-auth-mfa-challenge-select-c4febf718039",
+          "columns": [
+            "consumedAt",
+            "expiresAt"
+          ],
+          "allowed": [
+            "consumedAt=NULL",
+            "consumedAt=SERVER_TIMESTAMP_SET",
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-auth-mfa-challenge-update-c4febf718039",
+          "columns": [
+            "consumedAt",
+            "expiresAt"
+          ],
+          "allowed": [
+            "consumedAt=NULL",
+            "consumedAt=SERVER_TIMESTAMP_SET",
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        }
+      ],
+      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "critical",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "mutation-concurrency-proof",
+          "reason": "The mutation lacks family-level database concurrency and replay proof.",
+          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
+          "id": "blocker-family-account-and-security-mutations-mfaservice-69e7677edd-mutation-concurrency-proof"
+        },
+        {
+          "code": "named-function-prerequisite",
+          "reason": "At least one command rule requires a named function boundary.",
+          "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
+          "id": "blocker-family-account-and-security-mutations-mfaservice-69e7677edd-named-function-prerequisite"
+        },
+        {
+          "code": "unresolved-boundary",
+          "reason": "The workflow authorization-boundary type is unresolved.",
+          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
+          "id": "blocker-family-account-and-security-mutations-mfaservice-69e7677edd-unresolved-boundary"
+        },
+        {
+          "code": "unreviewed-scope",
+          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
+          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
+          "id": "blocker-family-account-and-security-mutations-mfaservice-69e7677edd-unreviewed-scope"
+        },
+        {
+          "code": "unverified-execution-path",
+          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
+          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
+          "id": "blocker-family-account-and-security-mutations-mfaservice-69e7677edd-unverified-execution-path"
+        },
+        {
+          "code": "unverified-root-call-chain",
+          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
+          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
+          "id": "blocker-family-account-and-security-mutations-mfaservice-69e7677edd-unverified-root-call-chain"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-account-and-security-mutations-mfaservice-744415554d",
       "category": "account and security mutations",
       "workflowIds": [
-        "workflow-internal-backend-src-services-auth-mfa-service-ts-consume-backup-code",
-        "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa"
+        "workflow-internal-backend-src-services-auth-mfa-service-ts-consume-backup-code"
       ],
       "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
@@ -31144,6 +31967,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -31159,29 +31984,12 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-admin-mfa-credential-update-2d0779382f94",
         "command-admin-mfa-credential-update-4877b6d8b05d"
       ],
       "tenantScopeModel": [
         "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent."
       ],
       "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-admin-mfa-credential-update-2d0779382f94",
-          "columns": [
-            "isEnabled",
-            "lastUsedAt"
-          ],
-          "allowed": [
-            "isEnabled=false",
-            "isEnabled=true",
-            "lastUsedAt=NULL",
-            "lastUsedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": [
-            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
-          ]
-        },
         {
           "commandRuleId": "command-admin-mfa-credential-update-4877b6d8b05d",
           "columns": [
@@ -31272,6 +32080,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -31378,10 +32188,10 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-mfaservice-d8853b8a79",
+      "id": "family-account-and-security-mutations-mfaservice-c08f94b58c",
       "category": "account and security mutations",
       "workflowIds": [
-        "workflow-internal-backend-src-services-auth-mfa-service-ts-complete-admin-mfa-challenge"
+        "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa"
       ],
       "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
@@ -31393,11 +32203,17 @@
       ],
       "repositoryFiles": [],
       "protectedTables": [
-        "table-auth-mfa-challenge"
+        "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
+        "table-audit-log-outbox",
+        "table-user-backup-code",
+        "table-user-mfa-factor"
       ],
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -31414,38 +32230,85 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-auth-mfa-challenge-select-c4febf718039",
-        "command-auth-mfa-challenge-update-c4febf718039"
+        "command-admin-mfa-credential-update-2d0779382f94",
+        "command-admin-web-authn-credential-delete-2d0779382f94",
+        "command-audit-log-outbox-insert-2d0779382f94",
+        "command-user-backup-code-delete-2d0779382f94",
+        "command-user-mfa-factor-update-2d0779382f94"
       ],
       "tenantScopeModel": [
-        "table-auth-mfa-challenge row must join through table-user on userId=id; no alternative parent."
+        "approved-system boundary from tables.json; empty or forged context is denied.",
+        "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent.",
+        "table-admin-web-authn-credential row must join through table-user on userId=id; no alternative parent.",
+        "table-user-backup-code row must join through table-user on userId=id; no alternative parent.",
+        "table-user-mfa-factor row must join through table-user on userId=id; no alternative parent."
       ],
       "lifecycleStateRequirements": [
         {
-          "commandRuleId": "command-auth-mfa-challenge-select-c4febf718039",
+          "commandRuleId": "command-admin-mfa-credential-update-2d0779382f94",
           "columns": [
-            "consumedAt",
-            "expiresAt"
+            "isEnabled",
+            "lastUsedAt"
           ],
           "allowed": [
-            "consumedAt=NULL",
-            "consumedAt=SERVER_TIMESTAMP_SET",
-            "expiresAt=NULL",
-            "expiresAt=SERVER_TIMESTAMP_SET"
+            "isEnabled=false",
+            "isEnabled=true",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
           ],
-          "forbidden": []
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
         },
         {
-          "commandRuleId": "command-auth-mfa-challenge-update-c4febf718039",
+          "commandRuleId": "command-admin-web-authn-credential-delete-2d0779382f94",
           "columns": [
-            "consumedAt",
-            "expiresAt"
+            "lastUsedAt"
           ],
           "allowed": [
-            "consumedAt=NULL",
-            "consumedAt=SERVER_TIMESTAMP_SET",
-            "expiresAt=NULL",
-            "expiresAt=SERVER_TIMESTAMP_SET"
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "LEGAL_HOLD_OR_UNSATISFIED_PARENT_LIFECYCLE"
+          ]
+        },
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-2d0779382f94",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-backup-code-delete-2d0779382f94",
+          "columns": [
+            "usedAt"
+          ],
+          "allowed": [
+            "usedAt=NULL",
+            "usedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "LEGAL_HOLD_OR_UNSATISFIED_PARENT_LIFECYCLE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-mfa-factor-update-2d0779382f94",
+          "columns": [
+            "disabledAt",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": [
             "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
@@ -31464,37 +32327,37 @@
           "code": "mutation-concurrency-proof",
           "reason": "The mutation lacks family-level database concurrency and replay proof.",
           "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
-          "id": "blocker-family-account-and-security-mutations-mfaservice-d8853b8a79-mutation-concurrency-proof"
+          "id": "blocker-family-account-and-security-mutations-mfaservice-c08f94b58c-mutation-concurrency-proof"
         },
         {
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-mfaservice-d8853b8a79-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-mfaservice-c08f94b58c-named-function-prerequisite"
         },
         {
           "code": "unresolved-boundary",
           "reason": "The workflow authorization-boundary type is unresolved.",
           "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-account-and-security-mutations-mfaservice-d8853b8a79-unresolved-boundary"
+          "id": "blocker-family-account-and-security-mutations-mfaservice-c08f94b58c-unresolved-boundary"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-mfaservice-d8853b8a79-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-mfaservice-c08f94b58c-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-mfaservice-d8853b8a79-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-mfaservice-c08f94b58c-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-mfaservice-d8853b8a79-unverified-root-call-chain"
+          "id": "blocker-family-account-and-security-mutations-mfaservice-c08f94b58c-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -31526,6 +32389,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -31652,6 +32517,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -31747,6 +32614,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -31889,6 +32758,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -32003,6 +32874,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -32127,6 +33000,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -32250,6 +33125,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -32334,6 +33211,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -32454,6 +33333,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -32548,6 +33429,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -32659,6 +33542,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -32812,6 +33697,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -32987,6 +33874,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -33112,6 +34001,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -33242,6 +34133,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -33354,6 +34247,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -33465,6 +34360,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -33568,6 +34465,8 @@
       "actorClasses": [
         "checker"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -33696,6 +34595,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -33813,6 +34714,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -33927,6 +34830,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -34023,6 +34928,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -34122,6 +35029,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -34216,6 +35125,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -34341,6 +35252,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -34525,6 +35438,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -34635,6 +35550,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -34738,6 +35655,8 @@
       "actorClasses": [
         "manufacturer"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -34835,6 +35754,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -35000,6 +35921,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -35106,6 +36029,8 @@
         "licensee-admin",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -35203,6 +36128,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -35306,6 +36233,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -35401,6 +36330,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -35530,6 +36461,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -35686,6 +36619,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -35789,6 +36724,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -35915,6 +36852,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -36026,6 +36965,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -36140,6 +37081,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -36272,6 +37215,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -36394,6 +37339,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -36518,6 +37465,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -36644,6 +37593,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -36774,6 +37725,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -36880,6 +37833,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -37018,6 +37973,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -37109,6 +38066,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -37179,6 +38138,100 @@
       }
     },
     {
+      "id": "family-split-manufacturerscopeservice-manufacturer-session-scope-hydration-e038879b07",
+      "category": "account and security mutations",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-manufacturer-scope-service-ts-resolve-manufacturer-session-scope"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "parentFamilyId": "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
+      "splitReason": "Separate canonical manufacturer session-scope hydration from richer invitation link projections.",
+      "semanticEvidence": [
+        "Authentication and session callers supply their transaction client; the helper has no global Prisma fallback or claim-carried membership authority."
+      ],
+      "routeRoots": [
+        "Authentication and session callers supply their transaction client; the helper has no global Prisma fallback or claim-carried membership authority."
+      ],
+      "protectedTableBoundary": "ManufacturerLicenseeLink plus active Licensee and Organization actor-bound projection",
+      "commandSemantics": "Password-verified actor-only SELECT with explicit projection, maximum 100 eligible links, deterministic ordering and same-transaction attribution; no blank tenant wildcard.",
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/manufacturerScopeService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-audit-log-outbox",
+        "table-manufacturer-licensee-link"
+      ],
+      "actorClasses": [
+        "manufacturer"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-audit-log-outbox-insert-88bea5f1af06",
+        "command-manufacturer-licensee-link-select-88bea5f1af06"
+      ],
+      "tenantScopeModel": [
+        "Database-verified manufacturer User.id is actor authority; eligible link rows are the bounded result, and licensee/organization context is installed only after server verification selects one link."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-88bea5f1af06",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        }
+      ],
+      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "critical",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "approvedBoundaryIds": [
+        "manufacturer-bootstrap-post-password-actor"
+      ],
+      "blockers": [
+        {
+          "code": "manufacturer-bootstrap-postgresql-certification-pending",
+          "reason": "The transaction-client-only runtime boundary is implemented and focused application tests pass; final generated-role and FORCE RLS PostgreSQL certification remains pending.",
+          "remediation": "Certify the implemented actor-context repository through the final generated package on disposable PostgreSQL.",
+          "id": "blocker-family-split-manufacturerscopeservice-manufacturer-session-scope-hydration-e038879b07-manufacturer-bootstrap-postgresql-certification-pending"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-fraud-report-read",
       "category": "incident/governance workflows",
       "workflowIds": [
@@ -37202,6 +38255,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -37262,6 +38317,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -37365,6 +38422,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -37453,6 +38512,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -37569,6 +38630,8 @@
       "actorClasses": [
         "authenticated-user"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -37687,6 +38750,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -37782,6 +38847,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -37955,6 +39022,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -38062,6 +39131,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -38141,6 +39212,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -38246,6 +39319,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -38336,6 +39411,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -38428,6 +39505,8 @@
         "operator",
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified",
@@ -38518,6 +39597,8 @@
       "actorClasses": [
         "licensee-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -38598,6 +39679,8 @@
         "worker",
         "scheduled-job"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "password-verified"
@@ -38672,6 +39755,8 @@
       "actorClasses": [
         "platform-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
         "mfa-verified"
@@ -38752,6 +39837,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -38827,6 +39914,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -38898,6 +39987,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -39045,6 +40136,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -39173,6 +40266,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -39301,6 +40396,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -39373,6 +40470,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -39448,6 +40547,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -39522,6 +40623,8 @@
         "anonymous",
         "pre-auth-runtime"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-pre-auth-app",
       "requiredAssurance": [
         "none"
@@ -39612,6 +40715,8 @@
       "actorClasses": [
         "worker"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-worker",
       "requiredAssurance": [
         "durable-worker-identity"
@@ -39663,6 +40768,8 @@
       "actorClasses": [
         "worker"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-worker",
       "requiredAssurance": [
         "system-verified"
@@ -39748,6 +40855,8 @@
       "actorClasses": [
         "scheduled-job"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-scheduled-job",
       "requiredAssurance": [
         "system-verified"
@@ -39915,6 +41024,8 @@
       "actorClasses": [
         "worker"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-worker",
       "requiredAssurance": [
         "system-verified"
@@ -39995,6 +41106,8 @@
       "actorClasses": [
         "operator-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-operator",
       "requiredAssurance": [
         "operator-approved"
@@ -40081,6 +41194,8 @@
       "actorClasses": [
         "break-glass"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-production-break-glass",
       "requiredAssurance": [
         "dual-approved-break-glass"
@@ -40150,6 +41265,8 @@
       "actorClasses": [
         "operator-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-operator",
       "requiredAssurance": [
         "operator-approved"
@@ -40288,6 +41405,8 @@
       "actorClasses": [
         "operator-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-operator",
       "requiredAssurance": [
         "operator-approved"
@@ -40522,6 +41641,8 @@
       "actorClasses": [
         "migration"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-migration",
       "requiredAssurance": [
         "system-verified"
@@ -40606,6 +41727,8 @@
       "actorClasses": [
         "operator-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-operator",
       "requiredAssurance": [
         "operator-approved"
@@ -40656,6 +41779,8 @@
       "actorClasses": [
         "break-glass"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-production-break-glass",
       "requiredAssurance": [
         "dual-approved-break-glass"
@@ -40846,6 +41971,8 @@
       "actorClasses": [
         "operator-admin"
       ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
       "runtimeIdentity": "identity-operator",
       "requiredAssurance": [
         "operator-approved"

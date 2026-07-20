@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "authority": "FULL_SYSTEM_RUNTIME_IMPLEMENTATION_PLAN.md and frozen workflow manifests",
+  "launchMode": "pre-activation-business-preserving",
+  "launchBlocked": true,
+  "launchBlocker": "No essential workflow has completed full-system disposable PostgreSQL integration certification.",
+  "defaultDisposition": "existing behavior preserved until an exact certified or frozen-product-prohibited final disposition exists",
+  "protectedRouteGate": {
+    "middleware": "backend/src/middleware/unsupportedWorkflowShutdown.ts",
+    "activationEnvironment": "MSCQR_FULL_RLS_REDUCED_SURFACE_ENABLED",
+    "currentActivation": "inactive",
+    "enabledRoutes": [],
+    "exemptSurfaces": [
+      "health and readiness endpoints without protected business reads",
+      "authentication and pre-auth routes governed by exact pre-auth boundaries",
+      "approved public/proof-bound routes governed by public-read-contract-v1"
+    ],
+    "emptyActiveAllowlist": "startup failure",
+    "productionTestOverride": "prohibited"
+  },
+  "workflows": [
+    {
+      "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-login-with-password",
+      "routeOrRoot": "POST /api/auth/login -> internal:loginWithPassword",
+      "requiredActor": "pre-auth account-bound caller",
+      "requiredBoundary": "pre-auth-security-function",
+      "currentRuntimeStatus": "contract-only",
+      "sqlFunctionPrerequisite": "app_auth.lookup_password_user and exact password-failure recording function",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "activation gate prevents RLS apply until exact pre-auth functions pass certification",
+      "userFacingFallback": "Existing login remains unchanged before activation; activation is prohibited while pending."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
+      "routeOrRoot": "POST /api/auth/refresh -> internal:refreshSession",
+      "requiredActor": "proof-bound refresh session",
+      "requiredBoundary": "pre-auth-security-function",
+      "currentRuntimeStatus": "contract-only",
+      "sqlFunctionPrerequisite": "exact refresh-token rotation function",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "activation gate",
+      "userFacingFallback": "No RLS activation until refresh rotation is certified."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge",
+      "routeOrRoot": "MFA completion routes -> internal:completeStableMfaLoginChallenge",
+      "requiredActor": "one-time MFA challenge holder",
+      "requiredBoundary": "mfa-bootstrap-boundary",
+      "currentRuntimeStatus": "contract-only",
+      "sqlFunctionPrerequisite": "exact one-time challenge completion function",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "activation gate",
+      "userFacingFallback": "No RLS activation until MFA completion is certified."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "routeOrRoot": "GET /api/analytics/risk-scores",
+      "requiredActor": "database-hydrated active LICENSEE_ADMIN or ORG_ADMIN",
+      "requiredBoundary": "authenticated-context tenant-risk-analytics",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "none; full table policies and real-path integration proof required",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate; the registered route remains functional before activation",
+      "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
+      "routeOrRoot": "GET /api/audit/logs",
+      "requiredActor": "frozen bounded audit viewer",
+      "requiredBoundary": "authenticated-context",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "none; full table policies and real-path integration proof required",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate; the registered route remains functional before activation",
+      "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv",
+      "routeOrRoot": "GET /api/audit/logs/export",
+      "requiredActor": "frozen bounded audit exporter",
+      "requiredBoundary": "authenticated-context",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "none; full table policies and real-path integration proof required",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate; the registered route remains functional before activation",
+      "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports",
+      "routeOrRoot": "GET /api/audit/fraud-reports",
+      "requiredActor": "database-revalidated platform administrator with fresh MFA and exact tenant selector",
+      "requiredBoundary": "bounded-platform authenticated-context",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "none; full table policies and real-path integration proof required",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate; the registered route remains functional before activation",
+      "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline",
+      "routeOrRoot": "GET /api/trace/timeline",
+      "requiredActor": "frozen bounded authenticated actor",
+      "requiredBoundary": "authenticated-context",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "none; full table policies and real-path integration proof required",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate; the registered route remains functional before activation",
+      "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-qr-controller-ts-create-batch",
+      "routeOrRoot": "POST /api/qr/batches",
+      "requiredActor": "licensee administrator with fresh MFA",
+      "requiredBoundary": "authenticated lifecycle mutation",
+      "currentRuntimeStatus": "blocked-runtime-and-concurrency",
+      "sqlFunctionPrerequisite": "full mutation policy and concurrency certification",
+      "launchDisposition": "disabled",
+      "disableMechanism": "RLS activation gate; the registered route remains functional before activation",
+      "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-qr-controller-ts-generate-qrcodes",
+      "routeOrRoot": "POST /api/qr/generate",
+      "requiredActor": "platform administrator with fresh MFA",
+      "requiredBoundary": "bounded QR lifecycle mutation",
+      "currentRuntimeStatus": "blocked-runtime-and-concurrency",
+      "sqlFunctionPrerequisite": "QR range/generation lifecycle policies and idempotency proof",
+      "launchDisposition": "disabled",
+      "disableMechanism": "RLS activation gate; the registered route remains functional before activation",
+      "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-print-job-create-print-job-handler-ts-create-print-job",
+      "routeOrRoot": "POST /api/manufacturer/print-jobs",
+      "requiredActor": "verified manufacturer",
+      "requiredBoundary": "manufacturer print lifecycle",
+      "currentRuntimeStatus": "blocked-runtime-and-concurrency",
+      "sqlFunctionPrerequisite": "print lifecycle policy and same-client transaction proof",
+      "launchDisposition": "disabled",
+      "disableMechanism": "RLS activation gate; the registered route remains functional before activation",
+      "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-print-job-direct-print-confirmation-handlers-ts-confirm-print-job",
+      "routeOrRoot": "POST /api/manufacturer/print-jobs/:id/confirm",
+      "requiredActor": "verified manufacturer with printer proof",
+      "requiredBoundary": "physical print confirmation lifecycle",
+      "currentRuntimeStatus": "blocked-runtime-and-concurrency",
+      "sqlFunctionPrerequisite": "compare-and-set print confirmation and audit policies",
+      "launchDisposition": "disabled",
+      "disableMechanism": "RLS activation gate; the registered route remains functional before activation",
+      "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-qr-controller-ts-release-batch",
+      "routeOrRoot": "POST /api/qr/batches/:id/release",
+      "requiredActor": "approved release actor",
+      "requiredBoundary": "batch release lifecycle",
+      "currentRuntimeStatus": "blocked-runtime-and-concurrency",
+      "sqlFunctionPrerequisite": "release readiness and compare-and-set policy proof",
+      "launchDisposition": "disabled",
+      "disableMechanism": "RLS activation gate; the registered route remains functional before activation",
+      "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
+    },
+    {
+      "workflowId": "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode",
+      "routeOrRoot": "public QR verification route",
+      "requiredActor": "anonymous proof-bound verifier",
+      "requiredBoundary": "public-qr-verification",
+      "currentRuntimeStatus": "contract-only",
+      "sqlFunctionPrerequisite": "narrow public verification function/repository contract",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "activation gate and public boundary registration",
+      "userFacingFallback": "Generic verification unavailable response without enumeration"
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox",
+      "routeOrRoot": "internal audit write roots",
+      "requiredActor": "authenticated or approved system boundary",
+      "requiredBoundary": "append-only audit/outbox",
+      "currentRuntimeStatus": "blocked-runtime",
+      "sqlFunctionPrerequisite": "append-only AuditLogOutbox policy",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "activation gate",
+      "userFacingFallback": "No RLS activation until required audit delivery is certified."
+    },
+    {
+      "workflowId": "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox",
+      "routeOrRoot": "worker:flushAuditLogOutbox",
+      "requiredActor": "approved worker identity",
+      "requiredBoundary": "worker boundary",
+      "currentRuntimeStatus": "contract-only",
+      "sqlFunctionPrerequisite": "exact claim/delivery worker function",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "worker deployment gate",
+      "userFacingFallback": "Worker remains disabled under full RLS until certified."
+    }
+  ],
+  "certification": {
+    "enabledWorkflowCount": 0,
+    "essentialWorkflowCount": 17,
+    "disposablePostgresqlStatus": "pending",
+    "activationRule": "launchBlocked may become false only after every enabled essential workflow passes real-path disposable PostgreSQL certification"
+  }
+}

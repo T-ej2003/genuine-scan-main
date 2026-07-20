@@ -109,7 +109,7 @@ The other seven affected workflows remain in the existing exact invitation/reset
 
 Nested ownership, scan-insight, customer-trust, mail, audit/outbox and notification helpers were inspected as runtime dependencies but are not silently authorized by this decision. They retain query-trace, transaction, concurrency, projection or special-boundary blockers until the full-system runtime pass maps each call to the owning function/transaction.
 
-The frozen counts are 316 families: three implemented families/four workflows, 31 contract-only families/59 workflows and 282 blocked families/365 workflows. The public decision changed the prior 321-family plan only through deterministic proof/function regrouping; workflow coverage remains exactly 428.
+The public-contract review froze 316 families at that checkpoint: three implemented families/four workflows, 31 contract-only families/59 workflows and 282 blocked families/365 workflows. The later complete MFA-disable implementation creates one additional exact multi-table mutation family, bringing the current programme to 317 without changing this public decision or the exact 428-workflow coverage.
 
 ## Architecture freeze
 

@@ -665,6 +665,7 @@ const routeEvidenceFor = (functionName, source = routeSource()) => {
 };
 
 const TRACE_TIMELINE_WORKFLOW_ID = "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline";
+const RISK_ANALYTICS_WORKFLOW_ID = "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics";
 
 const commandActorsFor = (workflow, table, routeEvidence) => {
   const text = `${workflow.id} ${workflow.canonicalSourceFiles.join(" ")}`.toLowerCase();
@@ -672,6 +673,7 @@ const commandActorsFor = (workflow, table, routeEvidence) => {
   if (workflow.id === AUDIT_LOGS_WORKFLOW_ID) return ["manufacturer", "licensee-admin", "platform-admin"];
   if (workflow.id === FRAUD_REPORTS_WORKFLOW_ID) return ["platform-admin"];
   if (workflow.id === TRACE_TIMELINE_WORKFLOW_ID) return ["authenticated-user", "manufacturer", "licensee-admin", "platform-admin"];
+  if (workflow.id === RISK_ANALYTICS_WORKFLOW_ID) return ["licensee-admin", "platform-admin"];
   if (workflow.authorizationBoundaryType === "operator-break-glass") return ["break-glass"];
   if (workflow.authorizationBoundaryType === "pre-auth-security-function") return ["anonymous", "pre-auth-runtime"];
   if (workflow.executionSurface === "worker") return ["worker"];
@@ -707,6 +709,7 @@ const runtimeIdentityForCommand = (workflow) => workflow.authorizationBoundaryTy
             : "identity-authenticated-app";
 
 const assuranceForCommand = (workflow, actors, command, table, routeEvidence) => {
+  if (workflow.id === RISK_ANALYTICS_WORKFLOW_ID) return "password-verified";
   if (workflow.platformReadRequiredAssurance) return workflow.platformReadRequiredAssurance;
   const guards = new Set(routeEvidence?.guards || []);
   if (workflow.id === AUDIT_CSV_EXPORT_WORKFLOW_ID) return "password-verified";
@@ -802,7 +805,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   const platformReadScope = workflow.platformReadScopeBoundaryId === PLATFORM_READ_SCOPE_BOUNDARY_ID;
   const policyAlertActorCeiling = workflow.policyAlertActorCeilingBoundaryId === POLICY_ALERT_ACTOR_CEILING_ID;
   const publicReadContract = workflow.publicReadContractBoundaryId === PUBLIC_READ_CONTRACT_ID;
-  const securityFunction = table.primaryCategory === "security-sensitive" && (command !== "SELECT" || table.sensitiveColumns.length > 0) && !auditCsvExport && !auditLogsRead && !fraudReportsRead;
+  const securityFunction = table.primaryCategory === "security-sensitive" && (command !== "SELECT" || table.sensitiveColumns.length > 0) && !auditCsvExport && !auditLogsRead && !fraudReportsRead && workflow.id !== RISK_ANALYTICS_WORKFLOW_ID;
   const preAuthFunction = actors.includes("pre-auth-runtime");
   const workerBoundary = actors.some((actor) => ["worker", "scheduled-job"].includes(actor));
   const operatorApproval = actors.some((actor) => ["operator-admin", "break-glass"].includes(actor));
@@ -813,12 +816,14 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   if (auditCsvExport && table.prismaModel === "User" && command === "SELECT") allowedColumns = ["id", "name"];
   if (auditCsvExport && table.prismaModel === "AuditLog" && command === "SELECT") allowedColumns = ["id", "createdAt", "action", "entityType", "entityId", "userId", "licenseeId"];
   if (auditLogsRead && table.prismaModel === "User" && command === "SELECT") allowedColumns = ["id", "name"];
-  if (auditLogsRead && table.prismaModel === "AuditLog" && command === "SELECT") allowedColumns = ["id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details", "ipAddress", "userAgent", "createdAt"];
+  if (auditLogsRead && table.prismaModel === "AuditLog" && command === "SELECT") allowedColumns = ["id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details", "createdAt"];
+  if (auditLogsRead && table.prismaModel === "AuditLog" && command === "INSERT") allowedColumns = ["action", "details", "entityId", "entityType", "id", "licenseeId", "orgId", "userId"];
   if (fraudReportsRead && table.prismaModel === "AuditLog" && command === "SELECT") allowedColumns = ["id", "createdAt", "userId", "licenseeId", "details", "ipAddress"];
   if (manufacturerBootstrap && table.prismaModel === "ManufacturerLicenseeLink" && command === "SELECT") allowedColumns = ["manufacturerId", "licenseeId", "isPrimary", "createdAt", "updatedAt"];
   if (platformReadScope && command === "SELECT") allowedColumns = workflow.platformReadAllowedColumnsByTable?.[table.id] || [];
   if (policyAlertActorCeiling) allowedColumns = workflow.policyAlertAllowedColumnsByTableAndCommand?.[table.id]?.[command] || [];
   if (publicReadContract && workflow.publicReadProjectionProfile) allowedColumns = workflow.publicReadAllowedColumnsByTableAndCommand?.[table.id]?.[command] || [];
+  if (workflow.id === RISK_ANALYTICS_WORKFLOW_ID) allowedColumns = workflow.riskAnalyticsAllowedColumnsByTableAndCommand?.[table.id]?.[command] || [];
   const hardDeleteSemantics = command === "DELETE" ? deleteSemanticsFor(table, workflow) : "not-applicable";
   const approvalClass = actors.includes("break-glass") ? "dual-approved-break-glass"
     : actors.includes("operator-admin") ? "operator-approved"
@@ -831,6 +836,12 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   const boundaryMode = platformReadScope && workflow.platformReadScopeClass === "prohibited-platform-read"
     ? "prohibited"
     : workerBoundary ? "restricted-worker" : operatorApproval ? "operator-approval" : requiresNamedFunction ? "named-function" : "ordinary-rls";
+  const minimumAssuranceByActorClass = Object.fromEntries(actors.map((actor) => [
+    actor,
+    workflow.platformReadRequiredAssuranceByActorClass?.[actor] || (
+      actor === "platform-admin" && ["none", "password-verified", "mfa-bootstrap"].includes(assurance) ? "mfa-verified" : assurance
+    ),
+  ]));
   return {
     id: `command-${slug(table.prismaModel)}-${command.toLowerCase()}-${crypto.createHash("sha256").update(workflow.id).digest("hex").slice(0, 12)}`,
     tableId: table.id,
@@ -838,6 +849,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
     actorClasses: actors,
     runtimeIdentities: [identityId],
     minimumAssurance: assurance,
+    minimumAssuranceByActorClass,
     scopeRule: publicReadContract
       ? workflow.tenantScopeRule
       : policyAlertActorCeiling
@@ -854,6 +866,8 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
       ? "Verified User.id must equal app.user_id and app.manufacturer_id before the read; ManufacturerLicenseeLink.manufacturerId must equal that actor. requestedLicenseeId may only narrow the freshly verified membership set, blank scope never means all, and active Licensee/Organization checks are mandatory."
       : workflow.id === TRACE_TIMELINE_WORKFLOW_ID
       ? "Authenticated tenant actors require their canonical licensee; manufacturers additionally require their own actor ID and one linked licensee; platform administrators require fresh MFA, one explicit licensee and purpose. Filters only narrow scope."
+      : workflow.id === RISK_ANALYTICS_WORKFLOW_ID
+      ? "An ACTIVE database-hydrated LICENSEE_ADMIN or ORG_ADMIN uses its nonblank canonical licensee and organization. A database-hydrated platform administrator requires fresh MFA and one active database-validated licensee and organization selector. Fixed tenant-risk-analytics purpose, request attribution, bounded candidates/dimensions and identical tenant predicates are mandatory; blank or foreign scope is denied."
       : scopeRuleFor(table, actors),
     allowedColumns,
     protectedColumns,
@@ -868,7 +882,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
     requiresNamedFunction,
     namedFunctionClass: requiresNamedFunction ? (dedicatedPlatformProjection ? `exact-${workflow.platformReadExecutionBoundary}` : preAuthFunction ? "narrow-pre-auth-security-definer" : rawEvidence ? "exact-reviewed-query-function" : "authenticated-security-repository-function") : "none",
     requiresRestrictedWorkerBoundary: workerBoundary,
-    requiresAuditEvent: publicReadContract || manufacturerBootstrap || policyAlertActorCeiling || command !== "SELECT" || actors.some((actor) => ["platform-admin", "operator", "operator-admin", "break-glass"].includes(actor)),
+    requiresAuditEvent: publicReadContract || manufacturerBootstrap || policyAlertActorCeiling || workflow.approvedReadAttribution === true || command !== "SELECT" || actors.some((actor) => ["platform-admin", "operator", "operator-admin", "break-glass"].includes(actor)),
     requiresApproval,
     approvalClass,
     authorizationBoundary: boundaryMode,
@@ -899,7 +913,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
     ...(platformReadScope ? { platformReadScopeBoundaryId: PLATFORM_READ_SCOPE_BOUNDARY_ID, platformReadScopeClass: workflow.platformReadScopeClass } : {}),
     ...(policyAlertActorCeiling ? { policyAlertActorCeilingBoundaryId: POLICY_ALERT_ACTOR_CEILING_ID, policyAlertClass: workflow.policyAlertClass } : {}),
     ...(publicReadContract ? { publicReadContractBoundaryId: PUBLIC_READ_CONTRACT_ID, publicAccessClass: workflow.publicAccessClass, publicFunctionId: workflow.publicReadFunctionId } : {}),
-    confidence: routeEvidence || workerBoundary || preAuthFunction || operatorApproval || manufacturerBootstrap || platformReadScope || policyAlertActorCeiling || publicReadContract ? "high" : "medium",
+    confidence: routeEvidence || workerBoundary || preAuthFunction || operatorApproval || manufacturerBootstrap || platformReadScope || policyAlertActorCeiling || publicReadContract || workflow.contextBoundaryStatus === "implemented" ? "high" : "medium",
     status: "architecture-resolved",
   };
 };
@@ -917,7 +931,7 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
       const table = tablesById.get(item.tableId);
       if (!table?.forceRlsTarget) continue;
       for (const command of item.commands) {
-        const actors = workflow.policyAlertActorClasses || workflow.platformReadActorClasses || workflow.publicReadActorClasses || commandActorsFor(workflow, table, routeEvidence);
+        const actors = workflow.runtimeImplementedActorClasses || workflow.policyAlertActorClasses || workflow.platformReadActorClasses || workflow.publicReadActorClasses || commandActorsFor(workflow, table, routeEvidence);
         const identityId = runtimeIdentityForCommand(workflow);
         const assurance = workflow.policyAlertRequiredAssurance || workflow.publicReadRequiredAssurance || assuranceForCommand(workflow, actors, command, table, routeEvidence);
         const rule = buildCommandRule({ table, workflow, command, actors, identityId, assurance, routeEvidence });
@@ -966,7 +980,52 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
     table.deleteSemantics = [...new Set(rules.filter((rule) => rule.tableId === table.id && rule.command === "DELETE").map((rule) => rule.hardDeleteSemantics))].sort();
     table.unresolvedDecisions = table.unresolvedDecisions.filter((id) => id !== "decision-policy-command-semantics");
   }
-  const manifest = { schemaVersion: 1, generatedFrom: ["backend/prisma/schema.prisma", "documents/security/rls-program/tables.json", "documents/security/rls-program/workflows.json", "documents/security/rls-program/manufacturer-bootstrap-boundary.json", "documents/security/rls-program/platform-read-scope-boundary.json", "documents/security/rls-program/policy-alert-actor-ceiling.json", "documents/security/rls-program/public-read-contract.json", "backend/src/routes/index.ts"], actorClasses: [...actorClasses], assuranceLevels: [...assuranceLevels], commandVocabulary: [...policyCommands], rules: rules.sort((a, b) => a.id.localeCompare(b.id)) };
+  const ruleIdsFor = (workflowId) => rules.filter((rule) => rule.supportingWorkflowIds.includes(workflowId)).map((rule) => rule.id).sort();
+  const sqlCertificationProfiles = [
+    {
+      id: "sql-profile-risk-analytics-licensee-admin", workflowId: RISK_ANALYTICS_WORKFLOW_ID, route: "GET /api/analytics/risk-scores",
+      actorClass: "licensee-admin", roleValues: ["LICENSEE_ADMIN", "ORG_ADMIN"], minimumAssurance: "password-verified", purposeCodes: ["tenant-risk-analytics"],
+      scopeType: "canonical-licensee-organization", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(RISK_ANALYTICS_WORKFLOW_ID),
+    },
+    {
+      id: "sql-profile-risk-analytics-platform-admin", workflowId: RISK_ANALYTICS_WORKFLOW_ID, route: "GET /api/analytics/risk-scores",
+      actorClass: "platform-admin", roleValues: ["SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"], minimumAssurance: "mfa-verified", purposeCodes: ["tenant-risk-analytics"],
+      scopeType: "database-validated-selected-licensee-organization", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(RISK_ANALYTICS_WORKFLOW_ID),
+    },
+    {
+      id: "sql-profile-audit-log-licensee-admin", workflowId: AUDIT_LOGS_WORKFLOW_ID, route: "GET /api/audit/logs",
+      actorClass: "licensee-admin", roleValues: ["LICENSEE_ADMIN", "ORG_ADMIN"], minimumAssurance: "mfa-verified", purposeCodes: ["audit-log-read"],
+      scopeType: "canonical-licensee-organization", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(AUDIT_LOGS_WORKFLOW_ID),
+    },
+    {
+      id: "sql-profile-audit-log-manufacturer", workflowId: AUDIT_LOGS_WORKFLOW_ID, route: "GET /api/audit/logs",
+      actorClass: "manufacturer", roleValues: ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"], minimumAssurance: "mfa-verified", purposeCodes: ["audit-log-read"],
+      scopeType: "canonical-manufacturer-linked-licensee", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(AUDIT_LOGS_WORKFLOW_ID),
+    },
+    {
+      id: "sql-profile-audit-log-platform-admin", workflowId: AUDIT_LOGS_WORKFLOW_ID, route: "GET /api/audit/logs",
+      actorClass: "platform-admin", roleValues: ["SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"], minimumAssurance: "mfa-verified", purposeCodes: ["platform-audit-log-read"],
+      scopeType: "database-validated-selected-licensee", status: "direct-policy-candidate",
+      commandRuleIds: ruleIdsFor(AUDIT_LOGS_WORKFLOW_ID).filter((ruleId) => rules.find((rule) => rule.id === ruleId)?.tableId === "table-audit-log"),
+    },
+    {
+      id: "sql-profile-trace-licensee-admin", workflowId: TRACE_TIMELINE_WORKFLOW_ID, route: "GET /api/trace/timeline",
+      actorClass: "licensee-admin", roleValues: ["LICENSEE_ADMIN", "ORG_ADMIN"], minimumAssurance: "password-verified", purposeCodes: ["trace-timeline-read"],
+      scopeType: "canonical-licensee-organization", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(TRACE_TIMELINE_WORKFLOW_ID),
+    },
+    {
+      id: "sql-profile-trace-manufacturer", workflowId: TRACE_TIMELINE_WORKFLOW_ID, route: "GET /api/trace/timeline",
+      actorClass: "manufacturer", roleValues: ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"], minimumAssurance: "password-verified", purposeCodes: ["trace-timeline-read"],
+      scopeType: "canonical-manufacturer-linked-licensee", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(TRACE_TIMELINE_WORKFLOW_ID),
+    },
+    {
+      id: "sql-profile-blocked-platform-and-incompatible-projections",
+      workflowIds: [AUDIT_CSV_EXPORT_WORKFLOW_ID, FRAUD_REPORTS_WORKFLOW_ID, TRACE_TIMELINE_WORKFLOW_ID],
+      actorClasses: ["platform-admin", "operator", "authenticated-user", "licensee-admin"], status: "direct-policy-blocked",
+      blockers: ["platform-licensee-selector-validation-boundary-pending", "shared-runtime-role-incompatible-column-projection", "operator-procedure-required", "authenticated-user-role-ceiling-unresolved-for-direct-sql"],
+    },
+  ];
+  const manifest = { schemaVersion: 1, generatedFrom: ["backend/prisma/schema.prisma", "documents/security/rls-program/tables.json", "documents/security/rls-program/workflows.json", "documents/security/rls-program/manufacturer-bootstrap-boundary.json", "documents/security/rls-program/platform-read-scope-boundary.json", "documents/security/rls-program/policy-alert-actor-ceiling.json", "documents/security/rls-program/public-read-contract.json", "backend/src/routes/index.ts"], actorClasses: [...actorClasses], assuranceLevels: [...assuranceLevels], commandVocabulary: [...policyCommands], sqlCertificationProfiles, rules: rules.sort((a, b) => a.id.localeCompare(b.id)) };
   writeJson(commandSemanticsPath, manifest);
   return manifest;
 };
@@ -1417,12 +1476,12 @@ const ENVIRONMENT_ROLES = Object.freeze({
 });
 
 const ownershipRule = (id, objectClass, expectedOwner, creationIdentity, transferMechanism, verification, rollbackBehavior, extra = {}) => ({
-  id, objectClass, expectedOwner, creationIdentity, transferMechanism, temporaryMembershipRequirements: "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.", postTransferVerification: verification, rollbackBehavior, forbiddenOwnershipStates: ["owned by any runtime LOGIN identity", "owned by identity-migration at deployment success", "owned by an environment administrator LOGIN"], ...extra,
+  id, objectClass, expectedOwner, creationIdentity, transferMechanism, temporaryMembershipRequirements: "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.", postTransferVerification: verification, rollbackBehavior, forbiddenOwnershipStates: ["owned by any runtime LOGIN identity", "owned by identity-migration at deployment success", "owned by an environment administrator LOGIN"], ...extra,
 });
 
 export const buildObjectOwnershipManifest = (tableManifest, identityManifest, preAuthManifest, workerManifest) => {
-  const safeRollback = "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.";
-  const perObjectTransfer = "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.";
+  const safeRollback = "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.";
+  const perObjectTransfer = "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.";
   const tableOwner = "identity-table-owner";
   const authOwner = "identity-auth-function-owner";
   const rules = [
@@ -1461,8 +1520,8 @@ export const buildObjectOwnershipManifest = (tableManifest, identityManifest, pr
       "Any temporary membership uses ADMIN FALSE, INHERIT FALSE, SET TRUE and is revoked before success; INHERIT FALSE prevents automatic privileges but SET TRUE remains powerful until revocation.",
       "ALTER DEFAULT PRIVILEGES applies to objects subsequently created by the named/current creator, not inherited role defaults, so every possible creation identity is normalized explicitly.",
     ],
-    recommendedTransferModel: { id: "broker-per-object-transfer", recommended: true, migrationOwnerMembership: false, transferExecutor: "audited broker-controlled administrative executor", grantorAuthority: "Managed database administrator or exact role member holding ADMIN option for the target owner; CREATEROLE without the required ADMIN/SET path is insufficient.", executorTemporaryMembership: { permitted: true, roles: [tableOwner, authOwner], admin: false, inherit: false, set: true, grantedOneAtATime: true, revokedBeforeSuccess: true, auditRequired: true }, reason: "Keeps owner-role reachability out of the migration credential while allowing deterministic per-object transfer." },
-    fallbackTransferModel: { id: "temporary-noninheriting-migration-membership", recommended: false, activation: "Separate reviewed exception when broker separation is unavailable", membership: { member: "identity-migration", roles: [tableOwner, authOwner], admin: false, inherit: false, set: true, oneOwnerAtATime: true }, requirements: ["Exact grantor authority verified before migration", "Grant and revoke recorded in immutable deployment audit", "Failure handler revokes membership even after partial DDL", "Catalog gate proves no membership or ownership residue"], successWithActiveMembershipAllowed: false },
+    recommendedTransferModel: { id: "clean-room-broker-per-object-transfer", recommended: true, migrationOwnerMembership: "transactional-admin-phase-only", transferExecutor: "audited broker-controlled green-database administrator", grantorAuthority: "The green administrator must hold exact SET/ADMIN authority for the package-created migration and NOLOGIN owner roles; CREATEROLE alone is insufficient.", temporaryMembership: { member: "identity-migration", roles: [tableOwner, authOwner], admin: false, inherit: false, set: true, grantedOneAtATime: true, revokedBeforeSuccess: true, runtimeCredentialUsed: false, auditRequired: true }, reason: "Prisma owns zero-based objects as the restricted migration identity; the separate administrative phase transfers them deterministically without giving a running migration or runtime session owner authority." },
+    fallbackTransferModel: { id: "none", recommended: false, activation: "unsupported", requirements: ["Destroy and recreate the green candidate if the exact transfer model cannot execute"], successWithActiveMembershipAllowed: false },
     objectClasses: rules,
     schemaOwnershipRules: [
       { schema: "public", expectedOwner: tableOwner, publicCreate: false, runtimeCreate: false, notes: "USAGE is grant-generated; upgraded databases are checked because PUBLIC CREATE may predate secure defaults." },
@@ -1481,8 +1540,8 @@ export const buildObjectOwnershipManifest = (tableManifest, identityManifest, pr
     defaultPrivilegeRules: { creationIdentities: ["identity-migration", tableOwner, authOwner], publicGrants: [], runtimeGrants: [], revokePublicByDefault: ["EXECUTE on functions/procedures", "USAGE on types", "all privileges on tables, sequences and schemas"], commandGrantSource: "documents/security/rls-program/command-semantics.json", notes: "Defaults affect future objects only and are normalized for each possible creator. Exact runtime grants are applied after ownership transfer; no app, read, worker, scheduled or pre-auth access is inherited from defaults." },
     migrationLifecycle: [
       { step: 1, id: "authenticate", requirement: "identity-migration authenticates with the deployment-only environment credential." },
-      { step: 2, id: "preflight", requirement: "Verify expected database/environment, current user, role attributes, owner attributes, schema baseline, clean membership state, and capture an exact object-owner snapshot." },
-      { step: 3, id: "temporary-authority", requirement: "Broker obtains only the exact transfer authority; recommended path grants no owner membership to migration." },
+      { step: 2, id: "preflight", requirement: "Verify the exact green database/environment and administrator, require a template0-clean application catalog, zero managed roles, zero unexpected grants/policies/memberships/default ACLs and no traffic." },
+      { step: 3, id: "temporary-authority", requirement: "Only after zero-based Prisma migration, the brokered administrator grants the migration owner one SET-only target-owner edge inside the ownership transaction." },
       { step: 4, id: "migrate", requirement: "Migration creates/alters only reviewed objects and records the created/changed object set." },
       { step: 5, id: "transfer", requirement: "Broker transfers each object to its class owner using the deterministic object manifest." },
       { step: 6, id: "normalize-privileges", requirement: "Normalize schema privileges, exact grants, routine EXECUTE, and creator-specific default privileges." },
@@ -1502,9 +1561,9 @@ export const buildObjectOwnershipManifest = (tableManifest, identityManifest, pr
       { id: "verify-optional-object-classes", catalogs: ["pg_publication", "pg_subscription", "pg_extension", "pg_depend"], proves: "Optional platform-owned objects are absent or exactly allowlisted and never runtime/migration owned." },
     ],
     forbiddenOwnershipStates: ["LOGIN owner for a protected object", "migration-owned object at success", "runtime-owned application object", "runtime membership in table or auth owner", "migration owner membership after transfer", "PUBLIC CREATE on a protected schema", "broad runtime grants from default privileges", "SECURITY DEFINER app_rls worker helper"],
-    migrationCompletionGate: { catalogVerificationRequired: true, transferFailureReportsSuccess: false, revocationFailureReportsSuccess: false, ownershipResidueAllowed: 0, migrationMembershipResidueAllowed: 0, runtimeOwnedObjectsAllowed: 0, transactionRule: "Use transactional DDL where supported; concurrent/nontransactional changes require the same preflight snapshot, explicit compensation, unconditional revocation and final catalog gate.", failClosed: true },
+    migrationCompletionGate: { catalogVerificationRequired: true, transferFailureReportsSuccess: false, revocationFailureReportsSuccess: false, ownershipResidueAllowed: 0, migrationMembershipResidueAllowed: 0, runtimeOwnedObjectsAllowed: 0, transactionRule: "Every package phase is transactional. Any phase failure stops green activation; cleanup destroys the unused green database and then removes only exact package-marked roles.", failClosed: true },
     migrationOnlyTables: tableManifest.tables.filter((table) => table.primaryCategory === "migration-only").map((table) => ({ tableId: table.id, owner: tableOwner, forceRlsTarget: false, runtimeGrants: [], decision: "No production runtime access; physical ownership is still normalized to the table owner." })),
-    evidence: ["documents/security/mscqr_staging_database_role_separation_template_2026-07-10.sql", "documents/security/mscqr_staging_database_role_separation_rollback_2026-07-10.sql", "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql", "scripts/run-disposable-role-separation-harness.mjs", "backend/tests/rlsAuthBootstrapP2.test.js", "backend/prisma/migrations"],
+    evidence: ["scripts/rls/generate-clean-room-rls-sql.mjs", "scripts/rls/certify-clean-room-database.mjs", "scripts/rls/certify-full-database.mjs", "scripts/tests/full-database-rls-enforcement.test.mjs", "backend/prisma/migrations"],
   };
   return manifest;
 };
@@ -1547,7 +1606,7 @@ const writeObjectOwnershipReview = (manifest) => {
   for (const rule of manifest.objectClasses) lines.push(`| ${rule.objectClass} | ${rule.expectedOwner} | ${rule.creationIdentity} | ${rule.transferMechanism} | ${rule.postTransferVerification} |`);
   lines.push("", "## Migration lifecycle", "");
   for (const step of manifest.migrationLifecycle) lines.push(`${step.step}. **${step.id}:** ${step.requirement}`);
-  lines.push("", "## Temporary authority model", "", "The approved path separates DDL execution from ownership transfer. `identity-migration` never joins an owner role: an audited broker executor transfers the exact changed objects and may receive one target-owner membership at a time with `ADMIN FALSE`, `INHERIT FALSE`, `SET TRUE`. That membership is itself privileged and is revoked before catalog verification. PostgreSQL 18 `CREATEROLE` is not treated as blanket authority; the grantor must have the exact membership administration authority and the transfer executor must be able to assume the target owner for the transfer.", "", "The fallback allows the migration identity the same non-inheriting, SET-only membership one owner at a time only under a separate reviewed exception. Success is impossible until membership is revoked and both ownership and membership residue are zero.", "", "## Schema, sequence, type, function and policy ownership", "", "`public` and `app_rls` belong to the table owner; `app_auth` belongs to the auth owner. PUBLIC and runtime CREATE are denied. Prisma-created application schemas must be declared and table-owner owned. Extension schemas remain with the allowlisted managed extension owner. Table-owned and standalone application sequences, enums, composite types, views and materialized views use the table owner. Indexes, constraints, policies and triggers follow the owning table; called functions are verified independently.", "", `The seven approved pre-auth functions are auth-owner SECURITY DEFINER functions. The ${manifest.approvedFunctionOwnerBoundaries.worker.length} approved worker helpers are table-owner SECURITY INVOKER functions. Policies have no independent PostgreSQL owner: their authority follows the table owner.`, "", "## Default privileges", "", "Every possible creator—migration, table owner and auth owner—has explicit future-object defaults. PUBLIC receives no application-object privilege; runtime roles receive no default table, sequence, schema, type or routine access. Exact runtime grants come only from command semantics after transfer. Defaults are not relied on retroactively and inherited-role defaults are not assumed.", "", "## Failure, rollback and catalog verification", "", "Preflight records exact owners and changed objects. Transfer, privilege normalization, revocation and catalog verification are a single fail-closed deployment gate. Transactional DDL rolls back together; nontransactional operations require explicit compensation. Rollback may restore only a previously approved NOLOGIN owner and never restores runtime or migration ownership. Failure handling always attempts revocation and cannot report success with residue.", "", "Catalog certification covers all 77 tables (75 FORCE targets plus two migration-only tables), sequences/dependencies, schemas/CREATE ACLs, exact function owners/security modes/EXECUTE ACLs, types, owner membership closure, default ACLs and optional publications/subscriptions/extensions. Migration, runtime and environment-admin LOGIN ownership must all be zero.", "", "## Environment differences", "", "The contract is identical in development, staging and production; only the `mscqr_dev_*`, `mscqr_staging_*` and `mscqr_prod_*` role names differ. Production uses the same deployment-only migration credential and broker gate, with no standing break-glass ownership path.", "", "## Remaining implementation work", "", "Implement reviewed role/bootstrap and ownership-transfer artifacts later, add disposable PostgreSQL catalog tests for every query contract, capture environment-specific preflight evidence, and rehearse partial-failure compensation before staging activation. This architecture decision does not authorize those changes.", "");
+  lines.push("", "## Temporary authority model", "", "The approved clean-room path separates zero-based Prisma DDL from ownership transfer. The restricted migration credential never receives owner membership while migrations run. In the later brokered administrative transaction, the administrator temporarily gives `identity-migration` one target-owner membership with `ADMIN FALSE`, `INHERIT FALSE`, `SET TRUE`, assumes the migration owner of the new objects, transfers the exact allowlisted objects, and revokes the membership before commit. There is no fallback transfer path and success requires zero membership and ownership residue.", "", "## Schema, sequence, type, function and policy ownership", "", "`public` and `app_rls` belong to the table owner; `app_auth` belongs to the auth owner. PUBLIC and runtime CREATE are denied. Prisma-created application schemas must be declared and table-owner owned. Extension schemas remain with the allowlisted managed extension owner. Table-owned and standalone application sequences, enums, composite types, views and materialized views use the table owner. Indexes, constraints, policies and triggers follow the owning table; called functions are verified independently.", "", `The seven approved pre-auth functions are auth-owner SECURITY DEFINER functions. The ${manifest.approvedFunctionOwnerBoundaries.worker.length} approved worker helpers are table-owner SECURITY INVOKER functions. Policies have no independent PostgreSQL owner: their authority follows the table owner.`, "", "## Default privileges", "", "Every possible creator—migration, table owner and auth owner—has explicit future-object defaults. PUBLIC receives no application-object privilege; runtime roles receive no default table, sequence, schema, type or routine access. Exact runtime grants come only from command semantics after transfer.", "", "## Failure, rollback and catalog verification", "", "Installation is permitted only in a fresh green database on isolated green infrastructure. Preflight refuses any application object, managed role, unexpected grant, policy, membership or default ACL. A failed candidate is not repaired in place: stop and disconnect green consumers, prove no required data was accepted, drop the green database, drop only exact package-marked roles, and keep or restore traffic to the untouched blue database.", "", "Catalog certification covers all 77 tables (75 FORCE targets plus two migration-only tables), sequences/dependencies, schemas/CREATE ACLs, exact function owners/security modes/EXECUTE ACLs, types, owner membership closure, default ACLs and optional publications/subscriptions/extensions. Migration, runtime and environment-admin LOGIN ownership must all be zero.", "", "## Environment differences", "", "The contract is identical in development, staging and production; only the `mscqr_dev_*`, `mscqr_staging_*` and `mscqr_prod_*` role names differ. Green must use a separate PostgreSQL cluster or instance because roles are cluster-wide and all managed names must be absent before apply. The current blue database and its roles are never mutation targets.", "", "## Certification status", "", "The clean-room generator, exact catalog verifier, failure-injection harness and role-marker cleanup package implement this ownership model. Application-path workflow certification and green staging activation remain separate gates.", "");
   fs.writeFileSync(objectOwnershipReviewPath, `${lines.join("\n")}\n`);
 };
 
@@ -1656,8 +1715,8 @@ export const buildOperatorBoundaryManifest = (workflowManifest, commandManifest)
     operatorBoundary("operator-boundary-job-recovery", "job-recovery", ["development", "staging", "production"], "operator-admin", proc("app_ops.recover_failed_job", "app_ops.recover_failed_job(job_id uuid, expected_state text, operator_id uuid, reason text, approval_id uuid)"), { acceptedArguments: ["job_id", "exact expected_state", "operator_id", "reason", "approval_id"], targetTables: ["table-compliance-pack-job", "table-evidence-retention-job", "table-audit-log-outbox", "table-security-event-outbox"], allowedColumns: ["retry/claim state", "attempt metadata"], maximumRowScope: "one failed durable job", tenantScopeRequirement: "job durable tenant scope is reverified" }),
     operatorBoundary("operator-boundary-staging-rls-fixture", "RLS-readiness-check", ["staging"], "operator-admin", proc("app_ops.prepare_rls_validation_fixture", "app_ops.prepare_rls_validation_fixture(fixture_id uuid, tenant_key text, approval_id uuid)"), { acceptedArguments: ["fixture_id", "reserved tenant_key", "approval_id"], targetTables: ["table-organization", "table-licensee", "table-manufacturer-licensee-link", "table-user", "table-qrrange", "table-batch", "table-qrcode"], allowedColumns: ["fixed synthetic fixture columns from the reviewed fixture manifest"], maximumRowScope: "one reserved synthetic tenant fixture with bounded QR count", tenantScopeRequirement: "reserved staging-only fixture tenant; production denied" }),
     operatorBoundary("operator-boundary-rls-readiness", "RLS-readiness-check", ["development", "staging", "production"], "operator-admin", command("mscqr-operator rls-readiness", "mscqr-operator rls-readiness --environment <exact> --release-sha <sha> --policy-digest <sha256> --grant-digest <sha256> --role-digest <sha256> --baseline-digest <sha256>"), { acceptedArguments: ["environment", "release_sha", "policy_digest", "grant_digest", "role_digest", "baseline_digest"], returnedFields: ["readiness_id", "checks", "catalog_baseline_digest", "ready", "expires_at"], maximumRowScope: "catalog metadata and bounded canary assertions only", tenantScopeRequirement: "canary uses approved synthetic tenant; no business payload output" }),
-    operatorBoundary("operator-boundary-rls-activation", "RLS-activation-control", ["staging", "production"], "operator-admin", command("mscqr-operator rls-activate", "mscqr-operator rls-activate --environment <exact> --release-sha <sha> --migration-set-digest <sha256> --catalog-baseline-digest <sha256> --readiness-id <id> --approval-id <id> --ticket-id <id> --window-id <id> --checker-id <id> --rollback-digest <sha256>"), { acceptedArguments: ["environment", "release_sha", "migration_set_digest", "catalog_baseline_digest", "readiness_id", "approval_id", "ticket_id", "window_id", "independent checker_id", "rollback_digest", "staging_evidence_digest for production"], returnedFields: ["activation_id", "phase", "table_set_digest", "canary_status", "post_catalog_digest", "rollback_ready"], maximumRowScope: "exact checksum-bound RLS activation phase only", tenantScopeRequirement: "approved canary tenants only; operator receives no policy bypass", rollbackBoundaryId: "operator-boundary-rls-rollback", productionRequirements: { stagingEvidenceRequired: true, exactReleaseBindingRequired: true, exactMigrationSetRequired: true, currentCatalogBaselineRequired: true, approvalRecordRequired: true, rollbackArtifactRequired: true, maintenanceWindowRequired: true, independentCheckerRequired: true, postActivationVerificationRequired: true } }),
-    operatorBoundary("operator-boundary-rls-rollback", "RLS-rollback-control", ["staging", "production"], "operator-admin", command("mscqr-operator rls-rollback", "mscqr-operator rls-rollback --environment <exact> --activation-id <id> --release-sha <sha> --rollback-digest <sha256> --approval-id <id> --ticket-id <id> --purpose <text>"), { acceptedArguments: ["environment", "activation_id", "release_sha", "rollback_digest", "approval_id", "ticket_id", "purpose"], returnedFields: ["rollback_id", "phase", "catalog_status", "membership_status", "post_rollback_digest"], maximumRowScope: "exact activation phase and checksum-paired rollback artifact only", tenantScopeRequirement: "not-applicable: exact table phase", pairedActivationBoundaryId: "operator-boundary-rls-activation" }),
+    operatorBoundary("operator-boundary-rls-activation", "RLS-activation-control", ["staging", "production"], "operator-admin", command("mscqr-operator rls-activate", "mscqr-operator rls-activate --environment <exact> --release-sha <sha> --migration-set-digest <sha256> --catalog-baseline-digest <sha256> --readiness-id <id> --approval-id <id> --ticket-id <id> --window-id <id> --checker-id <id> --rollback-digest <sha256>"), { acceptedArguments: ["environment", "release_sha", "migration_set_digest", "catalog_baseline_digest", "readiness_id", "approval_id", "ticket_id", "window_id", "independent checker_id", "rollback_digest", "staging_evidence_digest for production"], returnedFields: ["activation_id", "green_database_id", "blue_rollback_target_id", "phase", "table_set_digest", "canary_status", "post_catalog_digest", "rollback_ready"], maximumRowScope: "one checksum-bound green build and traffic switch; blue database mutation is prohibited", tenantScopeRequirement: "approved synthetic canary tenants only; operator receives no policy bypass", deploymentModel: "clean-room-blue-green", blueDatabaseMutationAllowed: false, rollbackBoundaryId: "operator-boundary-rls-rollback", productionRequirements: { stagingEvidenceRequired: true, exactReleaseBindingRequired: true, exactMigrationSetRequired: true, currentCatalogBaselineRequired: true, approvalRecordRequired: true, rollbackArtifactRequired: true, maintenanceWindowRequired: true, independentCheckerRequired: true, postActivationVerificationRequired: true } }),
+    operatorBoundary("operator-boundary-rls-rollback", "RLS-rollback-control", ["staging", "production"], "operator-admin", command("mscqr-operator rls-rollback", "mscqr-operator rls-rollback --environment <exact> --activation-id <id> --release-sha <sha> --rollback-digest <sha256> --approval-id <id> --ticket-id <id> --purpose <text>"), { acceptedArguments: ["environment", "activation_id", "release_sha", "rollback_digest", "approval_id", "ticket_id", "purpose"], returnedFields: ["rollback_id", "blue_switch_status", "green_database_absent", "managed_role_residue_count", "blue_fingerprint_unchanged", "post_rollback_digest"], maximumRowScope: "one recorded green database and its exact package-marked roles only", tenantScopeRequirement: "no required data accepted; blue is the immutable rollback target", deploymentModel: "clean-room-blue-green", blueDatabaseMutationAllowed: false, pairedActivationBoundaryId: "operator-boundary-rls-activation" }),
     operatorBoundary("operator-boundary-breakglass-issuance", "break-glass-only", ["production"], "break-glass", command("mscqr-security-broker issue-breakglass", "mscqr-security-broker issue-breakglass --incident-id <id> --ticket-id <id> --purpose <text> --approver-one <id> --approver-two <id> --boundary-ids <allowlist> --ttl-minutes <1..30>"), { acceptedArguments: ["incident_id", "ticket_id", "purpose", "two distinct approver identities", "exact boundary allowlist", "ttl 1..30 minutes"], returnedFields: ["ephemeral_identity", "credential_handle", "expires_at", "allowlist_digest", "audit_transcript_id"], maximumRowScope: "only targets permitted by the issued boundary allowlist", tenantScopeRequirement: "each issued command retains exact target/tenant binding", maximumDurationMinutes: 30, lifecycle: ["incident declared", "ticket created", "two distinct approvers approve", "broker creates individually attributable ephemeral credential", "exact boundary allowlist attached", "expiry fixed at no more than 30 minutes", "every command records actor/ticket/purpose/result", "automatic revocation at expiry", "early revocation remains available", "post-use catalog and data audit", "credential and memberships verified absent"] }),
     operatorBoundary("operator-boundary-prohibited-platform-role-repair", "prohibited", ["development", "staging", "production"], "break-glass", denied("backend/scripts/repair-admin-accounts.js"), { maximumDurationMinutes: 0, maximumRowScope: "zero rows", approvalRequirement: { required: false, distinctApprovers: 0 }, ticketRequirement: false, automaticRevocation: true, denyScenarios: ["Direct creation, promotion or repair of platform administrators is not an approved operator or break-glass action; use reviewed application governance or a future exact maker/checker procedure."], transactionBehavior: "No execution is authorized." }),
     operatorBoundary("operator-boundary-prohibited-seed-and-test-data", "prohibited", ["development", "staging", "production"], "operator-admin", denied("registered Prisma/enterprise/launch-smoke seed and QR-reset workflows"), { maximumDurationMinutes: 0, maximumRowScope: "zero rows", approvalRequirement: { required: false, distinctApprovers: 0 }, ticketRequirement: false, automaticRevocation: true, denyScenarios: ["Generic seed, upsert, delete or test-data mutation is not operator administration. Local disposable development may use test credentials outside protected environment roles."], transactionBehavior: "No execution is authorized against protected environments." }),
@@ -1746,7 +1805,7 @@ export const buildOperatorProgramme = () => {
 
 const MANUFACTURER_BOOTSTRAP_WORKFLOW_IDS = [
   "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-licensee-links",
-  "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids",
+  "workflow-internal-backend-src-services-manufacturer-scope-service-ts-resolve-manufacturer-session-scope",
 ];
 
 const applyManufacturerBootstrapAuthority = (workflowManifest) => {
@@ -1770,14 +1829,24 @@ const applyManufacturerBootstrapAuthority = (workflowManifest) => {
     workflow.expectedAllowedScenarios = boundary.allowScenarios;
     workflow.expectedDeniedScenarios = boundary.denyScenarios;
     workflow.unresolvedDecisions = workflow.unresolvedDecisions.filter((id) => id !== boundary.decisionId);
-    if (workflowId.endsWith("list-manufacturer-linked-licensee-ids")) {
+    if (workflowId.endsWith("resolve-manufacturer-session-scope")) {
       workflow.contextBoundaryBlockers = [{
-        code: "manufacturer-bootstrap-runtime-pending",
-        reason: "The actor bootstrap contract is resolved, but the current helper still permits global Prisma, catch-to-empty fallback and claim-carried membership reuse.",
-        remediation: "Implement the transaction-client-only actor-context repository and its deterministic membership, projection, attribution and denial tests in a focused runtime batch.",
+        code: "manufacturer-bootstrap-postgresql-certification-pending",
+        reason: "The transaction-client-only runtime boundary is implemented and focused application tests pass; final generated-role and FORCE RLS PostgreSQL certification remains pending.",
+        remediation: "Certify the implemented actor-context repository through the final generated package on disposable PostgreSQL.",
       }];
-      workflow.contextBoundaryFamilySplit.scopeModel = "Database-verified manufacturer User.id is actor authority; eligible link rows are the bounded result, and licensee/organization context is installed only after server verification selects one link.";
-      workflow.contextBoundaryFamilySplit.commandSemantics = "Password-verified actor-only SELECT with explicit projection, maximum 100 eligible links, deterministic ordering and same-transaction attribution; no blank tenant wildcard.";
+      workflow.contextBoundaryFamilySplit = {
+        parentFamilyId: "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
+        semanticKey: "manufacturer-session-scope-hydration",
+        reason: "Separate canonical manufacturer session-scope hydration from richer invitation link projections.",
+        evidence: ["Authentication and session callers supply their transaction client; the helper has no global Prisma fallback or claim-carried membership authority."],
+        routeRoots: ["Authentication and session callers supply their transaction client; the helper has no global Prisma fallback or claim-carried membership authority."],
+        actorClasses: ["manufacturer"],
+        scopeModel: "Database-verified manufacturer User.id is actor authority; eligible link rows are the bounded result, and licensee/organization context is installed only after server verification selects one link.",
+        executionSurface: "internal",
+        protectedTableBoundary: "ManufacturerLicenseeLink plus active Licensee and Organization actor-bound projection",
+        commandSemantics: "Password-verified actor-only SELECT with explicit projection, maximum 100 eligible links, deterministic ordering and same-transaction attribution; no blank tenant wildcard.",
+      };
     } else {
       workflow.contextBoundaryBlockers = [{
         code: "incompatible-shared-auth-roots",
@@ -1802,6 +1871,7 @@ const applyPlatformReadScopeAuthority = (workflowManifest) => {
     workflow.platformReadScopeBoundaryId = boundary.id;
     workflow.platformReadScopeClass = classification.primaryClass;
     workflow.platformReadRequiredAssurance = classification.requiredAssurance;
+    workflow.platformReadRequiredAssuranceByActorClass = classification.requiredAssuranceByActorClass || null;
     workflow.platformReadActorClasses = classification.actorClasses;
     workflow.platformReadExecutionBoundary = classification.executionBoundary;
     workflow.platformReadPurposeCodes = classification.purposeCodes;
@@ -1957,6 +2027,132 @@ const applyPublicReadContractAuthority = (workflowManifest) => {
   return boundary;
 };
 
+const applyRuntimeImplementationAuthority = (workflowManifest) => {
+  const workflow = workflowManifest.workflows.find((item) => item.id === RISK_ANALYTICS_WORKFLOW_ID);
+  assert(workflow, `${RISK_ANALYTICS_WORKFLOW_ID} runtime workflow missing`);
+  Object.assign(workflow, {
+    authenticationStage: "authenticated",
+    actorClasses: ["licensee-admin", "platform-admin"],
+    runtimeImplementedActorClasses: ["licensee-admin", "platform-admin"],
+    runtimeBlockedActorClasses: [],
+    platformRuntimeStatus: "implemented-postgresql-pending",
+    platformRuntimeBlockers: [],
+    canonicalSourceFiles: [
+      "backend/src/routes/index.ts",
+      "backend/src/middleware/auth.ts",
+      "backend/src/controllers/tracePolicyController.ts",
+      "backend/src/services/analyticsService.ts",
+    ],
+    tenantScopeRule: "An ACTIVE database-hydrated LICENSEE_ADMIN or ORG_ADMIN uses its nonblank User.licenseeId and User.orgId; a selector may only equal that scope. An ACTIVE database-hydrated platform administrator requires fresh MFA and one requested Licensee that is revalidated with its active Organization in the same transaction. Blank, foreign, inactive or inconsistent scope is denied.",
+    contextRequirements: [
+      "transaction-local canonical actor context",
+      "database-hydrated ACTIVE tenant administrator and request ID",
+      "nonblank database-validated organization and licensee scope",
+      "fixed allowlisted tenant-risk-analytics purpose",
+      "one REPEATABLE READ transaction with atomic immutable attribution",
+    ],
+    contextRequirementsSource: "human-reviewed",
+    authorizationBoundaryType: "authenticated-context",
+    expectedAllowedScenarios: [
+      "A database-hydrated LICENSEE_ADMIN or ORG_ADMIN reads bounded risk analytics for its active licensee and organization.",
+      "A database-hydrated platform administrator with fresh MFA reads one requested active licensee after its Licensee and Organization are revalidated in the same attributed transaction.",
+      "An optional query licensee equal to canonical scope narrows nothing and is accepted.",
+      "Batch, QR, scan-log, alert and policy reads share the same licensee and bounded lookback snapshot.",
+      "The immutable RISK_ANALYTICS_READ attribution commits in the same transaction before serialization.",
+    ],
+    expectedDeniedScenarios: [
+      "Password-only or stale-MFA platform, manufacturer, anonymous, inactive-session or unsupported-role actors are denied.",
+      "A platform actor with blank, malformed, foreign, inactive, suspended or organization-inconsistent selector scope is denied before analytics or RISK_ANALYTICS_READ attribution.",
+      "Blank, missing, foreign, inactive, suspended or organization-inconsistent scope is denied.",
+      "Out-of-range date/page inputs and context purpose, actor, assurance or scope mismatch are denied before analytics reads.",
+      "A protected query before context, global Prisma use, unbounded input, inconsistent tenant predicate, nested User projection or non-atomic attribution is denied.",
+    ],
+    currentCompatibilityStatus: "tenant-and-platform-context-boundary-implemented-postgresql-certification-pending",
+    implementationStatus: "context-boundary-implemented",
+    contextBoundaryBlockers: [],
+    requiredUnitTests: ["backend/tests/riskAnalyticsContext.test.js"],
+    unresolvedDecisions: [],
+    contextBoundaryStatus: "implemented",
+    implementationFamilyId: "family-simple-tenant-scoped-reads-analyticsservice-2c20deef24",
+    contextBoundaryCategory: "simple tenant-scoped reads",
+    approvedReadAttribution: true,
+    implementationFiles: [
+      "backend/src/controllers/tracePolicyController.ts",
+      "backend/src/services/analyticsService.ts",
+      "backend/src/lib/canonicalDbContext.ts",
+      "backend/src/middleware/auth.ts",
+      "backend/src/routes/index.ts",
+    ],
+    testFiles: ["backend/tests/riskAnalyticsContext.test.js"],
+    canonicalContextKeys: ["app.user_id", "app.role", "app.organization_id", "app.licensee_id", "app.manufacturer_id", "app.auth_assurance", "app.request_id", "app.purpose"],
+    sameTransactionGuarantee: true,
+    protectedQueryClient: "transaction-client-only",
+    consistentReadScopeGuarantee: true,
+    routeRootVerified: true,
+    aggregateScopeStatus: "tenant-bounded",
+    postgresqlCertificationStatus: "pending",
+    contextBoundaryPlanningEvidence: {
+      reviewedAt: "2026-07-16",
+      registeredRootCallChainVerified: true,
+      protectedQueryTraceComplete: true,
+      sameTransactionFeasible: true,
+      focusedTestsDeterministic: true,
+      databaseConcurrencyVerified: true,
+    },
+    resolvedContextBlockerIds: [
+      "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unresolved-boundary",
+      "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unreviewed-scope",
+      "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unverified-execution-path",
+      "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unverified-root-call-chain",
+    ],
+    rootCallChainEvidence: [
+      "backend/src/routes/index.ts registers GET /analytics/risk-scores with authenticate, requireAnyAdmin, bounded read limiters and enforceTenantIsolation before getRiskAnalyticsController.",
+      "getRiskAnalyticsController is the only production caller of getRiskAnalytics; tenant and freshly MFA-verified platform paths share the same repeatable-read analytics transaction.",
+      "authenticate performs exact actor-self User hydration first; tenant scope is database authoritative, while platform scope starts empty and one requested Licensee and Organization are revalidated before tenant data is accepted.",
+    ],
+    scopeEvidence: [
+      "buildRiskAnalyticsBoundary accepts database-hydrated LICENSEE_ADMIN/ORG_ADMIN claims and fresh-MFA platform claims; platform authority is narrowed to one requested Licensee and its active Organization before analytics data is accepted.",
+      "Every protected analytics predicate contains the validated tenant licensee; every scoped tenant Batch forms the bounded candidate set, preserving zero-activity rows, while in-window scans and every unresolved alert supply risk signals.",
+      "Every scan row must prove matching canonical Licensee, QR and Batch parentage before it can affect a ceiling, candidate, dimension or score.",
+      "Every populated PolicyAlert batch, QR, manufacturer, incident and policy-rule parent must resolve to the same active canonical tenant before candidate scoring.",
+    ],
+    responseProjection: [
+      "Explicit tenant-safe batch and manufacturer aggregate fields; User.id/name are the only returned manufacturer fields, while role/licenseeId/orgId/isActive/status/deletedAt/disabledAt are actor/scope/predicate validation columns and are never serialized. Email, password, token, MFA, WebAuthn, recovery, metadata and platform-security fields remain unreadable.",
+      "Risk rows are deterministically ordered by score and stable ID; policy thresholds and bounded result summaries only.",
+    ],
+    riskAnalyticsAllowedColumnsByTableAndCommand: {
+      "table-audit-log": { INSERT: ["action", "details", "entityId", "entityType", "id", "licenseeId", "orgId", "userId"] },
+      "table-batch": { SELECT: ["id", "licenseeId", "manufacturerId", "name"] },
+      "table-licensee": { SELECT: ["id", "isActive", "orgId", "suspendedAt"] },
+      "table-organization": { SELECT: ["id", "isActive"] },
+      "table-incident": { SELECT: ["id", "licenseeId"] },
+      "table-manufacturer-licensee-link": { SELECT: ["licenseeId", "manufacturerId"] },
+      "table-policy-alert": { SELECT: ["acknowledgedAt", "batchId", "id", "incidentId", "licenseeId", "manufacturerId", "policyRuleId", "qrCodeId"] },
+      "table-policy-rule": { SELECT: ["id", "isActive", "licenseeId", "manufacturerId", "orgId"] },
+      "table-qr-scan-log": { SELECT: ["batchId", "id", "latitude", "licenseeId", "longitude", "qrCodeId", "scannedAt"] },
+      "table-qrcode": { SELECT: ["batchId", "id", "licenseeId", "scanCount"] },
+      "table-security-policy": { SELECT: ["geoDriftThresholdKm", "licenseeId", "multiScanThreshold", "velocitySpikeThresholdPerMin"] },
+      "table-user": { SELECT: ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"] },
+    },
+  });
+
+  const nextWorkflow = workflowManifest.workflows.find((item) => item.id === "workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report");
+  assert(nextWorkflow, "respond-to-fraud-report runtime workflow missing");
+  nextWorkflow.contextBoundaryBlockers = [{
+    code: "incompatible-read-mutation-root",
+    reason: "POST /audit/fraud-reports/:id/respond is a platform-admin mutation: it reads a report through global Prisma, appends a response audit record through another global client path, and constructs a customer-delivery side effect. It lacks one bounded licensee/purpose context, transaction-client propagation, immutable ownership guards, idempotency and concurrency enforcement.",
+    remediation: "Move this workflow to a focused platform mutation batch: require one database-validated licensee/report scope and purpose, then perform report lookup, compare-and-set/idempotency, immutable response attribution and durable delivery enqueue in one canonical transaction with focused replay/concurrency tests.",
+  }];
+  nextWorkflow.contextBoundaryPlanningEvidence = {
+    reviewedAt: "2026-07-16",
+    registeredRootCallChainVerified: true,
+    protectedQueryTraceComplete: false,
+    sameTransactionFeasible: false,
+    focusedTestsDeterministic: true,
+    databaseConcurrencyVerified: false,
+  };
+};
+
 export const buildWorkflowManifest = () => {
   const scan = scanProductionAccess();
   const existing = readJson(workflowManifestPath, { schemaVersion: 1, workflows: [] });
@@ -1969,6 +2165,10 @@ export const buildWorkflowManifest = () => {
         ? "http:backend/src/controllers/auditController.ts:getLogs"
       : access.sourceFile === "backend/src/services/fraudReportQueryService.ts" && access.function === "queryFraudReports"
         ? "http:backend/src/controllers/auditController.ts:getFraudReports"
+      : access.sourceFile === "backend/src/services/analyticsService.ts" && ["loadRiskPolicy", "recordRiskAnalyticsRead"].includes(access.function)
+        ? "internal:backend/src/services/analyticsService.ts:getRiskAnalytics"
+      : access.sourceFile === "backend/src/services/auth/refreshTokenService.ts" && access.function === "revoke"
+        ? "internal:backend/src/services/auth/refreshTokenService.ts:rotateRefreshToken"
         : null;
     const key = delegatedKey || `${access.executionSurface}:${access.sourceFile}:${access.function}`;
     if (!groups.has(key)) groups.set(key, []);
@@ -1984,7 +2184,11 @@ export const buildWorkflowManifest = () => {
       ? { ...firstAccess, executionSurface: "http", sourceFile: "backend/src/controllers/auditController.ts", function: delegatedControllerFunction }
       : firstAccess;
     const id = `workflow-${slug(key)}`;
-    const old = previous.get(id) || {};
+    const legacyModuleId = "workflow-internal-backend-src-services-auth-refresh-token-service-ts-module";
+    const inheritedLegacyModule = id === "workflow-internal-backend-src-services-auth-refresh-token-service-ts-rotate-refresh-token"
+      && !previous.has(id)
+      && previous.has(legacyModuleId);
+    const old = previous.get(id) || (inheritedLegacyModule ? previous.get(legacyModuleId) : {}) || {};
     const boundary = old.authorizationBoundaryType || boundaryFor(path.join(repoRoot, first.sourceFile), first.function, first.executionSurface);
     const tableCommands = [...new Set(accesses.flatMap((access) => expandCommands([access.command]).map((command) => `${access.tableId}:${command}`)))].sort().map((value) => { const index = value.lastIndexOf(":"); return { tableId: value.slice(0, index), commands: [value.slice(index + 1)] }; });
     const mergedCommands = [...new Map(tableCommands.map((item) => [item.tableId, { tableId: item.tableId, commands: tableCommands.filter((candidate) => candidate.tableId === item.tableId).flatMap((candidate) => candidate.commands).sort() }])).values()];
@@ -1994,8 +2198,8 @@ export const buildWorkflowManifest = () => {
     return {
       ...old,
       id,
-      name: old.name || displayName(first.function),
-      entryPoint: old.entryPoint || `${first.executionSurface}:${first.function}`,
+      name: inheritedLegacyModule ? displayName(first.function) : old.name || displayName(first.function),
+      entryPoint: inheritedLegacyModule ? `${first.executionSurface}:${first.function}` : old.entryPoint || `${first.executionSurface}:${first.function}`,
       executionSurface: first.executionSurface,
       authenticationStage: old.authenticationStage || (preAuth ? "pre-authentication" : background || ["cli", "startup"].includes(first.executionSurface) ? "system" : "authenticated"),
       actorClasses: old.actorClasses || (background ? ["system-job"] : preAuth ? ["anonymous-or-partially-authenticated"] : first.executionSurface === "cli" ? ["operator"] : ["authenticated-user"]),
@@ -2042,6 +2246,7 @@ export const buildWorkflowManifest = () => {
   const platformReadScopeBoundary = applyPlatformReadScopeAuthority(result);
   const policyAlertActorCeiling = applyPolicyAlertActorCeilingAuthority(result);
   const publicReadContract = applyPublicReadContractAuthority(result);
+  applyRuntimeImplementationAuthority(result);
   for (const table of tableManifest.tables) applyRuntimeCommandMatrix(table, result.workflows);
   const commandManifest = buildCommandSemantics(tableManifest, result);
   const preAuthManifest = buildPreAuthBoundary(result, commandManifest, tableManifest);
@@ -2363,6 +2568,16 @@ export const validatePlatformReadScopeBoundary = (boundary, workflowManifest, co
   for (const classification of boundary.workflowClassifications) {
     assert(classNames.includes(classification.primaryClass), `${classification.workflowId} has an invalid platform class`);
     assert(classification.purposeCodes.length && classification.purposeCodes.every((code) => boundary.purposeCodes.some((item) => item.code === code)), `${classification.workflowId} platform read purpose is absent`);
+    if (classification.requiredAssuranceByActorClass) {
+      assert.deepEqual(Object.keys(classification.requiredAssuranceByActorClass).sort(), [...classification.actorClasses].sort(), `${classification.workflowId} actor assurance map drifted`);
+      assert.equal(classification.requiredAssuranceByActorClass["platform-admin"], "mfa-verified", `${classification.workflowId} platform actor lacks fresh MFA`);
+    }
+    if (classification.runtimeImplementedActorClasses) {
+      assert.deepEqual(classification.runtimeImplementedActorClasses, ["licensee-admin", "platform-admin"], `${classification.workflowId} loses implemented platform authority`);
+      assert.deepEqual(classification.runtimeBlockedActorClasses, [], `${classification.workflowId} retains a stale blocked platform contract`);
+      assert.deepEqual(classification.blockers, [], `${classification.workflowId} retains a stale platform selector blocker`);
+      assert.deepEqual(classification.runtimeAttributionFields, ["actorId", "role", "assurance", "requestId", "purposeCode", "organizationId", "licenseeId", "workflowId", "route", "outcome", "analyzedBatchCount", "returnedBatchCount", "analyzedManufacturerCount", "timestamp"], `${classification.workflowId} attribution contract drifted`);
+    }
     if (!["platform-aggregate-read", "platform-diagnostic-read", "operator-procedure-only", "prohibited-platform-read"].includes(classification.primaryClass)) assert(classification.requiredSelectors.length, `${classification.workflowId} raw global listing is approved without a specific class`);
     if (classification.primaryClass === "platform-aggregate-read") assert(boundary.aggregateRestrictions.approvedWorkflowIds.includes(classification.workflowId), `${classification.workflowId} raw global listing is approved without a specific class`);
     assert(classification.pagination && Number.isInteger(classification.pagination.maximumPageSize) && classification.pagination.maximumPageSize >= 0, `${classification.workflowId} pagination bounds are missing`);
@@ -2383,15 +2598,37 @@ export const validatePlatformReadScopeBoundary = (boundary, workflowManifest, co
     assert.equal(workflow.platformReadScopeClass, classification.primaryClass, `${classification.workflowId} platform class drifted`);
     assert.equal(workflow.authorizationBoundaryType, classification.inventoryBoundaryType, `${classification.workflowId} inventory boundary drifted`);
     assert.equal(workflow.platformReadRequiredAssurance, classification.requiredAssurance, `${classification.workflowId} assurance drifted`);
+    assert.deepEqual(workflow.platformReadRequiredAssuranceByActorClass, classification.requiredAssuranceByActorClass || null, `${classification.workflowId} actor assurance map drifted`);
     assert(!workflow.unresolvedDecisions.includes(boundary.decisionId), `${classification.workflowId} retains resolved platform decision`);
-    assert.notEqual(workflow.contextBoundaryStatus, "implemented", `${classification.workflowId} is falsely context-boundary implemented`);
+    if (classification.runtimeImplementedActorClasses) {
+      assert.deepEqual(workflow.runtimeImplementedActorClasses, classification.runtimeImplementedActorClasses, `${classification.workflowId} implemented actor slice drifted`);
+      assert.deepEqual(workflow.runtimeBlockedActorClasses, classification.runtimeBlockedActorClasses, `${classification.workflowId} blocked actor slice drifted`);
+      assert.equal(workflow.platformRuntimeStatus, "implemented-postgresql-pending", `${classification.workflowId} platform runtime status drifted`);
+      assert.deepEqual(workflow.platformRuntimeBlockers, [], `${classification.workflowId} retains stale selector-validation blocker evidence`);
+      assert.equal(workflow.contextBoundaryStatus, "implemented", `${classification.workflowId} tenant runtime implementation is missing`);
+      assert.equal(workflow.postgresqlCertificationStatus, "pending", `${classification.workflowId} is falsely PostgreSQL-certified`);
+    } else if (classification.implementationStatus === "runtime-implemented-postgresql-pending") {
+      assert.equal(workflow.contextBoundaryStatus, "implemented", `${classification.workflowId} runtime implementation is missing`);
+      assert.equal(workflow.postgresqlCertificationStatus, "pending", `${classification.workflowId} is falsely PostgreSQL-certified`);
+    } else {
+      assert.notEqual(workflow.contextBoundaryStatus, "implemented", `${classification.workflowId} is falsely context-boundary implemented`);
+    }
     for (const ruleId of workflow.commandRuleIds) {
       const rule = commandManifest.rules.find((item) => item.id === ruleId);
       assert.equal(rule?.platformReadScopeBoundaryId, boundary.id, `${ruleId} lacks platform read-scope boundary ID`);
-      assert.equal(rule.minimumAssurance, classification.requiredAssurance, `${ruleId} platform assurance drifted`);
+      const ruleAssurance = Object.fromEntries(rule.actorClasses.map((actor) => [actor, classification.requiredAssuranceByActorClass?.[actor] || classification.requiredAssurance]));
+      assert.deepEqual(rule.minimumAssuranceByActorClass, ruleAssurance, `${ruleId} actor-specific platform assurance drifted`);
+      if (classification.runtimeImplementedActorClasses) {
+        assert.deepEqual(rule.actorClasses, classification.runtimeImplementedActorClasses, `${ruleId} implemented actor slice drifted`);
+        assert(rule.actorClasses.includes("platform-admin"), `${ruleId} loses the certified bounded platform actor`);
+      }
       assert.equal(rule.requiresAuditEvent, true, `${ruleId} read attribution is missing`);
       const projection = classification.tableProjections.find((item) => item.tableId === rule.tableId);
-      assert.deepEqual(rule.allowedColumns, projection?.allowedColumns || [], `${ruleId} platform projection drifted`);
+      const implementedProjection = classification.runtimeImplementedActorClasses
+        ? workflow.riskAnalyticsAllowedColumnsByTableAndCommand?.[rule.tableId]?.[rule.command]
+        : projection?.allowedColumns;
+      if (rule.command === "SELECT") assert.deepEqual([...rule.allowedColumns].sort(), [...(implementedProjection || [])].sort(), `${ruleId} platform projection drifted`);
+      else assert((classification.runtimeImplementedActorClasses || classification.implementationStatus === "runtime-implemented-postgresql-pending") && rule.tableId === "table-audit-log" && rule.command === "INSERT", `${ruleId} adds an unsupported platform mutation`);
       if (classification.primaryClass === "prohibited-platform-read") assert.equal(rule.authorizationBoundary, "prohibited", `${ruleId} approves a prohibited platform read`);
       if (classification.executionBoundary.startsWith("dedicated-")) assert.equal(rule.requiresNamedFunction, true, `${ruleId} lacks dedicated projection boundary`);
     }
@@ -2824,12 +3061,20 @@ export const validateObjectOwnershipChain = (manifest, tableManifest, identityMa
     const rule = classes.get(objectClass);
     assert(rule?.creationIdentity && rule.expectedOwner && rule.transferMechanism && rule.postTransferVerification && rule.rollbackBehavior, `${objectClass} ownership rule is missing`);
   }
-  assert.equal(manifest.recommendedTransferModel.migrationOwnerMembership, false, "recommended transfer grants owner membership to migration");
-  assert.equal(manifest.recommendedTransferModel.executorTemporaryMembership.revokedBeforeSuccess, true, "revocation step is removed");
+  assert.equal(manifest.recommendedTransferModel.id, "clean-room-broker-per-object-transfer", "ownership transfer is not clean-room brokered");
+  assert.equal(manifest.recommendedTransferModel.migrationOwnerMembership, "transactional-admin-phase-only", "migration receives standing owner membership");
+  assert.equal(manifest.recommendedTransferModel.temporaryMembership.member, "identity-migration", "temporary membership targets the wrong identity");
+  assert.equal(manifest.recommendedTransferModel.temporaryMembership.inherit, false, "temporary migration membership is inheriting");
+  assert.equal(manifest.recommendedTransferModel.temporaryMembership.admin, false, "temporary migration membership has ADMIN");
+  assert.equal(manifest.recommendedTransferModel.temporaryMembership.set, true, "temporary migration transfer lacks exact SET authority");
+  assert.equal(manifest.recommendedTransferModel.temporaryMembership.runtimeCredentialUsed, false, "ownership transfer uses the migration runtime credential");
+  assert.equal(manifest.recommendedTransferModel.temporaryMembership.revokedBeforeSuccess, true, "revocation step is removed");
+  assert.equal(manifest.fallbackTransferModel.id, "none", "an ownership transfer fallback is enabled");
   assert.equal(manifest.fallbackTransferModel.successWithActiveMembershipAllowed, false, "migration failure may leave membership active");
-  assert.equal(manifest.fallbackTransferModel.membership.inherit, false, "temporary migration membership is inheriting");
-  assert.equal(manifest.fallbackTransferModel.membership.admin, false, "temporary migration membership has ADMIN");
-  assert.equal(manifest.fallbackTransferModel.membership.set, true, "temporary migration transfer lacks exact SET authority");
+  for (const rule of manifest.objectClasses) {
+    assert.match(rule.rollbackBehavior, /drop the fresh green database/i, `${rule.id} retains object-level rollback`);
+    assert.match(rule.rollbackBehavior, /blue database remains untouched/i, `${rule.id} may mutate blue during rollback`);
+  }
   const schemas = new Map(manifest.schemaOwnershipRules.map((rule) => [rule.schema, rule]));
   assert.equal(schemas.get("app_auth")?.expectedOwner, "identity-auth-function-owner", "app_auth ownership changes");
   assert.equal(schemas.get("app_rls")?.expectedOwner, "identity-table-owner", "app_rls has the wrong owner");

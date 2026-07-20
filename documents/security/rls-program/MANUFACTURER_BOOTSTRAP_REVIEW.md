@@ -10,9 +10,9 @@ Manufacturers still require MFA before an active application session. Password a
 
 ## Current execution path and security problem
 
-Current login calls `lookupPasswordBootstrapUser`, verifies the password, installs prototype context, then `buildBootstrapSessionForUser` calls `listManufacturerLicenseeLinks`. Session middleware verifies a signed access or MFA-bootstrap token, loads User and calls `listManufacturerLinkedLicenseeIds`. `/auth/me`, session issuance and invitation setup also call the richer link helper.
+Current login calls `lookupPasswordBootstrapUser`, verifies the password, installs prototype context, then session construction calls `resolveManufacturerSessionScope` through the owning transaction. Session middleware and `/auth/me` revalidate the signed actor and call the same transaction-client-only resolver. Invitation setup still uses the separate richer `listManufacturerLicenseeLinks` helper.
 
-The current helpers default to global Prisma, catch some membership failures as an empty list, accept JWT-carried linked IDs as a fallback and select primary-or-first membership. The richer helper is shared with invitation mutation roots. Those behaviours cannot establish tenant authority under RLS and remain runtime blockers.
+The canonical session resolver has no global Prisma default, does not reuse JWT-carried membership, fails closed on missing, foreign, inactive, inconsistent, ambiguous or oversized membership, and returns no first-row fallback when multiple memberships have no primary. The richer invitation helper remains a separate runtime blocker because its admin mutation roots require their own transaction and command contract.
 
 ## Approved identity chain
 

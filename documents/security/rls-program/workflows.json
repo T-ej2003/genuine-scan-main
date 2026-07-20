@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "groupingRule": "One workflow per execution surface, canonical source file, and containing function; repeated table calls within that function remain one functional workflow.",
   "generatedEvidence": {
-    "productionAccessSites": 1026,
+    "productionAccessSites": 1063,
     "testPathsExcluded": [
       "backend/tests",
       "scripts/tests"
@@ -12,57 +12,57 @@
         {
           "method": "GET",
           "path": "/health",
-          "source": "backend/src/app.ts:238"
+          "source": "backend/src/app.ts:248"
         },
         {
           "method": "GET",
           "path": "/healthz",
-          "source": "backend/src/app.ts:242"
+          "source": "backend/src/app.ts:252"
         },
         {
           "method": "GET",
           "path": "/health/live",
-          "source": "backend/src/app.ts:246"
+          "source": "backend/src/app.ts:256"
         },
         {
           "method": "GET",
           "path": "/version",
-          "source": "backend/src/app.ts:254"
+          "source": "backend/src/app.ts:264"
         },
         {
           "method": "GET",
           "path": "/health/latency",
-          "source": "backend/src/app.ts:266"
+          "source": "backend/src/app.ts:276"
         },
         {
           "method": "GET",
           "path": "/health/ready",
-          "source": "backend/src/app.ts:273"
+          "source": "backend/src/app.ts:283"
         },
         {
           "method": "GET",
           "path": "/health/db",
-          "source": "backend/src/app.ts:278"
+          "source": "backend/src/app.ts:288"
         },
         {
           "method": "POST",
           "path": "/__integration/shutdown",
-          "source": "backend/src/app.ts:307"
+          "source": "backend/src/app.ts:317"
         },
         {
           "method": "USE",
           "path": "/api",
-          "source": "backend/src/app.ts:325"
+          "source": "backend/src/app.ts:335"
         },
         {
           "method": "USE",
           "path": "/api",
-          "source": "backend/src/app.ts:340"
+          "source": "backend/src/app.ts:350"
         },
         {
           "method": "USE",
           "path": "/api",
-          "source": "backend/src/app.ts:346"
+          "source": "backend/src/app.ts:356"
         },
         {
           "method": "GET",
@@ -92,237 +92,237 @@
         {
           "method": "POST",
           "path": "/print-gateway/heartbeat",
-          "source": "backend/src/routes/index.ts:1757"
-        },
-        {
-          "method": "POST",
-          "path": "/print-gateway/direct/claim",
-          "source": "backend/src/routes/index.ts:1758"
-        },
-        {
-          "method": "POST",
-          "path": "/print-gateway/direct/ack",
-          "source": "backend/src/routes/index.ts:1759"
-        },
-        {
-          "method": "POST",
-          "path": "/print-gateway/direct/confirm",
           "source": "backend/src/routes/index.ts:1760"
         },
         {
           "method": "POST",
-          "path": "/print-gateway/direct/fail",
+          "path": "/print-gateway/direct/claim",
           "source": "backend/src/routes/index.ts:1761"
         },
         {
           "method": "POST",
-          "path": "/print-gateway/ipp/claim",
+          "path": "/print-gateway/direct/ack",
           "source": "backend/src/routes/index.ts:1762"
         },
         {
           "method": "POST",
-          "path": "/print-gateway/ipp/ack",
+          "path": "/print-gateway/direct/confirm",
           "source": "backend/src/routes/index.ts:1763"
         },
         {
           "method": "POST",
-          "path": "/print-gateway/test/claim",
+          "path": "/print-gateway/direct/fail",
           "source": "backend/src/routes/index.ts:1764"
         },
         {
           "method": "POST",
-          "path": "/print-gateway/test/ack",
+          "path": "/print-gateway/ipp/claim",
           "source": "backend/src/routes/index.ts:1765"
         },
         {
           "method": "POST",
-          "path": "/print-gateway/test/confirm",
+          "path": "/print-gateway/ipp/ack",
           "source": "backend/src/routes/index.ts:1766"
         },
         {
           "method": "POST",
-          "path": "/print-gateway/test/fail",
+          "path": "/print-gateway/test/claim",
           "source": "backend/src/routes/index.ts:1767"
         },
         {
           "method": "POST",
-          "path": "/printer-agent/local/claim",
+          "path": "/print-gateway/test/ack",
           "source": "backend/src/routes/index.ts:1768"
         },
         {
           "method": "POST",
-          "path": "/printer-agent/local/ack",
+          "path": "/print-gateway/test/confirm",
           "source": "backend/src/routes/index.ts:1769"
         },
         {
           "method": "POST",
-          "path": "/printer-agent/local/confirm",
+          "path": "/print-gateway/test/fail",
           "source": "backend/src/routes/index.ts:1770"
         },
         {
           "method": "POST",
-          "path": "/printer-agent/local/fail",
+          "path": "/printer-agent/local/claim",
           "source": "backend/src/routes/index.ts:1771"
         },
         {
           "method": "POST",
-          "path": "/printer-agent/local/test/ack",
+          "path": "/printer-agent/local/ack",
           "source": "backend/src/routes/index.ts:1772"
         },
         {
           "method": "POST",
-          "path": "/printer-agent/local/test/confirm",
+          "path": "/printer-agent/local/confirm",
           "source": "backend/src/routes/index.ts:1773"
         },
         {
           "method": "POST",
-          "path": "/printer-agent/local/test/fail",
+          "path": "/printer-agent/local/fail",
           "source": "backend/src/routes/index.ts:1774"
         },
         {
           "method": "POST",
-          "path": "/print-gateway/ipp/confirm",
+          "path": "/printer-agent/local/test/ack",
           "source": "backend/src/routes/index.ts:1775"
         },
         {
           "method": "POST",
-          "path": "/print-gateway/ipp/fail",
+          "path": "/printer-agent/local/test/confirm",
           "source": "backend/src/routes/index.ts:1776"
         },
         {
           "method": "POST",
+          "path": "/printer-agent/local/test/fail",
+          "source": "backend/src/routes/index.ts:1777"
+        },
+        {
+          "method": "POST",
+          "path": "/print-gateway/ipp/confirm",
+          "source": "backend/src/routes/index.ts:1778"
+        },
+        {
+          "method": "POST",
+          "path": "/print-gateway/ipp/fail",
+          "source": "backend/src/routes/index.ts:1779"
+        },
+        {
+          "method": "POST",
           "path": "/auth/login",
-          "source": "backend/src/routes/modules/authRoutes.ts:270"
+          "source": "backend/src/routes/modules/authRoutes.ts:271"
         },
         {
           "method": "POST",
           "path": "/auth/accept-invite",
-          "source": "backend/src/routes/modules/authRoutes.ts:271"
+          "source": "backend/src/routes/modules/authRoutes.ts:272"
         },
         {
           "method": "GET",
           "path": "/auth/invite-preview",
-          "source": "backend/src/routes/modules/authRoutes.ts:272"
-        },
-        {
-          "method": "POST",
-          "path": "/auth/verify-email",
           "source": "backend/src/routes/modules/authRoutes.ts:273"
         },
         {
           "method": "POST",
-          "path": "/auth/forgot-password",
+          "path": "/auth/verify-email",
           "source": "backend/src/routes/modules/authRoutes.ts:274"
         },
         {
           "method": "POST",
-          "path": "/auth/reset-password",
+          "path": "/auth/forgot-password",
           "source": "backend/src/routes/modules/authRoutes.ts:275"
+        },
+        {
+          "method": "POST",
+          "path": "/auth/reset-password",
+          "source": "backend/src/routes/modules/authRoutes.ts:276"
         },
         {
           "method": "GET",
           "path": "/auth/me",
-          "source": "backend/src/routes/modules/authRoutes.ts:277"
-        },
-        {
-          "method": "POST",
-          "path": "/auth/refresh",
           "source": "backend/src/routes/modules/authRoutes.ts:278"
         },
         {
           "method": "POST",
-          "path": "/auth/logout",
+          "path": "/auth/refresh",
           "source": "backend/src/routes/modules/authRoutes.ts:279"
+        },
+        {
+          "method": "POST",
+          "path": "/auth/logout",
+          "source": "backend/src/routes/modules/authRoutes.ts:280"
         },
         {
           "method": "GET",
           "path": "/auth/sessions",
-          "source": "backend/src/routes/modules/authRoutes.ts:280"
-        },
-        {
-          "method": "POST",
-          "path": "/auth/sessions/revoke-all",
           "source": "backend/src/routes/modules/authRoutes.ts:281"
         },
         {
           "method": "POST",
-          "path": "/auth/sessions/:id/revoke",
+          "path": "/auth/sessions/revoke-all",
           "source": "backend/src/routes/modules/authRoutes.ts:282"
         },
         {
           "method": "POST",
-          "path": "/auth/step-up/password",
+          "path": "/auth/sessions/:id/revoke",
           "source": "backend/src/routes/modules/authRoutes.ts:283"
+        },
+        {
+          "method": "POST",
+          "path": "/auth/step-up/password",
+          "source": "backend/src/routes/modules/authRoutes.ts:284"
         },
         {
           "method": "GET",
           "path": "/auth/mfa/status",
-          "source": "backend/src/routes/modules/authRoutes.ts:285"
-        },
-        {
-          "method": "POST",
-          "path": "/auth/mfa/setup/begin",
           "source": "backend/src/routes/modules/authRoutes.ts:286"
         },
         {
           "method": "POST",
-          "path": "/auth/mfa/setup/confirm",
+          "path": "/auth/mfa/setup/begin",
           "source": "backend/src/routes/modules/authRoutes.ts:287"
         },
         {
           "method": "POST",
-          "path": "/auth/mfa/challenge/begin",
+          "path": "/auth/mfa/setup/confirm",
           "source": "backend/src/routes/modules/authRoutes.ts:288"
         },
         {
           "method": "POST",
-          "path": "/auth/mfa/challenge/complete",
+          "path": "/auth/mfa/challenge/begin",
           "source": "backend/src/routes/modules/authRoutes.ts:289"
         },
         {
           "method": "POST",
-          "path": "/auth/mfa/step-up",
+          "path": "/auth/mfa/challenge/complete",
           "source": "backend/src/routes/modules/authRoutes.ts:290"
         },
         {
           "method": "POST",
-          "path": "/auth/mfa/backup-codes/rotate",
+          "path": "/auth/mfa/step-up",
           "source": "backend/src/routes/modules/authRoutes.ts:291"
         },
         {
           "method": "POST",
-          "path": "/auth/mfa/disable",
+          "path": "/auth/mfa/backup-codes/rotate",
           "source": "backend/src/routes/modules/authRoutes.ts:292"
         },
         {
           "method": "POST",
-          "path": "/auth/mfa/webauthn/setup/begin",
-          "source": "backend/src/routes/modules/authRoutes.ts:294"
+          "path": "/auth/mfa/disable",
+          "source": "backend/src/routes/modules/authRoutes.ts:293"
         },
         {
           "method": "POST",
-          "path": "/auth/mfa/webauthn/setup/finish",
+          "path": "/auth/mfa/webauthn/setup/begin",
           "source": "backend/src/routes/modules/authRoutes.ts:295"
         },
         {
           "method": "POST",
-          "path": "/auth/mfa/webauthn/challenge/begin",
+          "path": "/auth/mfa/webauthn/setup/finish",
           "source": "backend/src/routes/modules/authRoutes.ts:296"
         },
         {
           "method": "POST",
-          "path": "/auth/mfa/webauthn/challenge/finish",
+          "path": "/auth/mfa/webauthn/challenge/begin",
           "source": "backend/src/routes/modules/authRoutes.ts:297"
+        },
+        {
+          "method": "POST",
+          "path": "/auth/mfa/webauthn/challenge/finish",
+          "source": "backend/src/routes/modules/authRoutes.ts:298"
         },
         {
           "method": "DELETE",
           "path": "/auth/mfa/webauthn/credentials/:id",
-          "source": "backend/src/routes/modules/authRoutes.ts:298"
+          "source": "backend/src/routes/modules/authRoutes.ts:299"
         },
         {
           "method": "POST",
           "path": "/auth/invite",
-          "source": "backend/src/routes/modules/authRoutes.ts:300"
+          "source": "backend/src/routes/modules/authRoutes.ts:301"
         },
         {
           "method": "GET",
@@ -769,7 +769,7 @@
         {
           "packageFile": "backend/package.json",
           "name": "test:rls:auth-bootstrap",
-          "command": "npm --prefix .. run test:p2:db:up && P2_TEST_DATABASE_REQUIRED=true P2_TEST_DATABASE_ADMIN_URL=\"$(node ../scripts/p2-test-db-env.mjs --print-admin-url)\" MSCQR_RLS_AUTH_BOOTSTRAP_TEST=true node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/authBootstrapRepository.test.js && node tests/authRlsBootstrap.test.js && node tests/authLoginWithoutMfa.test.js && node tests/rlsAuthBootstrapP2.test.js\""
+          "command": "npm --prefix .. run test:p2:db:up && P2_TEST_DATABASE_REQUIRED=true P2_TEST_DATABASE_ADMIN_URL=\"$(node ../scripts/p2-test-db-env.mjs --print-admin-url)\" MSCQR_RLS_AUTH_BOOTSTRAP_TEST=true node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/authBootstrapRepository.test.js && node tests/manufacturerSessionScope.test.js && node tests/authRlsBootstrap.test.js && node tests/authLoginWithoutMfa.test.js && node tests/rlsAuthBootstrapP2.test.js\""
         },
         {
           "packageFile": "backend/package.json",
@@ -1208,6 +1208,21 @@
         },
         {
           "packageFile": "package.json",
+          "name": "rls:full-certify",
+          "command": "node scripts/rls/certify-full-database.mjs"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "rls:full-generate",
+          "command": "node scripts/rls/generate-full-rls-sql.mjs"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "rls:full-verify",
+          "command": "node scripts/rls/verify-full-rls-package.mjs && node --test scripts/tests/full-database-rls-enforcement.test.mjs"
+        },
+        {
+          "packageFile": "package.json",
           "name": "security:release-gate",
           "command": "git diff --check && npm --prefix backend run build && node backend/tests/accessControlIsolation.test.js && node backend/tests/tenantIsolationExtended.test.js && node backend/tests/securityResponseSurface.test.js && node backend/tests/securityRouteSurface.test.js && node scripts/check-prisma-scope-guardrails.mjs && node --test scripts/tests/prisma-scope-guardrails.test.mjs && npm --prefix backend run test:trust-critical:compiled && npm run typecheck && npm run build && npm run lint:security-scope"
         },
@@ -1438,6 +1453,11 @@
         },
         {
           "packageFile": "package.json",
+          "name": "test:staging-full-rls-capability-preflight",
+          "command": "node --test scripts/tests/staging-full-rls-capability-preflight.test.mjs scripts/tests/staging-full-rls-capability-postgres.test.mjs"
+        },
+        {
+          "packageFile": "package.json",
           "name": "test:staging-rls-shared-batch-phase",
           "command": "node --test scripts/tests/staging-rls-shared-batch-phase.test.mjs"
         },
@@ -1615,20 +1635,6 @@
         "evidence": "prisma.batch.deleteMany({ where: { licenseeId: { in: demoLicenseeIds } }, })"
       },
       {
-        "id": "access-0fd7f768fcec9779",
-        "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
-        "line": 240,
-        "function": "verifyCredentials",
-        "tableId": "table-user",
-        "prismaModel": "User",
-        "command": "SELECT",
-        "method": "$queryRawUnsafe",
-        "executionSurface": "cli",
-        "production": false,
-        "registrationEvidence": "unregistered",
-        "evidence": "tx.$queryRawUnsafe('SELECT 1 FROM \"User\" LIMIT 1')"
-      },
-      {
         "id": "access-1c63df9ac46bbaad",
         "sourceFile": "backend/scripts/cleanup-demo.ts",
         "line": 46,
@@ -1657,20 +1663,6 @@
         "evidence": "prisma.allocationEvent.deleteMany({ where: { licenseeId: { in: demoLicenseeIds } }, })"
       },
       {
-        "id": "access-228bf6043d70c024",
-        "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
-        "line": 244,
-        "function": "verifyCredentials",
-        "tableId": "table-action-idempotency-key",
-        "prismaModel": "ActionIdempotencyKey",
-        "command": "UPDATE",
-        "method": "$executeRawUnsafe",
-        "executionSurface": "cli",
-        "production": false,
-        "registrationEvidence": "unregistered",
-        "evidence": "tx.$executeRawUnsafe(`UPDATE \"ActionIdempotencyKey\" SET \"requestHash\"='updated' WHERE \"id\"='credential-proof-'||pg_backend_pid()`)"
-      },
-      {
         "id": "access-24ce0be334bc02a0",
         "sourceFile": "backend/scripts/cleanup-demo.js",
         "line": 102,
@@ -1697,6 +1689,20 @@
         "production": false,
         "registrationEvidence": "unregistered",
         "evidence": "prisma.user.update({ where: { id: existing.id }, data: { role: UserRole.PLATFORM_SUPER_ADMIN, licenseeId: null, orgId: null, isActive: true, deletedAt: null, }, })"
+      },
+      {
+        "id": "access-2dc46c46f6a21d4b",
+        "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
+        "line": 257,
+        "function": "verifyCredentials",
+        "tableId": "table-batch",
+        "prismaModel": "Batch",
+        "command": "SELECT",
+        "method": "$queryRawUnsafe",
+        "executionSurface": "cli",
+        "production": false,
+        "registrationEvidence": "unregistered",
+        "evidence": "tx.$queryRawUnsafe('SELECT 1 FROM \"Batch\" LIMIT 1')"
       },
       {
         "id": "access-2e2a9f9a5ae645bd",
@@ -1993,6 +1999,20 @@
         "evidence": "prisma.user.update({ where: { id: existing.id }, data: { role: UserRole.SUPER_ADMIN, licenseeId: null, orgId: null, isActive: true, deletedAt: null, status: existing.status || UserStatus.INVITED, }, select: { id: true, email: true, role: true, status: true, passwordHash: true }, })"
       },
       {
+        "id": "access-773d2756e2940176",
+        "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
+        "line": 256,
+        "function": "verifyCredentials",
+        "tableId": "table-user",
+        "prismaModel": "User",
+        "command": "SELECT",
+        "method": "$queryRawUnsafe",
+        "executionSurface": "cli",
+        "production": false,
+        "registrationEvidence": "unregistered",
+        "evidence": "tx.$queryRawUnsafe('SELECT 1 FROM \"User\" LIMIT 1')"
+      },
+      {
         "id": "access-7952852f407bf43d",
         "sourceFile": "backend/scripts/cleanup-demo.js",
         "line": 21,
@@ -2063,18 +2083,32 @@
         "evidence": "prisma.auditLog.deleteMany({ where: { OR: [ { licenseeId: { in: demoLicenseeIds } }, { userId: { in: demoUserIds } }, { action: \"SEED_INIT\" }, { entityId: \"seed\" }, ], }, })"
       },
       {
-        "id": "access-8d644bc63cf98e12",
+        "id": "access-8e3f4927dff3e67e",
         "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
-        "line": 241,
+        "line": 261,
         "function": "verifyCredentials",
-        "tableId": "table-batch",
-        "prismaModel": "Batch",
-        "command": "SELECT",
-        "method": "$queryRawUnsafe",
+        "tableId": "table-action-idempotency-key",
+        "prismaModel": "ActionIdempotencyKey",
+        "command": "DELETE",
+        "method": "$executeRawUnsafe",
         "executionSurface": "cli",
         "production": false,
         "registrationEvidence": "unregistered",
-        "evidence": "tx.$queryRawUnsafe('SELECT 1 FROM \"Batch\" LIMIT 1')"
+        "evidence": "tx.$executeRawUnsafe(`DELETE FROM \"ActionIdempotencyKey\" WHERE \"id\"='credential-proof-'||pg_backend_pid()`)"
+      },
+      {
+        "id": "access-90f1684ac6587138",
+        "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
+        "line": 260,
+        "function": "verifyCredentials",
+        "tableId": "table-action-idempotency-key",
+        "prismaModel": "ActionIdempotencyKey",
+        "command": "UPDATE",
+        "method": "$executeRawUnsafe",
+        "executionSurface": "cli",
+        "production": false,
+        "registrationEvidence": "unregistered",
+        "evidence": "tx.$executeRawUnsafe(`UPDATE \"ActionIdempotencyKey\" SET \"requestHash\"='updated' WHERE \"id\"='credential-proof-'||pg_backend_pid()`)"
       },
       {
         "id": "access-931da4cdba3e4069",
@@ -2103,34 +2137,6 @@
         "production": false,
         "registrationEvidence": "unregistered",
         "evidence": "prisma.licensee.findUnique({ where: { id: licenseeId }, select: { orgId: true }, })"
-      },
-      {
-        "id": "access-99a95d395c047de8",
-        "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
-        "line": 242,
-        "function": "verifyCredentials",
-        "tableId": "table-printer",
-        "prismaModel": "Printer",
-        "command": "SELECT",
-        "method": "$queryRawUnsafe",
-        "executionSurface": "cli",
-        "production": false,
-        "registrationEvidence": "unregistered",
-        "evidence": "tx.$queryRawUnsafe('SELECT 1 FROM \"Printer\" LIMIT 1')"
-      },
-      {
-        "id": "access-9f75b6e16717f401",
-        "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
-        "line": 243,
-        "function": "verifyCredentials",
-        "tableId": "table-action-idempotency-key",
-        "prismaModel": "ActionIdempotencyKey",
-        "command": "INSERT",
-        "method": "$executeRawUnsafe",
-        "executionSurface": "cli",
-        "production": false,
-        "registrationEvidence": "unregistered",
-        "evidence": "tx.$executeRawUnsafe(`INSERT INTO \"ActionIdempotencyKey\" (\"id\",\"keyHash\",\"action\",\"scope\",\"requestHash\",\"createdAt\",\"expiresAt\") VALUES ('credential-proof-'||pg_backend_pid(),'credential-proof-'||pg_backend_pid(),'credential-proof','credential-proof','rolled-back',now(),now()+interval '1 minute')`)"
       },
       {
         "id": "access-a1d55f52ca92d709",
@@ -2217,6 +2223,20 @@
         "evidence": "prisma.user.findUnique({ where: { email }, select: { id: true, email: true, role: true, status: true, passwordHash: true, isActive: true, deletedAt: true }, })"
       },
       {
+        "id": "access-c2dd54b29c3ae83d",
+        "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
+        "line": 259,
+        "function": "verifyCredentials",
+        "tableId": "table-action-idempotency-key",
+        "prismaModel": "ActionIdempotencyKey",
+        "command": "INSERT",
+        "method": "$executeRawUnsafe",
+        "executionSurface": "cli",
+        "production": false,
+        "registrationEvidence": "unregistered",
+        "evidence": "tx.$executeRawUnsafe(`INSERT INTO \"ActionIdempotencyKey\" (\"id\",\"keyHash\",\"action\",\"scope\",\"requestHash\",\"createdAt\",\"expiresAt\") VALUES ('credential-proof-'||pg_backend_pid(),'credential-proof-'||pg_backend_pid(),'credential-proof','credential-proof','rolled-back',now(),now()+interval '1 minute')`)"
+      },
+      {
         "id": "access-c556e5d1adaac164",
         "sourceFile": "backend/scripts/mscqr-print-test.ts",
         "line": 85,
@@ -2245,6 +2265,20 @@
         "evidence": "prisma.licensee.deleteMany({ where: { id: { in: demoLicenseeIds } } })"
       },
       {
+        "id": "access-c823712655e2de05",
+        "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
+        "line": 258,
+        "function": "verifyCredentials",
+        "tableId": "table-printer",
+        "prismaModel": "Printer",
+        "command": "SELECT",
+        "method": "$queryRawUnsafe",
+        "executionSurface": "cli",
+        "production": false,
+        "registrationEvidence": "unregistered",
+        "evidence": "tx.$queryRawUnsafe('SELECT 1 FROM \"Printer\" LIMIT 1')"
+      },
+      {
         "id": "access-d4fd5972faa72f10",
         "sourceFile": "backend/scripts/cleanup-demo.ts",
         "line": 28,
@@ -2257,20 +2291,6 @@
         "production": false,
         "registrationEvidence": "unregistered",
         "evidence": "prisma.licensee.findMany({ where: { OR: [ { id: { in: licenseeIdsFromUsers } }, { name: { in: demoLicenseeNames } }, { prefix: { in: demoPrefixes } }, ], }, select: { id: true, name: true, prefix: true }, })"
-      },
-      {
-        "id": "access-dc55ea94bc7fd853",
-        "sourceFile": "backend/scripts/staging-database-role-vpc-executor.mjs",
-        "line": 245,
-        "function": "verifyCredentials",
-        "tableId": "table-action-idempotency-key",
-        "prismaModel": "ActionIdempotencyKey",
-        "command": "DELETE",
-        "method": "$executeRawUnsafe",
-        "executionSurface": "cli",
-        "production": false,
-        "registrationEvidence": "unregistered",
-        "evidence": "tx.$executeRawUnsafe(`DELETE FROM \"ActionIdempotencyKey\" WHERE \"id\"='credential-proof-'||pg_backend_pid()`)"
       },
       {
         "id": "access-e405b61b814ded58",
@@ -5471,10 +5491,10 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-09f6c1872aea2b8c",
         "access-3f6a7323e3c9b5ef",
-        "access-7fbee7c5bdbd28d8",
-        "access-ad14196680b38d1b"
+        "access-9131d2f30101e91a",
+        "access-b026027f64773e60",
+        "access-e851436e7f760e5a"
       ],
       "currentCompatibilityStatus": "context-boundary-implemented-postgresql-certification-pending",
       "implementationStatus": "context-boundary-implemented",
@@ -5487,26 +5507,26 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-09f6c1872aea2b8c",
-          "source": "backend/src/services/auditLogQueryService.ts:167",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
-        },
-        {
           "accessId": "access-3f6a7323e3c9b5ef",
           "source": "backend/src/services/auditLogQueryService.ts:163",
           "registration": "reachable-from-registered-entrypoint",
           "method": "count"
         },
         {
-          "accessId": "access-7fbee7c5bdbd28d8",
+          "accessId": "access-9131d2f30101e91a",
           "source": "backend/src/services/auditLogQueryService.ts:177",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-b026027f64773e60",
+          "source": "backend/src/services/auditLogQueryService.ts:192",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
         },
         {
-          "accessId": "access-ad14196680b38d1b",
-          "source": "backend/src/services/auditLogQueryService.ts:144",
+          "accessId": "access-e851436e7f760e5a",
+          "source": "backend/src/services/auditLogQueryService.ts:146",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -5630,7 +5650,22 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryBlockers": [
+        {
+          "code": "incompatible-read-mutation-root",
+          "reason": "POST /audit/fraud-reports/:id/respond is a platform-admin mutation: it reads a report through global Prisma, appends a response audit record through another global client path, and constructs a customer-delivery side effect. It lacks one bounded licensee/purpose context, transaction-client propagation, immutable ownership guards, idempotency and concurrency enforcement.",
+          "remediation": "Move this workflow to a focused platform mutation batch: require one database-validated licensee/report scope and purpose, then perform report lookup, compare-and-set/idempotency, immutable response attribution and durable delivery enqueue in one canonical transaction with focused replay/concurrency tests."
+        }
+      ],
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": false,
+        "sameTransactionFeasible": false,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": false
+      }
     },
     {
       "id": "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-begin-admin-web-authn-setup-controller",
@@ -5669,7 +5704,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-78dfb42851ba2bcd"
+        "access-c2832c5984b5fd42"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -5682,14 +5717,84 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-78dfb42851ba2bcd",
-          "source": "backend/src/controllers/authAdminSecurityController.ts:82",
+          "accessId": "access-c2832c5984b5fd42",
+          "source": "backend/src/controllers/authAdminSecurityController.ts:121",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         }
       ],
       "commandRuleIds": [
         "command-user-select-7331cc8183dd"
+      ],
+      "commandActorClasses": [
+        "authenticated-user"
+      ],
+      "requiredAssurance": [
+        "password-verified"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "semanticStatus": "mapped"
+    },
+    {
+      "id": "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-complete-admin-mfa-challenge-controller",
+      "name": "Complete Admin Mfa Challenge Controller",
+      "entryPoint": "http:completeAdminMfaChallengeController",
+      "executionSurface": "http",
+      "authenticationStage": "authenticated",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "canonicalSourceFiles": [
+        "backend/src/controllers/authAdminSecurityController.ts"
+      ],
+      "tablesTouched": [
+        "table-audit-log-outbox"
+      ],
+      "commandsPerTable": [
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "INSERT"
+          ]
+        }
+      ],
+      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "contextRequirements": [
+        "transaction-local canonical actor context"
+      ],
+      "contextRequirementsSource": "generated-conservative",
+      "authorizationBoundaryType": "authenticated-context",
+      "expectedAllowedScenarios": [
+        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+      ],
+      "expectedDeniedScenarios": [
+        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+      ],
+      "preAuthSystemRequirements": [],
+      "currentDirectPrismaUsage": [
+        "access-e275ecf62446dfa9"
+      ],
+      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
+      "implementationStatus": "inventory-only",
+      "requiredUnitTests": [
+        "Allowed and denied command contract for this canonical workflow."
+      ],
+      "requiredDisposablePostgresqlTests": [
+        "Exact role, context, command, cross-tenant denial, and empty-context denial."
+      ],
+      "unresolvedDecisions": [],
+      "supportingEvidence": [
+        {
+          "accessId": "access-e275ecf62446dfa9",
+          "source": "backend/src/controllers/authAdminSecurityController.ts:325",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        }
+      ],
+      "commandRuleIds": [
+        "command-audit-log-outbox-insert-0b4b95c51d1e"
       ],
       "commandActorClasses": [
         "authenticated-user"
@@ -5739,7 +5844,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-7eff5f46889f02d7"
+        "access-296bc7025ff289f6"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -5752,8 +5857,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-7eff5f46889f02d7",
-          "source": "backend/src/controllers/authAdminSecurityController.ts:391",
+          "accessId": "access-296bc7025ff289f6",
+          "source": "backend/src/controllers/authAdminSecurityController.ts:495",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         }
@@ -5808,7 +5913,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-362f09dc5fbc4264"
+        "access-83c3e869d8b816e6"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -5821,8 +5926,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-362f09dc5fbc4264",
-          "source": "backend/src/controllers/authController.ts:96",
+          "accessId": "access-83c3e869d8b816e6",
+          "source": "backend/src/controllers/authController.ts:112",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         }
@@ -5879,7 +5984,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-cb171a4985f32cba"
+        "access-4d2963cb4e805692"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -5892,8 +5997,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-cb171a4985f32cba",
-          "source": "backend/src/controllers/authSessionController.ts:161",
+          "accessId": "access-4d2963cb4e805692",
+          "source": "backend/src/controllers/authSessionController.ts:164",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         }
@@ -6492,7 +6597,8 @@
       "platformReadResponseProjection": [
         "file bytes",
         "Content-Type from validated fileType"
-      ]
+      ],
+      "platformReadRequiredAssuranceByActorClass": null
     },
     {
       "id": "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts",
@@ -6656,7 +6762,8 @@
             "createdAt"
           ]
         }
-      }
+      },
+      "platformReadRequiredAssuranceByActorClass": null
     },
     {
       "id": "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert",
@@ -7988,7 +8095,8 @@
       "platformReadAllowedColumnsByTable": {
         "table-licensee": []
       },
-      "platformReadResponseProjection": []
+      "platformReadResponseProjection": [],
+      "platformReadRequiredAssuranceByActorClass": null
     },
     {
       "id": "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensee",
@@ -8132,7 +8240,8 @@
         "routeRoots": [
           "GET /licensees/:id uses an exact UUID route root."
         ]
-      }
+      },
+      "platformReadRequiredAssuranceByActorClass": null
     },
     {
       "id": "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensees",
@@ -8273,7 +8382,8 @@
         "routeRoots": [
           "GET /licensees is a distinct registered list root and currently has no selector or pagination."
         ]
-      }
+      },
+      "platformReadRequiredAssuranceByActorClass": null
     },
     {
       "id": "workflow-http-backend-src-controllers-licensee-controller-ts-update-licensee",
@@ -11973,7 +12083,8 @@
         "bounded ticket state",
         "incident severity/status summary",
         "assigned actor id and display name without email"
-      ]
+      ],
+      "platformReadRequiredAssuranceByActorClass": null
     },
     {
       "id": "workflow-http-backend-src-controllers-support-controller-ts-list-support-tickets",
@@ -12122,7 +12233,8 @@
         "bounded ticket state",
         "incident severity/status summary",
         "assigned actor id and display name without email"
-      ]
+      ],
+      "platformReadRequiredAssuranceByActorClass": null
     },
     {
       "id": "workflow-http-backend-src-controllers-support-controller-ts-patch-support-ticket",
@@ -12827,7 +12939,8 @@
         "verifyTransitionCount",
         "verifyDroppedCount",
         "at most 20 allowlisted routeTo aggregates"
-      ]
+      ],
+      "platformReadRequiredAssuranceByActorClass": null
     },
     {
       "id": "workflow-http-backend-src-controllers-trace-policy-controller-ts-acknowledge-policy-alert-controller",
@@ -12893,13 +13006,13 @@
       "supportingEvidence": [
         {
           "accessId": "access-3600d8039296e7ac",
-          "source": "backend/src/controllers/tracePolicyController.ts:372",
+          "source": "backend/src/controllers/tracePolicyController.ts:387",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
         },
         {
           "accessId": "access-77f8da454fc3882d",
-          "source": "backend/src/controllers/tracePolicyController.ts:361",
+          "source": "backend/src/controllers/tracePolicyController.ts:376",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }
@@ -13010,7 +13123,7 @@
       "supportingEvidence": [
         {
           "accessId": "access-53fbc3b78235ea52",
-          "source": "backend/src/controllers/tracePolicyController.ts:440",
+          "source": "backend/src/controllers/tracePolicyController.ts:455",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }
@@ -13094,13 +13207,13 @@
       "supportingEvidence": [
         {
           "accessId": "access-9aba912d4d4e84ac",
-          "source": "backend/src/controllers/tracePolicyController.ts:332",
+          "source": "backend/src/controllers/tracePolicyController.ts:347",
           "registration": "reachable-from-registered-entrypoint",
           "method": "count"
         },
         {
           "accessId": "access-cda286a36221c918",
-          "source": "backend/src/controllers/tracePolicyController.ts:320",
+          "source": "backend/src/controllers/tracePolicyController.ts:335",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -13212,7 +13325,7 @@
       "supportingEvidence": [
         {
           "accessId": "access-cc65fa8e36dcd281",
-          "source": "backend/src/controllers/tracePolicyController.ts:269",
+          "source": "backend/src/controllers/tracePolicyController.ts:284",
           "registration": "reachable-from-registered-entrypoint",
           "method": "upsert"
         }
@@ -15352,7 +15465,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-4e08a8db35d1ee8a"
+        "access-a848c4fc84c86b1b"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -15365,8 +15478,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-4e08a8db35d1ee8a",
-          "source": "backend/src/middleware/auth.ts:50",
+          "accessId": "access-a848c4fc84c86b1b",
+          "source": "backend/src/middleware/auth.ts:56",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         }
@@ -16422,8 +16535,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-6185caad1a68ac28",
-        "access-e5fdacdb40e52db4"
+        "access-468f1ee7e3350f11",
+        "access-4bf783f4a557458c"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -16436,14 +16549,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-6185caad1a68ac28",
-          "source": "backend/src/services/analyticsService.ts:140",
+          "accessId": "access-468f1ee7e3350f11",
+          "source": "backend/src/services/analyticsService.ts:144",
           "registration": "reachable-from-registered-entrypoint",
           "method": "groupBy"
         },
         {
-          "accessId": "access-e5fdacdb40e52db4",
-          "source": "backend/src/services/analyticsService.ts:107",
+          "accessId": "access-4bf783f4a557458c",
+          "source": "backend/src/services/analyticsService.ts:111",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -16471,18 +16584,36 @@
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "authenticated-user"
+        "licensee-admin",
+        "platform-admin"
       ],
       "canonicalSourceFiles": [
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/controllers/tracePolicyController.ts",
         "backend/src/services/analyticsService.ts"
       ],
       "tablesTouched": [
+        "table-audit-log",
         "table-batch",
+        "table-incident",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
         "table-policy-alert",
+        "table-policy-rule",
         "table-qr-scan-log",
-        "table-qrcode"
+        "table-qrcode",
+        "table-security-policy",
+        "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT"
+          ]
+        },
         {
           "tableId": "table-batch",
           "commands": [
@@ -16490,7 +16621,37 @@
           ]
         },
         {
+          "tableId": "table-incident",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-manufacturer-licensee-link",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
           "tableId": "table-policy-alert",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-policy-rule",
           "commands": [
             "SELECT"
           ]
@@ -16506,31 +16667,65 @@
           "commands": [
             "SELECT"
           ]
+        },
+        {
+          "tableId": "table-security-policy",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "commands": [
+            "SELECT"
+          ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "An ACTIVE database-hydrated LICENSEE_ADMIN or ORG_ADMIN uses its nonblank User.licenseeId and User.orgId; a selector may only equal that scope. An ACTIVE database-hydrated platform administrator requires fresh MFA and one requested Licensee that is revalidated with its active Organization in the same transaction. Blank, foreign, inactive or inconsistent scope is denied.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "database-hydrated ACTIVE tenant administrator and request ID",
+        "nonblank database-validated organization and licensee scope",
+        "fixed allowlisted tenant-risk-analytics purpose",
+        "one REPEATABLE READ transaction with atomic immutable attribution"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "A database-hydrated LICENSEE_ADMIN or ORG_ADMIN reads bounded risk analytics for its active licensee and organization.",
+        "A database-hydrated platform administrator with fresh MFA reads one requested active licensee after its Licensee and Organization are revalidated in the same attributed transaction.",
+        "An optional query licensee equal to canonical scope narrows nothing and is accepted.",
+        "Batch, QR, scan-log, alert and policy reads share the same licensee and bounded lookback snapshot.",
+        "The immutable RISK_ANALYTICS_READ attribution commits in the same transaction before serialization."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Password-only or stale-MFA platform, manufacturer, anonymous, inactive-session or unsupported-role actors are denied.",
+        "A platform actor with blank, malformed, foreign, inactive, suspended or organization-inconsistent selector scope is denied before analytics or RISK_ANALYTICS_READ attribution.",
+        "Blank, missing, foreign, inactive, suspended or organization-inconsistent scope is denied.",
+        "Out-of-range date/page inputs and context purpose, actor, assurance or scope mismatch are denied before analytics reads.",
+        "A protected query before context, global Prisma use, unbounded input, inconsistent tenant predicate, nested User projection or non-atomic attribution is denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-2df3b78d471993c6",
-        "access-51ab4d175d6bc690",
-        "access-6e0248baa666d2d5",
-        "access-d9320eab3e3702a1",
-        "access-eebe07f4773e55ae"
+        "access-08d90c7240f56c25",
+        "access-21b3fc04deec3ddd",
+        "access-28a77e9696dd1c39",
+        "access-2da865ba9c16e0e4",
+        "access-3e74be1b64e6f1f0",
+        "access-496e1c6a0c00b066",
+        "access-5431431ee00c1010",
+        "access-735858c7c8120821",
+        "access-73ec2e7794fa9dad",
+        "access-8574a3a7548790e6",
+        "access-8d799bd56015a0e0",
+        "access-a010bfb50a8ebcc5",
+        "access-a5e1fb98e9f32ae4",
+        "access-eec874f9c2017ae1",
+        "access-f30e32ab9d88f223"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "tenant-and-platform-context-boundary-implemented-postgresql-certification-pending",
+      "implementationStatus": "context-boundary-implemented",
       "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
+        "backend/tests/riskAnalyticsContext.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
@@ -16538,45 +16733,114 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-2df3b78d471993c6",
-          "source": "backend/src/services/analyticsService.ts:293",
+          "accessId": "access-08d90c7240f56c25",
+          "source": "backend/src/services/analyticsService.ts:617",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-51ab4d175d6bc690",
-          "source": "backend/src/services/analyticsService.ts:420",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "groupBy"
-        },
-        {
-          "accessId": "access-6e0248baa666d2d5",
-          "source": "backend/src/services/analyticsService.ts:391",
+          "accessId": "access-21b3fc04deec3ddd",
+          "source": "backend/src/services/analyticsService.ts:611",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-d9320eab3e3702a1",
-          "source": "backend/src/services/analyticsService.ts:325",
+          "accessId": "access-28a77e9696dd1c39",
+          "source": "backend/src/services/analyticsService.ts:592",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-eebe07f4773e55ae",
-          "source": "backend/src/services/analyticsService.ts:338",
+          "accessId": "access-2da865ba9c16e0e4",
+          "source": "backend/src/services/analyticsService.ts:525",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-3e74be1b64e6f1f0",
+          "source": "backend/src/services/analyticsService.ts:467",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-496e1c6a0c00b066",
+          "source": "backend/src/services/analyticsService.ts:460",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-5431431ee00c1010",
+          "source": "backend/src/services/analyticsService.ts:686",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-735858c7c8120821",
+          "source": "backend/src/services/analyticsService.ts:559",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-73ec2e7794fa9dad",
+          "source": "backend/src/services/analyticsService.ts:434",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-8574a3a7548790e6",
+          "source": "backend/src/services/analyticsService.ts:586",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-8d799bd56015a0e0",
+          "source": "backend/src/services/analyticsService.ts:605",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-a010bfb50a8ebcc5",
+          "source": "backend/src/services/analyticsService.ts:366",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-a5e1fb98e9f32ae4",
+          "source": "backend/src/services/analyticsService.ts:482",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-eec874f9c2017ae1",
+          "source": "backend/src/services/analyticsService.ts:383",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-f30e32ab9d88f223",
+          "source": "backend/src/services/analyticsService.ts:767",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
+        "command-audit-log-insert-509547f03abe",
         "command-batch-select-509547f03abe",
+        "command-incident-select-509547f03abe",
+        "command-licensee-select-509547f03abe",
+        "command-manufacturer-licensee-link-select-509547f03abe",
+        "command-organization-select-509547f03abe",
         "command-policy-alert-select-509547f03abe",
+        "command-policy-rule-select-509547f03abe",
         "command-qr-scan-log-select-509547f03abe",
-        "command-qrcode-select-509547f03abe"
+        "command-qrcode-select-509547f03abe",
+        "command-security-policy-select-509547f03abe",
+        "command-user-select-509547f03abe"
       ],
       "commandActorClasses": [
-        "authenticated-user"
+        "licensee-admin",
+        "platform-admin"
       ],
       "requiredAssurance": [
         "password-verified"
@@ -16584,7 +16848,277 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-simple-tenant-scoped-reads-analyticsservice-2c20deef24",
+      "contextBoundaryCategory": "simple tenant-scoped reads",
+      "approvedReadAttribution": true,
+      "implementationFiles": [
+        "backend/src/controllers/tracePolicyController.ts",
+        "backend/src/services/analyticsService.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/routes/index.ts"
+      ],
+      "testFiles": [
+        "backend/tests/riskAnalyticsContext.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "protectedQueryClient": "transaction-client-only",
+      "consistentReadScopeGuarantee": true,
+      "routeRootVerified": true,
+      "aggregateScopeStatus": "tenant-bounded",
+      "postgresqlCertificationStatus": "pending",
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-16",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": true,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": true
+      },
+      "resolvedContextBlockerIds": [
+        "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unresolved-boundary",
+        "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unreviewed-scope",
+        "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unverified-execution-path",
+        "blocker-family-simple-tenant-scoped-reads-analyticsservice-2c20deef24-unverified-root-call-chain"
+      ],
+      "rootCallChainEvidence": [
+        "backend/src/routes/index.ts registers GET /analytics/risk-scores with authenticate, requireAnyAdmin, bounded read limiters and enforceTenantIsolation before getRiskAnalyticsController.",
+        "getRiskAnalyticsController is the only production caller of getRiskAnalytics; tenant and freshly MFA-verified platform paths share the same repeatable-read analytics transaction.",
+        "authenticate performs exact actor-self User hydration first; tenant scope is database authoritative, while platform scope starts empty and one requested Licensee and Organization are revalidated before tenant data is accepted."
+      ],
+      "scopeEvidence": [
+        "buildRiskAnalyticsBoundary accepts database-hydrated LICENSEE_ADMIN/ORG_ADMIN claims and fresh-MFA platform claims; platform authority is narrowed to one requested Licensee and its active Organization before analytics data is accepted.",
+        "Every protected analytics predicate contains the validated tenant licensee; every scoped tenant Batch forms the bounded candidate set, preserving zero-activity rows, while in-window scans and every unresolved alert supply risk signals.",
+        "Every scan row must prove matching canonical Licensee, QR and Batch parentage before it can affect a ceiling, candidate, dimension or score.",
+        "Every populated PolicyAlert batch, QR, manufacturer, incident and policy-rule parent must resolve to the same active canonical tenant before candidate scoring."
+      ],
+      "responseProjection": [
+        "Explicit tenant-safe batch and manufacturer aggregate fields; User.id/name are the only returned manufacturer fields, while role/licenseeId/orgId/isActive/status/deletedAt/disabledAt are actor/scope/predicate validation columns and are never serialized. Email, password, token, MFA, WebAuthn, recovery, metadata and platform-security fields remain unreadable.",
+        "Risk rows are deterministically ordered by score and stable ID; policy thresholds and bounded result summaries only."
+      ],
+      "riskAnalyticsAllowedColumnsByTableAndCommand": {
+        "table-audit-log": {
+          "INSERT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ]
+        },
+        "table-batch": {
+          "SELECT": [
+            "id",
+            "licenseeId",
+            "manufacturerId",
+            "name"
+          ]
+        },
+        "table-licensee": {
+          "SELECT": [
+            "id",
+            "isActive",
+            "orgId",
+            "suspendedAt"
+          ]
+        },
+        "table-organization": {
+          "SELECT": [
+            "id",
+            "isActive"
+          ]
+        },
+        "table-incident": {
+          "SELECT": [
+            "id",
+            "licenseeId"
+          ]
+        },
+        "table-manufacturer-licensee-link": {
+          "SELECT": [
+            "licenseeId",
+            "manufacturerId"
+          ]
+        },
+        "table-policy-alert": {
+          "SELECT": [
+            "acknowledgedAt",
+            "batchId",
+            "id",
+            "incidentId",
+            "licenseeId",
+            "manufacturerId",
+            "policyRuleId",
+            "qrCodeId"
+          ]
+        },
+        "table-policy-rule": {
+          "SELECT": [
+            "id",
+            "isActive",
+            "licenseeId",
+            "manufacturerId",
+            "orgId"
+          ]
+        },
+        "table-qr-scan-log": {
+          "SELECT": [
+            "batchId",
+            "id",
+            "latitude",
+            "licenseeId",
+            "longitude",
+            "qrCodeId",
+            "scannedAt"
+          ]
+        },
+        "table-qrcode": {
+          "SELECT": [
+            "batchId",
+            "id",
+            "licenseeId",
+            "scanCount"
+          ]
+        },
+        "table-security-policy": {
+          "SELECT": [
+            "geoDriftThresholdKm",
+            "licenseeId",
+            "multiScanThreshold",
+            "velocitySpikeThresholdPerMin"
+          ]
+        },
+        "table-user": {
+          "SELECT": [
+            "deletedAt",
+            "disabledAt",
+            "id",
+            "isActive",
+            "licenseeId",
+            "name",
+            "orgId",
+            "role",
+            "status"
+          ]
+        }
+      },
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "platformReadRequiredAssurance": "mfa-verified",
+      "platformReadRequiredAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "platformReadActorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "platformReadExecutionBoundary": "normal-actor-context",
+      "platformReadPurposeCodes": [
+        "tenant-risk-analytics"
+      ],
+      "platformReadAllowedColumnsByTable": {
+        "table-licensee": [
+          "id",
+          "orgId",
+          "isActive",
+          "suspendedAt"
+        ],
+        "table-organization": [
+          "id",
+          "isActive"
+        ],
+        "table-user": [
+          "id",
+          "name",
+          "role",
+          "licenseeId",
+          "orgId",
+          "isActive",
+          "status",
+          "deletedAt",
+          "disabledAt"
+        ],
+        "table-batch": [
+          "id",
+          "name",
+          "licenseeId",
+          "manufacturerId"
+        ],
+        "table-qrcode": [
+          "id",
+          "batchId",
+          "licenseeId",
+          "scanCount"
+        ],
+        "table-qr-scan-log": [
+          "id",
+          "batchId",
+          "licenseeId",
+          "qrCodeId",
+          "latitude",
+          "longitude",
+          "scannedAt"
+        ],
+        "table-incident": [
+          "id",
+          "licenseeId"
+        ],
+        "table-manufacturer-licensee-link": [
+          "manufacturerId",
+          "licenseeId"
+        ],
+        "table-policy-alert": [
+          "id",
+          "batchId",
+          "qrCodeId",
+          "manufacturerId",
+          "incidentId",
+          "policyRuleId",
+          "licenseeId",
+          "acknowledgedAt"
+        ],
+        "table-policy-rule": [
+          "id",
+          "licenseeId",
+          "orgId",
+          "manufacturerId"
+        ],
+        "table-security-policy": [
+          "licenseeId",
+          "multiScanThreshold",
+          "geoDriftThresholdKm",
+          "velocitySpikeThresholdPerMin"
+        ]
+      },
+      "platformReadResponseProjection": [
+        "bounded risk policy thresholds and summary",
+        "score-ranked batch and manufacturer risk fields",
+        "manufacturer id and display name only"
+      ],
+      "contextBoundaryBlockers": [],
+      "runtimeImplementedActorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "runtimeBlockedActorClasses": [],
+      "platformRuntimeStatus": "implemented-postgresql-pending",
+      "platformRuntimeBlockers": []
     },
     {
       "id": "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox",
@@ -16625,7 +17159,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-b209f411a6fafdd9"
+        "access-df2bc71bb6662d12"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -16638,8 +17172,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-b209f411a6fafdd9",
-          "source": "backend/src/services/auditLogOutboxService.ts:32",
+          "accessId": "access-df2bc71bb6662d12",
+          "source": "backend/src/services/auditLogOutboxService.ts:36",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
         }
@@ -17039,9 +17573,9 @@
       "semanticStatus": "mapped"
     },
     {
-      "id": "workflow-internal-backend-src-services-auth-auth-service-ts-issue-session-for-user",
-      "name": "Issue Session For User",
-      "entryPoint": "internal:issueSessionForUser",
+      "id": "workflow-internal-backend-src-services-auth-auth-service-ts-load-active-session-state",
+      "name": "Load Active Session State",
+      "entryPoint": "internal:loadActiveSessionState",
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
@@ -17065,6 +17599,7 @@
       "contextRequirements": [
         "transaction-local canonical actor context"
       ],
+      "contextRequirementsSource": "generated-conservative",
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
@@ -17074,7 +17609,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-538d1d9be8822b91"
+        "access-21b0076c684380c4"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -17087,15 +17622,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-538d1d9be8822b91",
-          "source": "backend/src/services/auth/authService.ts:116",
+          "accessId": "access-21b0076c684380c4",
+          "source": "backend/src/services/auth/authService.ts:141",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
-        "command-user-select-d8e5bdf36b53"
+        "command-user-select-def90113be13"
       ],
       "commandActorClasses": [
         "authenticated-user"
@@ -17146,7 +17680,7 @@
         "No direct table fallback; exact function grants and owner must be certified."
       ],
       "currentDirectPrismaUsage": [
-        "access-a93a2790cb084c4d"
+        "access-735b2d6cc42b3518"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -17159,8 +17693,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-a93a2790cb084c4d",
-          "source": "backend/src/services/auth/authService.ts:418",
+          "accessId": "access-735b2d6cc42b3518",
+          "source": "backend/src/services/auth/authService.ts:506",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
         }
@@ -17222,7 +17756,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-3fc7413d9a5bee99"
+        "access-98b5184715f16d53"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -17235,8 +17769,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-3fc7413d9a5bee99",
-          "source": "backend/src/services/auth/authService.ts:596",
+          "accessId": "access-98b5184715f16d53",
+          "source": "backend/src/services/auth/authService.ts:684",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         }
@@ -17292,7 +17826,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-3c2a87130b908d3a"
+        "access-dda4450697ef1b60"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -17305,10 +17839,10 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-3c2a87130b908d3a",
-          "source": "backend/src/services/auth/backupCodeMfaProvider.ts:70",
+          "accessId": "access-dda4450697ef1b60",
+          "source": "backend/src/services/auth/backupCodeMfaProvider.ts:84",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "update"
+          "method": "updateMany"
         }
       ],
       "contextRequirementsSource": "generated-conservative",
@@ -17362,7 +17896,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-75f71566358c3206"
+        "access-593051e21a4fe39b"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -17375,8 +17909,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-75f71566358c3206",
-          "source": "backend/src/services/auth/backupCodeMfaProvider.ts:44",
+          "accessId": "access-593051e21a4fe39b",
+          "source": "backend/src/services/auth/backupCodeMfaProvider.ts:58",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         }
@@ -17397,9 +17931,9 @@
       "semanticStatus": "mapped"
     },
     {
-      "id": "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-replace-user-backup-codes",
-      "name": "Replace User Backup Codes",
-      "entryPoint": "internal:replaceUserBackupCodes",
+      "id": "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-replace-user-backup-codes-with-client",
+      "name": "Replace User Backup Codes With Client",
+      "entryPoint": "internal:replaceUserBackupCodesWithClient",
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
@@ -17424,6 +17958,7 @@
       "contextRequirements": [
         "transaction-local canonical actor context"
       ],
+      "contextRequirementsSource": "generated-conservative",
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
@@ -17433,8 +17968,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-6b492cb16c8261b8",
-        "access-85551d6a65d6a9d5"
+        "access-26338fb5b785a50f",
+        "access-8efa9479df339823"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -17447,22 +17982,21 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-6b492cb16c8261b8",
-          "source": "backend/src/services/auth/backupCodeMfaProvider.ts:28",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "deleteMany"
-        },
-        {
-          "accessId": "access-85551d6a65d6a9d5",
-          "source": "backend/src/services/auth/backupCodeMfaProvider.ts:31",
+          "accessId": "access-26338fb5b785a50f",
+          "source": "backend/src/services/auth/backupCodeMfaProvider.ts:36",
           "registration": "reachable-from-registered-entrypoint",
           "method": "createMany"
+        },
+        {
+          "accessId": "access-8efa9479df339823",
+          "source": "backend/src/services/auth/backupCodeMfaProvider.ts:33",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "deleteMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
-        "command-user-backup-code-delete-4d336fb890ba",
-        "command-user-backup-code-insert-4d336fb890ba"
+        "command-user-backup-code-delete-fcba06b77bbf",
+        "command-user-backup-code-insert-fcba06b77bbf"
       ],
       "commandActorClasses": [
         "authenticated-user"
@@ -18333,6 +18867,7 @@
       ],
       "tablesTouched": [
         "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
         "table-user-backup-code",
         "table-user-mfa-factor"
       ],
@@ -18341,13 +18876,19 @@
           "tableId": "table-admin-mfa-credential",
           "commands": [
             "INSERT",
+            "SELECT",
             "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-admin-web-authn-credential",
+          "commands": [
+            "SELECT"
           ]
         },
         {
           "tableId": "table-user-backup-code",
           "commands": [
-            "DELETE",
             "INSERT"
           ]
         },
@@ -18355,7 +18896,9 @@
           "tableId": "table-user-mfa-factor",
           "commands": [
             "DELETE",
-            "INSERT"
+            "INSERT",
+            "SELECT",
+            "UPDATE"
           ]
         }
       ],
@@ -18363,6 +18906,7 @@
       "contextRequirements": [
         "transaction-local canonical actor context"
       ],
+      "contextRequirementsSource": "generated-conservative",
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
@@ -18372,11 +18916,14 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-813d22bcc2ecf2b3",
-        "access-9c23029d694c8505",
-        "access-9ef9e38fc9f14c2b",
-        "access-bd71601ffbc73e13",
-        "access-e0b1744333e56080"
+        "access-08e2efa8f43f06ec",
+        "access-1a6b35d08687886f",
+        "access-45749ab944417782",
+        "access-5afa9341ead48873",
+        "access-5ff757a65e0c22cd",
+        "access-bf8a23c950839da2",
+        "access-d9e41ccdd5f2764d",
+        "access-ec683b932fc47765"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -18389,50 +18936,71 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-813d22bcc2ecf2b3",
-          "source": "backend/src/services/auth/mfaAdapter.ts:216",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "deleteMany"
-        },
-        {
-          "accessId": "access-9c23029d694c8505",
-          "source": "backend/src/services/auth/mfaAdapter.ts:219",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "create"
-        },
-        {
-          "accessId": "access-9ef9e38fc9f14c2b",
-          "source": "backend/src/services/auth/mfaAdapter.ts:227",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "deleteMany"
-        },
-        {
-          "accessId": "access-bd71601ffbc73e13",
-          "source": "backend/src/services/auth/mfaAdapter.ts:230",
+          "accessId": "access-08e2efa8f43f06ec",
+          "source": "backend/src/services/auth/mfaAdapter.ts:353",
           "registration": "reachable-from-registered-entrypoint",
           "method": "createMany"
         },
         {
-          "accessId": "access-e0b1744333e56080",
-          "source": "backend/src/services/auth/mfaAdapter.ts:198",
+          "accessId": "access-1a6b35d08687886f",
+          "source": "backend/src/services/auth/mfaAdapter.ts:359",
           "registration": "reachable-from-registered-entrypoint",
           "method": "upsert"
+        },
+        {
+          "accessId": "access-45749ab944417782",
+          "source": "backend/src/services/auth/mfaAdapter.ts:271",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-5afa9341ead48873",
+          "source": "backend/src/services/auth/mfaAdapter.ts:377",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-5ff757a65e0c22cd",
+          "source": "backend/src/services/auth/mfaAdapter.ts:285",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "count"
+        },
+        {
+          "accessId": "access-bf8a23c950839da2",
+          "source": "backend/src/services/auth/mfaAdapter.ts:325",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "upsert"
+        },
+        {
+          "accessId": "access-d9e41ccdd5f2764d",
+          "source": "backend/src/services/auth/mfaAdapter.ts:286",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-ec683b932fc47765",
+          "source": "backend/src/services/auth/mfaAdapter.ts:318",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "deleteMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
         "command-admin-mfa-credential-insert-19248b1c58f5",
+        "command-admin-mfa-credential-select-19248b1c58f5",
         "command-admin-mfa-credential-update-19248b1c58f5",
-        "command-user-backup-code-delete-19248b1c58f5",
+        "command-admin-web-authn-credential-select-19248b1c58f5",
         "command-user-backup-code-insert-19248b1c58f5",
         "command-user-mfa-factor-delete-19248b1c58f5",
-        "command-user-mfa-factor-insert-19248b1c58f5"
+        "command-user-mfa-factor-insert-19248b1c58f5",
+        "command-user-mfa-factor-select-19248b1c58f5",
+        "command-user-mfa-factor-update-19248b1c58f5"
       ],
       "commandActorClasses": [
         "authenticated-user"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "mfa-verified",
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -18452,9 +19020,16 @@
         "backend/src/services/auth/mfaAdapter.ts"
       ],
       "tablesTouched": [
+        "table-audit-log-outbox",
         "table-mfa-login-challenge"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "INSERT"
+          ]
+        },
         {
           "tableId": "table-mfa-login-challenge",
           "commands": [
@@ -18478,8 +19053,13 @@
         "No direct table fallback; exact function grants and owner must be certified."
       ],
       "currentDirectPrismaUsage": [
-        "access-4fbe0f3b3f909c3e",
-        "access-5c02882ea601b607"
+        "access-556af61c5269a41e",
+        "access-737c77f9bcb4c12e",
+        "access-7527d1d41f3e4d9d",
+        "access-87dae03cd06bbdca",
+        "access-cf26b80a4716803b",
+        "access-e92534dbcb2fc5b3",
+        "access-edce451af0344152"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -18492,20 +19072,51 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-4fbe0f3b3f909c3e",
-          "source": "backend/src/services/auth/mfaAdapter.ts:502",
+          "accessId": "access-556af61c5269a41e",
+          "source": "backend/src/services/auth/mfaAdapter.ts:802",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-737c77f9bcb4c12e",
+          "source": "backend/src/services/auth/mfaAdapter.ts:882",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-7527d1d41f3e4d9d",
+          "source": "backend/src/services/auth/mfaAdapter.ts:783",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         },
         {
-          "accessId": "access-5c02882ea601b607",
-          "source": "backend/src/services/auth/mfaAdapter.ts:577",
+          "accessId": "access-87dae03cd06bbdca",
+          "source": "backend/src/services/auth/mfaAdapter.ts:876",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "updateMany"
+        },
+        {
+          "accessId": "access-cf26b80a4716803b",
+          "source": "backend/src/services/auth/mfaAdapter.ts:790",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-e92534dbcb2fc5b3",
+          "source": "backend/src/services/auth/mfaAdapter.ts:861",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-edce451af0344152",
+          "source": "backend/src/services/auth/mfaAdapter.ts:853",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         }
       ],
       "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
+        "command-audit-log-outbox-insert-986a6bc31b69",
         "command-mfa-login-challenge-select-986a6bc31b69",
         "command-mfa-login-challenge-update-986a6bc31b69"
       ],
@@ -18540,13 +19151,36 @@
       ],
       "tablesTouched": [
         "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
+        "table-audit-log-outbox",
+        "table-user-backup-code",
         "table-user-mfa-factor"
       ],
       "commandsPerTable": [
         {
           "tableId": "table-admin-mfa-credential",
           "commands": [
+            "SELECT",
             "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-admin-web-authn-credential",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "INSERT"
+          ]
+        },
+        {
+          "tableId": "table-user-backup-code",
+          "commands": [
+            "DELETE",
+            "INSERT"
           ]
         },
         {
@@ -18561,6 +19195,7 @@
       "contextRequirements": [
         "transaction-local canonical actor context"
       ],
+      "contextRequirementsSource": "generated-conservative",
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
@@ -18570,9 +19205,15 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-3facc90085f0513f",
-        "access-ac46d7da01a0b093",
-        "access-cdb70684c3f75d53"
+        "access-03d74486a7eae575",
+        "access-22f0834f0f2845be",
+        "access-37b0dad78888847e",
+        "access-56c9afcdef264a26",
+        "access-86e68dfe93d769b6",
+        "access-b29371308cd2cd3a",
+        "access-ce9be607414dde10",
+        "access-dbf77e86f68b0359",
+        "access-dd02893b8a408b2d"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -18585,27 +19226,67 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-3facc90085f0513f",
-          "source": "backend/src/services/auth/mfaAdapter.ts:266",
+          "accessId": "access-03d74486a7eae575",
+          "source": "backend/src/services/auth/mfaAdapter.ts:494",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "createMany"
+        },
+        {
+          "accessId": "access-22f0834f0f2845be",
+          "source": "backend/src/services/auth/mfaAdapter.ts:418",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "count"
+        },
+        {
+          "accessId": "access-37b0dad78888847e",
+          "source": "backend/src/services/auth/mfaAdapter.ts:474",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         },
         {
-          "accessId": "access-ac46d7da01a0b093",
-          "source": "backend/src/services/auth/mfaAdapter.ts:246",
+          "accessId": "access-56c9afcdef264a26",
+          "source": "backend/src/services/auth/mfaAdapter.ts:487",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findFirst"
+          "method": "updateMany"
         },
         {
-          "accessId": "access-cdb70684c3f75d53",
-          "source": "backend/src/services/auth/mfaAdapter.ts:265",
+          "accessId": "access-86e68dfe93d769b6",
+          "source": "backend/src/services/auth/mfaAdapter.ts:493",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "deleteMany"
+        },
+        {
+          "accessId": "access-b29371308cd2cd3a",
+          "source": "backend/src/services/auth/mfaAdapter.ts:478",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
+        },
+        {
+          "accessId": "access-ce9be607414dde10",
+          "source": "backend/src/services/auth/mfaAdapter.ts:499",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-dbf77e86f68b0359",
+          "source": "backend/src/services/auth/mfaAdapter.ts:404",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-dd02893b8a408b2d",
+          "source": "backend/src/services/auth/mfaAdapter.ts:419",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
+        "command-admin-mfa-credential-select-62fc51366420",
         "command-admin-mfa-credential-update-62fc51366420",
+        "command-admin-web-authn-credential-select-62fc51366420",
+        "command-audit-log-outbox-insert-62fc51366420",
+        "command-user-backup-code-delete-62fc51366420",
+        "command-user-backup-code-insert-62fc51366420",
         "command-user-mfa-factor-select-62fc51366420",
         "command-user-mfa-factor-update-62fc51366420"
       ],
@@ -18659,7 +19340,7 @@
         "No direct table fallback; exact function grants and owner must be certified."
       ],
       "currentDirectPrismaUsage": [
-        "access-838017e8acd23a03"
+        "access-fd81141f09fb65f4"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -18672,8 +19353,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-838017e8acd23a03",
-          "source": "backend/src/services/auth/mfaAdapter.ts:458",
+          "accessId": "access-fd81141f09fb65f4",
+          "source": "backend/src/services/auth/mfaAdapter.ts:730",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
         }
@@ -18756,10 +19437,10 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-1310430d3d49c60e",
-        "access-2e9bae3be77d7e37",
-        "access-581936ef01b04f37",
-        "access-9b45a4b0fdba611d"
+        "access-0a02250733eb1700",
+        "access-d956be7223976ace",
+        "access-ee15f36f4d2a93ff",
+        "access-f3b86005029572ae"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -18772,26 +19453,26 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-1310430d3d49c60e",
-          "source": "backend/src/services/auth/mfaAdapter.ts:109",
+          "accessId": "access-0a02250733eb1700",
+          "source": "backend/src/services/auth/mfaAdapter.ts:157",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         },
         {
-          "accessId": "access-2e9bae3be77d7e37",
-          "source": "backend/src/services/auth/mfaAdapter.ts:126",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
-        },
-        {
-          "accessId": "access-581936ef01b04f37",
-          "source": "backend/src/services/auth/mfaAdapter.ts:139",
+          "accessId": "access-d956be7223976ace",
+          "source": "backend/src/services/auth/mfaAdapter.ts:188",
           "registration": "reachable-from-registered-entrypoint",
           "method": "count"
         },
         {
-          "accessId": "access-9b45a4b0fdba611d",
-          "source": "backend/src/services/auth/mfaAdapter.ts:121",
+          "accessId": "access-ee15f36f4d2a93ff",
+          "source": "backend/src/services/auth/mfaAdapter.ts:169",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-f3b86005029572ae",
+          "source": "backend/src/services/auth/mfaAdapter.ts:174",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -18808,76 +19489,6 @@
       ],
       "requiredAssurance": [
         "password-verified"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "semanticStatus": "mapped"
-    },
-    {
-      "id": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-record-failure",
-      "name": "Record Failure",
-      "entryPoint": "internal:recordFailure",
-      "executionSurface": "internal",
-      "authenticationStage": "authenticated",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "canonicalSourceFiles": [
-        "backend/src/services/auth/mfaAdapter.ts"
-      ],
-      "tablesTouched": [
-        "table-mfa-login-challenge"
-      ],
-      "commandsPerTable": [
-        {
-          "tableId": "table-mfa-login-challenge",
-          "commands": [
-            "UPDATE"
-          ]
-        }
-      ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
-      "contextRequirements": [
-        "transaction-local canonical actor context"
-      ],
-      "authorizationBoundaryType": "unresolved",
-      "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
-      ],
-      "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
-      ],
-      "preAuthSystemRequirements": [],
-      "currentDirectPrismaUsage": [
-        "access-befd93b04748d557"
-      ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
-      "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
-      ],
-      "requiredDisposablePostgresqlTests": [
-        "Exact role, context, command, cross-tenant denial, and empty-context denial."
-      ],
-      "unresolvedDecisions": [],
-      "supportingEvidence": [
-        {
-          "accessId": "access-befd93b04748d557",
-          "source": "backend/src/services/auth/mfaAdapter.ts:538",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "updateMany"
-        }
-      ],
-      "contextRequirementsSource": "generated-conservative",
-      "commandRuleIds": [
-        "command-mfa-login-challenge-update-0767280f618f"
-      ],
-      "commandActorClasses": [
-        "authenticated-user"
-      ],
-      "requiredAssurance": [
-        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -18920,7 +19531,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-287414c0f540fb79"
+        "access-0695b9a3f9a3b2ec"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -18933,8 +19544,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-287414c0f540fb79",
-          "source": "backend/src/services/auth/mfaAdapter.ts:431",
+          "accessId": "access-0695b9a3f9a3b2ec",
+          "source": "backend/src/services/auth/mfaAdapter.ts:703",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         }
@@ -18955,9 +19566,9 @@
       "semanticStatus": "mapped"
     },
     {
-      "id": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-mfa-code-with-adapter",
-      "name": "Verify Mfa Code With Adapter",
-      "entryPoint": "internal:verifyMfaCodeWithAdapter",
+      "id": "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-mfa-code-with-client",
+      "name": "Verify Mfa Code With Client",
+      "entryPoint": "internal:verifyMfaCodeWithClient",
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
@@ -18988,6 +19599,7 @@
       "contextRequirements": [
         "transaction-local canonical actor context"
       ],
+      "contextRequirementsSource": "generated-conservative",
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
@@ -18997,8 +19609,9 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-b353ecd93c4e12c3",
-        "access-c1629c671a6ed3da"
+        "access-025380c5668aede6",
+        "access-b06f8d2f78a6a649",
+        "access-d5ff4ea10d7a0791"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -19011,22 +19624,27 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-b353ecd93c4e12c3",
-          "source": "backend/src/services/auth/mfaAdapter.ts:378",
+          "accessId": "access-025380c5668aede6",
+          "source": "backend/src/services/auth/mfaAdapter.ts:646",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         },
         {
-          "accessId": "access-c1629c671a6ed3da",
-          "source": "backend/src/services/auth/mfaAdapter.ts:372",
+          "accessId": "access-b06f8d2f78a6a649",
+          "source": "backend/src/services/auth/mfaAdapter.ts:631",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-d5ff4ea10d7a0791",
+          "source": "backend/src/services/auth/mfaAdapter.ts:626",
           "registration": "reachable-from-registered-entrypoint",
           "method": "count"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
-        "command-admin-mfa-credential-select-a427b28f2ce4",
-        "command-user-backup-code-select-a427b28f2ce4"
+        "command-admin-mfa-credential-select-528a31845fa4",
+        "command-user-backup-code-select-528a31845fa4"
       ],
       "commandActorClasses": [
         "authenticated-user"
@@ -19084,9 +19702,9 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-0ca155e3f8036db0",
-        "access-19a63bfabb227731",
-        "access-d0693366ec809f57"
+        "access-8e7ce675352a3af0",
+        "access-9c1e943d8b41dbb8",
+        "access-aeab9e5e9f09a376"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -19099,20 +19717,20 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-0ca155e3f8036db0",
-          "source": "backend/src/services/auth/mfaAdapter.ts:307",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findUnique"
-        },
-        {
-          "accessId": "access-19a63bfabb227731",
-          "source": "backend/src/services/auth/mfaAdapter.ts:332",
+          "accessId": "access-8e7ce675352a3af0",
+          "source": "backend/src/services/auth/mfaAdapter.ts:585",
           "registration": "reachable-from-registered-entrypoint",
           "method": "upsert"
         },
         {
-          "accessId": "access-d0693366ec809f57",
-          "source": "backend/src/services/auth/mfaAdapter.ts:331",
+          "accessId": "access-9c1e943d8b41dbb8",
+          "source": "backend/src/services/auth/mfaAdapter.ts:561",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-aeab9e5e9f09a376",
+          "source": "backend/src/services/auth/mfaAdapter.ts:584",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
         }
@@ -19173,8 +19791,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-11c3a318a154fb6a",
-        "access-64f48fb7d0bda581"
+        "access-0719d8b3ebed6f9d",
+        "access-dae70322f05e9f37"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -19187,14 +19805,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-11c3a318a154fb6a",
-          "source": "backend/src/services/auth/mfaAdapter.ts:299",
+          "accessId": "access-0719d8b3ebed6f9d",
+          "source": "backend/src/services/auth/mfaAdapter.ts:550",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
         },
         {
-          "accessId": "access-64f48fb7d0bda581",
-          "source": "backend/src/services/auth/mfaAdapter.ts:276",
+          "accessId": "access-dae70322f05e9f37",
+          "source": "backend/src/services/auth/mfaAdapter.ts:519",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -19229,9 +19847,16 @@
         "backend/src/services/auth/mfaService.ts"
       ],
       "tablesTouched": [
+        "table-audit-log-outbox",
         "table-auth-mfa-challenge"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "INSERT"
+          ]
+        },
         {
           "tableId": "table-auth-mfa-challenge",
           "commands": [
@@ -19253,10 +19878,15 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-48905e5bf062e75d",
-        "access-8a4bbf63f023e44b",
-        "access-db250cbf9fc7234a",
-        "access-e0bc6c5acddf61ac"
+        "access-056a7f30e862bd9b",
+        "access-10230a5e15a1f4d9",
+        "access-5024bf0e3afeee01",
+        "access-64a7a2152e1343a0",
+        "access-755eef48a0e10577",
+        "access-9f49cd116c584c97",
+        "access-a3207e1e10f40e73",
+        "access-e362c63da4b67252",
+        "access-f7c56710d04d48ad"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -19269,32 +19899,63 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-48905e5bf062e75d",
-          "source": "backend/src/services/auth/mfaService.ts:482",
+          "accessId": "access-056a7f30e862bd9b",
+          "source": "backend/src/services/auth/mfaService.ts:585",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         },
         {
-          "accessId": "access-8a4bbf63f023e44b",
-          "source": "backend/src/services/auth/mfaService.ts:367",
+          "accessId": "access-10230a5e15a1f4d9",
+          "source": "backend/src/services/auth/mfaService.ts:568",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-5024bf0e3afeee01",
+          "source": "backend/src/services/auth/mfaService.ts:538",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-64a7a2152e1343a0",
+          "source": "backend/src/services/auth/mfaService.ts:510",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-755eef48a0e10577",
+          "source": "backend/src/services/auth/mfaService.ts:498",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-9f49cd116c584c97",
+          "source": "backend/src/services/auth/mfaService.ts:603",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-a3207e1e10f40e73",
+          "source": "backend/src/services/auth/mfaService.ts:563",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "updateMany"
+        },
+        {
+          "accessId": "access-e362c63da4b67252",
+          "source": "backend/src/services/auth/mfaService.ts:533",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "updateMany"
+        },
+        {
+          "accessId": "access-f7c56710d04d48ad",
+          "source": "backend/src/services/auth/mfaService.ts:460",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
-        },
-        {
-          "accessId": "access-db250cbf9fc7234a",
-          "source": "backend/src/services/auth/mfaService.ts:465",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "updateMany"
-        },
-        {
-          "accessId": "access-e0bc6c5acddf61ac",
-          "source": "backend/src/services/auth/mfaService.ts:440",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "updateMany"
         }
       ],
       "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
+        "command-audit-log-outbox-insert-c4febf718039",
         "command-auth-mfa-challenge-select-c4febf718039",
         "command-auth-mfa-challenge-update-c4febf718039"
       ],
@@ -19346,7 +20007,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-1a54528485658c95"
+        "access-74897ecb70ee5178"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -19359,8 +20020,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-1a54528485658c95",
-          "source": "backend/src/services/auth/mfaService.ts:331",
+          "accessId": "access-74897ecb70ee5178",
+          "source": "backend/src/services/auth/mfaService.ts:394",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
         }
@@ -19417,8 +20078,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-5c883088a146e89e",
-        "access-80ea3def4bc8dbe1"
+        "access-883de7d5a79a04a8",
+        "access-ab3c11fe71ed4b4c"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -19431,16 +20092,16 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-5c883088a146e89e",
-          "source": "backend/src/services/auth/mfaService.ts:265",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "updateMany"
-        },
-        {
-          "accessId": "access-80ea3def4bc8dbe1",
-          "source": "backend/src/services/auth/mfaService.ts:278",
+          "accessId": "access-883de7d5a79a04a8",
+          "source": "backend/src/services/auth/mfaService.ts:341",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
+        },
+        {
+          "accessId": "access-ab3c11fe71ed4b4c",
+          "source": "backend/src/services/auth/mfaService.ts:328",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "updateMany"
         }
       ],
       "contextRequirementsSource": "generated-conservative",
@@ -19472,11 +20133,39 @@
         "backend/src/services/auth/mfaService.ts"
       ],
       "tablesTouched": [
-        "table-admin-mfa-credential"
+        "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
+        "table-audit-log-outbox",
+        "table-user-backup-code",
+        "table-user-mfa-factor"
       ],
       "commandsPerTable": [
         {
           "tableId": "table-admin-mfa-credential",
+          "commands": [
+            "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-admin-web-authn-credential",
+          "commands": [
+            "DELETE"
+          ]
+        },
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "INSERT"
+          ]
+        },
+        {
+          "tableId": "table-user-backup-code",
+          "commands": [
+            "DELETE"
+          ]
+        },
+        {
+          "tableId": "table-user-mfa-factor",
           "commands": [
             "UPDATE"
           ]
@@ -19486,6 +20175,7 @@
       "contextRequirements": [
         "transaction-local canonical actor context"
       ],
+      "contextRequirementsSource": "generated-conservative",
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
@@ -19495,7 +20185,11 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-482b5cf37bb5b490"
+        "access-04dc89aa9bde26ff",
+        "access-3e2fcd5be7114d57",
+        "access-ab2bad185038fde1",
+        "access-cf39f3abbe89cde8",
+        "access-d499b7c847727193"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -19508,21 +20202,49 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-482b5cf37bb5b490",
-          "source": "backend/src/services/auth/mfaService.ts:228",
+          "accessId": "access-04dc89aa9bde26ff",
+          "source": "backend/src/services/auth/mfaService.ts:283",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "deleteMany"
+        },
+        {
+          "accessId": "access-3e2fcd5be7114d57",
+          "source": "backend/src/services/auth/mfaService.ts:282",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "deleteMany"
+        },
+        {
+          "accessId": "access-ab2bad185038fde1",
+          "source": "backend/src/services/auth/mfaService.ts:278",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "updateMany"
+        },
+        {
+          "accessId": "access-cf39f3abbe89cde8",
+          "source": "backend/src/services/auth/mfaService.ts:286",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
+        },
+        {
+          "accessId": "access-d499b7c847727193",
+          "source": "backend/src/services/auth/mfaService.ts:269",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
-        "command-admin-mfa-credential-update-2d0779382f94"
+        "command-admin-mfa-credential-update-2d0779382f94",
+        "command-admin-web-authn-credential-delete-2d0779382f94",
+        "command-audit-log-outbox-insert-2d0779382f94",
+        "command-user-backup-code-delete-2d0779382f94",
+        "command-user-mfa-factor-update-2d0779382f94"
       ],
       "commandActorClasses": [
         "authenticated-user"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "mfa-verified",
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -19823,7 +20545,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-aa3ca490b8fab5f7"
+        "access-1c7e9771ae6a471d"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -19836,8 +20558,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-aa3ca490b8fab5f7",
-          "source": "backend/src/services/auth/refreshTokenService.ts:23",
+          "accessId": "access-1c7e9771ae6a471d",
+          "source": "backend/src/services/auth/refreshTokenService.ts:55",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
         }
@@ -19893,7 +20615,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-cb163b14f28c5a86"
+        "access-6c2f3ec639eb8a35"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -19906,8 +20628,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-cb163b14f28c5a86",
-          "source": "backend/src/services/auth/refreshTokenService.ts:102",
+          "accessId": "access-6c2f3ec639eb8a35",
+          "source": "backend/src/services/auth/refreshTokenService.ts:135",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }
@@ -19963,7 +20685,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-3f377aebccc9dece"
+        "access-66fa330072d9c168"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -19976,8 +20698,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-3f377aebccc9dece",
-          "source": "backend/src/services/auth/refreshTokenService.ts:124",
+          "accessId": "access-66fa330072d9c168",
+          "source": "backend/src/services/auth/refreshTokenService.ts:157",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -20033,7 +20755,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-e68d25f5dfe37306"
+        "access-a2ef114753c7ee75"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20046,8 +20768,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-e68d25f5dfe37306",
-          "source": "backend/src/services/auth/refreshTokenService.ts:67",
+          "accessId": "access-a2ef114753c7ee75",
+          "source": "backend/src/services/auth/refreshTokenService.ts:100",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         }
@@ -20103,7 +20825,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-ecb825e45994d0a1"
+        "access-a747715cff559675"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20116,8 +20838,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-ecb825e45994d0a1",
-          "source": "backend/src/services/auth/refreshTokenService.ts:86",
+          "accessId": "access-a747715cff559675",
+          "source": "backend/src/services/auth/refreshTokenService.ts:119",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         }
@@ -20173,7 +20895,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-1ad075d7a63a00e3"
+        "access-d38005aa8f2bbf64"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20186,8 +20908,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-1ad075d7a63a00e3",
-          "source": "backend/src/services/auth/refreshTokenService.ts:151",
+          "accessId": "access-d38005aa8f2bbf64",
+          "source": "backend/src/services/auth/refreshTokenService.ts:184",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         }
@@ -20243,7 +20965,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-38a154e6cbe0bf26"
+        "access-29eabc221321c1bb"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20256,8 +20978,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-38a154e6cbe0bf26",
-          "source": "backend/src/services/auth/refreshTokenService.ts:48",
+          "accessId": "access-29eabc221321c1bb",
+          "source": "backend/src/services/auth/refreshTokenService.ts:81",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         }
@@ -20306,6 +21028,7 @@
       "contextRequirements": [
         "transaction-local canonical actor context"
       ],
+      "contextRequirementsSource": "generated-conservative",
       "authorizationBoundaryType": "unresolved",
       "expectedAllowedScenarios": [
         "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
@@ -20315,11 +21038,13 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-7cf1826db0f1fb0a",
-        "access-aa9c9714ad22ee05",
-        "access-aaf7491e3dd929b7",
-        "access-d11b38dbc1cc608a",
-        "access-e62a650e913ff912"
+        "access-195a658ee03cec82",
+        "access-608d0259eb6707f3",
+        "access-737a31623f136eff",
+        "access-95af646eb2a86168",
+        "access-bad63221832878a6",
+        "access-d8ac7a05584bca09",
+        "access-fe27693a61c64ddc"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20332,37 +21057,48 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-7cf1826db0f1fb0a",
-          "source": "backend/src/services/auth/refreshTokenService.ts:192",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findFirst"
-        },
-        {
-          "accessId": "access-aa9c9714ad22ee05",
-          "source": "backend/src/services/auth/refreshTokenService.ts:253",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "update"
-        },
-        {
-          "accessId": "access-aaf7491e3dd929b7",
-          "source": "backend/src/services/auth/refreshTokenService.ts:214",
+          "accessId": "access-195a658ee03cec82",
+          "source": "backend/src/services/auth/refreshTokenService.ts:267",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         },
         {
-          "accessId": "access-d11b38dbc1cc608a",
-          "source": "backend/src/services/auth/refreshTokenService.ts:239",
+          "accessId": "access-608d0259eb6707f3",
+          "source": "backend/src/services/auth/refreshTokenService.ts:249",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-737a31623f136eff",
+          "source": "backend/src/services/auth/refreshTokenService.ts:281",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "updateMany"
+        },
+        {
+          "accessId": "access-95af646eb2a86168",
+          "source": "backend/src/services/auth/refreshTokenService.ts:338",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "updateMany"
+        },
+        {
+          "accessId": "access-bad63221832878a6",
+          "source": "backend/src/services/auth/refreshTokenService.ts:299",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "updateMany"
+        },
+        {
+          "accessId": "access-d8ac7a05584bca09",
+          "source": "backend/src/services/auth/refreshTokenService.ts:323",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
         },
         {
-          "accessId": "access-e62a650e913ff912",
-          "source": "backend/src/services/auth/refreshTokenService.ts:228",
+          "accessId": "access-fe27693a61c64ddc",
+          "source": "backend/src/services/auth/refreshTokenService.ts:239",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "update"
+          "method": "findFirst"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
         "command-refresh-token-insert-433b30f2f2d3",
         "command-refresh-token-select-433b30f2f2d3",
@@ -20510,8 +21246,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-675135764a43f7f8",
-        "access-de64cc486dceab1a"
+        "access-3a3fd65775ae1044",
+        "access-e9c3c148453a5579"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20524,14 +21260,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-675135764a43f7f8",
-          "source": "backend/src/services/auth/webauthnMfaProvider.ts:206",
+          "accessId": "access-3a3fd65775ae1044",
+          "source": "backend/src/services/auth/webauthnMfaProvider.ts:213",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-de64cc486dceab1a",
-          "source": "backend/src/services/auth/webauthnMfaProvider.ts:224",
+          "accessId": "access-e9c3c148453a5579",
+          "source": "backend/src/services/auth/webauthnMfaProvider.ts:231",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
         }
@@ -20596,8 +21332,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-1cd363dc9437836e",
-        "access-99c1e3529f2aaea6"
+        "access-9ae4ba5f1d204224",
+        "access-a6a4ca8ca509b610"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20610,14 +21346,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-1cd363dc9437836e",
-          "source": "backend/src/services/auth/webauthnMfaProvider.ts:102",
+          "accessId": "access-9ae4ba5f1d204224",
+          "source": "backend/src/services/auth/webauthnMfaProvider.ts:109",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-99c1e3529f2aaea6",
-          "source": "backend/src/services/auth/webauthnMfaProvider.ts:125",
+          "accessId": "access-a6a4ca8ca509b610",
+          "source": "backend/src/services/auth/webauthnMfaProvider.ts:132",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
         }
@@ -20676,8 +21412,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-6a46e9e01333506f",
-        "access-7953c657daf68226"
+        "access-528c6c1e98549c21",
+        "access-79e3cf9ec509aaf5"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20690,14 +21426,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-6a46e9e01333506f",
-          "source": "backend/src/services/auth/webauthnMfaProvider.ts:251",
+          "accessId": "access-528c6c1e98549c21",
+          "source": "backend/src/services/auth/webauthnMfaProvider.ts:260",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         },
         {
-          "accessId": "access-7953c657daf68226",
-          "source": "backend/src/services/auth/webauthnMfaProvider.ts:272",
+          "accessId": "access-79e3cf9ec509aaf5",
+          "source": "backend/src/services/auth/webauthnMfaProvider.ts:281",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
         }
@@ -20756,7 +21492,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-7cfdb0e9bee3c517"
+        "access-2f77c12ef3d817ce"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20769,8 +21505,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-7cfdb0e9bee3c517",
-          "source": "backend/src/services/auth/webauthnMfaProvider.ts:168",
+          "accessId": "access-2f77c12ef3d817ce",
+          "source": "backend/src/services/auth/webauthnMfaProvider.ts:175",
           "registration": "reachable-from-registered-entrypoint",
           "method": "upsert"
         }
@@ -20827,7 +21563,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-caf578c18b7c09fb"
+        "access-b9243c6d3f5b5039"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20840,10 +21576,10 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-caf578c18b7c09fb",
-          "source": "backend/src/services/auth/webauthnMfaProvider.ts:87",
+          "accessId": "access-b9243c6d3f5b5039",
+          "source": "backend/src/services/auth/webauthnMfaProvider.ts:93",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "update"
+          "method": "updateMany"
         }
       ],
       "commandRuleIds": [
@@ -20897,7 +21633,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-09a52ade32f4c755"
+        "access-7693d0fe0cc99b96"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20910,8 +21646,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-09a52ade32f4c755",
-          "source": "backend/src/services/auth/webauthnMfaProvider.ts:74",
+          "accessId": "access-7693d0fe0cc99b96",
+          "source": "backend/src/services/auth/webauthnMfaProvider.ts:80",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }
@@ -20974,8 +21710,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-352bfc3d957eb9ed",
-        "access-9c53ee8bc62e60be"
+        "access-96f9d2695b643756",
+        "access-da9e15a9b70e9a07"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -20988,16 +21724,16 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-352bfc3d957eb9ed",
-          "source": "backend/src/services/auth/webauthnService.ts:349",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "create"
-        },
-        {
-          "accessId": "access-9c53ee8bc62e60be",
-          "source": "backend/src/services/auth/webauthnService.ts:331",
+          "accessId": "access-96f9d2695b643756",
+          "source": "backend/src/services/auth/webauthnService.ts:342",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
+        },
+        {
+          "accessId": "access-da9e15a9b70e9a07",
+          "source": "backend/src/services/auth/webauthnService.ts:360",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
         }
       ],
       "commandRuleIds": [
@@ -21054,8 +21790,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-291d1ea2fc0de332",
-        "access-d3c093d214e14a6a"
+        "access-1284a4873bbf20e0",
+        "access-6eef80e359ab59e1"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -21068,16 +21804,16 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-291d1ea2fc0de332",
-          "source": "backend/src/services/auth/webauthnService.ts:431",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findFirst"
-        },
-        {
-          "accessId": "access-d3c093d214e14a6a",
-          "source": "backend/src/services/auth/webauthnService.ts:477",
+          "accessId": "access-1284a4873bbf20e0",
+          "source": "backend/src/services/auth/webauthnService.ts:491",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
+        },
+        {
+          "accessId": "access-6eef80e359ab59e1",
+          "source": "backend/src/services/auth/webauthnService.ts:445",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findFirst"
         }
       ],
       "commandRuleIds": [
@@ -21134,7 +21870,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-d30a49733c1a81d6"
+        "access-eea42edf8fa72e68"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -21147,8 +21883,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-d30a49733c1a81d6",
-          "source": "backend/src/services/auth/webauthnService.ts:282",
+          "accessId": "access-eea42edf8fa72e68",
+          "source": "backend/src/services/auth/webauthnService.ts:293",
           "registration": "reachable-from-registered-entrypoint",
           "method": "upsert"
         }
@@ -21205,7 +21941,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-2f6d6a74560fbbc9"
+        "access-434b7ea30d06216e"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -21218,10 +21954,10 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-2f6d6a74560fbbc9",
-          "source": "backend/src/services/auth/webauthnService.ts:164",
+          "accessId": "access-434b7ea30d06216e",
+          "source": "backend/src/services/auth/webauthnService.ts:174",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "update"
+          "method": "updateMany"
         }
       ],
       "commandRuleIds": [
@@ -21282,8 +22018,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-551aa1a104dbafd0",
-        "access-eac0197fc7985f2c"
+        "access-a2449408f2a5f040",
+        "access-b9c592e0303ac6ab"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -21296,14 +22032,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-551aa1a104dbafd0",
-          "source": "backend/src/services/auth/webauthnService.ts:498",
+          "accessId": "access-a2449408f2a5f040",
+          "source": "backend/src/services/auth/webauthnService.ts:512",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
         },
         {
-          "accessId": "access-eac0197fc7985f2c",
-          "source": "backend/src/services/auth/webauthnService.ts:502",
+          "accessId": "access-b9c592e0303ac6ab",
+          "source": "backend/src/services/auth/webauthnService.ts:516",
           "registration": "reachable-from-registered-entrypoint",
           "method": "deleteMany"
         }
@@ -21367,8 +22103,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-850f72617b2dd99f",
-        "access-87fc6dd3d92a2d5d"
+        "access-2ee4544274b07d0f",
+        "access-5f93107f9cb9cabd"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -21381,14 +22117,14 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-850f72617b2dd99f",
-          "source": "backend/src/services/auth/webauthnService.ts:174",
+          "accessId": "access-2ee4544274b07d0f",
+          "source": "backend/src/services/auth/webauthnService.ts:198",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-87fc6dd3d92a2d5d",
-          "source": "backend/src/services/auth/webauthnService.ts:187",
+          "accessId": "access-5f93107f9cb9cabd",
+          "source": "backend/src/services/auth/webauthnService.ts:185",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -21445,7 +22181,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-d29f37486348a31a"
+        "access-bb43e0fb299a6758"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -21458,8 +22194,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-d29f37486348a31a",
-          "source": "backend/src/services/auth/webauthnService.ts:150",
+          "accessId": "access-bb43e0fb299a6758",
+          "source": "backend/src/services/auth/webauthnService.ts:160",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         }
@@ -23164,7 +23900,8 @@
       },
       "platformReadResponseProjection": [
         "bounded compliance job status and timing without storage, integrity, raw summary, or error payload"
-      ]
+      ],
+      "platformReadRequiredAssuranceByActorClass": null
     },
     {
       "id": "workflow-internal-backend-src-services-compliance-pack-service-ts-rebuild-compliance-pack-artifact-for-job",
@@ -25862,7 +26599,8 @@
         "key",
         "enabled",
         "updatedAt"
-      ]
+      ],
+      "platformReadRequiredAssuranceByActorClass": null
     },
     {
       "id": "workflow-internal-backend-src-services-governance-service-ts-resolve-duplicate-risk-profile",
@@ -29117,7 +29855,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-a5b5f9c3c97f13d4"
+        "access-103d3f31ee872064"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -29130,8 +29868,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-a5b5f9c3c97f13d4",
-          "source": "backend/src/services/manufacturerScopeService.ts:38",
+          "accessId": "access-103d3f31ee872064",
+          "source": "backend/src/services/manufacturerScopeService.ts:41",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -29186,9 +29924,9 @@
       "manufacturerBootstrapBoundaryId": "manufacturer-bootstrap-post-password-actor"
     },
     {
-      "id": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids",
-      "name": "List Manufacturer Linked Licensee Ids",
-      "entryPoint": "internal:listManufacturerLinkedLicenseeIds",
+      "id": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-resolve-manufacturer-session-scope",
+      "name": "Resolve Manufacturer Session Scope",
+      "entryPoint": "internal:resolveManufacturerSessionScope",
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
@@ -29198,9 +29936,16 @@
         "backend/src/services/manufacturerScopeService.ts"
       ],
       "tablesTouched": [
+        "table-audit-log-outbox",
         "table-manufacturer-licensee-link"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "INSERT"
+          ]
+        },
         {
           "tableId": "table-manufacturer-licensee-link",
           "commands": [
@@ -29215,6 +29960,7 @@
         "verified manufacturerId before membership read",
         "fresh relationship verification before tenant context"
       ],
+      "contextRequirementsSource": "human-reviewed",
       "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
         "One password-verified active manufacturer reads only its own eligible memberships with actor-only transaction context and server request attribution.",
@@ -29230,7 +29976,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-091fc2603fab3b2c"
+        "access-018e87c1430b92aa",
+        "access-60a8f793a616c5c9"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -29243,15 +29990,21 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-091fc2603fab3b2c",
-          "source": "backend/src/services/manufacturerScopeService.ts:59",
+          "accessId": "access-018e87c1430b92aa",
+          "source": "backend/src/services/manufacturerScopeService.ts:74",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
+        },
+        {
+          "accessId": "access-60a8f793a616c5c9",
+          "source": "backend/src/services/manufacturerScopeService.ts:166",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "create"
         }
       ],
-      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
-        "command-manufacturer-licensee-link-select-1d1bc0babd5d"
+        "command-audit-log-outbox-insert-88bea5f1af06",
+        "command-manufacturer-licensee-link-select-88bea5f1af06"
       ],
       "commandActorClasses": [
         "manufacturer"
@@ -29263,39 +30016,32 @@
         "identity-authenticated-app"
       ],
       "semanticStatus": "mapped",
-      "contextBoundaryPlanningEvidence": {
-        "reviewedAt": "2026-07-16",
-        "registeredRootCallChainVerified": true,
-        "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
-        "focusedTestsDeterministic": true
-      },
+      "manufacturerBootstrapBoundaryId": "manufacturer-bootstrap-post-password-actor",
       "contextBoundaryBlockers": [
         {
-          "code": "manufacturer-bootstrap-runtime-pending",
-          "reason": "The actor bootstrap contract is resolved, but the current helper still permits global Prisma, catch-to-empty fallback and claim-carried membership reuse.",
-          "remediation": "Implement the transaction-client-only actor-context repository and its deterministic membership, projection, attribution and denial tests in a focused runtime batch."
+          "code": "manufacturer-bootstrap-postgresql-certification-pending",
+          "reason": "The transaction-client-only runtime boundary is implemented and focused application tests pass; final generated-role and FORCE RLS PostgreSQL certification remains pending.",
+          "remediation": "Certify the implemented actor-context repository through the final generated package on disposable PostgreSQL."
         }
       ],
       "contextBoundaryFamilySplit": {
         "parentFamilyId": "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
-        "semanticKey": "manufacturer-id-scope-hydration",
-        "reason": "Separate minimal linked-licensee ID hydration from richer link/detail projections.",
+        "semanticKey": "manufacturer-session-scope-hydration",
+        "reason": "Separate canonical manufacturer session-scope hydration from richer invitation link projections.",
         "evidence": [
-          "hydrateTenantIfNeeded supplies its transaction client after JWT verification; fallback application callers may not."
+          "Authentication and session callers supply their transaction client; the helper has no global Prisma fallback or claim-carried membership authority."
         ],
         "routeRoots": [
-          "hydrateTenantIfNeeded supplies its transaction client after JWT verification; fallback application callers may not."
+          "Authentication and session callers supply their transaction client; the helper has no global Prisma fallback or claim-carried membership authority."
         ],
         "actorClasses": [
           "manufacturer"
         ],
         "scopeModel": "Database-verified manufacturer User.id is actor authority; eligible link rows are the bounded result, and licensee/organization context is installed only after server verification selects one link.",
         "executionSurface": "internal",
-        "protectedTableBoundary": "ManufacturerLicenseeLink actor-bound ID projection",
+        "protectedTableBoundary": "ManufacturerLicenseeLink plus active Licensee and Organization actor-bound projection",
         "commandSemantics": "Password-verified actor-only SELECT with explicit projection, maximum 100 eligible links, deterministic ordering and same-transaction attribution; no blank tenant wildcard."
-      },
-      "manufacturerBootstrapBoundaryId": "manufacturer-bootstrap-post-password-actor"
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-upsert-manufacturer-licensee-link",
@@ -29334,8 +30080,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-15bdddb359f914d8",
-        "access-b1bc97b2f580f81a"
+        "access-61d13083a7607e8b",
+        "access-b469c8cb03e59f6c"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -29348,16 +30094,16 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-15bdddb359f914d8",
-          "source": "backend/src/services/manufacturerScopeService.ts:85",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "upsert"
-        },
-        {
-          "accessId": "access-b1bc97b2f580f81a",
-          "source": "backend/src/services/manufacturerScopeService.ts:75",
+          "accessId": "access-61d13083a7607e8b",
+          "source": "backend/src/services/manufacturerScopeService.ts:208",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
+        },
+        {
+          "accessId": "access-b469c8cb03e59f6c",
+          "source": "backend/src/services/manufacturerScopeService.ts:218",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "upsert"
         }
       ],
       "contextRequirementsSource": "generated-conservative",
@@ -41999,9 +42745,9 @@
         "No superuser, ownership execution, or BYPASSRLS."
       ],
       "currentDirectPrismaUsage": [
-        "access-a65f68d63fc11a52",
-        "access-af6c55ccb69ae750",
-        "access-e41955be45cf50ea"
+        "access-45a000499004970b",
+        "access-ccd744ed56a9f24b",
+        "access-dc9d6e7a96786ec9"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -42014,20 +42760,20 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-a65f68d63fc11a52",
-          "source": "backend/src/services/auditLogOutboxService.ts:84",
+          "accessId": "access-45a000499004970b",
+          "source": "backend/src/services/auditLogOutboxService.ts:76",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
         },
         {
-          "accessId": "access-af6c55ccb69ae750",
-          "source": "backend/src/services/auditLogOutboxService.ts:71",
+          "accessId": "access-ccd744ed56a9f24b",
+          "source": "backend/src/services/auditLogOutboxService.ts:89",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
         },
         {
-          "accessId": "access-e41955be45cf50ea",
-          "source": "backend/src/services/auditLogOutboxService.ts:53",
+          "accessId": "access-dc9d6e7a96786ec9",
+          "source": "backend/src/services/auditLogOutboxService.ts:58",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }

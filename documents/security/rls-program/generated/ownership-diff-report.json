@@ -1,0 +1,315 @@
+{
+  "schemaVersion": 2,
+  "mode": "clean-room-expected-after-apply",
+  "rows": [
+    {
+      "table": "ActionIdempotencyKey",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AdminMfaCredential",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AdminWebAuthnCredential",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AllocationEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AuditLog",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AuditLogOutbox",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AuthMfaChallenge",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AuthSessionRiskSignal",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AuthWebAuthnChallenge",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Batch",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "BatchPrintPackToken",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CompliancePackJob",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CustomerTrustCredential",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CustomerTrustIntake",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CustomerVerificationSession",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CustomerWebAuthnChallenge",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CustomerWebAuthnCredential",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "DegradationEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "EmailVerificationToken",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "EvidenceRetentionJob",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "EvidenceRetentionPolicy",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "ForensicEventChain",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Incident",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "IncidentCommunication",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "IncidentEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "IncidentEvidence",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "IncidentEvidenceFingerprint",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "IncidentHandoff",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "InventoryStatusRollup",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Invite",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Licensee",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "MfaLoginChallenge",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Notification",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Organization",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Ownership",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "OwnershipTransfer",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PasswordReset",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PolicyAlert",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PolicyRule",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintAuditEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Printer",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrinterAgentSession",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrinterAttestation",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrinterProfile",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrinterProfileSnapshot",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrinterRegistration",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintItem",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintItemEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintJob",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintJobChunk",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintReissueRequest",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintRenderToken",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintSession",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "QrAllocationRequest",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "QRCode",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "QRRange",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "QrScanLog",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "RefreshToken",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "ReplacementChain",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "RequestAccess",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "RouteTransitionMetric",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "ScanMetricsHourlyRollup",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SecurityEventOutbox",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SecurityPolicy",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SensitiveActionApproval",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SupportIssueReport",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SupportTicket",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SupportTicketMessage",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SystemCheckpoint",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "TenantFeatureFlag",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "TraceEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "User",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "UserBackupCode",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "UserMfaFactor",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "VerificationDecision",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "VerificationEvidenceSnapshot",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    }
+  ],
+  "legacyOwnershipRestoration": false
+}

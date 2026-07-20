@@ -177,12 +177,12 @@
       "familyId": "family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1",
       "workflowIds": [
         "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-licensee-links",
-        "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids"
+        "workflow-internal-backend-src-services-manufacturer-scope-service-ts-resolve-manufacturer-session-scope"
       ],
       "reviewedRisk": "low",
       "resolution": "split-blocked",
       "resultingFamilyIds": [
-        "family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46",
+        "family-split-manufacturerscopeservice-manufacturer-session-scope-hydration-e038879b07",
         "family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef"
       ],
       "canonicalFiles": [
@@ -198,7 +198,7 @@
         "manufacturer"
       ],
       "commandRuleIds": [
-        "command-manufacturer-licensee-link-select-1d1bc0babd5d",
+        "command-manufacturer-licensee-link-select-88bea5f1af06",
         "command-manufacturer-licensee-link-select-8a5527dcca57"
       ],
       "protectedTables": [

@@ -1,0 +1,2306 @@
+{
+  "schemaVersion": 3,
+  "deploymentModel": "clean-room-blue-green",
+  "sourceContractSha256": "2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f",
+  "sourceContractInputs": [
+    {
+      "path": "documents/security/rls-program/tables.json",
+      "sha256": "abc0f277420613ba8443a0a4e3af09f33e3399b811eb01be4a72bc874add459a"
+    },
+    {
+      "path": "documents/security/rls-program/workflows.json",
+      "sha256": "d7002cb85091f9bf0911ac73d1fb4b66b9145f2808fbefce296fb216c52f80c9"
+    },
+    {
+      "path": "documents/security/rls-program/command-semantics.json",
+      "sha256": "7f0f50605e75bdd58171131063d2e143888ad97b45f351e984b609615cd0180c"
+    },
+    {
+      "path": "documents/security/rls-program/runtime-identities.json",
+      "sha256": "fc049f55fc74d47cfe3c0136c0431afb4c8375d7b2caa81284918d874bfc9898"
+    },
+    {
+      "path": "documents/security/rls-program/object-ownership-chain.json",
+      "sha256": "48a978bc0c07aaba829ad2ef681c4127287bb7a3bf37e59ea845b9cccae6215e"
+    },
+    {
+      "path": "documents/security/rls-program/essential-workflow-allowlist.json",
+      "sha256": "915395b052435341f98359ebd7dcd42ee2abbfa4299859c143e0d98a4c2b4c58"
+    },
+    {
+      "path": "documents/security/rls-program/context-boundary-families.json",
+      "sha256": "b263b80601d91e038ef6440612b1e6e048930c4e55074f9f54d3944084975e1f"
+    },
+    {
+      "path": "backend/prisma/schema.prisma",
+      "sha256": "b52f9ed8607b4a07bc7083c726fb208bf8b96d7a15d32c136d628c625bf5e280"
+    },
+    {
+      "path": "scripts/rls/generate-full-rls-sql.mjs",
+      "sha256": "abbde9d1583b1ccd4a63403e3770fd5bad1cb9616ee3bb611ebbb6434fc69c6a"
+    },
+    {
+      "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
+      "sha256": "ffbf47d8b72da521bfbbc04206cc205deedd9a87945873e57bef027a6814e3e4"
+    },
+    {
+      "path": "scripts/rls/lib/clean-room-source-contract.mjs",
+      "sha256": "7558156c4ee61400e71a364ca173d707f13f9e5fcf75fa1830fed5b53f113995"
+    }
+  ],
+  "forceRls": [
+    "ActionIdempotencyKey",
+    "AdminMfaCredential",
+    "AdminWebAuthnCredential",
+    "AllocationEvent",
+    "AuditLog",
+    "AuditLogOutbox",
+    "AuthMfaChallenge",
+    "AuthSessionRiskSignal",
+    "AuthWebAuthnChallenge",
+    "Batch",
+    "CompliancePackJob",
+    "CustomerTrustCredential",
+    "CustomerTrustIntake",
+    "CustomerVerificationSession",
+    "CustomerWebAuthnChallenge",
+    "CustomerWebAuthnCredential",
+    "DegradationEvent",
+    "EmailVerificationToken",
+    "EvidenceRetentionJob",
+    "EvidenceRetentionPolicy",
+    "ForensicEventChain",
+    "Incident",
+    "IncidentCommunication",
+    "IncidentEvent",
+    "IncidentEvidence",
+    "IncidentEvidenceFingerprint",
+    "IncidentHandoff",
+    "InventoryStatusRollup",
+    "Invite",
+    "Licensee",
+    "ManufacturerLicenseeLink",
+    "MfaLoginChallenge",
+    "Notification",
+    "Organization",
+    "Ownership",
+    "OwnershipTransfer",
+    "PasswordReset",
+    "PolicyAlert",
+    "PolicyRule",
+    "PrintAuditEvent",
+    "Printer",
+    "PrinterAgentSession",
+    "PrinterAttestation",
+    "PrinterProfile",
+    "PrinterProfileSnapshot",
+    "PrinterRegistration",
+    "PrintItem",
+    "PrintItemEvent",
+    "PrintJob",
+    "PrintJobChunk",
+    "PrintReissueRequest",
+    "PrintSession",
+    "QrAllocationRequest",
+    "QRCode",
+    "QRRange",
+    "QrScanLog",
+    "RefreshToken",
+    "ReplacementChain",
+    "RequestAccess",
+    "RouteTransitionMetric",
+    "ScanMetricsHourlyRollup",
+    "SecurityEventOutbox",
+    "SecurityPolicy",
+    "SensitiveActionApproval",
+    "SupportIssueReport",
+    "SupportTicket",
+    "SupportTicketMessage",
+    "SystemCheckpoint",
+    "TenantFeatureFlag",
+    "TraceEvent",
+    "User",
+    "UserBackupCode",
+    "UserMfaFactor",
+    "VerificationDecision",
+    "VerificationEvidenceSnapshot"
+  ],
+  "ownership": [
+    {
+      "table": "ActionIdempotencyKey",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AdminMfaCredential",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AdminWebAuthnCredential",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AllocationEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AuditLog",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AuditLogOutbox",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AuthMfaChallenge",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AuthSessionRiskSignal",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "AuthWebAuthnChallenge",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Batch",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "BatchPrintPackToken",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CompliancePackJob",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CustomerTrustCredential",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CustomerTrustIntake",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CustomerVerificationSession",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CustomerWebAuthnChallenge",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "CustomerWebAuthnCredential",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "DegradationEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "EmailVerificationToken",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "EvidenceRetentionJob",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "EvidenceRetentionPolicy",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "ForensicEventChain",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Incident",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "IncidentCommunication",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "IncidentEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "IncidentEvidence",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "IncidentEvidenceFingerprint",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "IncidentHandoff",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "InventoryStatusRollup",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Invite",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Licensee",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "MfaLoginChallenge",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Notification",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Organization",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Ownership",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "OwnershipTransfer",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PasswordReset",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PolicyAlert",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PolicyRule",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintAuditEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "Printer",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrinterAgentSession",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrinterAttestation",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrinterProfile",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrinterProfileSnapshot",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrinterRegistration",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintItem",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintItemEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintJob",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintJobChunk",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintReissueRequest",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintRenderToken",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "PrintSession",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "QrAllocationRequest",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "QRCode",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "QRRange",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "QrScanLog",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "RefreshToken",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "ReplacementChain",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "RequestAccess",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "RouteTransitionMetric",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "ScanMetricsHourlyRollup",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SecurityEventOutbox",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SecurityPolicy",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SensitiveActionApproval",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SupportIssueReport",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SupportTicket",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SupportTicketMessage",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "SystemCheckpoint",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "TenantFeatureFlag",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "TraceEvent",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "User",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "UserBackupCode",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "UserMfaFactor",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "VerificationDecision",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "table": "VerificationEvidenceSnapshot",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    }
+  ],
+  "prismaMigrationLedgerOwner": "mscqr_rls_cert_migration",
+  "prismaMigrations": [
+    {
+      "name": "20260116204023_init",
+      "sha256": "f8dfb8680a05d8797f778f7d632c4e45590f20cb61f17c5ae0d92ffcf69c53c2"
+    },
+    {
+      "name": "20260120204640_add_user_is_active",
+      "sha256": "fbe7dbf19171b954266fb0bb9b7738e4b55a959c5e3d1f4de4ee09bf49a4678a"
+    },
+    {
+      "name": "20260122124102_add_deleted_at_to_user",
+      "sha256": "af269bcec744ed8d796c9494f3415b63e019ea1b60b6e477c2d546467bf1443a"
+    },
+    {
+      "name": "20260126214238_prisma",
+      "sha256": "325caa5eb8dd4904c21b8f594fe0e816481f2e8955e9fbbfc5ab6eca699a55fc"
+    },
+    {
+      "name": "20260129175536_fix_qrrange_updatedat",
+      "sha256": "ae2d5fb2f2d3874fe8f63a05fe77501f1f577e74fc80c9a9cbe3946cc69c86fb"
+    },
+    {
+      "name": "20260129195433_new",
+      "sha256": "308adbd8bc80ccd0861ddd8bb9e732dfa5e44dc133a5a29b238a5dcc5ba87d02"
+    },
+    {
+      "name": "20260129234105_neww",
+      "sha256": "73e3a61bdb19fbd3210ed7d26a9318ccfc5c3884b0fecd5eb5bc0e559c9a2127"
+    },
+    {
+      "name": "20260202185400_add_qr_requests_print_pack",
+      "sha256": "3f7f9d64d072d7ca00845714cd41e3ebc71f3f127d398e9d3c2a60376f2d7f3b"
+    },
+    {
+      "name": "20260212150000_add_trace_policy_ops",
+      "sha256": "49614fd59cb00c1091692f34e03d031d0f16429ce55290997cc22d0948dce70e"
+    },
+    {
+      "name": "20260213120000_add_incident_response",
+      "sha256": "9b9cf6341646bbe5786159fb2eb5d528c1c4e013cb9758d629fcb098c2ee58c4"
+    },
+    {
+      "name": "20260213143000_incident_email_sender_metadata",
+      "sha256": "1a4914e4784a9212311dc508b73cfcf38589aeac5c722a77ea140db45da67944"
+    },
+    {
+      "name": "20260215190547_org_auth_rbac_ir",
+      "sha256": "1d7479b6ed8c31606672129c2d0f313d01ce0d24fee971a1c42ef76b0ef80249"
+    },
+    {
+      "name": "20260216183000_add_verify_ownership",
+      "sha256": "36f9184260db720b6f3ccc0e1665a60548013584546573e3ebc00319db91150a"
+    },
+    {
+      "name": "20260216194000_add_ops_governance_reliability",
+      "sha256": "3b556db13e7f6f3c952177179e7919712467282d417534ff41dcf76b3603bd0b"
+    },
+    {
+      "name": "20260221113000_extend_ownership_for_device_claim",
+      "sha256": "1efd721facd47a6c894c3d4a4a1ea56aa52acb5e39c520ad382c65105e27391d"
+    },
+    {
+      "name": "20260226033000_add_qr_request_batch_name",
+      "sha256": "fb3de06647bd076c099ba6658d2ee6f08b33be9c214ffd401888f578635746fa"
+    },
+    {
+      "name": "20260303235000_enterprise_top_tier_security",
+      "sha256": "b17047341ab51de4b9b8e3ee16a6833b86645c9667dc9865a9071fd79d5d7686"
+    },
+    {
+      "name": "20260304091500_add_support_issue_reports",
+      "sha256": "417f7caac988a8f0c8aaa4173a40ab2ad02c79ef963f7dba33de19e11bacaa7c"
+    },
+    {
+      "name": "20260304113000_add_direct_print_render_tokens",
+      "sha256": "4e8367e781057283aeb4f53bae39ee73e8db237ae638140be6201bd5fc1785cd"
+    },
+    {
+      "name": "20260305190000_print_session_printer_trust",
+      "sha256": "c49b998abd48c6531ae955e951a5718006b0447d7da5545e6c786394e3fbd427"
+    },
+    {
+      "name": "20260306010500_add_support_issue_report_responses",
+      "sha256": "a14559db8b259e23396cc2125011d0f8d750c6ee15f01ca0efd71c6f2f6ae93c"
+    },
+    {
+      "name": "20260306073000_batch_lineage_and_ownership_transfer",
+      "sha256": "23ac8027848bd74f84ac8f31e8b2fc7e03c441b8fdace9d17d1fdaea7adbd37f"
+    },
+    {
+      "name": "20260306230000_add_printer_registry_and_dispatch_modes",
+      "sha256": "f01efa98dd41cb4dce0c1aee253e4a899dcc3194faf4d6c79cf5053c0cba4178"
+    },
+    {
+      "name": "20260307100000_add_manufacturer_licensee_links",
+      "sha256": "f22286ade114ae73d9d80e20832b7271f179c214095cc07c4537aee01b07e955"
+    },
+    {
+      "name": "20260311123000_add_trusted_scan_context",
+      "sha256": "b7a71f6c58237d21af63160c68c4d8930a44a555e0cf9de7710ec975cfef4046"
+    },
+    {
+      "name": "20260312120000_add_network_ipp_and_gateway_dispatch",
+      "sha256": "0af6ea1d9f0bdb211d3fe1a57f163974a34d582b2bdc71aab7a48a163a28386e"
+    },
+    {
+      "name": "20260325120000_auth_email_verification_and_secret_rotation",
+      "sha256": "44f3f7968293dadd1fdddcdb5c53598073fa6d3f7cb7007ca1abbfef8edafc2e"
+    },
+    {
+      "name": "20260326110000_industrial_printer_registry_and_agent_claim",
+      "sha256": "064bfa8666f0ff09a6e53828cabbd55fd99e9eebc3cca52a73bbecf539f28922"
+    },
+    {
+      "name": "20260326133000_print_lock_token_nullable",
+      "sha256": "9941b8dd1c8547998d6839856933ad103a3b6642be82199c88c2680b949e5fd5"
+    },
+    {
+      "name": "20260328120000_add_print_item_dispatch_receipts",
+      "sha256": "ea6324d0417078e847d65509fe1f2f7e8eb73427ac0346167b671549b5877e03"
+    },
+    {
+      "name": "20260328152000_add_refresh_token_auth_assurance",
+      "sha256": "586c1ae46718305f5bfc3e4156540048360b78559a7e07047b9c087ba21d8199"
+    },
+    {
+      "name": "20260328173000_add_rollups_and_scale_indexes",
+      "sha256": "27e54ef0889766eb8e487f5d3971977fee082b4f5e168f9ee7e45b4425f31220"
+    },
+    {
+      "name": "20260328193000_add_notification_updated_at_for_partition_cutover",
+      "sha256": "fb58302c12c0c080191ce8392b219483e8f319bc1b7abb8f943bba0d79b550fc"
+    },
+    {
+      "name": "20260328214500_add_webauthn_and_sensitive_approvals",
+      "sha256": "952244d73b8acd16775a7c732ddebc0f3775c214400b0916cfbfffcfca6812c2"
+    },
+    {
+      "name": "20260402110000_add_verification_decisions_and_trust_controls",
+      "sha256": "9803c292cad74131284ce60021b9e28c35f92625db4fd2f2d0a6dd9dbba816c9"
+    },
+    {
+      "name": "20260402153000_add_customer_passkeys_and_trust_review",
+      "sha256": "f832a9e9ba0459af46256a055972310321e415cfe4e4d309874e1664b7a6c9a2"
+    },
+    {
+      "name": "20260405170000_add_customer_verification_sessions",
+      "sha256": "67ec58dc355a37dc8ad577047b336e74a7290d0f36550829058da62628b16550"
+    },
+    {
+      "name": "20260405193000_add_replay_epoch_and_qr_provenance",
+      "sha256": "19f888fdc738b53ccb8c7ff9cac49e9a92588ca2320434838838584885437515"
+    },
+    {
+      "name": "20260603120000_repair_batch_print_pack_schema",
+      "sha256": "64496c72c50ae0b9c4204765ec54fb6803555215d3b6cae00e38e75e5e52fc94"
+    },
+    {
+      "name": "20260604193000_phase_e_support_request_access",
+      "sha256": "1ffbd5f5ce6d00d9c7dc42a8111b72587e94e19fcc6e2a8dfd34503c59c5b9b4"
+    },
+    {
+      "name": "20260608123000_add_qr_display_code",
+      "sha256": "bec932ade5ea56c73ee6035707eed545fcb1a910f21c87110e53aa7c0addce55"
+    },
+    {
+      "name": "20260608143000_add_print_audit_event",
+      "sha256": "d79604c34a3d00328726aa24ed8078655b38346780b84ec5ec7016a91540c76e"
+    },
+    {
+      "name": "20260609103000_add_batch_release_lifecycle",
+      "sha256": "e9e47ab26d4e3923f38eab900635be1644480512e4e19e539ee9b95f96bc4493"
+    },
+    {
+      "name": "20260609160000_print_operations_pause_reissue",
+      "sha256": "f9280871f6815d78d0a4eea54dd14c3c2673874da7dde46aa8371441f5e8273f"
+    },
+    {
+      "name": "20260610130000_add_label_serial_metadata",
+      "sha256": "e5c2d40092ba1b6c85655a56a69fd07e2398f4513bf188062e6a3bb81c67d0d7"
+    },
+    {
+      "name": "20260615233000_bind_admin_mfa_challenges",
+      "sha256": "13ecf8769807ed2f512c1d1545d9a2ac4ef6115da4d9fe2be29da69cc799e3ea"
+    },
+    {
+      "name": "20260616103000_add_standards_mfa_adapter_tables",
+      "sha256": "235fd7e86a0064e084cd1198d63c685e71712e3a1dccd2615229b991960ac2da"
+    },
+    {
+      "name": "20260625120000_printer_agent_persistent_sessions",
+      "sha256": "e3edc922568f6efa47676136e8a182684aba8558f33cab3479a21573d9f30eaf"
+    }
+  ],
+  "enumOwnership": [
+    {
+      "type": "AlertSeverity",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "AuditLogOutboxStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "AuthRiskLevel",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "BatchLifecycleState",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "CompliancePackJobStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "CustomerTrustLevel",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "CustomerTrustReviewState",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "CustomerVerificationAuthState",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "CustomerVerificationEntryMethod",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "EvidenceRetentionJobStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "ForensicEventType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentActorType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentCommChannel",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentCommDirection",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentCommStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentContactMethod",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentEventType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentHandoffStage",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentPriority",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentReportedBy",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentResolutionOutcome",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentSeverity",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "IncidentType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "NotificationAudience",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "NotificationChannel",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "OwnershipTransferStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PolicyAlertType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PolicyRuleType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrintDispatchMode",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrintItemEventType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrintItemState",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrintJobStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrintPayloadType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrintPipelineState",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrintSessionStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrinterCommandLanguage",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrinterConnectionType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrinterDeliveryMode",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrinterLanguageKind",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrinterProfileSnapshotType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrinterProfileStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrinterTransportKind",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "PrinterTrustStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "QRStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "QrAllocationRequestStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "ReissueRequestStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "ReplacementChainStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "SecurityEventDeliveryStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "SupportTicketStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "TraceEventType",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "UserRole",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "UserStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "VerificationDecisionOutcome",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "VerificationDegradationMode",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "VerificationProofTier",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "VerificationReplacementStatus",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
+      "type": "VerificationRiskBand",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    }
+  ],
+  "columnPrivileges": [
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "command": "INSERT",
+      "columns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-509547f03abe",
+        "command-audit-log-insert-97535583a8fe"
+      ]
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "command": "SELECT",
+      "columns": [
+        "action",
+        "createdAt",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-select-97535583a8fe"
+      ]
+    },
+    {
+      "tableId": "table-batch",
+      "table": "Batch",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "manufacturerId",
+        "name"
+      ],
+      "sourceCommandRuleIds": [
+        "command-batch-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-incident",
+      "table": "Incident",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-incident-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive",
+        "orgId",
+        "suspendedAt"
+      ],
+      "sourceCommandRuleIds": [
+        "command-licensee-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-manufacturer-licensee-link",
+      "table": "ManufacturerLicenseeLink",
+      "command": "SELECT",
+      "columns": [
+        "licenseeId",
+        "manufacturerId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-manufacturer-licensee-link-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "sourceCommandRuleIds": [
+        "command-organization-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-policy-alert",
+      "table": "PolicyAlert",
+      "command": "SELECT",
+      "columns": [
+        "acknowledgedAt",
+        "batchId",
+        "id",
+        "incidentId",
+        "licenseeId",
+        "manufacturerId",
+        "policyRuleId",
+        "qrCodeId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-policy-alert-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-policy-rule",
+      "table": "PolicyRule",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive",
+        "licenseeId",
+        "manufacturerId",
+        "orgId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-policy-rule-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-qrcode",
+      "table": "QRCode",
+      "command": "SELECT",
+      "columns": [
+        "batchId",
+        "id",
+        "licenseeId",
+        "scanCount"
+      ],
+      "sourceCommandRuleIds": [
+        "command-qrcode-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-qr-scan-log",
+      "table": "QrScanLog",
+      "command": "SELECT",
+      "columns": [
+        "batchId",
+        "id",
+        "latitude",
+        "licenseeId",
+        "longitude",
+        "qrCodeId",
+        "scannedAt"
+      ],
+      "sourceCommandRuleIds": [
+        "command-qr-scan-log-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-security-policy",
+      "table": "SecurityPolicy",
+      "command": "SELECT",
+      "columns": [
+        "geoDriftThresholdKm",
+        "licenseeId",
+        "multiScanThreshold",
+        "velocitySpikeThresholdPerMin"
+      ],
+      "sourceCommandRuleIds": [
+        "command-security-policy-select-509547f03abe"
+      ]
+    },
+    {
+      "tableId": "table-trace-event",
+      "table": "TraceEvent",
+      "command": "SELECT",
+      "columns": [
+        "batchId",
+        "createdAt",
+        "details",
+        "eventType",
+        "id",
+        "licenseeId",
+        "manufacturerId",
+        "qrCodeId",
+        "sourceAction",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-trace-event-select-f571cd9ea8dd"
+      ]
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "deletedAt",
+        "disabledAt",
+        "id",
+        "isActive",
+        "licenseeId",
+        "name",
+        "orgId",
+        "role",
+        "status"
+      ],
+      "sourceCommandRuleIds": [
+        "command-user-select-509547f03abe",
+        "command-user-select-97535583a8fe"
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_auditlog_insert_sql_profile_audit_log_licen_94344ee5bf",
+      "command": "INSERT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "audit-log-read"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "(\"userId\" = app_rls.current_user_id() AND \"licenseeId\" = app_rls.current_licensee_id() AND \"orgId\" = app_rls.current_organization_id())",
+      "columns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-97535583a8fe"
+      ],
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
+      "route": "GET /api/audit/logs",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_auditlog_insert_sql_profile_audit_log_manuf_05e750c2a3",
+      "command": "INSERT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "audit-log-read"
+      ],
+      "scopeType": "canonical-manufacturer-linked-licensee",
+      "scopePredicate": "(\"userId\" = app_rls.current_user_id() AND \"licenseeId\" = app_rls.current_licensee_id() AND \"orgId\" = app_rls.current_organization_id() AND app_rls.manufacturer_scope_valid(app_rls.current_user_id()))",
+      "columns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-97535583a8fe"
+      ],
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
+      "route": "GET /api/audit/logs",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_auditlog_insert_sql_profile_audit_log_platf_7acd564b55",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "platform-audit-log-read"
+      ],
+      "scopeType": "database-validated-selected-licensee",
+      "scopePredicate": "(\"userId\"=app_rls.current_user_id() AND \"licenseeId\"=app_rls.current_licensee_id() AND EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"AuditLog\".\"orgId\" AND scope_licensee.\"isActive\"=TRUE AND scope_licensee.\"suspendedAt\" IS NULL))",
+      "columns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-97535583a8fe"
+      ],
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
+      "route": "GET /api/audit/logs",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_auditlog_insert_sql_profile_risk_analytics__0f42474373",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "(\"userId\"=app_rls.current_user_id() AND \"licenseeId\"=app_rls.current_licensee_id() AND EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"AuditLog\".\"orgId\" AND scope_licensee.\"isActive\"=TRUE AND scope_licensee.\"suspendedAt\" IS NULL))",
+      "columns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_auditlog_insert_sql_profile_risk_analytics__fa8df9e7e5",
+      "command": "INSERT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "(\"userId\" = app_rls.current_user_id() AND \"licenseeId\" = app_rls.current_licensee_id() AND \"orgId\" = app_rls.current_organization_id())",
+      "columns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_auditlog_select_sql_profile_audit_log_licen_9fc3407041",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "audit-log-read"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "(\"licenseeId\" = app_rls.current_licensee_id() AND (\"orgId\" IS NULL OR \"orgId\" = app_rls.current_organization_id()))",
+      "columns": [
+        "action",
+        "createdAt",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-select-97535583a8fe"
+      ],
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
+      "route": "GET /api/audit/logs",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_auditlog_select_sql_profile_audit_log_manuf_76949345a1",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "audit-log-read"
+      ],
+      "scopeType": "canonical-manufacturer-linked-licensee",
+      "scopePredicate": "(\"userId\" = app_rls.current_user_id() AND \"licenseeId\" = app_rls.current_licensee_id() AND \"orgId\" = app_rls.current_organization_id() AND app_rls.manufacturer_scope_valid(app_rls.current_user_id()))",
+      "columns": [
+        "action",
+        "createdAt",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-select-97535583a8fe"
+      ],
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
+      "route": "GET /api/audit/logs",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_auditlog_select_sql_profile_audit_log_platf_0a07cbe1e0",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "platform-audit-log-read"
+      ],
+      "scopeType": "database-validated-selected-licensee",
+      "scopePredicate": "\"licenseeId\"=app_rls.current_licensee_id()",
+      "columns": [
+        "action",
+        "createdAt",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-select-97535583a8fe"
+      ],
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
+      "route": "GET /api/audit/logs",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_internal_platform_audit_details",
+      "name": "full_rls_internal_platform_audit_details",
+      "predicate": "app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose()='platform-audit-log-read' AND \"licenseeId\"=app_rls.current_licensee_id()",
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-select-97535583a8fe",
+        "command-policy-rule-select-509547f03abe",
+        "command-trace-event-select-f571cd9ea8dd"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "tenant-risk-analytics",
+        "audit-log-read",
+        "platform-audit-log-read",
+        "trace-timeline-read"
+      ],
+      "scopePredicate": "app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose()='platform-audit-log-read' AND \"licenseeId\"=app_rls.current_licensee_id()",
+      "command": "SELECT",
+      "columns": [],
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-batch",
+      "table": "Batch",
+      "policyName": "full_rls_batch_select_sql_profile_risk_analytics_lic_c1a48aed58",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "id",
+        "licenseeId",
+        "manufacturerId",
+        "name"
+      ],
+      "sourceCommandRuleIds": [
+        "command-batch-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-batch",
+      "table": "Batch",
+      "policyName": "full_rls_batch_select_sql_profile_risk_analytics_pla_5cb898fc84",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "id",
+        "licenseeId",
+        "manufacturerId",
+        "name"
+      ],
+      "sourceCommandRuleIds": [
+        "command-batch-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-incident",
+      "table": "Incident",
+      "policyName": "full_rls_incident_select_sql_profile_risk_analytics__5b7afba446",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "id",
+        "licenseeId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-incident-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-incident",
+      "table": "Incident",
+      "policyName": "full_rls_incident_select_sql_profile_risk_analytics__e0fb8de21b",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "id",
+        "licenseeId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-incident-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "policyName": "full_rls_internal_manufacturer_licensee",
+      "name": "full_rls_internal_manufacturer_licensee",
+      "predicate": "\"id\"=app_rls.current_licensee_id() AND (app_rls.current_organization_id() IS NULL OR \"orgId\"=app_rls.current_organization_id()) AND \"isActive\"=TRUE AND \"suspendedAt\" IS NULL",
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-select-97535583a8fe",
+        "command-policy-rule-select-509547f03abe",
+        "command-trace-event-select-f571cd9ea8dd"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "tenant-risk-analytics",
+        "audit-log-read",
+        "platform-audit-log-read",
+        "trace-timeline-read"
+      ],
+      "scopePredicate": "\"id\"=app_rls.current_licensee_id() AND (app_rls.current_organization_id() IS NULL OR \"orgId\"=app_rls.current_organization_id()) AND \"isActive\"=TRUE AND \"suspendedAt\" IS NULL",
+      "command": "SELECT",
+      "columns": [],
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "policyName": "full_rls_licensee_select_sql_profile_risk_analytics__14d7456070",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "\"id\"=app_rls.current_licensee_id()",
+      "columns": [
+        "id",
+        "isActive",
+        "orgId",
+        "suspendedAt"
+      ],
+      "sourceCommandRuleIds": [
+        "command-licensee-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "policyName": "full_rls_licensee_select_sql_profile_risk_analytics__196ec818f8",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "(\"id\" = app_rls.current_licensee_id() AND \"orgId\" = app_rls.current_organization_id())",
+      "columns": [
+        "id",
+        "isActive",
+        "orgId",
+        "suspendedAt"
+      ],
+      "sourceCommandRuleIds": [
+        "command-licensee-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-manufacturer-licensee-link",
+      "table": "ManufacturerLicenseeLink",
+      "policyName": "full_rls_internal_manufacturer_link",
+      "name": "full_rls_internal_manufacturer_link",
+      "predicate": "\"licenseeId\"=app_rls.current_licensee_id() AND ((app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"manufacturerId\"=app_rls.current_user_id()) OR ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_purpose()='tenant-risk-analytics'))",
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-select-97535583a8fe",
+        "command-policy-rule-select-509547f03abe",
+        "command-trace-event-select-f571cd9ea8dd"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "tenant-risk-analytics",
+        "audit-log-read",
+        "platform-audit-log-read",
+        "trace-timeline-read"
+      ],
+      "scopePredicate": "\"licenseeId\"=app_rls.current_licensee_id() AND ((app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"manufacturerId\"=app_rls.current_user_id()) OR ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_purpose()='tenant-risk-analytics'))",
+      "command": "SELECT",
+      "columns": [],
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-manufacturer-licensee-link",
+      "table": "ManufacturerLicenseeLink",
+      "policyName": "full_rls_manufacturerlicenseelink_select_sql_profile_23bfa2d5a1",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "licenseeId",
+        "manufacturerId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-manufacturer-licensee-link-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-manufacturer-licensee-link",
+      "table": "ManufacturerLicenseeLink",
+      "policyName": "full_rls_manufacturerlicenseelink_select_sql_profile_f6bb844ebb",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "licenseeId",
+        "manufacturerId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-manufacturer-licensee-link-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
+      "policyName": "full_rls_internal_manufacturer_org",
+      "name": "full_rls_internal_manufacturer_org",
+      "predicate": "((\"id\"=app_rls.current_organization_id()) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose() IN ('tenant-risk-analytics','platform-audit-log-read') AND EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"Organization\".\"id\"))) AND \"isActive\"=TRUE",
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-select-97535583a8fe",
+        "command-policy-rule-select-509547f03abe",
+        "command-trace-event-select-f571cd9ea8dd"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "tenant-risk-analytics",
+        "audit-log-read",
+        "platform-audit-log-read",
+        "trace-timeline-read"
+      ],
+      "scopePredicate": "((\"id\"=app_rls.current_organization_id()) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose() IN ('tenant-risk-analytics','platform-audit-log-read') AND EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"Organization\".\"id\"))) AND \"isActive\"=TRUE",
+      "command": "SELECT",
+      "columns": [],
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
+      "policyName": "full_rls_organization_select_sql_profile_risk_analyt_287c51409b",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"Organization\".\"id\" AND scope_licensee.\"isActive\"=TRUE AND scope_licensee.\"suspendedAt\" IS NULL)",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "sourceCommandRuleIds": [
+        "command-organization-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
+      "policyName": "full_rls_organization_select_sql_profile_risk_analyt_e01a17d3ed",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "\"id\" = app_rls.current_organization_id()",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "sourceCommandRuleIds": [
+        "command-organization-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-policy-alert",
+      "table": "PolicyAlert",
+      "policyName": "full_rls_policyalert_select_sql_profile_risk_analyti_2b2fa413e6",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "acknowledgedAt",
+        "batchId",
+        "id",
+        "incidentId",
+        "licenseeId",
+        "manufacturerId",
+        "policyRuleId",
+        "qrCodeId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-policy-alert-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-policy-alert",
+      "table": "PolicyAlert",
+      "policyName": "full_rls_policyalert_select_sql_profile_risk_analyti_d2f587dad6",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "acknowledgedAt",
+        "batchId",
+        "id",
+        "incidentId",
+        "licenseeId",
+        "manufacturerId",
+        "policyRuleId",
+        "qrCodeId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-policy-alert-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-policy-rule",
+      "table": "PolicyRule",
+      "policyName": "full_rls_policyrule_select_sql_profile_risk_analytic_4843026076",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "(\n    (\"licenseeId\" = app_rls.current_licensee_id() AND (\"orgId\" IS NULL OR EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"PolicyRule\".\"orgId\" AND scope_licensee.\"isActive\"=TRUE AND scope_licensee.\"suspendedAt\" IS NULL)) AND (\"manufacturerId\" IS NULL OR app_rls.manufacturer_scope_valid(\"manufacturerId\")))\n    OR (\"licenseeId\" IS NULL AND EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"PolicyRule\".\"orgId\" AND scope_licensee.\"isActive\"=TRUE AND scope_licensee.\"suspendedAt\" IS NULL) AND \"manufacturerId\" IS NULL)\n    OR (\"licenseeId\" IS NULL AND \"manufacturerId\" IS NOT NULL AND (\"orgId\" IS NULL OR EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"PolicyRule\".\"orgId\" AND scope_licensee.\"isActive\"=TRUE AND scope_licensee.\"suspendedAt\" IS NULL)) AND app_rls.manufacturer_scope_valid(\"manufacturerId\"))\n  ) AND \"isActive\" = TRUE",
+      "columns": [
+        "id",
+        "isActive",
+        "licenseeId",
+        "manufacturerId",
+        "orgId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-policy-rule-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-policy-rule",
+      "table": "PolicyRule",
+      "policyName": "full_rls_policyrule_select_sql_profile_risk_analytic_9ad9712ac4",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "(\n    (\"licenseeId\" = app_rls.current_licensee_id() AND (\"orgId\" IS NULL OR \"orgId\"=app_rls.current_organization_id()) AND (\"manufacturerId\" IS NULL OR app_rls.manufacturer_scope_valid(\"manufacturerId\")))\n    OR (\"licenseeId\" IS NULL AND \"orgId\" = app_rls.current_organization_id() AND \"manufacturerId\" IS NULL)\n    OR (\"licenseeId\" IS NULL AND \"manufacturerId\" IS NOT NULL AND (\"orgId\" IS NULL OR \"orgId\"=app_rls.current_organization_id()) AND app_rls.manufacturer_scope_valid(\"manufacturerId\"))\n  ) AND \"isActive\" = TRUE",
+      "columns": [
+        "id",
+        "isActive",
+        "licenseeId",
+        "manufacturerId",
+        "orgId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-policy-rule-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-qrcode",
+      "table": "QRCode",
+      "policyName": "full_rls_qrcode_select_sql_profile_risk_analytics_li_dd9f8b097c",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "batchId",
+        "id",
+        "licenseeId",
+        "scanCount"
+      ],
+      "sourceCommandRuleIds": [
+        "command-qrcode-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-qrcode",
+      "table": "QRCode",
+      "policyName": "full_rls_qrcode_select_sql_profile_risk_analytics_pl_1056ea6284",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "batchId",
+        "id",
+        "licenseeId",
+        "scanCount"
+      ],
+      "sourceCommandRuleIds": [
+        "command-qrcode-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-qr-scan-log",
+      "table": "QrScanLog",
+      "policyName": "full_rls_qrscanlog_select_sql_profile_risk_analytics_481880b778",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "batchId",
+        "id",
+        "latitude",
+        "licenseeId",
+        "longitude",
+        "qrCodeId",
+        "scannedAt"
+      ],
+      "sourceCommandRuleIds": [
+        "command-qr-scan-log-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-qr-scan-log",
+      "table": "QrScanLog",
+      "policyName": "full_rls_qrscanlog_select_sql_profile_risk_analytics_61c1729f27",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "batchId",
+        "id",
+        "latitude",
+        "licenseeId",
+        "longitude",
+        "qrCodeId",
+        "scannedAt"
+      ],
+      "sourceCommandRuleIds": [
+        "command-qr-scan-log-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-security-policy",
+      "table": "SecurityPolicy",
+      "policyName": "full_rls_securitypolicy_select_sql_profile_risk_anal_532f30156f",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "geoDriftThresholdKm",
+        "licenseeId",
+        "multiScanThreshold",
+        "velocitySpikeThresholdPerMin"
+      ],
+      "sourceCommandRuleIds": [
+        "command-security-policy-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-security-policy",
+      "table": "SecurityPolicy",
+      "policyName": "full_rls_securitypolicy_select_sql_profile_risk_anal_9b15f0bd9b",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "geoDriftThresholdKm",
+        "licenseeId",
+        "multiScanThreshold",
+        "velocitySpikeThresholdPerMin"
+      ],
+      "sourceCommandRuleIds": [
+        "command-security-policy-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-trace-event",
+      "table": "TraceEvent",
+      "policyName": "full_rls_traceevent_select_sql_profile_trace_license_c5c782790d",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "trace-timeline-read"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "\"licenseeId\" = app_rls.current_licensee_id()",
+      "columns": [
+        "batchId",
+        "createdAt",
+        "details",
+        "eventType",
+        "id",
+        "licenseeId",
+        "manufacturerId",
+        "qrCodeId",
+        "sourceAction",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-trace-event-select-f571cd9ea8dd"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline",
+      "route": "GET /api/trace/timeline",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-trace-event",
+      "table": "TraceEvent",
+      "policyName": "full_rls_traceevent_select_sql_profile_trace_manufac_9f66e24ac5",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "trace-timeline-read"
+      ],
+      "scopeType": "canonical-manufacturer-linked-licensee",
+      "scopePredicate": "(\"licenseeId\" = app_rls.current_licensee_id() AND \"manufacturerId\" = app_rls.current_user_id() AND app_rls.manufacturer_scope_valid(app_rls.current_user_id()))",
+      "columns": [
+        "batchId",
+        "createdAt",
+        "details",
+        "eventType",
+        "id",
+        "licenseeId",
+        "manufacturerId",
+        "qrCodeId",
+        "sourceAction",
+        "userId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-trace-event-select-f571cd9ea8dd"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline",
+      "route": "GET /api/trace/timeline",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "full_rls_internal_actor_user",
+      "name": "full_rls_internal_actor_user",
+      "predicate": "(((\"id\"=app_rls.current_user_id() AND \"role\"::text=app_rls.current_role()) OR (((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_purpose()='tenant-risk-analytics') AND \"role\" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose()='platform-audit-log-read' AND \"licenseeId\"=app_rls.current_licensee_id())) AND \"isActive\"=TRUE AND \"status\"='ACTIVE' AND \"deletedAt\" IS NULL AND \"disabledAt\" IS NULL)",
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-select-97535583a8fe",
+        "command-policy-rule-select-509547f03abe",
+        "command-trace-event-select-f571cd9ea8dd"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "tenant-risk-analytics",
+        "audit-log-read",
+        "platform-audit-log-read",
+        "trace-timeline-read"
+      ],
+      "scopePredicate": "(((\"id\"=app_rls.current_user_id() AND \"role\"::text=app_rls.current_role()) OR (((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_purpose()='tenant-risk-analytics') AND \"role\" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose()='platform-audit-log-read' AND \"licenseeId\"=app_rls.current_licensee_id())) AND \"isActive\"=TRUE AND \"status\"='ACTIVE' AND \"deletedAt\" IS NULL AND \"disabledAt\" IS NULL)",
+      "command": "SELECT",
+      "columns": [],
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "full_rls_user_select_sql_profile_audit_log_licensee__cdc66ebebd",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "audit-log-read"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "((\"id\" = app_rls.current_user_id() OR \"licenseeId\" = app_rls.current_licensee_id() OR app_rls.manufacturer_scope_valid(\"id\")) AND (\"orgId\" IS NULL OR \"orgId\" = app_rls.current_organization_id()))",
+      "columns": [
+        "id",
+        "name"
+      ],
+      "sourceCommandRuleIds": [
+        "command-user-select-97535583a8fe"
+      ],
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
+      "route": "GET /api/audit/logs",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "full_rls_user_select_sql_profile_audit_log_manufactu_b86d2f2a12",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "audit-log-read"
+      ],
+      "scopeType": "canonical-manufacturer-linked-licensee",
+      "scopePredicate": "(\"id\" = app_rls.current_user_id() AND app_rls.manufacturer_scope_valid(\"id\"))",
+      "columns": [
+        "id",
+        "name"
+      ],
+      "sourceCommandRuleIds": [
+        "command-user-select-97535583a8fe"
+      ],
+      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
+      "route": "GET /api/audit/logs",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "full_rls_user_select_sql_profile_risk_analytics_lice_db5e477285",
+      "command": "SELECT",
+      "actors": [
+        "licensee-admin"
+      ],
+      "assurance": "password-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "scopePredicate": "(\"id\"=app_rls.current_user_id() OR app_rls.manufacturer_scope_valid(\"id\"))",
+      "columns": [
+        "deletedAt",
+        "disabledAt",
+        "id",
+        "isActive",
+        "licenseeId",
+        "name",
+        "orgId",
+        "role",
+        "status"
+      ],
+      "sourceCommandRuleIds": [
+        "command-user-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "full_rls_user_select_sql_profile_risk_analytics_plat_5fbcfb923c",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin"
+      ],
+      "assurance": "mfa-verified",
+      "purpose": [
+        "tenant-risk-analytics"
+      ],
+      "scopeType": "database-validated-selected-licensee-organization",
+      "scopePredicate": "(\"id\"=app_rls.current_user_id() OR app_rls.manufacturer_scope_valid(\"id\"))",
+      "columns": [
+        "deletedAt",
+        "disabledAt",
+        "id",
+        "isActive",
+        "licenseeId",
+        "name",
+        "orgId",
+        "role",
+        "status"
+      ],
+      "sourceCommandRuleIds": [
+        "command-user-select-509547f03abe"
+      ],
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "route": "GET /api/analytics/risk-scores",
+      "certificationStatus": "pending",
+      "internalHelperOnly": false
+    }
+  ],
+  "roles": [
+    {
+      "key": "owner",
+      "name": "mscqr_rls_cert_owner",
+      "login": false,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "authOwner",
+      "name": "mscqr_rls_cert_auth_owner",
+      "login": false,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "app",
+      "name": "mscqr_rls_cert_app",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "read",
+      "name": "mscqr_rls_cert_read",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "preauth",
+      "name": "mscqr_rls_cert_preauth",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "worker",
+      "name": "mscqr_rls_cert_worker",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "scheduled",
+      "name": "mscqr_rls_cert_scheduled",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "operator",
+      "name": "mscqr_rls_cert_operator",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "migration",
+      "name": "mscqr_rls_cert_migration",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    }
+  ]
+}

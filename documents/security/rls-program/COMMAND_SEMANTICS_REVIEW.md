@@ -2,18 +2,18 @@
 
 This is the compact human review of `command-semantics.json`. It defines architecture only: no SQL, grants, roles, RLS state, or runtime behavior are changed.
 
-Rules: 988; workflows mapped: 428/428.
+Rules: 1011; workflows mapped: 428/428.
 
 ## Review groups
 
 | Group | Tables | Rules | SELECT | INSERT | UPDATE | DELETE |
 |---|---:|---:|---:|---:|---:|---:|
-| A | 21 | 222 | 94 | 37 | 65 | 26 |
-| B | 3 | 66 | 33 | 15 | 13 | 5 |
+| A | 21 | 232 | 100 | 38 | 66 | 28 |
+| B | 3 | 69 | 36 | 15 | 13 | 5 |
 | C | 15 | 241 | 135 | 27 | 61 | 18 |
 | D | 13 | 266 | 134 | 43 | 73 | 16 |
-| E | 18 | 161 | 71 | 44 | 26 | 20 |
-| F | 7 | 32 | 9 | 8 | 7 | 8 |
+| E | 18 | 165 | 74 | 45 | 26 | 20 |
+| F | 7 | 38 | 9 | 14 | 7 | 8 |
 | G | 0 | 0 | 0 | 0 | 0 | 0 |
 
 ## Actor classes
@@ -21,12 +21,12 @@ Rules: 988; workflows mapped: 428/428.
 | Value | Rules |
 |---|---:|
 | anonymous | 47 |
-| authenticated-user | 271 |
-| manufacturer | 239 |
+| authenticated-user | 281 |
+| manufacturer | 240 |
 | operator | 92 |
 | checker | 10 |
-| licensee-admin | 132 |
-| platform-admin | 221 |
+| licensee-admin | 144 |
+| platform-admin | 233 |
 | restricted-read | 16 |
 | pre-auth-runtime | 47 |
 | worker | 5 |
@@ -40,9 +40,9 @@ Rules: 988; workflows mapped: 428/428.
 | Value | Rules |
 |---|---:|
 | none | 122 |
-| password-verified | 488 |
-| mfa-bootstrap | 3 |
-| mfa-verified | 237 |
+| password-verified | 506 |
+| mfa-bootstrap | 4 |
+| mfa-verified | 241 |
 | step-up-verified | 17 |
 | system-verified | 33 |
 | operator-approved | 81 |
@@ -52,22 +52,22 @@ Rules: 988; workflows mapped: 428/428.
 
 | Value | Rules |
 |---|---:|
-| SELECT | 476 |
-| INSERT | 174 |
-| UPDATE | 245 |
-| DELETE | 93 |
+| SELECT | 488 |
+| INSERT | 182 |
+| UPDATE | 246 |
+| DELETE | 95 |
 
 ## Boundary and deletion summary
 
-Named-function rules: 354.
+Named-function rules: 363.
 Restricted-worker rules: 15.
 Approval-gated rules: 101.
 
 | Hard-delete classification | Rules |
 |---|---:|
-| actor self-delete | 5 |
+| actor self-delete | 7 |
 | migration-only | 3 |
-| not-applicable | 895 |
+| not-applicable | 916 |
 | operator-approved | 1 |
 | prohibited | 75 |
 | retention delete | 3 |

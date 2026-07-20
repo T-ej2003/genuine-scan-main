@@ -136,7 +136,8 @@
     { "code": "platform-telemetry-health", "workflowClasses": ["platform-aggregate-read"] },
     { "code": "tenant-support-triage", "workflowClasses": ["licensee-bounded-read"] },
     { "code": "tenant-compliance-status", "workflowClasses": ["licensee-bounded-read"] },
-    { "code": "tenant-feature-flag-review", "workflowClasses": ["licensee-bounded-read"] }
+    { "code": "tenant-feature-flag-review", "workflowClasses": ["licensee-bounded-read"] },
+    { "code": "tenant-risk-analytics", "workflowClasses": ["licensee-bounded-read"] }
   ],
   "purposeRules": {
     "required": true,
@@ -447,6 +448,45 @@
       "readAttributionSameTransaction": true,
       "implementationStatus": "blocked-runtime-contract-pending",
       "blockers": ["Current route obtains licenseeId from an unverified query value, lacks recent MFA/purpose/attribution, returns config, and uses global Prisma."]
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "primaryClass": "licensee-bounded-read",
+      "inventoryBoundaryType": "authenticated-context",
+      "actorClasses": ["licensee-admin", "platform-admin"],
+      "requiredAssurance": "mfa-verified",
+      "requiredAssuranceByActorClass": { "licensee-admin": "password-verified", "platform-admin": "mfa-verified" },
+      "runtimeImplementedActorClasses": ["licensee-admin", "platform-admin"],
+      "runtimeBlockedActorClasses": [],
+      "runtimeAttributionFields": ["actorId", "role", "assurance", "requestId", "purposeCode", "organizationId", "licenseeId", "workflowId", "route", "outcome", "analyzedBatchCount", "returnedBatchCount", "analyzedManufacturerCount", "timestamp"],
+      "purposeCodes": ["tenant-risk-analytics"],
+      "requiredSelectors": ["licenseeId"],
+      "optionalSelectors": [],
+      "scopeRule": "Tenant administrators use their database-hydrated active licensee and organization; platform administrators require fresh MFA and one requested licensee that is validated with its active Organization before canonical tenant context is installed. Blank scope never means global.",
+      "runtimeDenialInvariant": "The platform path permits exact actor-self User hydration only with fresh MFA, then validates one active Licensee and Organization selector before any analytics-table access. Blank, foreign, inactive or conflicting scope is denied before analytics or RISK_ANALYTICS_READ attribution.",
+      "executionBoundary": "normal-actor-context",
+      "tableProjections": [
+        { "tableId": "table-licensee", "allowedColumns": ["id", "orgId", "isActive", "suspendedAt"], "prohibitedColumns": ["description", "location", "website", "supportEmail", "supportPhone", "metadata", "suspendedReason"] },
+        { "tableId": "table-organization", "allowedColumns": ["id", "isActive"], "prohibitedColumns": ["metadata"] },
+        { "tableId": "table-user", "allowedColumns": ["id", "name", "role", "licenseeId", "orgId", "isActive", "status", "deletedAt", "disabledAt"], "prohibitedColumns": ["email", "passwordHash", "pendingEmail", "metadata", "lockedUntil", "lastLoginAt"] },
+        { "tableId": "table-batch", "allowedColumns": ["id", "name", "licenseeId", "manufacturerId"], "prohibitedColumns": ["metadata", "sampleScanPolicy", "startCode", "endCode"] },
+        { "tableId": "table-qrcode", "allowedColumns": ["id", "batchId", "licenseeId", "scanCount"], "prohibitedColumns": ["code", "publicCode", "qrToken", "metadata"] },
+        { "tableId": "table-qr-scan-log", "allowedColumns": ["id", "batchId", "licenseeId", "qrCodeId", "latitude", "longitude", "scannedAt"], "prohibitedColumns": ["ipAddress", "userAgent", "deviceFingerprint", "metadata"] },
+        { "tableId": "table-incident", "allowedColumns": ["id", "licenseeId"], "prohibitedColumns": ["description", "photos", "customerName", "customerEmail", "customerPhone", "internalNotes", "resolutionSummary"] },
+        { "tableId": "table-manufacturer-licensee-link", "allowedColumns": ["manufacturerId", "licenseeId"], "prohibitedColumns": ["createdAt", "updatedAt"] },
+        { "tableId": "table-policy-alert", "allowedColumns": ["id", "batchId", "qrCodeId", "manufacturerId", "incidentId", "policyRuleId", "licenseeId", "acknowledgedAt"], "prohibitedColumns": ["details", "message", "score", "acknowledgedByUserId"] },
+        { "tableId": "table-policy-rule", "allowedColumns": ["id", "licenseeId", "orgId", "manufacturerId"], "prohibitedColumns": ["name", "description", "threshold", "windowMinutes", "actionConfig", "createdByUserId"] },
+        { "tableId": "table-security-policy", "allowedColumns": ["licenseeId", "multiScanThreshold", "geoDriftThresholdKm", "velocitySpikeThresholdPerMin"], "prohibitedColumns": ["metadata"] }
+      ],
+      "responseProjection": ["bounded risk policy thresholds and summary", "score-ranked batch and manufacturer risk fields", "manufacturer id and display name only"],
+      "maximumRows": 200,
+      "pagination": { "mode": "score-ranked-bounded", "maximumPageSize": 200, "maximumOffset": 0 },
+      "dateWindow": { "required": true, "maximumDays": 30 },
+      "deterministicOrdering": ["risk score DESC", "stable ID ASC"],
+      "countAndListSameSnapshot": true,
+      "readAttributionSameTransaction": true,
+      "implementationStatus": "runtime-implemented-postgresql-pending",
+      "blockers": []
     }
   ],
   "allowScenarios": [
@@ -469,7 +509,8 @@
     "workflow-http-backend-src-controllers-support-controller-ts-list-support-tickets",
     "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary",
     "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs",
-    "workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags"
+    "workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags",
+    "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"
   ],
   "crossReferences": {
     "publicReadContract": "public-read-contract-v1 prohibits public platform directories, tenant-private raw rows, diagnostics and blank-scope fallback; this platform contract applies only after verified platform actor context."

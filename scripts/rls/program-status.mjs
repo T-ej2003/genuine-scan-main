@@ -66,7 +66,7 @@ console.log(JSON.stringify({
   authOwnerObjects: objectOwnershipChain.approvedFunctionOwnerBoundaries.preAuth.length + 1,
   migrationOwnedResidueAllowed: objectOwnershipChain.migrationCompletionGate.ownershipResidueAllowed,
   runtimeOwnedObjectsAllowed: objectOwnershipChain.migrationCompletionGate.runtimeOwnedObjectsAllowed,
-  temporaryMemberships: objectOwnershipChain.recommendedTransferModel.executorTemporaryMembership.roles.length,
+  temporaryMemberships: objectOwnershipChain.recommendedTransferModel.temporaryMembership.roles.length,
   schemaCreateViolations: objectOwnershipChain.schemaOwnershipRules.filter((rule) => rule.publicCreate || rule.runtimeCreate).length,
   defaultPrivilegeViolations: objectOwnershipChain.defaultPrivilegeRules.publicGrants.length + objectOwnershipChain.defaultPrivilegeRules.runtimeGrants.length,
   unresolvedOwnershipChainItems: objectOwnershipChain.status === "architecture-resolved" && decisions.decisions.find((decision) => decision.id === objectOwnershipChain.decisionId)?.status === "resolved" ? 0 : 1,

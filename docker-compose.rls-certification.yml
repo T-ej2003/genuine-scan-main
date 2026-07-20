@@ -1,0 +1,21 @@
+name: mscqr-full-rls-certification
+
+services:
+  rls-cert-postgres:
+    image: postgres:18
+    container_name: mscqr-full-rls-certification-postgres
+    restart: "no"
+    environment:
+      POSTGRES_DB: mscqr_full_rls_admin
+      POSTGRES_USER: mscqr_rls_cert_admin
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "127.0.0.1:55434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mscqr_rls_cert_admin -d mscqr_full_rls_admin"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+    tmpfs:
+      - /var/lib/postgresql

@@ -2851,6 +2851,8 @@
       ],
       "returnedFields": [
         "activation_id",
+        "green_database_id",
+        "blue_rollback_target_id",
         "phase",
         "table_set_digest",
         "canary_status",
@@ -2869,8 +2871,8 @@
       "ticketRequirement": true,
       "purposeRequirement": true,
       "maximumDurationMinutes": 60,
-      "maximumRowScope": "exact checksum-bound RLS activation phase only",
-      "tenantScopeRequirement": "approved canary tenants only; operator receives no policy bypass",
+      "maximumRowScope": "one checksum-bound green build and traffic switch; blue database mutation is prohibited",
+      "tenantScopeRequirement": "approved synthetic canary tenants only; operator receives no policy bypass",
       "allowedColumns": [],
       "prohibitedColumns": [
         "passwordHash",
@@ -2938,6 +2940,8 @@
       "secretOutputAllowed": false,
       "sharedCredentialAllowed": false,
       "automaticRevocation": true,
+      "deploymentModel": "clean-room-blue-green",
+      "blueDatabaseMutationAllowed": false,
       "rollbackBoundaryId": "operator-boundary-rls-rollback",
       "productionRequirements": {
         "stagingEvidenceRequired": true,
@@ -2977,9 +2981,10 @@
       ],
       "returnedFields": [
         "rollback_id",
-        "phase",
-        "catalog_status",
-        "membership_status",
+        "blue_switch_status",
+        "green_database_absent",
+        "managed_role_residue_count",
+        "blue_fingerprint_unchanged",
         "post_rollback_digest"
       ],
       "targetSchemas": [],
@@ -2994,8 +2999,8 @@
       "ticketRequirement": true,
       "purposeRequirement": true,
       "maximumDurationMinutes": 60,
-      "maximumRowScope": "exact activation phase and checksum-paired rollback artifact only",
-      "tenantScopeRequirement": "not-applicable: exact table phase",
+      "maximumRowScope": "one recorded green database and its exact package-marked roles only",
+      "tenantScopeRequirement": "no required data accepted; blue is the immutable rollback target",
       "allowedColumns": [],
       "prohibitedColumns": [
         "passwordHash",
@@ -3063,6 +3068,8 @@
       "secretOutputAllowed": false,
       "sharedCredentialAllowed": false,
       "automaticRevocation": true,
+      "deploymentModel": "clean-room-blue-green",
+      "blueDatabaseMutationAllowed": false,
       "pairedActivationBoundaryId": "operator-boundary-rls-activation"
     },
     {

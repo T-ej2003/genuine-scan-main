@@ -65,6 +65,7 @@ const categoryFor = (workflow, rules, tables) => {
   const commands = allCommands(workflow);
   const touched = workflow.tablesTouched.map((id) => tables.get(id)).filter(Boolean);
   const mutation = commands.some((command) => command !== "SELECT");
+  if (workflow.contextBoundaryCategory) return workflow.contextBoundaryCategory;
   if (workflow.operatorBoundaryId) return /prohibited/.test(workflow.operatorBoundaryId) ? "prohibited or legacy workflows" : "operator-boundary workflows";
   if (workflow.preAuthBoundary?.boundaryMode === "exact-security-definer-function") return "pre-auth function-backed workflows";
   if (workflow.workerBoundaryId || ["worker", "scheduled"].includes(workflow.executionSurface)) return "worker/scheduled workflows";
@@ -247,6 +248,7 @@ export const buildContextBoundaryPlan = () => {
     const lifecycle = familyRules.filter((rule) => rule.lifecycleColumns?.length).map((rule) => ({ commandRuleId: rule.id, columns: rule.lifecycleColumns, allowed: rule.allowedLifecycleStates, forbidden: rule.forbiddenLifecycleStates }));
     const runtimeIdentities = unique(familyWorkflows.flatMap((workflow) => workflow.runtimeIdentities || []));
     const implementationStatus = automationEligibility === "implemented" ? "implemented" : automationEligibility === "contract-only" ? "contract-ready" : automationEligibility === "auto-implementable" ? "planned" : "blocked";
+    const compatibleReadTransaction = familyWorkflows.every((workflow) => allCommands(workflow).every((command) => command === "SELECT") || workflow.approvedReadAttribution === true);
     return {
       id,
       category: group.category,
@@ -266,13 +268,15 @@ export const buildContextBoundaryPlan = () => {
       repositoryFiles: unique(files.filter((file) => /repository/i.test(file))),
       protectedTables: unique(familyWorkflows.flatMap((workflow) => workflow.tablesTouched)),
       actorClasses: group.split ? group.split.actorClasses : systemBoundary?.actorClasses || unique(familyWorkflows.flatMap((workflow) => workflow.commandActorClasses || [])),
+      pendingActorClasses: unique(familyWorkflows.flatMap((workflow) => workflow.runtimeBlockedActorClasses || [])),
+      pendingActorBlockers: familyWorkflows.flatMap((workflow) => workflow.platformRuntimeBlockers || []),
       runtimeIdentity: systemBoundary?.familyRuntimeIdentity || (runtimeIdentities.length === 1 ? runtimeIdentities[0] : runtimeIdentities.length ? "mixed" : "none"),
       requiredAssurance: systemBoundary?.requiredAssurance || unique(familyWorkflows.flatMap((workflow) => workflow.requiredAssurance || [])),
       canonicalContextKeys: automationEligibility === "contract-only" ? [] : canonicalContextKeys,
       readWriteCommandRuleIds: ruleIds,
       tenantScopeModel: group.split ? [group.split.scopeModel] : systemBoundary ? [systemBoundary.authoritativeScopeSource] : unique(familyRules.map((rule) => rule.scopeRule)),
       lifecycleStateRequirements: lifecycle,
-      transactionIsolationRequirement: allCommands(familyWorkflows[0]).every((command) => command === "SELECT") ? "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction" : "One atomic canonical transaction with database-enforced concurrency",
+      transactionIsolationRequirement: compatibleReadTransaction ? "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction" : "One atomic canonical transaction with database-enforced concurrency",
       expectedReusableHelper: automationEligibility === "contract-only" ? governingBoundaryIds.join(", ") : "withCanonicalDbContext plus a transaction-client-only service",
       implementationStrategy: implementationStrategy(group.category, automationEligibility, governingBoundaryIds),
       testStrategy: testStrategy(group.category, automationEligibility),
@@ -425,6 +429,10 @@ export const validateContextBoundaryPlan = (manifest, workflowManifest, commandM
     }
     if (family.automationEligibility === "implemented") {
       assert(family.implementationStatus === "implemented" && family.blockers.length === 0, `${family.id} implemented family is blocked`);
+      const implementedActorCeiling = unique(family.workflowIds.flatMap((workflowId) => workflowManifest.workflows.find((item) => item.id === workflowId)?.commandActorClasses || []));
+      assert.deepEqual(family.actorClasses, implementedActorCeiling, `${family.id} actor ceiling drifted`);
+      assert(!family.pendingActorClasses.some((actor) => family.actorClasses.includes(actor)), `${family.id} claims a blocked actor as implemented`);
+      if (family.pendingActorClasses.includes("platform-admin")) assert(family.pendingActorBlockers.some((blocker) => blocker.code === "platform-licensee-selector-validation-boundary-pending"), `${family.id} loses the pending platform selector blocker`);
       for (const workflowId of family.workflowIds) {
         const workflow = workflowManifest.workflows.find((item) => item.id === workflowId);
         assert.equal(workflow.contextBoundaryStatus, "implemented", `${workflowId} is falsely implemented`);

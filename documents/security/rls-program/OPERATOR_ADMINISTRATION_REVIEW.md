@@ -35,8 +35,8 @@ Production break-glass is an individually attributable broker-issued identity wi
 | operator-boundary-job-recovery | job-recovery | development, staging, production | identity-operator | app_ops.recover_failed_job | one failed durable job |
 | operator-boundary-staging-rls-fixture | RLS-readiness-check | staging | identity-operator | app_ops.prepare_rls_validation_fixture | one reserved synthetic tenant fixture with bounded QR count |
 | operator-boundary-rls-readiness | RLS-readiness-check | development, staging, production | identity-operator | mscqr-operator rls-readiness | catalog metadata and bounded canary assertions only |
-| operator-boundary-rls-activation | RLS-activation-control | staging, production | identity-operator | mscqr-operator rls-activate | exact checksum-bound RLS activation phase only |
-| operator-boundary-rls-rollback | RLS-rollback-control | staging, production | identity-operator | mscqr-operator rls-rollback | exact activation phase and checksum-paired rollback artifact only |
+| operator-boundary-rls-activation | RLS-activation-control | staging, production | identity-operator | mscqr-operator rls-activate | one checksum-bound green build and traffic switch; blue database mutation is prohibited |
+| operator-boundary-rls-rollback | RLS-rollback-control | staging, production | identity-operator | mscqr-operator rls-rollback | one recorded green database and its exact package-marked roles only |
 | operator-boundary-breakglass-issuance | break-glass-only | production | identity-production-break-glass | mscqr-security-broker issue-breakglass | only targets permitted by the issued boundary allowlist |
 | operator-boundary-prohibited-platform-role-repair | prohibited | development, staging, production | identity-production-break-glass | backend/scripts/repair-admin-accounts.js | zero rows |
 | operator-boundary-prohibited-seed-and-test-data | prohibited | development, staging, production | identity-operator | registered Prisma/enterprise/launch-smoke seed and QR-reset workflows | zero rows |

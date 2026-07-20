@@ -20,7 +20,7 @@
   "boundaryType": "post-password-actor-bootstrap",
   "supportingWorkflows": [
     "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-licensee-links",
-    "workflow-internal-backend-src-services-manufacturer-scope-service-ts-list-manufacturer-linked-licensee-ids"
+    "workflow-internal-backend-src-services-manufacturer-scope-service-ts-resolve-manufacturer-session-scope"
   ],
   "registeredRoots": [
     "POST /auth/login -> loginWithPassword -> password verification -> manufacturer bootstrap",

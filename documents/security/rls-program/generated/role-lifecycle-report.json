@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 5,
+  "deploymentModel": "clean-room-blue-green",
+  "sourceContractSha256": "2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f",
+  "deploymentId": "cert",
+  "greenDatabasePattern": "^mscqr_full_rls_cert_[a-z0-9_]+$",
+  "roles": [
+    {
+      "key": "owner",
+      "name": "mscqr_rls_cert_owner",
+      "login": false,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "authOwner",
+      "name": "mscqr_rls_cert_auth_owner",
+      "login": false,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "app",
+      "name": "mscqr_rls_cert_app",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "read",
+      "name": "mscqr_rls_cert_read",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "preauth",
+      "name": "mscqr_rls_cert_preauth",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "worker",
+      "name": "mscqr_rls_cert_worker",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "scheduled",
+      "name": "mscqr_rls_cert_scheduled",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "operator",
+      "name": "mscqr_rls_cert_operator",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    },
+    {
+      "key": "migration",
+      "name": "mscqr_rls_cert_migration",
+      "login": true,
+      "marker": "mscqr-full-rls-clean-room:certification:2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f"
+    }
+  ],
+  "preflight": {
+    "mutationAllowed": false,
+    "requires": [
+      "PostgreSQL 18",
+      "exact green database",
+      "zero managed roles",
+      "zero application objects",
+      "zero policies",
+      "zero unexpected grants",
+      "zero default ACLs",
+      "zero other sessions"
+    ]
+  },
+  "creation": "all nine roles are created transactionally and marked by this package; reuse is prohibited",
+  "failureCleanup": "drop the green database from the maintenance database, then transactionally drop only exact marked roles",
+  "blueDatabase": "never connected to or mutated by the package",
+  "legacyRoleRestoration": false,
+  "legacyAclRestoration": false,
+  "legacyDefaultAclRestoration": false,
+  "legacyOwnershipRestoration": false,
+  "dropOwnedAllowed": false
+}

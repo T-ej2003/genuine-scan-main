@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validatePublicReadContract, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
 import { contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch, validateSystemBoundaryContracts } from "./context-boundary-plan.mjs";
+import { validateGeneratedPackage } from "./verify-full-rls-package.mjs";
 
 const { tables, workflows, identities, decisions, commandSemantics, preAuthFunctions, workerBoundaries, objectOwnershipChain, operatorBoundaries, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract } = manifests();
 assert(tables && workflows && identities && decisions && commandSemantics && preAuthFunctions && workerBoundaries && objectOwnershipChain && operatorBoundaries && systemBoundaries && manufacturerBootstrapBoundary && platformReadScopeBoundary && policyAlertActorCeiling && publicReadContract, "all programme manifests must exist");
@@ -138,6 +139,11 @@ for (const rule of commandSemantics.rules) {
     for (const identity of rule.runtimeIdentities) assert(identityIds.has(identity), `${rule.id} references unknown identity ${identity}`);
   }
   assert(assuranceLevels.has(rule.minimumAssurance), `${rule.id} lacks a valid assurance level`);
+  if (rule.actorClasses.length > 1 || rule.actorClasses.includes("platform-admin")) {
+    assert(rule.minimumAssuranceByActorClass && typeof rule.minimumAssuranceByActorClass === "object", `${rule.id} lacks actor-specific assurance`);
+    assert.deepEqual(Object.keys(rule.minimumAssuranceByActorClass).sort(), [...rule.actorClasses].sort(), `${rule.id} actor-specific assurance coverage drifted`);
+    for (const assurance of Object.values(rule.minimumAssuranceByActorClass)) assert(assuranceLevels.has(assurance), `${rule.id} has invalid actor-specific assurance`);
+  }
   assert(rule.scopeRule?.trim() && rule.allowScenarios?.length && rule.denyScenarios?.length, `${rule.id} lacks scope or allow/deny cases`);
   assert(rule.status === "architecture-resolved", `${rule.id} is unresolved`);
   assert(rule.command === "DELETE" || rule.hardDeleteSemantics === "not-applicable", `${rule.id} has invalid hard-delete semantics`);
@@ -150,7 +156,7 @@ for (const rule of commandSemantics.rules) {
   assert(!(table.appendOnly && rule.command === "UPDATE" && rule.authorizationBoundary !== "prohibited"), `${rule.id} allows append-only UPDATE`);
   if (rule.command === "DELETE") assert(["prohibited", "soft-delete only", "actor self-delete", "tenant-admin delete", "retention delete", "cascade through approved parent lifecycle", "migration-only", "operator-approved", "break-glass only"].includes(rule.hardDeleteSemantics), `${rule.id} lacks explicit DELETE semantics`);
   if (rule.actorClasses.includes("platform-admin")) {
-    assert.notEqual(rule.minimumAssurance, "none", `${rule.id} grants unconditional platform-admin access`);
+    assert(["mfa-verified", "step-up-verified", "operator-approved", "dual-approved-break-glass"].includes(rule.minimumAssuranceByActorClass?.["platform-admin"]), `${rule.id} platform-admin lacks MFA-specific assurance`);
     assert(rule.requiresAuditEvent, `${rule.id} platform-admin command lacks audit`);
     assert(!/USING\s*\(\s*true\s*\)/i.test(rule.scopeRule), `${rule.id} grants generic platform-admin access`);
   }
@@ -186,5 +192,21 @@ const contextBoundaryFamilies = JSON.parse(fs.readFileSync(contextBoundaryFamili
 validateSystemBoundaryContracts(systemBoundaries, workflows);
 validateContextBoundaryPlan(contextBoundaryFamilies, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract);
 validateContextBoundaryReadBatch(JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8")), contextBoundaryFamilies, workflows, commandSemantics, tables);
+const essentialAllowlist = JSON.parse(fs.readFileSync("documents/security/rls-program/essential-workflow-allowlist.json", "utf8"));
+const shutdown = JSON.parse(fs.readFileSync("documents/security/rls-program/unsupported-workflow-shutdown.json", "utf8"));
+const generatedRls = JSON.parse(fs.readFileSync("documents/security/rls-program/generated/full-rls-implementation-manifest.json", "utf8"));
+const generatedPolicies = JSON.parse(fs.readFileSync("documents/security/rls-program/generated/policy-inventory-report.json", "utf8"));
+const generatedPrivileges = JSON.parse(fs.readFileSync("documents/security/rls-program/generated/column-privilege-report.json", "utf8"));
+assert.equal(new Set(essentialAllowlist.workflows.map((entry) => entry.workflowId)).size, essentialAllowlist.workflows.length, "essential allowlist duplicates workflows");
+for (const entry of essentialAllowlist.workflows) assert(workflowIds.has(entry.workflowId), `essential allowlist references unknown workflow ${entry.workflowId}`);
+assert.deepEqual(essentialAllowlist.protectedRouteGate.enabledRoutes, shutdown.enabledProtectedRoutes, "launch allowlist and shutdown middleware manifest drifted");
+assert.equal(essentialAllowlist.certification.enabledWorkflowCount, essentialAllowlist.workflows.filter((entry) => entry.launchDisposition === "enabled").length, "enabled workflow certification count drifted");
+assert(!essentialAllowlist.workflows.some((entry) => entry.launchDisposition === "enabled" && entry.currentRuntimeStatus.includes("pending")), "pending workflow is launch-enabled");
+assert.equal(generatedRls.tables.length, 77, "generated RLS manifest lost a table");
+assert.equal(generatedRls.tables.filter((entry) => entry.rls === "ENABLE AND FORCE").length, 75, "generated RLS manifest must FORCE 75 tables");
+assert.equal(generatedRls.tables.filter((entry) => entry.rls.startsWith("not-applicable")).length, 2, "generated RLS migration-only count drifted");
+validateGeneratedPackage({ manifest: generatedRls, policies: generatedPolicies, privileges: generatedPrivileges, commandSemantics });
+assert(generatedRls.tables.every((entry) => entry.policyFamily && entry.disposition && Array.isArray(entry.policySlices) && Array.isArray(entry.columnGrants)), "generated table lacks exact RLS disposition");
+assert(!generatedRls.blockedDirectProfiles.some((entry) => entry.status !== "direct-policy-blocked"), "blocked SQL actor slice became implemented");
 assert(sharedApplyIsBlocked(), "existing shared-table apply must remain blocked before BEGIN");
 console.log(JSON.stringify({ valid: true, tables: tables.tables.length, workflows: workflows.workflows.length, productionAccessSites: mappedAccessIds.size }));

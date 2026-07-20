@@ -100,13 +100,13 @@
     "ALTER DEFAULT PRIVILEGES applies to objects subsequently created by the named/current creator, not inherited role defaults, so every possible creation identity is normalized explicitly."
   ],
   "recommendedTransferModel": {
-    "id": "broker-per-object-transfer",
+    "id": "clean-room-broker-per-object-transfer",
     "recommended": true,
-    "migrationOwnerMembership": false,
-    "transferExecutor": "audited broker-controlled administrative executor",
-    "grantorAuthority": "Managed database administrator or exact role member holding ADMIN option for the target owner; CREATEROLE without the required ADMIN/SET path is insufficient.",
-    "executorTemporaryMembership": {
-      "permitted": true,
+    "migrationOwnerMembership": "transactional-admin-phase-only",
+    "transferExecutor": "audited broker-controlled green-database administrator",
+    "grantorAuthority": "The green administrator must hold exact SET/ADMIN authority for the package-created migration and NOLOGIN owner roles; CREATEROLE alone is insufficient.",
+    "temporaryMembership": {
+      "member": "identity-migration",
       "roles": [
         "identity-table-owner",
         "identity-auth-function-owner"
@@ -116,30 +116,17 @@
       "set": true,
       "grantedOneAtATime": true,
       "revokedBeforeSuccess": true,
+      "runtimeCredentialUsed": false,
       "auditRequired": true
     },
-    "reason": "Keeps owner-role reachability out of the migration credential while allowing deterministic per-object transfer."
+    "reason": "Prisma owns zero-based objects as the restricted migration identity; the separate administrative phase transfers them deterministically without giving a running migration or runtime session owner authority."
   },
   "fallbackTransferModel": {
-    "id": "temporary-noninheriting-migration-membership",
+    "id": "none",
     "recommended": false,
-    "activation": "Separate reviewed exception when broker separation is unavailable",
-    "membership": {
-      "member": "identity-migration",
-      "roles": [
-        "identity-table-owner",
-        "identity-auth-function-owner"
-      ],
-      "admin": false,
-      "inherit": false,
-      "set": true,
-      "oneOwnerAtATime": true
-    },
+    "activation": "unsupported",
     "requirements": [
-      "Exact grantor authority verified before migration",
-      "Grant and revoke recorded in immutable deployment audit",
-      "Failure handler revokes membership even after partial DDL",
-      "Catalog gate proves no membership or ownership residue"
+      "Destroy and recreate the green candidate if the exact transfer model cannot execute"
     ],
     "successWithActiveMembershipAllowed": false
   },
@@ -149,10 +136,10 @@
       "objectClass": "tables",
       "expectedOwner": "identity-table-owner",
       "creationIdentity": "identity-migration",
-      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "transferMechanism": "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every Prisma table has relowner=environment table owner; all 75 FORCE targets and both migration-only tables are included.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -164,10 +151,10 @@
       "objectClass": "table-owned-sequences",
       "expectedOwner": "identity-table-owner",
       "creationIdentity": "identity-migration",
-      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "transferMechanism": "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every identity/serial sequence linked through pg_depend has the same owner as its owning table.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -179,10 +166,10 @@
       "objectClass": "standalone-sequences",
       "expectedOwner": "identity-table-owner",
       "creationIdentity": "identity-migration",
-      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "transferMechanism": "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every non-extension application sequence has the table owner; no orphan migration-owned sequence remains.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -195,9 +182,9 @@
       "expectedOwner": "owning-table-owner",
       "creationIdentity": "identity-migration",
       "transferMechanism": "Index ownership follows its owning table and is normalized by the table transfer.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every application index resolves to a table whose relowner is the table owner.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -210,9 +197,9 @@
       "expectedOwner": "owning-table-owner",
       "creationIdentity": "identity-migration",
       "transferMechanism": "Constraint authority follows the owning table; no independent runtime ownership exists.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every constraint belongs to a table certified to the table owner; referenced tables are also certified.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -225,9 +212,9 @@
       "expectedOwner": "owning-table-owner",
       "creationIdentity": "identity-migration",
       "transferMechanism": "Policies have no independent owner; only the owning table owner may create, alter, or drop them through the reviewed deployment path.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every policy's table relowner is the table owner and no policy command is installed by startup/runtime.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -240,9 +227,9 @@
       "expectedOwner": "schema-specific",
       "creationIdentity": "identity-migration",
       "transferMechanism": "Explicit ALTER SCHEMA OWNER through the broker path: public and app_rls to table owner; app_auth to auth owner; extension-owned schemas remain extension-managed.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "pg_namespace proves exact schema owners and PUBLIC/runtime CREATE is absent on protected schemas.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -254,10 +241,10 @@
       "objectClass": "functions",
       "expectedOwner": "schema-and-function-specific",
       "creationIdentity": "identity-migration",
-      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "transferMechanism": "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "app_auth exact pre-auth signatures have auth owner; approved app_rls worker helpers have table owner and SECURITY INVOKER; no migration/runtime-owned application function remains.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -269,10 +256,10 @@
       "objectClass": "procedures",
       "expectedOwner": "identity-table-owner",
       "creationIdentity": "identity-migration",
-      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "transferMechanism": "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every application procedure is owned by the table owner; app_auth procedures are forbidden unless separately added to the exact auth manifest.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -284,10 +271,10 @@
       "objectClass": "enum-types",
       "expectedOwner": "identity-table-owner",
       "creationIdentity": "identity-migration",
-      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "transferMechanism": "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every non-extension application enum type has typowner=table owner.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -299,10 +286,10 @@
       "objectClass": "composite-types",
       "expectedOwner": "identity-table-owner",
       "creationIdentity": "identity-migration",
-      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "transferMechanism": "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every standalone non-extension composite type has typowner=table owner; table row types follow their table.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -314,10 +301,10 @@
       "objectClass": "views",
       "expectedOwner": "identity-table-owner",
       "creationIdentity": "identity-migration",
-      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "transferMechanism": "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every application view has relowner=table owner and uses an explicitly reviewed security option.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -329,10 +316,10 @@
       "objectClass": "materialized-views",
       "expectedOwner": "identity-table-owner",
       "creationIdentity": "identity-migration",
-      "transferMechanism": "The broker-controlled transfer executor performs explicit, fully qualified per-object ALTER OWNER after the migration creates or alters the object; REASSIGN OWNED is forbidden because it cannot preserve the table-owner/auth-owner split.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "transferMechanism": "After zero-based Prisma migration, the brokered administrator transaction temporarily gives identity-migration SET-only access to one target NOLOGIN owner, SET ROLEs to the migration owner, performs explicit fully qualified ALTER OWNER statements, and revokes the edge before success. REASSIGN OWNED is forbidden.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every application materialized view has relowner=table owner and an exact refresh authority.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -345,9 +332,9 @@
       "expectedOwner": "owning-table-owner",
       "creationIdentity": "identity-migration",
       "transferMechanism": "Trigger authority follows the table; its called function is separately certified under the function rule.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every non-internal trigger is attached to a table-owner table and calls an approved-owner function.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -360,9 +347,9 @@
       "expectedOwner": "external-managed-service-owner",
       "creationIdentity": "controlled-platform-administration-only",
       "transferMechanism": "Application migrations may not create publications. If introduced, a separately approved non-runtime administrative owner is required.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "No MSCQR application publication is present; future presence fails verification until allowlisted.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -376,9 +363,9 @@
       "expectedOwner": "external-managed-service-owner",
       "creationIdentity": "controlled-platform-administration-only",
       "transferMechanism": "Application migrations may not create subscriptions. If introduced, a separately approved non-runtime administrative owner is required.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "No MSCQR application subscription is present; future presence fails verification until allowlisted.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -392,9 +379,9 @@
       "expectedOwner": "managed-service-extension-owner",
       "creationIdentity": "controlled-platform-administration-only",
       "transferMechanism": "Extension installation and update are outside Prisma migrations; extension-owned objects/schemas are identified by extension dependencies and excluded from application transfer.",
-      "temporaryMembershipRequirements": "Recommended path grants no owner membership to identity-migration; the audited transfer executor may receive SET TRUE, INHERIT FALSE, ADMIN FALSE membership only for the exact target owner and transfer window.",
+      "temporaryMembershipRequirements": "Only the brokered administrative ownership phase may grant identity-migration one target-owner membership at a time with SET TRUE, INHERIT FALSE and ADMIN FALSE. It is revoked in the same transaction before success.",
       "postTransferVerification": "Every extension and extension-owned object is on an explicit platform allowlist and is not owned by a runtime role.",
-      "rollbackBehavior": "Use the preflight object/owner snapshot and reverse only the allowlisted object transfer to its prior approved NOLOGIN owner; never restore migration or runtime ownership. Revoke temporary membership in the failure path and report failure until catalogs are clean.",
+      "rollbackBehavior": "Clean-room only: stop every green consumer, prove no required data was accepted, drop the fresh green database, then drop only package-marked roles. The blue database remains untouched; object-level restoration is unsupported.",
       "forbiddenOwnershipStates": [
         "owned by any runtime LOGIN identity",
         "owned by identity-migration at deployment success",
@@ -592,12 +579,12 @@
     {
       "step": 2,
       "id": "preflight",
-      "requirement": "Verify expected database/environment, current user, role attributes, owner attributes, schema baseline, clean membership state, and capture an exact object-owner snapshot."
+      "requirement": "Verify the exact green database/environment and administrator, require a template0-clean application catalog, zero managed roles, zero unexpected grants/policies/memberships/default ACLs and no traffic."
     },
     {
       "step": 3,
       "id": "temporary-authority",
-      "requirement": "Broker obtains only the exact transfer authority; recommended path grants no owner membership to migration."
+      "requirement": "Only after zero-based Prisma migration, the brokered administrator grants the migration owner one SET-only target-owner edge inside the ownership transaction."
     },
     {
       "step": 4,
@@ -729,7 +716,7 @@
     "ownershipResidueAllowed": 0,
     "migrationMembershipResidueAllowed": 0,
     "runtimeOwnedObjectsAllowed": 0,
-    "transactionRule": "Use transactional DDL where supported; concurrent/nontransactional changes require the same preflight snapshot, explicit compensation, unconditional revocation and final catalog gate.",
+    "transactionRule": "Every package phase is transactional. Any phase failure stops green activation; cleanup destroys the unused green database and then removes only exact package-marked roles.",
     "failClosed": true
   },
   "migrationOnlyTables": [
@@ -749,11 +736,10 @@
     }
   ],
   "evidence": [
-    "documents/security/mscqr_staging_database_role_separation_template_2026-07-10.sql",
-    "documents/security/mscqr_staging_database_role_separation_rollback_2026-07-10.sql",
-    "documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql",
-    "scripts/run-disposable-role-separation-harness.mjs",
-    "backend/tests/rlsAuthBootstrapP2.test.js",
+    "scripts/rls/generate-clean-room-rls-sql.mjs",
+    "scripts/rls/certify-clean-room-database.mjs",
+    "scripts/rls/certify-full-database.mjs",
+    "scripts/tests/full-database-rls-enforcement.test.mjs",
     "backend/prisma/migrations"
   ]
 }
