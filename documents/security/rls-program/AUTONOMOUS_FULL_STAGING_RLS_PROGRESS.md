@@ -10,8 +10,8 @@ Last updated: 2026-07-20 (Europe/London)
 - Workflow disposition: five runtime-implemented/application-path-PostgreSQL-pending, 59 contract-only, 364 blocked and zero launch-enabled.
 - Generated foundation: 39 policies, 34 direct policy slices and 78 exact column-privilege cells.
 - Deployment model: clean-room blue/green only. Current staging and production databases are untouched.
-- Foundation artifact commit: pending logical commit creation; all gates are green.
-- Full workflow worktrees: not permitted until the committed foundation SHA and green PostgreSQL 18 result are recorded.
+- Final foundation commit: `061b3134ba89db84e0564b893e920a2601c14452` (certified artifacts committed in `2f9c6e8f724f8bb31ff1d5178f06c7b3bdf80348`).
+- Full workflow worktrees: permitted only after the exhaustive two-session partition is machine-validated and committed by Session A.
 
 ## Foundation findings A-D
 
@@ -58,7 +58,7 @@ Exact certified artifact values:
 - Cleanup SQL SHA-256: `691cfbf7eba1b886e2d359c783d03d5f94eb08217ea5b329872127aac3809d0b`
 - Certification evidence SHA-256: `fd003009dc041578a18721270eadf9cd4f31784af9322cf8f3df0d361b8d113b`
 
-Exact next task: create the logical foundation commits while excluding preserved unrelated ops/QA/scratch files, record the resulting SHA, then generate and validate the exhaustive 428-workflow session partition before creating any worktree.
+Exact next task: generate and validate the exhaustive 428-workflow two-session partition, commit its ownership contract, then create Session B from the recorded final foundation SHA while Session A continues its owned waves.
 
 ## Environment state
 
