@@ -11,7 +11,8 @@ Last updated: 2026-07-20 (Europe/London)
 - Generated foundation: 39 policies, 34 direct policy slices and 78 exact column-privilege cells.
 - Deployment model: clean-room blue/green only. Current staging and production databases are untouched.
 - Final foundation commit: `061b3134ba89db84e0564b893e920a2601c14452` (certified artifacts committed in `2f9c6e8f724f8bb31ff1d5178f06c7b3bdf80348`).
-- Full workflow worktrees: permitted only after the exhaustive two-session partition is machine-validated and committed by Session A.
+- Two-session partition commit: `8cec28edc9da2d39304bd0b3366cef7a2bb3a553`; 284 Session A workflows and 144 Session B workflows, with zero missing, duplicate, unknown, catch-all or overlapping editable production files.
+- Session B worktree: `/Users/abhiramteja/Downloads/genuine-scan-rls-auth`, branch `rls-wave-auth-public-workers`, clean coordination head `8cec28edc9da2d39304bd0b3366cef7a2bb3a553`, certified branch point `061b3134ba89db84e0564b893e920a2601c14452`.
 
 ## Foundation findings A-D
 
@@ -58,7 +59,7 @@ Exact certified artifact values:
 - Cleanup SQL SHA-256: `691cfbf7eba1b886e2d359c783d03d5f94eb08217ea5b329872127aac3809d0b`
 - Certification evidence SHA-256: `fd003009dc041578a18721270eadf9cd4f31784af9322cf8f3df0d361b8d113b`
 
-Exact next task: generate and validate the exhaustive 428-workflow two-session partition, commit its ownership contract, then create Session B from the recorded final foundation SHA while Session A continues its owned waves.
+Exact next task: begin Session A's tenant/manufacturer/platform read wave against `mscqr_rls_wave_a_integration` while Session B executes the exact prompt in `TWO_SESSION_WORKFLOW_EXECUTION_HANDOFF.md`; integrate Session B only after its committed fresh-PostgreSQL wave gate and one review are green.
 
 ## Environment state
 
