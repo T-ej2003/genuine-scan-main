@@ -7,12 +7,12 @@ Last updated: 2026-07-20 (Europe/London)
 - Branch: `refactor/full-database-rls-program`
 - Foundation base commit: `8b58ece86aa96e9f11a79623e3cd385b14889957`
 - Inventory: 77 tables, 75 intended FORCE targets, 428 workflows, 318 families, 1,063 registered production access sites and 55 potentially dead access sites requiring later exact resolution.
-- Workflow disposition: five runtime-implemented/application-path-PostgreSQL-pending, 59 contract-only, 364 blocked and zero launch-enabled.
+- Workflow disposition: one application-path-certified/complete, four runtime-implemented/PostgreSQL-pending, 59 contract-only, 364 blocked and zero launch-enabled.
 - Generated foundation: 39 policies, 34 direct policy slices and 78 exact column-privilege cells.
 - Deployment model: clean-room blue/green only. Current staging and production databases are untouched.
 - Final foundation commit: `061b3134ba89db84e0564b893e920a2601c14452` (certified artifacts committed in `2f9c6e8f724f8bb31ff1d5178f06c7b3bdf80348`).
 - Two-session partition commit: `8cec28edc9da2d39304bd0b3366cef7a2bb3a553`; 284 Session A workflows and 144 Session B workflows, with zero missing, duplicate, unknown, catch-all or overlapping editable production files.
-- Session B worktree: `/Users/abhiramteja/Downloads/genuine-scan-rls-auth`, branch `rls-wave-auth-public-workers`, clean coordination head `8cec28edc9da2d39304bd0b3366cef7a2bb3a553`, certified branch point `061b3134ba89db84e0564b893e920a2601c14452`.
+- Session B worktree: `/Users/abhiramteja/Downloads/genuine-scan-rls-auth`, branch `rls-wave-auth-public-workers`, clean coordination head `f1163b83e039af7129c5879f0957a441d1219fa9`, certified branch point `061b3134ba89db84e0564b893e920a2601c14452`.
 
 ## Foundation findings A-D
 
@@ -50,16 +50,24 @@ MFA challenge/backup-code and WebAuthn one-time state, factor changes, session i
 
 ## Validation state
 
-Serial inventory and generation pass at 428 workflows, 318 families, 77 tables, 75 FORCE targets, 39 policies, 34 direct slices, 78 column cells and 26 checksummed artifacts. PostgreSQL 18 certification passed for all 75 FORCE targets with all 11 failure-injection stages, nine clean-room preflight refusals, five direct-phase refusals, nine catalog-tamper dimensions, zero green database/role residue and an unchanged blue fingerprint. Application-path workflow certification remains `0/428` and is the next programme phase.
+Serial inventory and generation pass at 428 workflows, 318 families, 77 tables, 75 FORCE targets, 39 policies, 34 direct slices, 78 column cells and 26 checksummed artifacts. PostgreSQL 18 certification passed for all 75 FORCE targets with all 11 failure-injection stages, nine clean-room preflight refusals, five direct-phase refusals, nine catalog-tamper dimensions, zero green database/role residue and an unchanged blue fingerprint. Application-path workflow certification is now `1/428`: tenant and fresh-MFA platform risk analytics are proven through the compiled controller with the restricted app role. The remaining 427 workflows remain pending or frozen-product-prohibited until their exact wave gates run.
 
 Exact certified artifact values:
 
-- Source contract SHA-256: `2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f`
-- Package checksum-manifest SHA-256: `8c03b5e6bbcb1e16676e5ebeed44b545bf338b26fb18ce268c639762c6808a4c`
-- Cleanup SQL SHA-256: `691cfbf7eba1b886e2d359c783d03d5f94eb08217ea5b329872127aac3809d0b`
-- Certification evidence SHA-256: `fd003009dc041578a18721270eadf9cd4f31784af9322cf8f3df0d361b8d113b`
+- Source contract SHA-256: `31314331260d1ce2f31399e33eb04cb87fcad6450368f99e3c7ea303efd74e3f`
+- Package checksum-manifest SHA-256: `0831f0ebe0ff0d5cfc884d3c0947d9737204eeae6b0d0b8f6d1d66bfe771abeb`
+- Cleanup SQL SHA-256: `1790fba7eb6de1322227050c5c59c40cedc2a104e52e483456b44252725730b5`
+- Certification evidence SHA-256: `ee17cda136039666823c62566e2be6a6b8209b26d4d75c7504416bf7f0549099`
 
-Exact next task: begin Session A's tenant/manufacturer/platform read wave against `mscqr_rls_wave_a_integration` while Session B executes the exact prompt in `TWO_SESSION_WORKFLOW_EXECUTION_HANDOFF.md`; integrate Session B only after its committed fresh-PostgreSQL wave gate and one review are green.
+Exact next task: continue Session A's tenant/manufacturer/platform read wave with the remaining licensee directory, manufacturer scope, selector, dashboard, inventory and SLA families. Session B remains isolated at the exact prompt in `TWO_SESSION_WORKFLOW_EXECUTION_HANDOFF.md`; integrate it only after its committed fresh-PostgreSQL wave gate and one review are green.
+
+## Session A read-wave application-path progress
+
+The workflow `workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics` passed its compiled-controller PostgreSQL 18 application-path gate. The proof covers a legitimate tenant administrator, a legitimate fresh-MFA platform administrator selecting one tenant, blank request context, blank platform selector, foreign tenant selector, forged platform role and stale tenant membership. Only the two legitimate reads commit `RISK_ANALYTICS_READ` attribution; denied paths commit none.
+
+The authoritative workflow and family inventories now record this workflow as `compatible`, `complete` and `certified`. Manifest validation refuses any completed workflow unless it names an existing PostgreSQL 18 application-path test and harness and records exact-column and atomic-attribution proof; changing a pending status alone still fails closed.
+
+The real Prisma path exposed two privilege mismatches that SQL-only probes could not detect. Prisma added the `SecurityPolicy.id` field to a `findUnique` projection and added client-side `AuditLog.createdAt` to `create`. The implementation now uses parameterized transaction-local SQL for those two exact operations: the policy read selects only the frozen threshold columns, and audit insertion lets PostgreSQL own `createdAt` without granting that protected column or requiring `RETURNING` read authority. No table-wide grant or new column privilege was added.
 
 ## Environment state
 

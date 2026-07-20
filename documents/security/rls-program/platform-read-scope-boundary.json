@@ -485,7 +485,7 @@
       "deterministicOrdering": ["risk score DESC", "stable ID ASC"],
       "countAndListSameSnapshot": true,
       "readAttributionSameTransaction": true,
-      "implementationStatus": "runtime-implemented-postgresql-pending",
+      "implementationStatus": "runtime-implemented-postgresql-certified",
       "blockers": []
     }
   ],

@@ -395,6 +395,9 @@ const rawCommandsFor = (method, sql) => {
   const matches = [...sql.matchAll(/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b/gi)].map((match) => match[1].split(/\s/)[0].toUpperCase());
   return [...new Set(matches.length ? matches : ["UPDATE"])];
 };
+const rawTableNamesFor = (sql) => [...sql.matchAll(
+  /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|FROM|JOIN)\s+(?:ONLY\s+)?(?:(?:"(?:[^"]|"")*"|[a-z_][\w$]*)\s*\.\s*)?(?:"((?:[^"]|"")*)"|([a-z_][\w$]*))/gi
+)].map((match) => (match[1] || match[2]).replaceAll('""', '"').toLowerCase());
 const WORKFLOW_SURFACE_OVERRIDES = new Map([
   ["backend/src/services/attentionQueueService.ts:getAttentionQueueSnapshotUncached", "http"],
   ["backend/src/services/auditLogOutboxService.ts:queueAuditLogOutbox", "internal"],
@@ -519,12 +522,18 @@ export const scanProductionAccess = () => {
         }
         if (rawMethods.has(method)) {
           const raw = node.getText(ast);
-          for (const [name, model] of physical) if (new RegExp(`(?:\\b|[\"'])${name}(?:\\b|[\"'])`, "i").test(raw)) for (const command of rawCommandsFor(method, raw)) record(node, model, method, command, raw);
+          for (const name of new Set(rawTableNamesFor(raw))) {
+            const model = physical.get(name);
+            if (model) for (const command of rawCommandsFor(method, raw)) record(node, model, method, command, raw);
+          }
         }
       }
       if (ts.isTaggedTemplateExpression(node) && ts.isPropertyAccessExpression(node.tag) && rawMethods.has(node.tag.name.text)) {
         const raw = node.getText(ast);
-        for (const [name, model] of physical) if (new RegExp(`(?:\\b|[\"'])${name}(?:\\b|[\"'])`, "i").test(raw)) for (const command of rawCommandsFor(node.tag.name.text, raw)) record(node, model, node.tag.name.text, command, raw);
+        for (const name of new Set(rawTableNamesFor(raw))) {
+          const model = physical.get(name);
+          if (model) for (const command of rawCommandsFor(node.tag.name.text, raw)) record(node, model, node.tag.name.text, command, raw);
+        }
       }
       ts.forEachChild(node, visit);
     };
@@ -809,7 +818,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   const preAuthFunction = actors.includes("pre-auth-runtime");
   const workerBoundary = actors.some((actor) => ["worker", "scheduled-job"].includes(actor));
   const operatorApproval = actors.some((actor) => ["operator-admin", "break-glass"].includes(actor));
-  const rawEvidence = workflow.supportingEvidence.some((evidence) => evidence.method?.startsWith("$"));
+  const rawEvidence = workflow.id !== RISK_ANALYTICS_WORKFLOW_ID && workflow.supportingEvidence.some((evidence) => evidence.method?.startsWith("$"));
   let allowedColumns = command === "DELETE" ? [] : command === "SELECT"
     ? scalarColumns.filter((column) => !(table.primaryCategory === "security-sensitive" && table.sensitiveColumns.includes(column)))
     : scalarColumns.filter((column) => !protectedColumns.includes(column));
@@ -2035,7 +2044,7 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
     actorClasses: ["licensee-admin", "platform-admin"],
     runtimeImplementedActorClasses: ["licensee-admin", "platform-admin"],
     runtimeBlockedActorClasses: [],
-    platformRuntimeStatus: "implemented-postgresql-pending",
+    platformRuntimeStatus: "application-path-certified",
     platformRuntimeBlockers: [],
     canonicalSourceFiles: [
       "backend/src/routes/index.ts",
@@ -2067,10 +2076,10 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
       "Out-of-range date/page inputs and context purpose, actor, assurance or scope mismatch are denied before analytics reads.",
       "A protected query before context, global Prisma use, unbounded input, inconsistent tenant predicate, nested User projection or non-atomic attribution is denied.",
     ],
-    currentCompatibilityStatus: "tenant-and-platform-context-boundary-implemented-postgresql-certification-pending",
-    implementationStatus: "context-boundary-implemented",
+    currentCompatibilityStatus: "compatible",
+    implementationStatus: "complete",
     contextBoundaryBlockers: [],
-    requiredUnitTests: ["backend/tests/riskAnalyticsContext.test.js"],
+    requiredUnitTests: ["backend/tests/riskAnalyticsContext.test.js", "backend/tests/riskAnalyticsRouteChain.test.js"],
     unresolvedDecisions: [],
     contextBoundaryStatus: "implemented",
     implementationFamilyId: "family-simple-tenant-scoped-reads-analyticsservice-2c20deef24",
@@ -2083,14 +2092,29 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
       "backend/src/middleware/auth.ts",
       "backend/src/routes/index.ts",
     ],
-    testFiles: ["backend/tests/riskAnalyticsContext.test.js"],
+    testFiles: [
+      "backend/tests/riskAnalyticsContext.test.js",
+      "backend/tests/riskAnalyticsRouteChain.test.js",
+      "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
+    ],
     canonicalContextKeys: ["app.user_id", "app.role", "app.organization_id", "app.licensee_id", "app.manufacturer_id", "app.auth_assurance", "app.request_id", "app.purpose"],
     sameTransactionGuarantee: true,
     protectedQueryClient: "transaction-client-only",
     consistentReadScopeGuarantee: true,
     routeRootVerified: true,
     aggregateScopeStatus: "tenant-bounded",
-    postgresqlCertificationStatus: "pending",
+    postgresqlCertificationStatus: "certified",
+    applicationPathCertificationEvidence: {
+      status: "application-path-certified",
+      postgresqlMajor: 18,
+      testFile: "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
+      harnessFile: "scripts/rls/certify-clean-room-database.mjs",
+      runtimeRole: "identity-authenticated-app",
+      positiveActors: ["licensee-admin", "platform-admin"],
+      deniedCases: ["blank-context", "foreign-scope", "forged-role", "stale-membership"],
+      atomicAttributionVerified: true,
+      exactColumnPrivilegesVerified: true,
+    },
     contextBoundaryPlanningEvidence: {
       reviewedAt: "2026-07-16",
       registeredRootCallChainVerified: true,
@@ -2601,12 +2625,17 @@ export const validatePlatformReadScopeBoundary = (boundary, workflowManifest, co
     assert.deepEqual(workflow.platformReadRequiredAssuranceByActorClass, classification.requiredAssuranceByActorClass || null, `${classification.workflowId} actor assurance map drifted`);
     assert(!workflow.unresolvedDecisions.includes(boundary.decisionId), `${classification.workflowId} retains resolved platform decision`);
     if (classification.runtimeImplementedActorClasses) {
+      const postgresqlCertified = classification.implementationStatus === "runtime-implemented-postgresql-certified";
       assert.deepEqual(workflow.runtimeImplementedActorClasses, classification.runtimeImplementedActorClasses, `${classification.workflowId} implemented actor slice drifted`);
       assert.deepEqual(workflow.runtimeBlockedActorClasses, classification.runtimeBlockedActorClasses, `${classification.workflowId} blocked actor slice drifted`);
-      assert.equal(workflow.platformRuntimeStatus, "implemented-postgresql-pending", `${classification.workflowId} platform runtime status drifted`);
+      assert.equal(workflow.platformRuntimeStatus, postgresqlCertified ? "application-path-certified" : "implemented-postgresql-pending", `${classification.workflowId} platform runtime status drifted`);
       assert.deepEqual(workflow.platformRuntimeBlockers, [], `${classification.workflowId} retains stale selector-validation blocker evidence`);
       assert.equal(workflow.contextBoundaryStatus, "implemented", `${classification.workflowId} tenant runtime implementation is missing`);
-      assert.equal(workflow.postgresqlCertificationStatus, "pending", `${classification.workflowId} is falsely PostgreSQL-certified`);
+      assert.equal(workflow.postgresqlCertificationStatus, postgresqlCertified ? "certified" : "pending", `${classification.workflowId} PostgreSQL certification status drifted`);
+      if (postgresqlCertified) {
+        assert.equal(workflow.applicationPathCertificationEvidence?.status, "application-path-certified", `${classification.workflowId} lacks application-path certification evidence`);
+        assert.equal(workflow.applicationPathCertificationEvidence?.postgresqlMajor, 18, `${classification.workflowId} lacks PostgreSQL 18 certification evidence`);
+      }
     } else if (classification.implementationStatus === "runtime-implemented-postgresql-pending") {
       assert.equal(workflow.contextBoundaryStatus, "implemented", `${classification.workflowId} runtime implementation is missing`);
       assert.equal(workflow.postgresqlCertificationStatus, "pending", `${classification.workflowId} is falsely PostgreSQL-certified`);

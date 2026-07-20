@@ -1,4 +1,5 @@
 import { Prisma, SecurityPolicy, UserRole, UserStatus } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import prisma from "../config/database";
 import { CanonicalDbContext } from "../lib/canonicalDbContext";
 import { AuthenticatedSessionClaims } from "../types";
@@ -363,14 +364,14 @@ export const buildRiskAnalyticsBoundary = (
 };
 
 const loadRiskPolicy = async (tx: Prisma.TransactionClient, licenseeId: string) => {
-  const policy = await tx.securityPolicy.findUnique({
-    where: { licenseeId },
-    select: {
-      multiScanThreshold: true,
-      geoDriftThresholdKm: true,
-      velocitySpikeThresholdPerMin: true,
-    },
-  });
+  const [policy] = await tx.$queryRaw<
+    Array<Pick<SecurityPolicy, "multiScanThreshold" | "geoDriftThresholdKm" | "velocitySpikeThresholdPerMin">>
+  >`
+    SELECT "multiScanThreshold", "geoDriftThresholdKm", "velocitySpikeThresholdPerMin"
+    FROM public."SecurityPolicy"
+    WHERE "licenseeId" = ${licenseeId}
+    LIMIT 1
+  `;
   return policy || defaultPolicy;
 };
 
@@ -380,35 +381,33 @@ const recordRiskAnalyticsRead = (
   query: RiskAnalyticsQuery,
   result: { analyzedBatches: number; returnedBatches: number; analyzedManufacturers: number },
   timestamp: Date
-) => tx.auditLog.create({
-  data: {
-    userId: context.userId,
-    orgId: context.organizationId,
+) => {
+  const details = {
+    actorId: context.userId,
+    role: context.role,
+    assurance: context.authAssurance,
+    requestId: context.requestId,
+    purposeCode: context.purpose,
+    organizationId: context.organizationId,
     licenseeId: context.licenseeId,
-    action: "RISK_ANALYTICS_READ",
-    entityType: "Licensee",
-    entityId: context.licenseeId,
-    details: {
-      actorId: context.userId,
-      role: context.role,
-      assurance: context.authAssurance,
-      requestId: context.requestId,
-      purposeCode: context.purpose,
-      organizationId: context.organizationId,
-      licenseeId: context.licenseeId,
-      workflowId: riskAnalyticsWorkflowId,
-      route: riskAnalyticsRoute,
-      outcome: "SUCCESS",
-      lookbackHours: query.lookbackHours,
-      limit: query.limit,
-      analyzedBatchCount: result.analyzedBatches,
-      returnedBatchCount: result.returnedBatches,
-      analyzedManufacturerCount: result.analyzedManufacturers,
-      timestamp: timestamp.toISOString(),
-    },
-  },
-  select: { id: true },
-});
+    workflowId: riskAnalyticsWorkflowId,
+    route: riskAnalyticsRoute,
+    outcome: "SUCCESS",
+    lookbackHours: query.lookbackHours,
+    limit: query.limit,
+    analyzedBatchCount: result.analyzedBatches,
+    returnedBatchCount: result.returnedBatches,
+    analyzedManufacturerCount: result.analyzedManufacturers,
+    timestamp: timestamp.toISOString(),
+  };
+  return tx.$executeRaw`
+    INSERT INTO public."AuditLog"
+      ("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details")
+    VALUES
+      (${randomUUID()}, ${context.userId}, ${context.organizationId}, ${context.licenseeId},
+       'RISK_ANALYTICS_READ', 'Licensee', ${context.licenseeId}, ${JSON.stringify(details)}::jsonb)
+  `;
+};
 
 export const getRiskAnalytics = async (
   tx: Prisma.TransactionClient,

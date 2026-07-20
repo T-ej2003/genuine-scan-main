@@ -93,7 +93,16 @@ for (const workflow of workflows.workflows) {
   assert(surfaces.has(workflow.executionSurface), `${workflow.id} surface is invalid`);
   assert(boundaries.has(workflow.authorizationBoundaryType), `${workflow.id} boundary is invalid`);
   assert(workflow.expectedAllowedScenarios.length && workflow.expectedDeniedScenarios.length, `${workflow.id} needs allowed and denied scenarios`);
-  assert.notEqual(workflow.implementationStatus, "complete", `${workflow.id} cannot be silently complete`);
+  if (workflow.implementationStatus === "complete") {
+    const evidence = workflow.applicationPathCertificationEvidence;
+    assert.equal(workflow.postgresqlCertificationStatus, "certified", `${workflow.id} cannot be silently complete`);
+    assert.equal(evidence?.status, "application-path-certified", `${workflow.id} cannot be silently complete`);
+    assert.equal(evidence?.postgresqlMajor, 18, `${workflow.id} cannot be silently complete`);
+    assert(workflow.testFiles?.includes(evidence?.testFile) && fs.existsSync(evidence.testFile), `${workflow.id} cannot be silently complete`);
+    assert(fs.existsSync(evidence?.harnessFile), `${workflow.id} cannot be silently complete`);
+    assert.equal(evidence?.atomicAttributionVerified, true, `${workflow.id} cannot be silently complete`);
+    assert.equal(evidence?.exactColumnPrivilegesVerified, true, `${workflow.id} cannot be silently complete`);
+  }
   assert.equal(workflow.semanticStatus, "mapped", `${workflow.id} command semantics are unresolved`);
   assert(workflow.commandRuleIds?.length, `${workflow.id} lacks command-rule references`);
   assert(workflow.requiredAssurance?.length, `${workflow.id} lacks assurance requirements`);
@@ -110,7 +119,7 @@ for (const workflow of workflows.workflows) {
   }
   for (const id of workflow.unresolvedDecisions) assert(decisionIds.has(id), `${workflow.id} references missing decision ${id}`);
   if (workflow.contextBoundaryStatus === "implemented") {
-    assert.equal(workflow.implementationStatus, "context-boundary-implemented", `${workflow.id} has an inconsistent context-boundary status`);
+    assert.equal(workflow.implementationStatus, workflow.postgresqlCertificationStatus === "certified" ? "complete" : "context-boundary-implemented", `${workflow.id} has an inconsistent context-boundary status`);
     assert(/^family-[a-z0-9-]+$/.test(workflow.implementationFamilyId), `${workflow.id} lacks an implementation family`);
     assert(workflow.implementationFiles?.length && workflow.implementationFiles.every((file) => fs.existsSync(file)), `${workflow.id} lacks implementation files`);
     assert(workflow.testFiles?.length && workflow.testFiles.every((file) => fs.existsSync(file)), `${workflow.id} lacks context-boundary tests`);

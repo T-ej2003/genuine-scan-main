@@ -1,16 +1,26 @@
 {
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "2c1d2c305b7f788d56ac78a231597285cceaf1dae399302f090c4a6fa110319f",
+  "sourceContractSha256": "31314331260d1ce2f31399e33eb04cb87fcad6450368f99e3c7ea303efd74e3f",
   "tablesExpected": 77,
   "forceRlsTargetsExpected": 75,
   "tablesCertified": 75,
   "generatedPoliciesCertified": 39,
   "columnPrivilegeCellsCertified": 78,
   "workflowCertificationStatus": "pending-application-path-certification",
-  "workflowsApplicationPathCertified": 0,
+  "workflowsApplicationPathCertified": 1,
+  "applicationPathCertifiedWorkflowIds": [
+    "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"
+  ],
+  "applicationPathResults": [
+    {
+      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "status": "application-path-certified",
+      "postgresqlMajor": 18
+    }
+  ],
   "workflowsProductProhibited": 0,
   "cleanRoomPreflightCertified": true,
   "migrationsFromZeroCertified": true,
@@ -288,7 +298,7 @@
   "columnPrivilegeCertification": true,
   "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "8c03b5e6bbcb1e16676e5ebeed44b545bf338b26fb18ce268c639762c6808a4c",
+  "packageChecksumsSha256": "0831f0ebe0ff0d5cfc884d3c0947d9737204eeae6b0d0b8f6d1d66bfe771abeb",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
   "disposableCertificationFixtureRows": 36
 }

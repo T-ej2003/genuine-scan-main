@@ -112,12 +112,42 @@ const fakeRunner = (overrides = {}) => {
   }] : overrides.batchRows;
   const tx = {
     $executeRaw: async (strings, ...values) => {
+      const sql = strings.join("?");
+      if (/INSERT INTO public\."AuditLog"/.test(sql)) {
+        assert(contextInstalled, "audit attempted before canonical context installation");
+        assert.match(sql, /\("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details"\)/);
+        assert(!sql.includes("createdAt"), "database owns immutable audit creation time");
+        events.push("audit");
+        calls.audit.push({
+          data: {
+            userId: values[1],
+            orgId: values[2],
+            licenseeId: values[3],
+            action: "RISK_ANALYTICS_READ",
+            entityType: "Licensee",
+            entityId: values[4],
+            details: JSON.parse(values[5]),
+          },
+        });
+        return 1;
+      }
       events.push("context");
       contextInstalled = true;
       calls.contextValues.push(values);
-      assert.match(strings.join("?"), /set_config\('app\.licensee_id'/);
+      assert.match(sql, /set_config\('app\.licensee_id'/);
       assert.strictEqual(values[7], "tenant-risk-analytics");
       return 1;
+    },
+    $queryRaw: async (strings, ...values) => {
+      assert(contextInstalled, "policy attempted before canonical context installation");
+      assert.match(strings.join("?"), /SELECT "multiScanThreshold", "geoDriftThresholdKm", "velocitySpikeThresholdPerMin"[\s\S]*FROM public\."SecurityPolicy"[\s\S]*WHERE "licenseeId" = \?/);
+      events.push("policy");
+      calls.policy.push(values);
+      return [{
+        multiScanThreshold: 2,
+        geoDriftThresholdKm: 300,
+        velocitySpikeThresholdPerMin: 2,
+      }];
     },
     licensee: { findUnique: protectedCall("licensee", "licensee", tenant) },
     organization: { findUnique: protectedCall("organization", "organization", organization) },
@@ -126,13 +156,6 @@ const fakeRunner = (overrides = {}) => {
       findMany: async (args) => args.select?.name
         ? protectedCall("manufacturer", "manufacturer", overrides.manufacturerRows === undefined ? [{ id: "manufacturer-a", name: "Manufacturer A" }] : overrides.manufacturerRows)(args)
         : protectedCall("alert-manufacturer", "alertManufacturer", overrides.alertManufacturerRows || [])(args),
-    },
-    securityPolicy: {
-      findUnique: protectedCall("policy", "policy", {
-        multiScanThreshold: 2,
-        geoDriftThresholdKm: 300,
-        velocitySpikeThresholdPerMin: 2,
-      }),
     },
     batch: {
       findMany: protectedCall("batch", "batch", batchRows),
@@ -156,9 +179,6 @@ const fakeRunner = (overrides = {}) => {
     },
     incident: { findMany: protectedCall("incident", "incident", overrides.incidentRows || []) },
     policyRule: { findMany: protectedCall("policy-rule", "policyRule", overrides.policyRuleRows || []) },
-    auditLog: {
-      create: protectedCall("audit", "audit", { id: "audit-a" }),
-    },
   };
   return {
     calls,

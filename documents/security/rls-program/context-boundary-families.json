@@ -353,7 +353,9 @@
         "backend/src/services/analyticsService.ts"
       ],
       "testFiles": [
-        "backend/tests/riskAnalyticsContext.test.js"
+        "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
+        "backend/tests/riskAnalyticsContext.test.js",
+        "backend/tests/riskAnalyticsRouteChain.test.js"
       ],
       "contextKeys": [
         "app.auth_assurance",
@@ -385,7 +387,7 @@
         "Password-only or stale-MFA platform, manufacturer, anonymous, inactive-session or unsupported-role actors are denied."
       ],
       "postgresqlCertificationStatus": [
-        "pending"
+        "certified"
       ],
       "changeSizeGuard": {
         "maximumProductionFiles": 15,

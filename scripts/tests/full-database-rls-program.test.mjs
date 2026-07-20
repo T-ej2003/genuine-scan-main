@@ -22,6 +22,15 @@ test("all Prisma models and production access sites are represented exactly and 
   assert.deepEqual([...mapped].sort(), detected.map((item) => item.id).sort());
 });
 
+test("raw SQL inventory recognizes table clauses without treating data literals as tables", () => {
+  const accesses = scanProductionAccess().accesses.filter((entry) =>
+    entry.sourceFile === "backend/src/services/analyticsService.ts" &&
+    entry.function === "recordRiskAnalyticsRead" &&
+    entry.method === "$executeRaw"
+  );
+  assert.deepEqual(accesses.map((entry) => [entry.prismaModel, entry.command]), [["AuditLog", "INSERT"]]);
+});
+
 test("stable IDs and references are unique and valid", () => {
   const { tables, workflows, identities, decisions, commandSemantics } = manifests();
   for (const items of [tables.tables, workflows.workflows, identities.identities, decisions.decisions, commandSemantics.rules]) assert.equal(new Set(items.map((item) => item.id)).size, items.length);
@@ -45,7 +54,7 @@ test("implemented HTTP context boundaries retain complete certification evidence
   const requiredKeys = ["app.auth_assurance", "app.licensee_id", "app.manufacturer_id", "app.organization_id", "app.purpose", "app.request_id", "app.role", "app.user_id"];
   const verify = (workflow) => {
     assert.equal(workflow.contextBoundaryStatus, "implemented", "context boundary status");
-    assert.equal(workflow.implementationStatus, "context-boundary-implemented", "implementation status");
+    assert.equal(workflow.implementationStatus, workflow.postgresqlCertificationStatus === "certified" ? "complete" : "context-boundary-implemented", "implementation status");
     assert.match(workflow.implementationFamilyId, /^family-[a-z0-9-]+$/, "implementation family");
     assert(workflow.implementationFiles.length && workflow.testFiles.length, "implementation and test evidence");
     assert(workflow.tablesTouched.length, "protected table evidence");
@@ -126,7 +135,11 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   reject((candidate) => { const family = candidate.families.find((item) => item.automationEligibility === "blocked"); family.blockers = []; }, /blocker evidence drifted|lacks exact blockers/);
   reject((candidate) => { const family = candidate.families.find((item) => item.automationEligibility === "blocked"); family.automationEligibility = "auto-implementable"; family.implementationStatus = "planned"; family.blockers = []; }, /eligibility does not match workflow evidence/);
   reject((candidate) => { const family = candidate.families.find((item) => item.automationEligibility === "contract-only"); family.canonicalContextKeys = ["app.user_id"]; }, /contract boundary is invalid/);
-  reject((candidate, candidateWorkflows) => { const family = candidate.families.find((item) => item.automationEligibility === "implemented"); const workflow = candidateWorkflows.workflows.find((item) => item.id === family.workflowIds[0]); workflow.postgresqlCertificationStatus = "certified"; }, /falsely PostgreSQL-certified/);
+  reject((candidate, candidateWorkflows) => {
+    const family = candidate.families.find((item) => item.automationEligibility === "implemented" && item.workflowIds.some((id) => candidateWorkflows.workflows.find((workflow) => workflow.id === id)?.postgresqlCertificationStatus === "pending"));
+    const workflow = candidateWorkflows.workflows.find((item) => family.workflowIds.includes(item.id) && item.postgresqlCertificationStatus === "pending");
+    workflow.postgresqlCertificationStatus = "certified";
+  }, /falsely PostgreSQL-certified/);
   const splitFamilies = generated.families.filter((family) => family.parentFamilyId);
   assert.equal(splitFamilies.length, 10);
   assert.equal(new Set(splitFamilies.flatMap((family) => family.workflowIds)).size, splitFamilies.flatMap((family) => family.workflowIds).length, "split workflows duplicated");
@@ -144,12 +157,25 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   assert.deepEqual(riskFamily.actorClasses, ["licensee-admin", "platform-admin"]);
   assert.deepEqual(riskWorkflow.runtimeImplementedActorClasses, ["licensee-admin", "platform-admin"]);
   assert.deepEqual(riskWorkflow.runtimeBlockedActorClasses, []);
-  assert.equal(riskWorkflow.platformRuntimeStatus, "implemented-postgresql-pending");
+  assert.equal(riskWorkflow.platformRuntimeStatus, "application-path-certified");
   assert.deepEqual(riskWorkflow.platformRuntimeBlockers, []);
   assert.equal(riskWorkflow.platformReadScopeBoundaryId, "platform-read-scope-v1");
   assert.deepEqual(riskWorkflow.platformReadRequiredAssuranceByActorClass, { "licensee-admin": "password-verified", "platform-admin": "mfa-verified" });
   assert.deepEqual(riskWorkflow.platformReadPurposeCodes, ["tenant-risk-analytics"]);
-  assert.equal(riskWorkflow.postgresqlCertificationStatus, "pending");
+  assert.equal(riskWorkflow.currentCompatibilityStatus, "compatible");
+  assert.equal(riskWorkflow.implementationStatus, "complete");
+  assert.equal(riskWorkflow.postgresqlCertificationStatus, "certified");
+  assert.deepEqual(riskWorkflow.applicationPathCertificationEvidence, {
+    status: "application-path-certified",
+    postgresqlMajor: 18,
+    testFile: "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
+    harnessFile: "scripts/rls/certify-clean-room-database.mjs",
+    runtimeRole: "identity-authenticated-app",
+    positiveActors: ["licensee-admin", "platform-admin"],
+    deniedCases: ["blank-context", "foreign-scope", "forged-role", "stale-membership"],
+    atomicAttributionVerified: true,
+    exactColumnPrivilegesVerified: true,
+  });
   assert.equal(riskWorkflow.protectedQueryClient, "transaction-client-only");
   const riskUserRule = commandSemantics.rules.find((rule) => rule.tableId === "table-user" && rule.supportingWorkflowIds.includes(riskWorkflowId));
   assert(riskUserRule, "risk analytics User projection command rule");

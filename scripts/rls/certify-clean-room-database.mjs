@@ -41,6 +41,7 @@ const ids = {
 };
 const riskAnalyticsUserColumns = ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"];
 const prohibitedRiskAnalyticsUserColumns = ["createdAt", "disabledReason", "email", "emailVerifiedAt", "failedLoginAttempts", "lastLoginAt", "location", "lockedUntil", "metadata", "passwordHash", "pendingEmail", "pendingEmailRequestedAt", "updatedAt", "website"];
+const riskAnalyticsWorkflowId = "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics";
 let runCounter = 0;
 const activeDatabases = new Set();
 
@@ -111,6 +112,29 @@ const runPrisma = (migrationUrl, env) => {
     cwd: path.join(root, "backend"), env: { ...env, DATABASE_URL: migrationUrl, NODE_ENV: "test" }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
   });
   if (result.status !== 0) throw new Error(`Restricted migration identity failed Prisma deploy: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+};
+const runBackendBuild = (env) => {
+  const result = spawnSync("npm", ["run", "build"], {
+    cwd: path.join(root, "backend"), env: { ...env, NODE_ENV: "test" }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`Backend build failed before application-path certification: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+};
+const runRiskAnalyticsApplicationPath = (appUrl, env) => {
+  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js")], {
+    cwd: root,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      DATABASE_URL: appUrl,
+      MSCQR_RISK_ANALYTICS_POSTGRES18_TEST: "true",
+      MSCQR_RISK_ANALYTICS_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_RISK_ANALYTICS_POSTGRES18_TEST",
+    },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`Risk analytics application-path certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/application-path proof passed/.test(result.stdout || "")) throw new Error("Risk analytics application-path certification did not emit its success marker");
+  return { workflowId: riskAnalyticsWorkflowId, status: "application-path-certified", postgresqlMajor: 18 };
 };
 const injectBeforeCommit = (file, label) => {
   const source = fs.readFileSync(path.join(sqlRoot, file), "utf8");
@@ -595,8 +619,9 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     certifySemantics(urls.bootstrap, urls.app);
     const fixtureRows = Number(scalar(urls.bootstrap, "SELECT sum(row_count) FROM (SELECT (xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM public.%I',c.relname),false,true,'')))[1]::text::bigint AS row_count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_prisma_migrations') counts", "count disposable certification fixture rows"));
     if (!fixtureRows) throw new Error("Final semantic certification did not load its declared disposable fixtures");
+    const applicationPathResults = [runRiskAnalyticsApplicationPath(urls.app, env)];
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, catalogTamperResults, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -613,6 +638,7 @@ export const runCertification = (adminUrl, env = process.env) => {
   const parsed = assertSafeAdminUrl(adminUrl);
   try { verifyFullRlsPackage(); }
   catch (error) { throw new FullRlsCertificationSafetyError(`Generated package verification failed before database mutation: ${error instanceof Error ? error.message : String(error)}`); }
+  runBackendBuild(env);
   const maintenanceDatabase = decodeURIComponent(parsed.pathname.slice(1));
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   const execution = JSON.parse(fs.readFileSync(executionPath, "utf8"));
@@ -628,7 +654,7 @@ export const runCertification = (adminUrl, env = process.env) => {
   if (scalar(adminUrl, `SELECT count(*) FROM pg_roles WHERE rolname=${lit(certificationAdministrator)}`, "check certification administrator") !== "0") throw new FullRlsCertificationSafetyError("Certification administrator already exists; clean-room provenance is unknown");
 
   const result = {
-    schemaVersion: 10,
+    schemaVersion: 11,
     environment: "local-disposable-only",
     deploymentModel: "clean-room-blue-green",
     postgresqlMajor: 18,
@@ -640,6 +666,8 @@ export const runCertification = (adminUrl, env = process.env) => {
     columnPrivilegeCellsCertified: 0,
     workflowCertificationStatus: "pending-application-path-certification",
     workflowsApplicationPathCertified: 0,
+    applicationPathCertifiedWorkflowIds: [],
+    applicationPathResults: [],
     workflowsProductProhibited: 0,
     cleanRoomPreflightCertified: false,
     migrationsFromZeroCertified: false,
@@ -690,6 +718,9 @@ export const runCertification = (adminUrl, env = process.env) => {
 
     const finalRun = runSuccessfulCertification({ adminUrl, maintenanceDatabase, manifest, execution, policies, privileges, env, blueUrl, expectedBlueFingerprint });
     result.tablesCertified = finalRun.tablesCertified;
+    result.applicationPathResults = finalRun.applicationPathResults;
+    result.applicationPathCertifiedWorkflowIds = finalRun.applicationPathResults.map((entry) => entry.workflowId);
+    result.workflowsApplicationPathCertified = result.applicationPathCertifiedWorkflowIds.length;
     result.catalogTamperResults = finalRun.catalogTamperResults;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
     result.generatedPoliciesCertified = policies.count;

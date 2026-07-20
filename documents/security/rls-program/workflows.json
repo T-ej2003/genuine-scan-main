@@ -1223,6 +1223,21 @@
         },
         {
           "packageFile": "package.json",
+          "name": "rls:partition-check",
+          "command": "node scripts/rls/validate-workflow-session-partition.mjs && node --test scripts/tests/workflow-session-partition.test.mjs"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "rls:partition-generate",
+          "command": "node scripts/rls/generate-workflow-session-partition.mjs"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "rls:session-b-ownership-check",
+          "command": "node scripts/rls/check-session-b-file-ownership.mjs"
+        },
+        {
+          "packageFile": "package.json",
           "name": "security:release-gate",
           "command": "git diff --check && npm --prefix backend run build && node backend/tests/accessControlIsolation.test.js && node backend/tests/tenantIsolationExtended.test.js && node backend/tests/securityResponseSurface.test.js && node backend/tests/securityRouteSurface.test.js && node scripts/check-prisma-scope-guardrails.mjs && node --test scripts/tests/prisma-scope-guardrails.test.mjs && npm --prefix backend run test:trust-critical:compiled && npm run typecheck && npm run build && npm run lint:security-scope"
         },
@@ -16535,8 +16550,8 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-468f1ee7e3350f11",
-        "access-4bf783f4a557458c"
+        "access-1b0fee1261befe8f",
+        "access-c4139fe369225ff0"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -16549,16 +16564,16 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-468f1ee7e3350f11",
-          "source": "backend/src/services/analyticsService.ts:144",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "groupBy"
-        },
-        {
-          "accessId": "access-4bf783f4a557458c",
-          "source": "backend/src/services/analyticsService.ts:111",
+          "accessId": "access-1b0fee1261befe8f",
+          "source": "backend/src/services/analyticsService.ts:112",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
+        },
+        {
+          "accessId": "access-c4139fe369225ff0",
+          "source": "backend/src/services/analyticsService.ts:145",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "groupBy"
         }
       ],
       "contextRequirementsSource": "generated-conservative",
@@ -16706,26 +16721,27 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-08d90c7240f56c25",
-        "access-21b3fc04deec3ddd",
-        "access-28a77e9696dd1c39",
-        "access-2da865ba9c16e0e4",
-        "access-3e74be1b64e6f1f0",
-        "access-496e1c6a0c00b066",
-        "access-5431431ee00c1010",
-        "access-735858c7c8120821",
-        "access-73ec2e7794fa9dad",
-        "access-8574a3a7548790e6",
-        "access-8d799bd56015a0e0",
-        "access-a010bfb50a8ebcc5",
-        "access-a5e1fb98e9f32ae4",
-        "access-eec874f9c2017ae1",
-        "access-f30e32ab9d88f223"
+        "access-0e5c2efb8a495e45",
+        "access-2ec69d64fd8801b1",
+        "access-3f1a02e3c6f21ca6",
+        "access-60cad4c5c7b63111",
+        "access-68f712e6c8d315bd",
+        "access-733064980deb8ca4",
+        "access-8eb0dd364003a182",
+        "access-a86d375a612153e1",
+        "access-b492fc3e4189a27b",
+        "access-b8bdf83a9c777c88",
+        "access-bf5ed1b0fb0ff743",
+        "access-c5f8024e76de7e59",
+        "access-d081425ee3776c9c",
+        "access-d327e9a3d3477caf",
+        "access-eca3d85ff4081ad7"
       ],
-      "currentCompatibilityStatus": "tenant-and-platform-context-boundary-implemented-postgresql-certification-pending",
-      "implementationStatus": "context-boundary-implemented",
+      "currentCompatibilityStatus": "compatible",
+      "implementationStatus": "complete",
       "requiredUnitTests": [
-        "backend/tests/riskAnalyticsContext.test.js"
+        "backend/tests/riskAnalyticsContext.test.js",
+        "backend/tests/riskAnalyticsRouteChain.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
         "Exact role, context, command, cross-tenant denial, and empty-context denial."
@@ -16733,92 +16749,92 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-08d90c7240f56c25",
-          "source": "backend/src/services/analyticsService.ts:617",
+          "accessId": "access-0e5c2efb8a495e45",
+          "source": "backend/src/services/analyticsService.ts:585",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-21b3fc04deec3ddd",
-          "source": "backend/src/services/analyticsService.ts:611",
+          "accessId": "access-2ec69d64fd8801b1",
+          "source": "backend/src/services/analyticsService.ts:403",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "$executeRaw"
         },
         {
-          "accessId": "access-28a77e9696dd1c39",
-          "source": "backend/src/services/analyticsService.ts:592",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
-        },
-        {
-          "accessId": "access-2da865ba9c16e0e4",
-          "source": "backend/src/services/analyticsService.ts:525",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
-        },
-        {
-          "accessId": "access-3e74be1b64e6f1f0",
-          "source": "backend/src/services/analyticsService.ts:467",
+          "accessId": "access-3f1a02e3c6f21ca6",
+          "source": "backend/src/services/analyticsService.ts:459",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         },
         {
-          "accessId": "access-496e1c6a0c00b066",
-          "source": "backend/src/services/analyticsService.ts:460",
+          "accessId": "access-60cad4c5c7b63111",
+          "source": "backend/src/services/analyticsService.ts:524",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-68f712e6c8d315bd",
+          "source": "backend/src/services/analyticsService.ts:685",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-733064980deb8ca4",
+          "source": "backend/src/services/analyticsService.ts:367",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$queryRaw"
+        },
+        {
+          "accessId": "access-8eb0dd364003a182",
+          "source": "backend/src/services/analyticsService.ts:466",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         },
         {
-          "accessId": "access-5431431ee00c1010",
-          "source": "backend/src/services/analyticsService.ts:686",
+          "accessId": "access-a86d375a612153e1",
+          "source": "backend/src/services/analyticsService.ts:604",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-735858c7c8120821",
-          "source": "backend/src/services/analyticsService.ts:559",
+          "accessId": "access-b492fc3e4189a27b",
+          "source": "backend/src/services/analyticsService.ts:766",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-73ec2e7794fa9dad",
-          "source": "backend/src/services/analyticsService.ts:434",
+          "accessId": "access-b8bdf83a9c777c88",
+          "source": "backend/src/services/analyticsService.ts:616",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-bf5ed1b0fb0ff743",
+          "source": "backend/src/services/analyticsService.ts:433",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         },
         {
-          "accessId": "access-8574a3a7548790e6",
-          "source": "backend/src/services/analyticsService.ts:586",
+          "accessId": "access-c5f8024e76de7e59",
+          "source": "backend/src/services/analyticsService.ts:591",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-8d799bd56015a0e0",
-          "source": "backend/src/services/analyticsService.ts:605",
+          "accessId": "access-d081425ee3776c9c",
+          "source": "backend/src/services/analyticsService.ts:610",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-a010bfb50a8ebcc5",
-          "source": "backend/src/services/analyticsService.ts:366",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findUnique"
-        },
-        {
-          "accessId": "access-a5e1fb98e9f32ae4",
-          "source": "backend/src/services/analyticsService.ts:482",
+          "accessId": "access-d327e9a3d3477caf",
+          "source": "backend/src/services/analyticsService.ts:558",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-eec874f9c2017ae1",
-          "source": "backend/src/services/analyticsService.ts:383",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "create"
-        },
-        {
-          "accessId": "access-f30e32ab9d88f223",
-          "source": "backend/src/services/analyticsService.ts:767",
+          "accessId": "access-eca3d85ff4081ad7",
+          "source": "backend/src/services/analyticsService.ts:481",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         }
@@ -16861,7 +16877,9 @@
         "backend/src/routes/index.ts"
       ],
       "testFiles": [
-        "backend/tests/riskAnalyticsContext.test.js"
+        "backend/tests/riskAnalyticsContext.test.js",
+        "backend/tests/riskAnalyticsRouteChain.test.js",
+        "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -16878,7 +16896,7 @@
       "consistentReadScopeGuarantee": true,
       "routeRootVerified": true,
       "aggregateScopeStatus": "tenant-bounded",
-      "postgresqlCertificationStatus": "pending",
+      "postgresqlCertificationStatus": "certified",
       "contextBoundaryPlanningEvidence": {
         "reviewedAt": "2026-07-16",
         "registeredRootCallChainVerified": true,
@@ -17117,8 +17135,27 @@
         "platform-admin"
       ],
       "runtimeBlockedActorClasses": [],
-      "platformRuntimeStatus": "implemented-postgresql-pending",
-      "platformRuntimeBlockers": []
+      "platformRuntimeStatus": "application-path-certified",
+      "platformRuntimeBlockers": [],
+      "applicationPathCertificationEvidence": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "foreign-scope",
+          "forged-role",
+          "stale-membership"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox",

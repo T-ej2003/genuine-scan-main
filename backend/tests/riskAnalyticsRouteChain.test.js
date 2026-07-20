@@ -65,7 +65,13 @@ let databaseLinks = [];
 let transactionCount = 0;
 const events = [];
 const authTx = {
-  $executeRaw: async () => { events.push(transactionCount === 1 ? "actor-self-context" : "risk-context"); return 1; },
+  $executeRaw: async (strings) => {
+    events.push(/INSERT INTO public\."AuditLog"/.test(strings.join("?"))
+      ? "audit"
+      : transactionCount === 1 ? "actor-self-context" : "risk-context");
+    return 1;
+  },
+  $queryRaw: async () => { events.push("policy"); return []; },
   user: { findUnique: async () => { events.push("actor-self-user"); return databaseUser; } },
   manufacturerLicenseeLink: { findMany: async () => { events.push("actor-membership"); return databaseLinks; } },
   licensee: {
@@ -80,11 +86,9 @@ const authTx = {
       return { id: ids.organization, isActive: true };
     },
   },
-  securityPolicy: { findUnique: async () => { events.push("policy"); return null; } },
   qrScanLog: { findMany: async () => { events.push("scan"); return []; } },
   policyAlert: { findMany: async () => { events.push("alert"); return []; } },
   batch: { findMany: async () => { events.push("batch"); return []; } },
-  auditLog: { create: async () => { events.push("audit"); return { id: "audit-risk" }; } },
 };
 const database = {
   $transaction: async (callback) => {

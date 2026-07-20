@@ -437,7 +437,16 @@ export const validateContextBoundaryPlan = (manifest, workflowManifest, commandM
         const workflow = workflowManifest.workflows.find((item) => item.id === workflowId);
         assert.equal(workflow.contextBoundaryStatus, "implemented", `${workflowId} is falsely implemented`);
         assert.equal(workflow.implementationFamilyId, family.id, `${workflowId} lacks its implementation family`);
-        assert.equal(workflow.postgresqlCertificationStatus, "pending", `${workflowId} is falsely PostgreSQL-certified`);
+        if (workflow.postgresqlCertificationStatus === "certified") {
+          const evidence = workflow.applicationPathCertificationEvidence;
+          assert.equal(evidence?.status, "application-path-certified", `${workflowId} is falsely PostgreSQL-certified`);
+          assert.equal(evidence?.postgresqlMajor, 18, `${workflowId} is falsely PostgreSQL-certified`);
+          assert(workflow.testFiles.includes(evidence?.testFile), `${workflowId} is falsely PostgreSQL-certified`);
+          assert.equal(evidence?.atomicAttributionVerified, true, `${workflowId} is falsely PostgreSQL-certified`);
+          assert.equal(evidence?.exactColumnPrivilegesVerified, true, `${workflowId} is falsely PostgreSQL-certified`);
+        } else {
+          assert.equal(workflow.postgresqlCertificationStatus, "pending", `${workflowId} has invalid PostgreSQL certification status`);
+        }
       }
     }
     if (family.automationEligibility === "auto-implementable") {
