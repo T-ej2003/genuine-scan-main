@@ -4004,12 +4004,12 @@
     {
       "workflowId": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-upsert-manufacturer-licensee-link",
       "sessionId": "session-a",
-      "waveId": "a-01-tenant-manufacturer-platform-reads",
-      "assignmentRuleId": "a01-tenant-read-service-root",
+      "waveId": "a-02-tenant-platform-administration",
+      "assignmentRuleId": "a02-manufacturer-link-mutation-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:upsertManufacturerLicenseeLink",
       "executionSurface": "internal",
-      "contract": "Database-revalidated tenant, manufacturer and bounded platform reads, including dashboards and analytics; filters only narrow trusted scope.",
+      "contract": "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
       "canonicalSourceFiles": [
         "backend/src/services/manufacturerScopeService.ts"
       ]
@@ -5809,8 +5809,8 @@
       "session-b": 144
     },
     "waveCounts": {
-      "a-01-tenant-manufacturer-platform-reads": 15,
-      "a-02-tenant-platform-administration": 7,
+      "a-01-tenant-manufacturer-platform-reads": 14,
+      "a-02-tenant-platform-administration": 8,
       "a-03-batch-qr-lifecycle": 46,
       "a-04-printing-reissue-recovery-release": 111,
       "a-05-audit-fraud-trace-alerts": 17,
