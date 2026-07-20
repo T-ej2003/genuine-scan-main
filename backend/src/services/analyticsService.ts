@@ -1,5 +1,9 @@
-import { SecurityPolicy } from "@prisma/client";
+import { Prisma, SecurityPolicy, UserRole, UserStatus } from "@prisma/client";
 import prisma from "../config/database";
+import { CanonicalDbContext } from "../lib/canonicalDbContext";
+import { AuthenticatedSessionClaims } from "../types";
+import { getAdminStepUpWindowMinutes } from "./auth/authService";
+import { MANUFACTURER_ROLES, isLicenseeAdminRole, isPlatformRole } from "./manufacturerScopeService";
 import { getOrCreateSecurityPolicy } from "./policyEngineService";
 import { getBatchScanHistoryFallback } from "./scanLogReportingService";
 
@@ -277,32 +281,383 @@ export type RiskAnalytics = {
   manufacturerRisk: ManufacturerRiskRow[];
 };
 
-export const getRiskAnalytics = async (opts: {
-  licenseeId?: string;
-  lookbackHours?: number;
-  limit?: number;
-}): Promise<RiskAnalytics> => {
-  const limit = Math.max(1, Math.min(opts.limit ?? 20, 200));
-  const lookbackHours = Math.max(1, Math.min(opts.lookbackHours ?? 24, 24 * 30));
-  const policy = await loadPolicyForScope(opts.licenseeId);
-  const since = new Date(Date.now() - lookbackHours * 3_600_000);
+export type RiskAnalyticsQuery = {
+  licenseeId: string;
+  lookbackHours: number;
+  limit: number;
+};
 
-  const whereBatch: any = {};
-  if (opts.licenseeId) whereBatch.licenseeId = opts.licenseeId;
+export class RiskAnalyticsAccessError extends Error {
+  constructor(message: string, readonly statusCode = 403) {
+    super(message);
+  }
+}
 
-  const batches = await prisma.batch.findMany({
-    where: whereBatch,
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const riskAnalyticsPurpose = "tenant-risk-analytics";
+const riskAnalyticsWorkflowId = "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics";
+const riskAnalyticsRoute = "GET /api/analytics/risk-scores";
+export const RISK_ANALYTICS_MAX_CANDIDATE_BATCHES = 5_000;
+export const RISK_ANALYTICS_MAX_DIMENSION_ROWS = 50_000;
+export const RISK_ANALYTICS_MAX_OPEN_ALERT_ROWS = 50_000;
+
+export const buildRiskAnalyticsBoundary = (
+  user: AuthenticatedSessionClaims,
+  input: { requestedLicenseeId?: string; lookbackHours: number; limit: number },
+  requestId: string
+) => {
+  const userId = String(user?.userId || "").trim();
+  const normalizedRequestId = String(requestId || "").trim();
+  if (!userId || !normalizedRequestId || user?.sessionStage !== "ACTIVE") {
+    throw new RiskAnalyticsAccessError("Authenticated actor context is required", 401);
+  }
+  const requestedLicenseeId = String(input.requestedLicenseeId || "").trim();
+  if (!Number.isInteger(input.lookbackHours) || input.lookbackHours < 1 || input.lookbackHours > 24 * 30) {
+    throw new RiskAnalyticsAccessError("Risk analytics date window is out of bounds", 400);
+  }
+  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 200) {
+    throw new RiskAnalyticsAccessError("Risk analytics page size is out of bounds", 400);
+  }
+
+  const platformActor = isPlatformRole(user.role);
+  if (!platformActor && !isLicenseeAdminRole(user.role)) {
+    throw new RiskAnalyticsAccessError("Risk analytics actor is not authorized");
+  }
+  if (platformActor) {
+    if (user.licenseeId !== null || user.orgId !== null) {
+      throw new RiskAnalyticsAccessError("Platform actor tenant scope must be empty");
+    }
+    const mfaVerifiedAt = Date.parse(String(user.mfaVerifiedAt || ""));
+    if (
+      user.authAssurance !== "ADMIN_MFA" ||
+      !Number.isFinite(mfaVerifiedAt) ||
+      Date.now() - mfaVerifiedAt > getAdminStepUpWindowMinutes() * 60_000
+    ) {
+      throw new RiskAnalyticsAccessError("Fresh administrator MFA is required");
+    }
+  } else if (!["PASSWORD", "ADMIN_MFA"].includes(user.authAssurance)) {
+    throw new RiskAnalyticsAccessError("Risk analytics assurance is insufficient");
+  }
+  const licenseeId = platformActor ? requestedLicenseeId : String(user.licenseeId || "").trim();
+  const organizationId = platformActor ? "" : String(user.orgId || "").trim();
+  if (!uuid.test(licenseeId) || (!platformActor && !uuid.test(organizationId))) {
+    throw new RiskAnalyticsAccessError("A valid tenant scope is required");
+  }
+  if (!platformActor && requestedLicenseeId && (!uuid.test(requestedLicenseeId) || requestedLicenseeId !== licenseeId)) {
+    throw new RiskAnalyticsAccessError("Requested scope does not match the authenticated tenant");
+  }
+
+  return {
+    context: {
+      userId,
+      role: String(user.role),
+      organizationId: organizationId || null,
+      licenseeId,
+      manufacturerId: null,
+      authAssurance: platformActor || user.authAssurance === "ADMIN_MFA" ? "mfa-verified" : "password-verified",
+      requestId: normalizedRequestId,
+      purpose: riskAnalyticsPurpose,
+    } satisfies CanonicalDbContext,
+    query: { licenseeId, lookbackHours: input.lookbackHours, limit: input.limit } satisfies RiskAnalyticsQuery,
+  };
+};
+
+const loadRiskPolicy = async (tx: Prisma.TransactionClient, licenseeId: string) => {
+  const policy = await tx.securityPolicy.findUnique({
+    where: { licenseeId },
+    select: {
+      multiScanThreshold: true,
+      geoDriftThresholdKm: true,
+      velocitySpikeThresholdPerMin: true,
+    },
+  });
+  return policy || defaultPolicy;
+};
+
+const recordRiskAnalyticsRead = (
+  tx: Prisma.TransactionClient,
+  context: CanonicalDbContext,
+  query: RiskAnalyticsQuery,
+  result: { analyzedBatches: number; returnedBatches: number; analyzedManufacturers: number },
+  timestamp: Date
+) => tx.auditLog.create({
+  data: {
+    userId: context.userId,
+    orgId: context.organizationId,
+    licenseeId: context.licenseeId,
+    action: "RISK_ANALYTICS_READ",
+    entityType: "Licensee",
+    entityId: context.licenseeId,
+    details: {
+      actorId: context.userId,
+      role: context.role,
+      assurance: context.authAssurance,
+      requestId: context.requestId,
+      purposeCode: context.purpose,
+      organizationId: context.organizationId,
+      licenseeId: context.licenseeId,
+      workflowId: riskAnalyticsWorkflowId,
+      route: riskAnalyticsRoute,
+      outcome: "SUCCESS",
+      lookbackHours: query.lookbackHours,
+      limit: query.limit,
+      analyzedBatchCount: result.analyzedBatches,
+      returnedBatchCount: result.returnedBatches,
+      analyzedManufacturerCount: result.analyzedManufacturers,
+      timestamp: timestamp.toISOString(),
+    },
+  },
+  select: { id: true },
+});
+
+export const getRiskAnalytics = async (
+  tx: Prisma.TransactionClient,
+  query: RiskAnalyticsQuery,
+  context: CanonicalDbContext,
+  now = new Date()
+): Promise<RiskAnalytics> => {
+  const tenantActor = isLicenseeAdminRole(context.role as UserRole);
+  const platformActor = isPlatformRole(context.role as UserRole);
+  if (!uuid.test(query.licenseeId) || context.purpose !== riskAnalyticsPurpose) {
+    throw new RiskAnalyticsAccessError("Risk analytics scope does not match canonical context");
+  }
+  if (!tenantActor && !platformActor) {
+    throw new RiskAnalyticsAccessError("Risk analytics actor ceiling is invalid");
+  }
+  if (query.licenseeId !== context.licenseeId || tenantActor && !context.organizationId) {
+    throw new RiskAnalyticsAccessError("Risk analytics scope does not match canonical context");
+  }
+  if (platformActor ? context.authAssurance !== "mfa-verified" : !["password-verified", "mfa-verified"].includes(context.authAssurance)) {
+    throw new RiskAnalyticsAccessError("Risk analytics assurance is insufficient");
+  }
+
+  const actor = await tx.user.findUnique({
+    where: { id: context.userId },
+    select: {
+      id: true,
+      role: true,
+      licenseeId: true,
+      orgId: true,
+      isActive: true,
+      status: true,
+      deletedAt: true,
+      disabledAt: true,
+    },
+  });
+  if (
+    !actor ||
+    actor.role !== context.role ||
+    !actor.isActive ||
+    actor.status !== UserStatus.ACTIVE ||
+    actor.deletedAt !== null ||
+    actor.disabledAt !== null ||
+    tenantActor && (actor.licenseeId !== query.licenseeId || actor.orgId !== context.organizationId) ||
+    platformActor && (actor.licenseeId !== null || actor.orgId !== null)
+  ) {
+    throw new RiskAnalyticsAccessError("Risk analytics actor or tenant authority is stale or inconsistent");
+  }
+
+  const tenant = await tx.licensee.findUnique({
+    where: { id: query.licenseeId },
+    select: { id: true, orgId: true, isActive: true, suspendedAt: true },
+  });
+  if (!tenant?.isActive || tenant.id !== query.licenseeId || tenant.suspendedAt || tenantActor && tenant.orgId !== context.organizationId) {
+    throw new RiskAnalyticsAccessError("Tenant scope is inactive or inconsistent");
+  }
+  const organization = await tx.organization.findUnique({
+    where: { id: tenant.orgId },
+    select: { id: true, isActive: true },
+  });
+  if (!organization?.isActive || organization.id !== tenant.orgId) {
+    throw new RiskAnalyticsAccessError("Tenant scope is inactive or inconsistent");
+  }
+
+  const scopedContext = platformActor ? { ...context, organizationId: tenant.orgId } : context;
+
+  const limit = query.limit;
+  const lookbackHours = query.lookbackHours;
+  const policy = await loadRiskPolicy(tx, scopedContext.licenseeId!);
+  const since = new Date(now.getTime() - lookbackHours * 3_600_000);
+
+  const scanLogs = await tx.qrScanLog.findMany({
+    where: {
+      licenseeId: scopedContext.licenseeId!,
+      batchId: { not: null },
+      scannedAt: { gte: since, lte: now },
+    },
+    orderBy: [{ batchId: "asc" }, { qrCodeId: "asc" }, { scannedAt: "asc" }, { id: "asc" }],
+    take: RISK_ANALYTICS_MAX_DIMENSION_ROWS + 1,
+    select: {
+      id: true,
+      licenseeId: true,
+      qrCodeId: true,
+      batchId: true,
+      latitude: true,
+      longitude: true,
+      scannedAt: true,
+      qrCode: { select: { id: true, licenseeId: true, batchId: true } },
+      batch: { select: { id: true, licenseeId: true } },
+    },
+  });
+  const scopedScanLogs = scanLogs.filter((row): row is typeof row & { batchId: string } => row.batchId !== null);
+  const qrParents = new Map<string, string>();
+  for (const row of scopedScanLogs) {
+    const previousBatchId = qrParents.get(row.qrCodeId);
+    if (
+      row.licenseeId !== scopedContext.licenseeId ||
+      !row.qrCode ||
+      row.qrCode.id !== row.qrCodeId ||
+      row.qrCode.licenseeId !== scopedContext.licenseeId ||
+      row.qrCode.batchId !== row.batchId ||
+      !row.batch ||
+      row.batch.id !== row.batchId ||
+      row.batch.licenseeId !== scopedContext.licenseeId ||
+      (previousBatchId !== undefined && previousBatchId !== row.batchId)
+    ) {
+      throw new RiskAnalyticsAccessError("Risk analytics scan parentage is missing, foreign, or inconsistent", 422);
+    }
+    qrParents.set(row.qrCodeId, row.batchId);
+  }
+  if (scanLogs.length > RISK_ANALYTICS_MAX_DIMENSION_ROWS) {
+    throw new RiskAnalyticsAccessError("Risk analytics scan dimension exceeds its bounded limit", 422);
+  }
+
+  const openAlertRows = await tx.policyAlert.findMany({
+    where: {
+      licenseeId: scopedContext.licenseeId!,
+      batchId: { not: null },
+      acknowledgedAt: null,
+    },
+    orderBy: [{ batchId: "asc" }, { id: "asc" }],
+    take: RISK_ANALYTICS_MAX_OPEN_ALERT_ROWS + 1,
+    select: {
+      id: true,
+      licenseeId: true,
+      batchId: true,
+      qrCodeId: true,
+      manufacturerId: true,
+      incidentId: true,
+      policyRuleId: true,
+      acknowledgedAt: true,
+    },
+  });
+  const scopedOpenAlertRows = openAlertRows.filter((row): row is typeof row & { batchId: string } => row.batchId !== null);
+  if (scopedOpenAlertRows.some((row) => row.licenseeId !== scopedContext.licenseeId)) {
+    throw new RiskAnalyticsAccessError("Risk analytics alert parentage is missing, foreign, or inconsistent", 422);
+  }
+  if (openAlertRows.length > RISK_ANALYTICS_MAX_OPEN_ALERT_ROWS) {
+    throw new RiskAnalyticsAccessError("Risk analytics open-alert set exceeds its bounded limit", 422);
+  }
+
+  const referencedBatchIds = [...new Set([
+    ...scopedScanLogs.map((row) => row.batchId),
+    ...scopedOpenAlertRows.map((row) => row.batchId),
+  ].filter((id): id is string => Boolean(id)))].sort();
+  if (referencedBatchIds.length > RISK_ANALYTICS_MAX_CANDIDATE_BATCHES) {
+    throw new RiskAnalyticsAccessError("Risk analytics candidate batch set exceeds its bounded limit", 422);
+  }
+  const batches = await tx.batch.findMany({
+    where: { licenseeId: scopedContext.licenseeId! },
+    orderBy: { id: "asc" },
+    take: RISK_ANALYTICS_MAX_CANDIDATE_BATCHES + 1,
     select: {
       id: true,
       name: true,
       licenseeId: true,
       manufacturerId: true,
-      manufacturer: { select: { id: true, name: true } },
     },
   });
+  const loadedBatchIds = new Set(batches.map((batch) => batch.id));
+  if (batches.length > RISK_ANALYTICS_MAX_CANDIDATE_BATCHES) {
+    throw new RiskAnalyticsAccessError("Risk analytics candidate batch set exceeds its bounded limit", 422);
+  }
+  if (
+    loadedBatchIds.size !== batches.length ||
+    batches.some((batch) => batch.licenseeId !== scopedContext.licenseeId) ||
+    referencedBatchIds.some((id) => !loadedBatchIds.has(id))
+  ) {
+    throw new RiskAnalyticsAccessError("Risk analytics candidate parentage is missing, foreign, or inconsistent", 422);
+  }
+
+  const alertQrIds = [...new Set(scopedOpenAlertRows.map((row) => row.qrCodeId).filter((id): id is string => Boolean(id)))].sort();
+  const alertManufacturerIds = [...new Set(scopedOpenAlertRows.map((row) => row.manufacturerId).filter((id): id is string => Boolean(id)))].sort();
+  const alertIncidentIds = [...new Set(scopedOpenAlertRows.map((row) => row.incidentId).filter((id): id is string => Boolean(id)))].sort();
+  const alertPolicyRuleIds = [...new Set(scopedOpenAlertRows.map((row) => row.policyRuleId).filter((id): id is string => Boolean(id)))].sort();
+  const alertQrs = alertQrIds.length ? await tx.qRCode.findMany({
+    where: { id: { in: alertQrIds } },
+    orderBy: { id: "asc" },
+    take: alertQrIds.length + 1,
+    select: { id: true, licenseeId: true, batchId: true },
+  }) : [];
+  const alertManufacturers = alertManufacturerIds.length ? await tx.user.findMany({
+    where: {
+      id: { in: alertManufacturerIds },
+      role: { in: MANUFACTURER_ROLES },
+      isActive: true,
+      status: UserStatus.ACTIVE,
+      deletedAt: null,
+      disabledAt: null,
+    },
+    orderBy: { id: "asc" },
+    take: alertManufacturerIds.length + 1,
+    select: { id: true },
+  }) : [];
+  const alertManufacturerLinks = alertManufacturerIds.length ? await tx.manufacturerLicenseeLink.findMany({
+    where: { manufacturerId: { in: alertManufacturerIds }, licenseeId: scopedContext.licenseeId! },
+    orderBy: [{ manufacturerId: "asc" }, { licenseeId: "asc" }],
+    take: alertManufacturerIds.length + 1,
+    select: { manufacturerId: true, licenseeId: true },
+  }) : [];
+  const alertIncidents = alertIncidentIds.length ? await tx.incident.findMany({
+    where: { id: { in: alertIncidentIds } },
+    orderBy: { id: "asc" },
+    take: alertIncidentIds.length + 1,
+    select: { id: true, licenseeId: true },
+  }) : [];
+  const alertPolicyRules = alertPolicyRuleIds.length ? await tx.policyRule.findMany({
+    where: { id: { in: alertPolicyRuleIds } },
+    orderBy: { id: "asc" },
+    take: alertPolicyRuleIds.length + 1,
+    select: { id: true, licenseeId: true, orgId: true, manufacturerId: true, isActive: true },
+  }) : [];
+  const alertQrMap = new Map(alertQrs.map((row) => [row.id, row]));
+  const alertManufacturerSet = new Set(alertManufacturers.map((row) => row.id));
+  const alertManufacturerLinkSet = new Set(alertManufacturerLinks.map((row) => row.manufacturerId));
+  const alertIncidentMap = new Map(alertIncidents.map((row) => [row.id, row]));
+  const alertPolicyRuleMap = new Map(alertPolicyRules.map((row) => [row.id, row]));
+  if (
+    alertQrs.length !== alertQrMap.size || alertQrMap.size !== alertQrIds.length ||
+    alertManufacturers.length !== alertManufacturerSet.size || alertManufacturerSet.size !== alertManufacturerIds.length ||
+    alertManufacturerLinks.length !== alertManufacturerLinkSet.size || alertManufacturerLinkSet.size !== alertManufacturerIds.length ||
+    alertIncidents.length !== alertIncidentMap.size || alertIncidentMap.size !== alertIncidentIds.length ||
+    alertPolicyRules.length !== alertPolicyRuleMap.size || alertPolicyRuleMap.size !== alertPolicyRuleIds.length
+  ) {
+    throw new RiskAnalyticsAccessError("Risk analytics alert parentage is missing, foreign, inactive, or inconsistent", 422);
+  }
+  const batchMap = new Map(batches.map((row) => [row.id, row]));
+  for (const alert of scopedOpenAlertRows) {
+    const batch = batchMap.get(alert.batchId);
+    const qr = alert.qrCodeId ? alertQrMap.get(alert.qrCodeId) : null;
+    const incident = alert.incidentId ? alertIncidentMap.get(alert.incidentId) : null;
+    const rule = alert.policyRuleId ? alertPolicyRuleMap.get(alert.policyRuleId) : null;
+    if (
+      !batch || batch.licenseeId !== scopedContext.licenseeId ||
+      (alert.qrCodeId && (!qr || qr.licenseeId !== scopedContext.licenseeId || qr.batchId !== alert.batchId)) ||
+      (alert.manufacturerId && (!alertManufacturerSet.has(alert.manufacturerId) || !alertManufacturerLinkSet.has(alert.manufacturerId) || batch.manufacturerId !== alert.manufacturerId)) ||
+      (alert.incidentId && (!incident || incident.licenseeId !== scopedContext.licenseeId)) ||
+      (alert.policyRuleId && (!rule ||
+        !rule.isActive ||
+        (rule.licenseeId !== null && rule.licenseeId !== scopedContext.licenseeId) ||
+        (rule.orgId !== null && rule.orgId !== scopedContext.organizationId) ||
+        (rule.manufacturerId !== null && rule.manufacturerId !== alert.manufacturerId) ||
+        (rule.licenseeId === null && rule.orgId === null && rule.manufacturerId === null)))
+    ) {
+      throw new RiskAnalyticsAccessError("Risk analytics alert parentage is missing, foreign, inactive, or inconsistent", 422);
+    }
+  }
 
   if (!batches.length) {
-    return {
+    const result = {
       policy: {
         multiScanThreshold: policy.multiScanThreshold,
         geoDriftThresholdKm: policy.geoDriftThresholdKm,
@@ -318,14 +673,25 @@ export const getRiskAnalytics = async (opts: {
       batchRisk: [],
       manufacturerRisk: [],
     };
+    await recordRiskAnalyticsRead(tx, scopedContext, query, {
+      analyzedBatches: 0,
+      returnedBatches: 0,
+      analyzedManufacturers: 0,
+    }, now);
+    return result;
   }
 
   const batchIds = batches.map((b) => b.id);
 
-  const qrRows = await prisma.qRCode.findMany({
-    where: { batchId: { in: batchIds } },
-    select: { id: true, batchId: true, scanCount: true },
+  const qrRows = await tx.qRCode.findMany({
+    where: { licenseeId: scopedContext.licenseeId!, batchId: { in: batchIds } },
+    orderBy: [{ batchId: "asc" }, { id: "asc" }],
+    take: RISK_ANALYTICS_MAX_DIMENSION_ROWS + 1,
+    select: { batchId: true, scanCount: true },
   });
+  if (qrRows.length > RISK_ANALYTICS_MAX_DIMENSION_ROWS) {
+    throw new RiskAnalyticsAccessError("Risk analytics QR dimension exceeds its bounded limit", 422);
+  }
 
   const multiScanByBatch = new Map<string, number>();
   for (const qr of qrRows) {
@@ -334,23 +700,6 @@ export const getRiskAnalytics = async (opts: {
       multiScanByBatch.set(qr.batchId, (multiScanByBatch.get(qr.batchId) || 0) + 1);
     }
   }
-
-  const geoLogs = await prisma.qrScanLog.findMany({
-    where: {
-      batchId: { in: batchIds },
-      scannedAt: { gte: since },
-      latitude: { not: null },
-      longitude: { not: null },
-    },
-    orderBy: [{ qrCodeId: "asc" }, { scannedAt: "asc" }],
-    select: {
-      qrCodeId: true,
-      batchId: true,
-      latitude: true,
-      longitude: true,
-      scannedAt: true,
-    },
-  });
 
   const geoByQr = new Map<
     string,
@@ -363,8 +712,8 @@ export const getRiskAnalytics = async (opts: {
     }
   >();
 
-  for (const log of geoLogs) {
-    if (!log.batchId || log.latitude == null || log.longitude == null) continue;
+  for (const log of scopedScanLogs) {
+    if (log.latitude == null || log.longitude == null) continue;
     const existing = geoByQr.get(log.qrCodeId);
     if (!existing) {
       geoByQr.set(log.qrCodeId, {
@@ -388,17 +737,8 @@ export const getRiskAnalytics = async (opts: {
     }
   }
 
-  const velocityLogs = await prisma.qrScanLog.findMany({
-    where: {
-      batchId: { in: batchIds },
-      scannedAt: { gte: since },
-    },
-    select: { batchId: true, scannedAt: true },
-  });
-
   const minuteBucketCounts = new Map<string, number>();
-  for (const log of velocityLogs) {
-    if (!log.batchId) continue;
+  for (const log of scopedScanLogs) {
     const d = new Date(log.scannedAt);
     const minute = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(
       d.getUTCDate()
@@ -417,20 +757,23 @@ export const getRiskAnalytics = async (opts: {
     velocityByBatch.set(batchId, (velocityByBatch.get(batchId) || 0) + 1);
   }
 
-  const openAlertGrouped = await prisma.policyAlert.groupBy({
-    by: ["batchId"],
-    where: {
-      batchId: { in: batchIds },
-      acknowledgedAt: null,
-    },
-    _count: { _all: true },
-  });
-
   const openAlertsByBatch = new Map<string, number>();
-  for (const row of openAlertGrouped) {
-    if (!row.batchId) continue;
-    openAlertsByBatch.set(row.batchId, row._count._all || 0);
+  for (const row of scopedOpenAlertRows) {
+    openAlertsByBatch.set(row.batchId, (openAlertsByBatch.get(row.batchId) || 0) + 1);
   }
+
+  const manufacturerIds = [...new Set(batches.map((batch) => batch.manufacturerId).filter((id): id is string => Boolean(id)))];
+  const manufacturers = manufacturerIds.length
+    ? await tx.user.findMany({
+        where: {
+          id: { in: manufacturerIds },
+          assignedBatches: { some: { id: { in: batchIds }, licenseeId: scopedContext.licenseeId! } },
+        },
+        orderBy: { id: "asc" },
+        select: { id: true, name: true },
+      })
+    : [];
+  const manufacturerNames = new Map(manufacturers.map((manufacturer) => [manufacturer.id, manufacturer.name]));
 
   const batchRiskAll: BatchRiskRow[] = batches.map((batch) => {
     const multi = multiScanByBatch.get(batch.id) || 0;
@@ -443,7 +786,7 @@ export const getRiskAnalytics = async (opts: {
       name: batch.name,
       licenseeId: batch.licenseeId,
       manufacturerId: batch.manufacturerId || null,
-      manufacturerName: batch.manufacturer?.name || null,
+      manufacturerName: batch.manufacturerId ? manufacturerNames.get(batch.manufacturerId) || null : null,
       score,
       riskLevel: scoreToLevel(score),
       multiScanAnomalies: multi,
@@ -511,10 +854,10 @@ export const getRiskAnalytics = async (opts: {
     };
   });
 
-  const sortedBatchRisk = [...batchRiskAll].sort((a, b) => b.score - a.score);
-  const sortedManufacturerRisk = [...manufacturerRiskAll].sort((a, b) => b.score - a.score);
+  const sortedBatchRisk = [...batchRiskAll].sort((a, b) => b.score - a.score || a.batchId.localeCompare(b.batchId));
+  const sortedManufacturerRisk = [...manufacturerRiskAll].sort((a, b) => b.score - a.score || a.manufacturerId.localeCompare(b.manufacturerId));
 
-  return {
+  const result = {
     policy: {
       multiScanThreshold: policy.multiScanThreshold,
       geoDriftThresholdKm: policy.geoDriftThresholdKm,
@@ -530,4 +873,10 @@ export const getRiskAnalytics = async (opts: {
     batchRisk: sortedBatchRisk.slice(0, limit),
     manufacturerRisk: sortedManufacturerRisk.slice(0, limit),
   };
+  await recordRiskAnalyticsRead(tx, scopedContext, query, {
+    analyzedBatches: result.summary.analyzedBatches,
+    returnedBatches: result.batchRisk.length,
+    analyzedManufacturers: result.summary.analyzedManufacturers,
+  }, now);
+  return result;
 };

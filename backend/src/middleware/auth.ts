@@ -4,7 +4,12 @@ import { AuthenticatedSessionClaims, JWTPayload } from "../types";
 import { UserRole } from "@prisma/client";
 import { ACCESS_TOKEN_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
 import { openCookieToken } from "../services/auth/cookieTokenProtectionService";
-import { isManufacturerRole, listManufacturerLinkedLicenseeIds } from "../services/manufacturerScopeService";
+import {
+  isLicenseeAdminRole,
+  isManufacturerRole,
+  isPlatformRole,
+  resolveManufacturerSessionScope,
+} from "../services/manufacturerScopeService";
 import { isDisabledUserRecord } from "../services/accessControlService";
 import { readCookie } from "../utils/cookies";
 // rls-prototype-approved-import: verified signed claims establish hydration context.
@@ -15,6 +20,7 @@ import {
   getSensitiveActionStepUpMethod,
   isAdminMfaRequiredRole,
 } from "../services/auth/authService";
+import { getAdminMfaStatus } from "../services/auth/mfaService";
 
 export interface AuthRequest extends Request {
   user?: AuthenticatedSessionClaims;
@@ -32,17 +38,17 @@ const getCookieAccessToken = (req: Request) => {
   return token ? openCookieToken(token, "auth.access") : null;
 };
 
-async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promise<AuthenticatedSessionClaims> {
+export async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promise<AuthenticatedSessionClaims> {
   if (!payload?.userId || !payload?.role) return payload;
 
-  const { user: u, linkedLicenseeIds } = await withRlsPrototypeTransaction(
+  const { user: u, manufacturerScope, currentMfaEnabled } = await withRlsPrototypeTransaction(
     prisma,
     {
       userId: payload.userId,
       role: payload.role,
-      licenseeId: payload.licenseeId,
+      licenseeId: isManufacturerRole(payload.role) ? null : payload.licenseeId,
       manufacturerId: isManufacturerRole(payload.role) ? payload.userId : null,
-      organizationId: payload.orgId,
+      organizationId: isManufacturerRole(payload.role) ? null : payload.orgId,
       // Hydration only needs actor-self visibility. Never elevate from a stale claim.
       isPlatformAdmin: false,
     },
@@ -61,31 +67,80 @@ async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promi
           disabledAt: true,
         },
       });
-      const linkedIds = user && isManufacturerRole(user.role)
-        ? await listManufacturerLinkedLicenseeIds(payload.userId, tx).catch(() => [])
-        : [];
-      return { user, linkedLicenseeIds: linkedIds };
+      if (user && user.role !== payload.role) {
+        throw new Error("Account role changed");
+      }
+      const scope = user && isManufacturerRole(user.role)
+        ? await resolveManufacturerSessionScope({
+            manufacturerId: user.id,
+            legacyLicenseeId: user.licenseeId,
+            legacyOrgId: user.orgId,
+            requestedLicenseeId: payload.licenseeId,
+            requestedOrgId: payload.orgId,
+            requestedScopeVersion: payload.scopeVersion,
+          }, tx)
+        : null;
+      const mfaStatus = user && payload.sessionStage === "ACTIVE" && payload.authAssurance === "ADMIN_MFA" && isAdminMfaRequiredRole(user.role)
+        ? await getAdminMfaStatus(user.id, tx)
+        : null;
+      return { user, manufacturerScope: scope, currentMfaEnabled: mfaStatus ? Boolean(mfaStatus.enabled) : null };
     }
   );
 
   if (!u || isDisabledUserRecord(u)) {
     throw new Error("Account is disabled");
   }
+  if (payload.sessionStage === "ACTIVE" && payload.authAssurance === "ADMIN_MFA" && isAdminMfaRequiredRole(u.role) && !currentMfaEnabled) {
+    throw new Error("Account MFA state changed");
+  }
 
-  const effectiveRole = u.role || payload.role;
-  const effectiveLinkedLicenseeIds = isManufacturerRole(effectiveRole)
-    ? linkedLicenseeIds
-    : Array.isArray(payload.linkedLicenseeIds)
-      ? payload.linkedLicenseeIds
-      : [];
+  const effectiveRole = u.role;
+  const databaseLicenseeId = String(u.licenseeId || "").trim() || null;
+  const databaseOrgId = String(u.orgId || "").trim() || null;
+  const tokenLicenseeId = String(payload.licenseeId || "").trim() || null;
+  const tokenOrgId = String(payload.orgId || "").trim() || null;
+
+  if (isPlatformRole(effectiveRole)) {
+    return { ...payload, email: u.email || payload.email, role: effectiveRole, licenseeId: null, orgId: null, scopeVersion: null, linkedLicenseeIds: [] };
+  }
+
+  if (isLicenseeAdminRole(effectiveRole)) {
+    if (!databaseLicenseeId || !databaseOrgId) throw new Error("Account tenant scope is unavailable");
+    if ((tokenLicenseeId && tokenLicenseeId !== databaseLicenseeId) || (tokenOrgId && tokenOrgId !== databaseOrgId)) {
+      throw new Error("Account tenant scope changed");
+    }
+    return {
+      ...payload,
+      email: u.email || payload.email,
+      role: effectiveRole,
+      licenseeId: databaseLicenseeId,
+      orgId: databaseOrgId,
+      scopeVersion: null,
+      linkedLicenseeIds: [],
+    };
+  }
+
+  if (isManufacturerRole(effectiveRole)) {
+    const selected = manufacturerScope?.selectedLicensee || null;
+    return {
+      ...payload,
+      email: u.email || payload.email,
+      role: effectiveRole,
+      licenseeId: selected?.id || null,
+      orgId: selected?.orgId || null,
+      scopeVersion: selected?.scopeVersion || null,
+      linkedLicenseeIds: manufacturerScope?.linkedLicenseeIds || [],
+    };
+  }
 
   return {
     ...payload,
     email: u.email || payload.email,
     role: effectiveRole,
-    licenseeId: u?.licenseeId ?? payload.licenseeId ?? effectiveLinkedLicenseeIds?.[0] ?? null,
-    orgId: u?.orgId ?? payload.orgId ?? null,
-    linkedLicenseeIds: effectiveLinkedLicenseeIds.length ? effectiveLinkedLicenseeIds : payload.linkedLicenseeIds ?? null,
+    licenseeId: databaseLicenseeId,
+    orgId: databaseOrgId,
+    scopeVersion: null,
+    linkedLicenseeIds: [],
   };
 }
 
@@ -101,6 +156,7 @@ const parseAnySessionToken = async (token: string): Promise<AuthenticatedSession
       role: decoded.role,
       licenseeId: decoded.licenseeId ?? null,
       orgId: decoded.orgId ?? null,
+      scopeVersion: decoded.scopeVersion ?? null,
       linkedLicenseeIds: decoded.linkedLicenseeIds ?? null,
       sessionStage: "MFA_BOOTSTRAP",
       authAssurance: "PASSWORD",
@@ -238,6 +294,9 @@ export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: Nex
 
   return next();
 };
+
+export const requireRecentAdminMfaForSetup = (req: AuthRequest, res: Response, next: NextFunction) =>
+  req.user?.sessionStage === "MFA_BOOTSTRAP" ? next() : requireRecentAdminMfa(req, res, next);
 
 export const requireRecentSensitiveAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) {

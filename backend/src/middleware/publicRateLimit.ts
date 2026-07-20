@@ -37,7 +37,7 @@ const buildResourceKey = (req: Request, resolver?: RequestResolver) => {
   return resource ? `resource:${shortHash(resource.toLowerCase())}` : "resource:global";
 };
 
-const redisRateLimitStore = () =>
+export const createRedisRateLimitStore = () =>
   isRedisConfigured()
     ? new RedisStore({
         sendCommand: (async (...args: string[]) => {
@@ -52,7 +52,7 @@ const redisRateLimitStore = () =>
 export const createSharedRateLimiter = (options: NonNullable<Parameters<typeof rateLimit>[0]>) =>
   rateLimit({
     ...options,
-    store: options.store || redisRateLimitStore(),
+    store: options.store || createRedisRateLimitStore(),
   });
 
 export const buildPublicIpRateLimitKey = (req: Request, scope: string, resourceResolver?: RequestResolver) => {
@@ -78,7 +78,7 @@ export const createPublicIpRateLimiter = ({ scope, windowMs, max, message, resou
     max,
     standardHeaders: true,
     legacyHeaders: false,
-    store: redisRateLimitStore(),
+    store: createRedisRateLimitStore(),
     keyGenerator: (req) => buildPublicIpRateLimitKey(req, scope, resourceResolver),
     handler: createRateLimitJsonHandler(scope, message, { includeRetryAfter: true }),
   });
@@ -96,7 +96,7 @@ export const createPublicActorRateLimiter = ({
     max,
     standardHeaders: true,
     legacyHeaders: false,
-    store: redisRateLimitStore(),
+    store: createRedisRateLimitStore(),
     keyGenerator: (req) => buildPublicActorRateLimitKey(req, scope, actorResolver, resourceResolver),
     handler: createRateLimitJsonHandler(scope, message, { includeRetryAfter: true }),
   });

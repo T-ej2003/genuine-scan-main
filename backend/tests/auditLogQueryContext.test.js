@@ -40,7 +40,7 @@ const filters = (overrides = {}) => ({ limit: 50, offset: 0, ...overrides });
 
 const fakeRunner = () => {
   const events = [];
-  const calls = { find: [], count: [], users: [], create: [], contextValues: [] };
+  const calls = { find: [], count: [], users: [], create: [], details: [], contextValues: [] };
   let contextInstalled = false;
   const requireContext = () => assert(contextInstalled, "protected query attempted before canonical context installation");
   const tx = {
@@ -50,6 +50,12 @@ const fakeRunner = () => {
       contextInstalled = true;
       assert.match(strings.join("?"), /set_config\('app\.purpose'/);
       return 1;
+    },
+    $queryRaw: async (strings, ...values) => {
+      requireContext();
+      events.push("platform-details");
+      calls.details.push({ strings, values });
+      return [{ id: "audit-a", ipAddress: "192.0.2.1", userAgent: "Test Browser", userId: ids.tenantAdmin, userName: "Tenant Admin" }];
     },
     auditLog: {
       findMany: async (args) => {
@@ -184,8 +190,13 @@ const denied = (user, input, message, requestId = "request-denied") => {
       userId: ids.tenantAdmin,
     })
   );
-  assert.strictEqual(platform.fake.calls.contextValues[0][7], "review incident IR-42");
+  assert.strictEqual(platform.fake.calls.contextValues[0][7], "platform-audit-log-read");
   assert.strictEqual(platform.result.logs[0].ipAddress, "192.0.2.1");
+  assert.strictEqual(platform.fake.calls.create[0].data.details.purpose, "review incident IR-42");
+  assert.strictEqual(platform.fake.calls.details.length, 1);
+  assert.strictEqual(platform.fake.calls.users.length, 0, "platform name/network projection must stay behind the exact function");
+  assert.strictEqual(platform.fake.calls.find[0].select.ipAddress, undefined);
+  assert.strictEqual(platform.fake.calls.find[0].select.userAgent, undefined);
   assert(platform.fake.calls.find[0].where.AND.some((clause) => clause.createdAt));
 
   denied(actor(), filters({ licenseeId: ids.foreignTenant }), "licensee");

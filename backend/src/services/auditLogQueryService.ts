@@ -32,6 +32,7 @@ type AuditLogBoundary = {
   context: CanonicalDbContext;
   isPlatformAdmin: boolean;
   isManufacturer: boolean;
+  requestedPurpose: string;
 };
 
 const tenantAdminRoles = new Set<UserRole>([UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN]);
@@ -81,9 +82,9 @@ export const buildAuditLogBoundary = (
     throw new AuditLogQueryAccessError("Access denied to this organization");
   }
 
-  const purpose = isPlatformAdmin ? String(filters.purpose || "").trim() : String(filters.purpose || "audit-log-read").trim();
-  if (!purpose) throw new AuditLogQueryAccessError("An explicit audit-log purpose is required");
-  if (purpose.length > 240) throw new AuditLogQueryAccessError("Audit-log purpose is too long", 400);
+  const requestedPurpose = isPlatformAdmin ? String(filters.purpose || "").trim() : String(filters.purpose || "audit-log-read").trim();
+  if (!requestedPurpose) throw new AuditLogQueryAccessError("An explicit audit-log purpose is required");
+  if (requestedPurpose.length > 240) throw new AuditLogQueryAccessError("Audit-log purpose is too long", 400);
   if (filters.cursor && filters.offset) throw new AuditLogQueryAccessError("Cursor and offset pagination cannot be combined", 400);
   if (filters.cursor && !decodeDateCursor(filters.cursor)) throw new AuditLogQueryAccessError("Invalid audit-log cursor", 400);
   if (Boolean(filters.from) !== Boolean(filters.to)) throw new AuditLogQueryAccessError("Audit-log date range requires both from and to", 400);
@@ -104,10 +105,11 @@ export const buildAuditLogBoundary = (
       manufacturerId: isManufacturer ? userId : null,
       authAssurance: "mfa-verified",
       requestId: normalizedRequestId,
-      purpose,
+      purpose: isPlatformAdmin ? "platform-audit-log-read" : "audit-log-read",
     },
     isPlatformAdmin,
     isManufacturer,
+    requestedPurpose,
   };
 };
 
@@ -152,8 +154,6 @@ export const queryAuditLogs = async (
         entityType: true,
         entityId: true,
         details: true,
-        ipAddress: boundary.isPlatformAdmin,
-        userAgent: boundary.isPlatformAdmin,
         createdAt: true,
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -162,18 +162,33 @@ export const queryAuditLogs = async (
     }),
     filters.cursor ? Promise.resolve<number | null>(null) : tx.auditLog.count({ where }),
   ]);
-  const actorIds = [...new Set(logs.map((log) => log.userId).filter(Boolean))] as string[];
+  const platformDetails = boundary.isPlatformAdmin && logs.length
+    ? await tx.$queryRaw<Array<{ id: string; ipAddress: string | null; userAgent: string | null; userId: string | null; userName: string | null }>>`
+        SELECT id,ip_address AS "ipAddress",user_agent AS "userAgent",user_id AS "userId",user_name AS "userName"
+        FROM app_rls.platform_audit_log_details(${logs.map((log) => log.id)}::text[])
+      `
+    : [];
+  const platformDetailMap = new Map(platformDetails.map((row) => [row.id, row]));
+  if (boundary.isPlatformAdmin && (platformDetailMap.size !== logs.length || logs.some((log) => !platformDetailMap.has(log.id)))) {
+    throw new Error("Platform audit detail projection did not match the bounded audit page");
+  }
+  const actorIds = boundary.isPlatformAdmin ? [] : [...new Set(logs.map((log) => log.userId).filter(Boolean))] as string[];
   const users = actorIds.length
     ? await tx.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
     : [];
   const userMap = new Map(users.map((user) => [user.id, { ...user, email: "" }]));
-  const responseLogs = logs.map((log) => ({
-    ...log,
-    details: redactAuditDetails(log.details),
-    ipAddress: boundary.isPlatformAdmin ? log.ipAddress || null : null,
-    userAgent: boundary.isPlatformAdmin ? log.userAgent || null : null,
-    user: log.userId ? userMap.get(log.userId) || null : null,
-  }));
+  const responseLogs = logs.map((log) => {
+    const platformDetail = platformDetailMap.get(log.id);
+    return {
+      ...log,
+      details: redactAuditDetails(log.details),
+      ipAddress: platformDetail?.ipAddress ?? null,
+      userAgent: platformDetail?.userAgent ?? null,
+      user: boundary.isPlatformAdmin
+        ? platformDetail?.userId && platformDetail.userName ? { id: platformDetail.userId, name: platformDetail.userName, email: "" } : null
+        : log.userId ? userMap.get(log.userId) || null : null,
+    };
+  });
   await tx.auditLog.create({
     data: {
       userId: context.userId,
@@ -183,7 +198,7 @@ export const queryAuditLogs = async (
       entityType: "AuditLog",
       entityId: context.licenseeId,
       details: {
-        purpose: context.purpose,
+        purpose: boundary.requestedPurpose,
         requestId: context.requestId,
         returnedRows: responseLogs.length,
         filters: {

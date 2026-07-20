@@ -11,26 +11,35 @@ import {
 import {
   beginAdminMfaSetup,
   completeAdminMfaChallenge,
-  confirmAdminMfaSetup,
   createAdminMfaChallenge,
   disableAdminMfa,
   getAdminMfaStatus,
   rotateAdminMfaBackupCodes,
   verifyAdminMfaCode,
 } from "../services/auth/mfaService";
-import { issueAdminMfaSessionFromClaims } from "../services/auth/authClaimsRlsContext";
-import { verifyPassword } from "../services/auth/passwordService";
+import {
+  confirmAdminMfaEnrollmentAndIssueSessionFromClaims,
+  confirmAdminMfaReplacementFromClaims,
+  withAdminMfaClaimsTransaction,
+} from "../services/auth/authClaimsRlsContext";
+import { getAdminStepUpWindowMinutes, issueSessionForUser } from "../services/auth/authService";
+import { lockMfaState, MfaAdapterError } from "../services/auth/mfaAdapter";
 import { revokeRefreshTokenByRaw } from "../services/auth/refreshTokenService";
+import { verifyPassword } from "../services/auth/passwordService";
 import { createAuditLog } from "../services/auditService";
+import { queueAuditLogOutbox } from "../services/auditLogOutboxService";
 import {
   authResponseData,
+  clearAuthCookies,
   disableMfaSchema,
   getAuthClaims,
   getRefreshTokenFromRequest,
+  getRequestId,
   hashIp,
   isAdminMfaRequiredRole,
   mfaChallengeCompleteSchema,
   mfaCodeSchema,
+  mfaSessionCodeSchema,
   normalizeUserAgent,
   prisma,
   setAuthCookies,
@@ -38,6 +47,13 @@ import {
   webAuthnCredentialParamSchema,
   webAuthnRegistrationCompleteSchema,
 } from "./authControllerShared";
+
+const logAuthSecurityFailure = (event: string, userId: string, category: string, error: unknown) =>
+  logger.warn(event, {
+    userId,
+    errorCategory: category,
+    errorName: error instanceof Error ? error.name : typeof error,
+  });
 
 export const getAdminMfaStatusController = async (req: Request, res: Response) => {
   const claims = getAuthClaims(req);
@@ -54,8 +70,13 @@ export const getAdminMfaStatusController = async (req: Request, res: Response) =
     });
   }
 
-  const status = await getAdminMfaStatus(claims.userId);
-  return res.json({ success: true, data: { required: true, sessionStage: claims.sessionStage, ...status } });
+  try {
+    const status = await getAdminMfaStatus(claims.userId);
+    return res.json({ success: true, data: { required: true, sessionStage: claims.sessionStage, ...status } });
+  } catch {
+    logger.warn("auth_mfa_status_unavailable", { userId: claims.userId });
+    return res.status(503).json({ success: false, error: "MFA status is temporarily unavailable." });
+  }
 };
 
 export const beginAdminMfaSetupController = async (req: Request, res: Response) => {
@@ -65,8 +86,26 @@ export const beginAdminMfaSetupController = async (req: Request, res: Response) 
     return res.status(403).json({ success: false, error: "MFA is not required for this role." });
   }
 
-  const setup = await beginAdminMfaSetup({ userId: claims.userId, email: claims.email });
-  return res.json({ success: true, data: setup });
+  try {
+    const setup = await beginAdminMfaSetup({
+      userId: claims.userId,
+      email: claims.email,
+      mode: claims.sessionStage === "ACTIVE" ? "REPLACEMENT" : "FIRST_ENROLLMENT",
+    });
+    return res.json({ success: true, data: setup });
+  } catch (error) {
+    const conflict = error instanceof Error && [
+      "MFA_ALREADY_ENROLLED",
+      "MFA_REPLACEMENT_REQUIRES_ENROLLED_FACTOR",
+      "MFA_SETUP_ALREADY_STARTED",
+    ].includes(error.message);
+    const category = conflict && error instanceof Error ? error.message : "MFA_ENROLLMENT_STATE_UNAVAILABLE";
+    logger.warn("auth_mfa_setup_begin_failed", { userId: claims.userId, category });
+    return res.status(conflict ? 409 : 503).json({
+      success: false,
+      error: conflict ? "MFA setup could not be started." : "MFA setup is temporarily unavailable.",
+    });
+  }
 };
 
 export const beginAdminWebAuthnSetupController = async (req: Request, res: Response) => {
@@ -97,7 +136,7 @@ export const beginAdminWebAuthnSetupController = async (req: Request, res: Respo
 
     return res.json({ success: true, data: setup });
   } catch (error) {
-    console.error("beginAdminWebAuthnSetupController error:", error);
+    logAuthSecurityFailure("auth_webauthn_setup_begin_failed", claims.userId, "WEBAUTHN_SETUP_BEGIN_FAILED", error);
     return res.status(409).json({ success: false, error: "Could not start WebAuthn setup right now." });
   }
 };
@@ -105,41 +144,52 @@ export const beginAdminWebAuthnSetupController = async (req: Request, res: Respo
 export const confirmAdminMfaSetupController = async (req: Request, res: Response) => {
   const claims = getAuthClaims(req);
   if (!claims?.userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-  const parsed = mfaCodeSchema.safeParse(req.body || {});
+  const parsed = mfaSessionCodeSchema.safeParse(req.body || {});
   if (!parsed.success) {
     return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
   }
 
   try {
-    await confirmAdminMfaSetup({ userId: claims.userId, code: parsed.data.code });
+    const ipHash = hashIp(req.ip);
+    const userAgent = normalizeUserAgent(req.get("user-agent"));
 
     if (claims.sessionStage === "MFA_BOOTSTRAP") {
-      const ipHash = hashIp(req.ip);
-      const userAgent = normalizeUserAgent(req.get("user-agent"));
       const now = new Date();
-      const session = await issueAdminMfaSessionFromClaims(claims, { ipHash, userAgent, now });
-
-      await createAuditLog({
-        userId: claims.userId,
-        action: "AUTH_MFA_ENROLLED",
-        entityType: "User",
-        entityId: claims.userId,
-        details: { source: "LOGIN_BOOTSTRAP" },
-        ipHash: ipHash || undefined,
-        userAgent: userAgent || undefined,
-      } as any);
+      const session = await confirmAdminMfaEnrollmentAndIssueSessionFromClaims(claims, {
+        code: parsed.data.code,
+        ipHash,
+        userAgent,
+        now,
+        requestId: getRequestId(req),
+        requestedLicenseeId: parsed.data.licenseeId,
+        requestedScopeVersion: parsed.data.scopeVersion,
+      });
 
       setAuthCookies(res, session);
       return res.json({ success: true, data: authResponseData(session) });
     }
 
+    await confirmAdminMfaReplacementFromClaims(claims, { code: parsed.data.code, ipHash, userAgent });
     return res.json({ success: true, data: { enabled: true } });
   } catch (error: any) {
     const message = String(error?.message || "");
-    const status = message === "INVALID_MFA_CODE" ? 400 : 409;
+    const scopeSelection = ["SCOPE_SELECTION_REQUIRED", "MANUFACTURER_SCOPE_VERSION_REQUIRED", "MANUFACTURER_SCOPE_STALE"].includes(message);
+    const conflict = scopeSelection || ["MFA_ALREADY_ENROLLED", "MFA_REPLACEMENT_REQUIRES_ENROLLED_FACTOR", "MFA_SETUP_NOT_STARTED"].includes(message);
+    const status = message === "INVALID_MFA_CODE" ? 400 : message === "MANUFACTURER_SCOPE_DENIED" ? 403 : conflict ? 409 : 503;
+    logger.warn("auth_mfa_setup_confirm_failed", {
+      userId: claims.userId,
+      category: message === "INVALID_MFA_CODE" ? message : "MFA_ENROLLMENT_CONFIRM_DENIED",
+    });
     return res.status(status).json({
       success: false,
-      error: message === "INVALID_MFA_CODE" ? "Invalid authentication code." : "MFA setup could not be completed.",
+      error:
+        message === "INVALID_MFA_CODE"
+          ? "Invalid authentication code."
+          : scopeSelection
+            ? "Select a current manufacturer workspace and try again."
+          : conflict
+            ? "MFA setup could not be completed."
+            : "MFA setup is temporarily unavailable.",
     });
   }
 };
@@ -179,7 +229,7 @@ export const completeAdminWebAuthnSetupController = async (req: Request, res: Re
     const status = await getAdminMfaStatus(claims.userId);
     return res.json({ success: true, data: { enrolled: true, status } });
   } catch (error) {
-    console.error("completeAdminWebAuthnSetupController error:", error);
+    logAuthSecurityFailure("auth_webauthn_setup_complete_failed", claims.userId, "WEBAUTHN_SETUP_COMPLETE_FAILED", error);
     return res.status(409).json({ success: false, error: "Could not complete WebAuthn setup." });
   }
 };
@@ -246,38 +296,61 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
     const ipHash = hashIp(req.ip);
     const userAgent = normalizeUserAgent(req.get("user-agent"));
     const now = new Date();
-    const completed = await completeAdminMfaChallenge({
-      userId: claims.userId,
-      sessionId: claims.sessionId || null,
-      ticket: parsed.data.ticket,
-      method: parsed.data.method || null,
-      code: parsed.data.code,
-      ipHash,
-      userAgent,
+    const outcome = await withAdminMfaClaimsTransaction(claims, async (tx) => {
+      try {
+        const completed = await completeAdminMfaChallenge({
+          userId: claims.userId,
+          sessionId: claims.sessionId || null,
+          ticket: parsed.data.ticket,
+          method: parsed.data.method || null,
+          code: parsed.data.code,
+          ipHash,
+          userAgent,
+        }, tx);
+        if (completed.userId !== claims.userId) throw new MfaAdapterError("MFA_CHALLENGE_FORBIDDEN", { status: 403 });
+
+        const session = await issueSessionForUser({
+          userId: claims.userId,
+          ipHash,
+          userAgent,
+          authAssurance: "ADMIN_MFA",
+          authenticatedAt: now,
+          mfaVerifiedAt: now,
+          now,
+          requestId: getRequestId(req),
+          purpose: "manufacturer-bootstrap",
+          requestedLicenseeId: parsed.data.licenseeId ?? claims.licenseeId,
+          requestedScopeVersion: parsed.data.scopeVersion ?? claims.scopeVersion,
+        }, tx);
+        await tx.auditLogOutbox.create({
+          data: {
+            payload: {
+              userId: claims.userId,
+              action: "AUTH_MFA_LOGIN_COMPLETE",
+              entityType: "User",
+              entityId: claims.userId,
+              details: {
+                riskScore: completed.riskScore,
+                riskLevel: completed.riskLevel,
+                reasons: completed.reasons,
+              },
+              ipHash,
+              userAgent,
+            },
+          },
+        });
+        return { ok: true as const, session };
+      } catch (error) {
+        if (error instanceof MfaAdapterError && error.commitFailure) {
+          return { ok: false as const, error };
+        }
+        throw error;
+      }
     });
+    if (!outcome.ok) throw outcome.error;
 
-    if (completed.userId !== claims.userId) {
-      return res.status(403).json({ success: false, error: "MFA challenge does not match the active bootstrap session." });
-    }
-
-    const session = await issueAdminMfaSessionFromClaims(claims, { ipHash, userAgent, now });
-
-    await createAuditLog({
-      userId: claims.userId,
-      action: "AUTH_MFA_LOGIN_COMPLETE",
-      entityType: "User",
-      entityId: claims.userId,
-      details: {
-        riskScore: completed.riskScore,
-        riskLevel: completed.riskLevel,
-        reasons: completed.reasons,
-      },
-      ipHash: ipHash || undefined,
-      userAgent: userAgent || undefined,
-    } as any);
-
-    setAuthCookies(res, session);
-    return res.json({ success: true, data: authResponseData(session) });
+    setAuthCookies(res, outcome.session);
+    return res.json({ success: true, data: authResponseData(outcome.session) });
   } catch (error: any) {
     const raw = String(error?.message || "");
     const retryAfterSeconds = Number(error?.retryAfterSeconds || 0);
@@ -286,9 +359,23 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
       MFA_TOO_MANY_ATTEMPTS: [429, "Too many MFA attempts. Wait and try again."],
       MFA_CHALLENGE_FORBIDDEN: [403, "MFA challenge does not match the active bootstrap session."],
       MFA_CHALLENGE_NOT_FOUND: [410, "This MFA challenge expired. Start again."],
+      SCOPE_SELECTION_REQUIRED: [409, "Select a current manufacturer workspace and try again."],
+      MANUFACTURER_SCOPE_VERSION_REQUIRED: [409, "Select a current manufacturer workspace and try again."],
+      MANUFACTURER_SCOPE_STALE: [409, "Select a current manufacturer workspace and try again."],
+      MANUFACTURER_SCOPE_DENIED: [403, "The requested manufacturer workspace is unavailable."],
     } as Record<string, [number, string]>)[raw] || [409, "MFA challenge could not be completed."];
     const requestId = String((req as Request & { requestId?: string }).requestId || req.get("x-request-id") || "").trim() || null;
-    const known = ["INVALID_MFA_CODE", "MFA_TOO_MANY_ATTEMPTS", "MFA_CHALLENGE_FORBIDDEN", "MFA_CHALLENGE_NOT_FOUND", "MFA_VERIFICATION_UNAVAILABLE"];
+    const known = [
+      "INVALID_MFA_CODE",
+      "MFA_TOO_MANY_ATTEMPTS",
+      "MFA_CHALLENGE_FORBIDDEN",
+      "MFA_CHALLENGE_NOT_FOUND",
+      "MFA_VERIFICATION_UNAVAILABLE",
+      "SCOPE_SELECTION_REQUIRED",
+      "MANUFACTURER_SCOPE_VERSION_REQUIRED",
+      "MANUFACTURER_SCOPE_STALE",
+      "MANUFACTURER_SCOPE_DENIED",
+    ];
     const safeCategory = known.includes(raw) ? raw : "MFA_COMPLETION_UNEXPECTED_ERROR";
     logger.warn("auth_mfa_challenge_complete_failed", {
       requestId,
@@ -316,31 +403,43 @@ export const completeAdminWebAuthnChallengeController = async (req: Request, res
   }
 
   try {
-    const completed = await completeAdminWebAuthnChallenge({
-      userId: claims.userId,
-      ticket: parsed.data.ticket,
-      credential: parsed.data.credential,
-    });
-
     const ipHash = hashIp(req.ip);
     const userAgent = normalizeUserAgent(req.get("user-agent"));
     const now = new Date();
-    const session = await issueAdminMfaSessionFromClaims(claims, { ipHash, userAgent, now });
-
     const currentRefresh = getRefreshTokenFromRequest(req);
-    if (currentRefresh) {
-      await revokeRefreshTokenByRaw({ rawToken: currentRefresh, reason: "STEP_UP_REPLACED" });
-    }
-
-    await createAuditLog({
-      userId: claims.userId,
-      action: completed.purpose === "LOGIN" ? "AUTH_WEBAUTHN_LOGIN_COMPLETE" : "AUTH_WEBAUTHN_STEP_UP_SUCCESS",
-      entityType: "User",
-      entityId: claims.userId,
-      details: { method: "WEBAUTHN", purpose: completed.purpose },
-      ipHash: ipHash || undefined,
-      userAgent: userAgent || undefined,
-    } as any);
+    const session = await withAdminMfaClaimsTransaction(claims, async (tx) => {
+      const completed = await completeAdminWebAuthnChallenge({
+        userId: claims.userId,
+        ticket: parsed.data.ticket,
+        credential: parsed.data.credential,
+      }, tx);
+      const nextSession = await issueSessionForUser({
+        userId: claims.userId,
+        ipHash,
+        userAgent,
+        authAssurance: "ADMIN_MFA",
+        authenticatedAt: now,
+        mfaVerifiedAt: now,
+        now,
+        requestId: getRequestId(req),
+        purpose: "manufacturer-bootstrap",
+        requestedLicenseeId: parsed.data.licenseeId ?? claims.licenseeId,
+        requestedScopeVersion: parsed.data.scopeVersion ?? claims.scopeVersion,
+      }, tx);
+      if (currentRefresh) {
+        await revokeRefreshTokenByRaw({ rawToken: currentRefresh, reason: "STEP_UP_REPLACED", now }, tx);
+      }
+      await queueAuditLogOutbox({
+        userId: claims.userId,
+        action: completed.purpose === "LOGIN" ? "AUTH_WEBAUTHN_LOGIN_COMPLETE" : "AUTH_WEBAUTHN_STEP_UP_SUCCESS",
+        entityType: "User",
+        entityId: claims.userId,
+        details: { method: "WEBAUTHN", purpose: completed.purpose },
+        ipHash,
+        userAgent,
+      }, undefined, tx);
+      return nextSession;
+    });
 
     setAuthCookies(res, session);
     return res.json({ success: true, data: authResponseData(session) });
@@ -388,33 +487,74 @@ export const disableAdminMfaController = async (req: Request, res: Response) => 
     return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: claims.userId },
-    select: { id: true, passwordHash: true, role: true },
-  });
-
-  if (!user?.passwordHash) {
-    return res.status(400).json({ success: false, error: "Password confirmation is unavailable for this account." });
-  }
-
-  const passwordOk = await verifyPassword(user.passwordHash, parsed.data.currentPassword);
-  if (!passwordOk) {
-    return res.status(400).json({ success: false, error: "Current password is incorrect." });
-  }
-
   try {
-    await verifyAdminMfaCode({ userId: claims.userId, code: parsed.data.code });
-    await disableAdminMfa(claims.userId);
-    await createAuditLog({
-      userId: claims.userId,
-      action: "AUTH_MFA_DISABLED",
-      entityType: "User",
-      entityId: claims.userId,
-      details: { actorUserId: claims.userId },
-      ipAddress: req.ip,
-    } as any);
+    const ipHash = hashIp(req.ip);
+    const userAgent = normalizeUserAgent(req.get("user-agent"));
+    await withAdminMfaClaimsTransaction(claims, async (tx) => {
+      await lockMfaState(tx, claims.userId);
+      const user = await tx.user.findUnique({
+        where: { id: claims.userId },
+        select: {
+          passwordHash: true,
+          role: true,
+          status: true,
+          isActive: true,
+          disabledAt: true,
+          deletedAt: true,
+        },
+      });
+      if (
+        !user ||
+        user.role !== claims.role ||
+        !isAdminMfaRequiredRole(user.role) ||
+        !user.isActive ||
+        user.status === "DISABLED" ||
+        user.disabledAt ||
+        user.deletedAt
+      ) {
+        throw new Error("MFA_DISABLE_ACTOR_UNAVAILABLE");
+      }
+
+      const now = new Date();
+      const verifiedAt = claims.mfaVerifiedAt ? new Date(claims.mfaVerifiedAt) : null;
+      if (
+        claims.authAssurance !== "ADMIN_MFA" ||
+        !verifiedAt ||
+        Number.isNaN(verifiedAt.getTime()) ||
+        verifiedAt.getTime() > now.getTime() ||
+        now.getTime() - verifiedAt.getTime() > getAdminStepUpWindowMinutes() * 60_000
+      ) {
+        throw new Error("MFA_DISABLE_FRESHNESS_REQUIRED");
+      }
+      if (!user.passwordHash) throw new Error("MFA_PASSWORD_CONFIRMATION_UNAVAILABLE");
+      if (!await verifyPassword(user.passwordHash, parsed.data.currentPassword)) {
+        throw new Error("INVALID_CURRENT_PASSWORD");
+      }
+
+      await verifyAdminMfaCode({ userId: claims.userId, code: parsed.data.code }, tx);
+      await disableAdminMfa(claims.userId, tx, { ipHash, userAgent });
+    });
+    clearAuthCookies(res);
     return res.json({ success: true, data: { enabled: false } });
-  } catch {
+  } catch (error) {
+    const category = error instanceof Error ? error.message : "";
+    if (category === "MFA_PASSWORD_CONFIRMATION_UNAVAILABLE") {
+      return res.status(400).json({ success: false, error: "Password confirmation is unavailable for this account." });
+    }
+    if (category === "INVALID_CURRENT_PASSWORD") {
+      return res.status(400).json({ success: false, error: "Current password is incorrect." });
+    }
+    logger.warn("auth_mfa_disable_failed", {
+      userId: claims.userId,
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorCode: typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : null,
+      errorCategory: [
+        "MFA_DISABLE_ACTOR_UNAVAILABLE",
+        "MFA_DISABLE_FRESHNESS_REQUIRED",
+        "INVALID_MFA_CODE",
+        "MFA_VERIFICATION_UNAVAILABLE",
+      ].includes(category) ? category : "MFA_DISABLE_TRANSACTION_FAILED",
+    });
     return res.status(400).json({ success: false, error: "Could not disable MFA. Check the code and try again." });
   }
 };
@@ -466,7 +606,7 @@ export const deleteAdminWebAuthnCredentialController = async (req: Request, res:
     const status = await getAdminMfaStatus(claims.userId);
     return res.json({ success: true, data: { deleted: true, status } });
   } catch (error) {
-    console.error("deleteAdminWebAuthnCredentialController error:", error);
+    logAuthSecurityFailure("auth_webauthn_credential_delete_failed", claims.userId, "WEBAUTHN_CREDENTIAL_DELETE_FAILED", error);
     return res.status(500).json({ success: false, error: "Could not remove that WebAuthn credential." });
   }
 };

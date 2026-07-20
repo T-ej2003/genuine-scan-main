@@ -4,7 +4,12 @@ import { z } from "zod";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { buildTraceTimelineBoundary, getTraceTimeline, TraceTimelineAccessError } from "../services/traceEventService";
-import { getBatchSlaAnalytics, getRiskAnalytics } from "../services/analyticsService";
+import {
+  buildRiskAnalyticsBoundary,
+  getBatchSlaAnalytics,
+  getRiskAnalytics,
+  RiskAnalyticsAccessError,
+} from "../services/analyticsService";
 import { getOrCreateSecurityPolicy } from "../services/policyEngineService";
 import { createAuditLog } from "../services/auditService";
 import { buildImmutableBatchAuditPackage } from "../services/immutableAuditExportService";
@@ -200,13 +205,23 @@ export const getRiskAnalyticsController = async (req: AuthRequest, res: Response
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
     }
 
-    const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
-    const limit = parsed.data.limit ?? 20;
-    const lookbackHours = parsed.data.lookbackHours ?? 24;
-
-    const data = await getRiskAnalytics({ licenseeId, lookbackHours, limit });
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+    const boundary = buildRiskAnalyticsBoundary(req.user, {
+      requestedLicenseeId: parsed.data.licenseeId,
+      limit: parsed.data.limit ?? 20,
+      lookbackHours: parsed.data.lookbackHours ?? 24,
+    }, requestId);
+    const data = await withCanonicalDbContext(
+      prisma,
+      boundary.context,
+      (tx, installedContext) => getRiskAnalytics(tx, boundary.query, installedContext),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+    );
     return res.json({ success: true, data });
   } catch (e) {
+    if (e instanceof RiskAnalyticsAccessError) {
+      return res.status(e.statusCode).json({ success: false, error: e.message });
+    }
     console.error("getRiskAnalyticsController error:", e);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }

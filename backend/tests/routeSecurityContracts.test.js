@@ -13,6 +13,8 @@ const readNormalized = (relativePath) =>
 const indexSource = readNormalized("src/index.ts");
 const appSource = readNormalized("src/app.ts");
 const authRoutesSource = readNormalized("src/routes/modules/authRoutes.ts");
+const authSecurityControllerSource = readNormalized("src/controllers/authAdminSecurityController.ts");
+const authClaimsContextSource = readNormalized("src/services/auth/authClaimsRlsContext.ts");
 const routesSource = readNormalized("src/routes/index.ts");
 const realtimeRoutesSource = readNormalized("src/routes/modules/realtimeRoutes.ts");
 const governanceRoutesSource = readNormalized("src/routes/modules/governanceRoutes.ts");
@@ -86,10 +88,19 @@ assert(auditRoutesSource.includes("const auditFraudReportsRespondPreAuthRouteLim
   'router.get("/auth/sessions", sessionReadPreAuthRouteLimiter, authenticate, sessionReadRouteLimiter, listSessions);',
   'router.post("/auth/sessions/revoke-all", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeAllSessionsController);',
   'router.post("/auth/mfa/backup-codes/rotate", mfaPreAuthRouteLimiter, authenticate, requireRecentAdminMfa, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, rotateAdminMfaBackupCodesController);',
+  'router.post("/auth/mfa/setup/begin", mfaPreAuthRouteLimiter, authenticateAnySession, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaSetupController);',
+  'router.post("/auth/mfa/setup/confirm", mfaPreAuthRouteLimiter, authenticateAnySession, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, confirmAdminMfaSetupController);',
   'router.post("/auth/invite", adminInvitePreAuthRouteLimiter, authenticate, requireAnyAdmin, requireRecentAdminMfa, adminInviteRouteLimiter, adminInviteIpLimiter, adminInviteActorLimiter, requireCsrf, invite);',
 ].forEach((pattern) => {
   assert(authRoutesSource.includes(pattern), `auth route contract missing: ${pattern}`);
 });
+
+assert.strictEqual(
+  authClaimsContextSource.includes('mode: "FIRST_ENROLLMENT"') && authClaimsContextSource.includes('mode: "REPLACEMENT"'),
+  true,
+  "atomic claim-bound TOTP operations must use explicit enrollment and replacement modes"
+);
+assert(!authSecurityControllerSource.includes("console.error"), "auth security controllers must not serialize raw WebAuthn errors");
 
 [
   '"/dashboard/stats", dashboardReadPreAuthRouteLimiter, authenticate,',

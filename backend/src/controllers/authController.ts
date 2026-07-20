@@ -5,7 +5,7 @@ import { loginWithPassword, logoutSession, refreshSession } from "../services/au
 import { acceptInvite, createInvite, getInvitePreview } from "../services/auth/inviteService";
 import { requestPasswordReset, resetPasswordWithToken } from "../services/auth/passwordResetService";
 import { confirmEmailVerification } from "../services/auth/emailVerificationService";
-import { listManufacturerLicenseeLinks, normalizeLinkedLicensees, isManufacturerRole } from "../services/manufacturerScopeService";
+import { isManufacturerRole, resolveManufacturerSessionScope } from "../services/manufacturerScopeService";
 // rls-prototype-approved-import: signed access claims establish auth/me context.
 import { withRlsPrototypeTransaction } from "../lib/rlsTransactionContextPrototype";
 import {
@@ -18,6 +18,7 @@ import {
   getAuthClaims,
   getCurrentRefreshSession,
   getRefreshTokenFromRequest,
+  getRequestId,
   hashIp,
   invitePreviewQuerySchema,
   inviteSchema,
@@ -26,9 +27,23 @@ import {
   normalizeUserAgent,
   prisma,
   resetPasswordSchema,
+  refreshSessionSchema,
   setAuthCookies,
   verifyEmailSchema,
 } from "./authControllerShared";
+
+const authMeUserSelect = Prisma.validator<Prisma.UserSelect>()({
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  licenseeId: true,
+  orgId: true,
+  emailVerifiedAt: true,
+  pendingEmail: true,
+  pendingEmailRequestedAt: true,
+  licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
+});
 
 export { adminMfaStepUpController, listSessions, passwordStepUpController, revokeAllSessionsController, revokeSessionController } from "./authSessionController";
 export {
@@ -62,6 +77,7 @@ export const login = async (req: Request, res: Response) => {
       password,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
+      requestId: getRequestId(req),
     });
 
     setAuthCookies(res, session);
@@ -81,32 +97,47 @@ export const me = async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
 
-    const { user, linkedLicensees } = await withRlsPrototypeTransaction(
+    const { user, manufacturerScope } = await withRlsPrototypeTransaction(
       prisma,
       {
         userId: claims.userId,
         role: claims.role,
-        licenseeId: claims.licenseeId,
+        licenseeId: isManufacturerRole(claims.role) ? null : claims.licenseeId,
         manufacturerId: isManufacturerRole(claims.role) ? claims.userId : null,
-        organizationId: claims.orgId,
+        organizationId: isManufacturerRole(claims.role) ? null : claims.orgId,
         // auth/me only needs actor-self visibility; do not elevate from a stale claim.
         isPlatformAdmin: false,
       },
       async (tx: Prisma.TransactionClient) => {
         const scopedUser = await tx.user.findUnique({
           where: { id: userId },
-          include: { licensee: true },
+          select: authMeUserSelect,
         });
-        const scopedLinks = scopedUser && isManufacturerRole(scopedUser.role)
-          ? normalizeLinkedLicensees(await listManufacturerLicenseeLinks(scopedUser.id, tx))
-          : [];
-        return { user: scopedUser, linkedLicensees: scopedLinks };
+        if (scopedUser && scopedUser.role !== claims.role) {
+          throw new Error("Account role changed");
+        }
+        const scope = scopedUser && isManufacturerRole(scopedUser.role)
+          ? await resolveManufacturerSessionScope({
+              manufacturerId: scopedUser.id,
+              legacyLicenseeId: scopedUser.licenseeId,
+              legacyOrgId: scopedUser.orgId,
+              requestedLicenseeId: claims.licenseeId,
+              requestedOrgId: claims.orgId,
+              requestedScopeVersion: claims.scopeVersion,
+            }, tx)
+          : null;
+        return { user: scopedUser, manufacturerScope: scope };
       }
     );
     if (!user) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
-    const primaryLicensee = user.licensee || linkedLicensees.find((row) => row.isPrimary) || linkedLicensees[0] || null;
+    const manufacturer = isManufacturerRole(user.role);
+    const primaryLicensee = manufacturer ? manufacturerScope?.selectedLicensee || null : user.licensee;
+    const linkedLicensees = manufacturerScope?.linkedLicensees || [];
+    const sessionLicenseeId = primaryLicensee?.id || (manufacturer ? null : user.licenseeId);
+    const sessionOrgId = primaryLicensee?.orgId || (manufacturer ? null : user.orgId);
+    const scopeVersion = manufacturer ? manufacturerScope?.selectedLicensee?.scopeVersion ?? null : null;
 
     ensureCsrfCookie(req, res);
     const currentSession = await getCurrentRefreshSession(req);
@@ -122,14 +153,16 @@ export const me = async (req: Request, res: Response) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        licenseeId: primaryLicensee?.id || user.licenseeId,
-        orgId: user.orgId || primaryLicensee?.orgId || null,
+        licenseeId: sessionLicenseeId,
+        orgId: sessionOrgId,
+        scopeVersion,
         licensee: primaryLicensee
           ? {
               id: primaryLicensee.id,
               name: primaryLicensee.name,
               prefix: primaryLicensee.prefix,
               brandName: primaryLicensee.brandName ?? null,
+              ...(scopeVersion ? { scopeVersion } : {}),
             }
           : null,
         linkedLicensees,
@@ -147,6 +180,10 @@ export const me = async (req: Request, res: Response) => {
 
 export const refresh = async (req: Request, res: Response) => {
   try {
+    const selection = refreshSessionSchema.safeParse(req.body || {});
+    if (!selection.success) {
+      return res.status(400).json({ success: false, error: selection.error.errors[0]?.message || "Invalid scope selection" });
+    }
     const rawRefresh = getRefreshTokenFromRequest(req);
     if (!rawRefresh) return res.status(401).json({ success: false, error: "No refresh token" });
 
@@ -154,6 +191,9 @@ export const refresh = async (req: Request, res: Response) => {
       rawRefreshToken: rawRefresh,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
+      requestId: getRequestId(req),
+      requestedLicenseeId: selection.data.licenseeId,
+      requestedScopeVersion: selection.data.scopeVersion,
     });
 
     if (!rotated.ok) {
@@ -164,6 +204,13 @@ export const refresh = async (req: Request, res: Response) => {
     setAuthCookies(res, rotated);
     return res.json({ success: true, data: authResponseData(rotated) });
   } catch (error) {
+    const category = error instanceof Error ? error.message : "";
+    if (["SCOPE_SELECTION_REQUIRED", "MANUFACTURER_SCOPE_VERSION_REQUIRED", "MANUFACTURER_SCOPE_STALE"].includes(category)) {
+      return res.status(409).json({ success: false, error: "Select a current manufacturer workspace and try again.", code: category });
+    }
+    if (category === "MANUFACTURER_SCOPE_DENIED") {
+      return res.status(403).json({ success: false, error: "The requested manufacturer workspace is unavailable." });
+    }
     console.error("Refresh error:", error);
     return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
   }
@@ -312,6 +359,7 @@ export const acceptInviteController = async (req: Request, res: Response) => {
       password: parsed.data.password,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
+      requestId: getRequestId(req),
     });
 
     setAuthCookies(res, session);

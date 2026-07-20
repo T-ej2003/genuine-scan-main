@@ -6,11 +6,13 @@ import {
   type AuthenticationResponseJSON,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
+import { Prisma } from "@prisma/client";
 
 import prisma from "../../config/database";
 import { buildTokenHashCandidates, hashToken, normalizeUserAgent, randomOpaqueToken } from "../../utils/security";
 
 type WebAuthnChallengePurpose = "ENROLLMENT" | "LOGIN" | "STEP_UP";
+type WebAuthnDbClient = Pick<Prisma.TransactionClient, "authWebAuthnChallenge" | "userMfaFactor">;
 
 const parsePositiveIntEnv = (key: string, fallback: number) => {
   const raw = Number(String(process.env[key] || "").trim());
@@ -70,8 +72,12 @@ export const deriveWebAuthnOrigins = () => {
 
 const challengeTtlMinutes = () => parsePositiveIntEnv("AUTH_WEBAUTHN_CHALLENGE_TTL_MINUTES", 5);
 
-const loadChallengeByTicket = async (ticket: string, purpose?: WebAuthnChallengePurpose) => {
-  const row = await prisma.authWebAuthnChallenge.findFirst({
+const loadChallengeByTicket = async (
+  ticket: string,
+  purpose?: WebAuthnChallengePurpose,
+  db: WebAuthnDbClient = prisma
+) => {
+  const row = await db.authWebAuthnChallenge.findFirst({
     where: {
       ticketHash: { in: buildTokenHashCandidates(ticket) },
       purpose: purpose || undefined,
@@ -83,11 +89,12 @@ const loadChallengeByTicket = async (ticket: string, purpose?: WebAuthnChallenge
   return row;
 };
 
-const consumeChallenge = async (id: string) => {
-  await prisma.authWebAuthnChallenge.update({
-    where: { id },
+const consumeChallenge = async (id: string, db: WebAuthnDbClient = prisma) => {
+  const consumed = await db.authWebAuthnChallenge.updateMany({
+    where: { id, consumedAt: null, expiresAt: { gt: new Date() } },
     data: { consumedAt: new Date() },
   });
+  if (consumed.count !== 1) throw new Error("WEBAUTHN_CHALLENGE_NOT_FOUND");
 };
 
 export const beginWebAuthnFactorRegistration = async (params: {
@@ -243,12 +250,14 @@ export const completeWebAuthnFactorAuthentication = async (params: {
   userId: string;
   ticket: string;
   credential: AuthenticationResponseJSON;
-}) => {
-  const challenge = await loadChallengeByTicket(params.ticket);
+}, db?: Prisma.TransactionClient): Promise<{ ok: true; purpose: WebAuthnChallengePurpose }> => {
+  if (!db) return prisma.$transaction((tx) => completeWebAuthnFactorAuthentication(params, tx));
+
+  const challenge = await loadChallengeByTicket(params.ticket, undefined, db);
   if (challenge.userId !== params.userId) throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
 
   const credentialId = String(params.credential.rawId || params.credential.id || "").trim();
-  const factor = await prisma.userMfaFactor.findFirst({
+  const factor = await db.userMfaFactor.findFirst({
     where: { userId: params.userId, type: "WEBAUTHN", disabledAt: null, credentialId },
     select: { id: true, credentialId: true, publicKey: true, counter: true, transports: true },
   });
@@ -269,7 +278,7 @@ export const completeWebAuthnFactorAuthentication = async (params: {
   });
 
   if (!verification.verified) throw new Error("WEBAUTHN_ASSERTION_NOT_VERIFIED");
-  await prisma.userMfaFactor.update({
+  await db.userMfaFactor.update({
     where: { id: factor.id },
     data: {
       counter: Math.max(factor.counter, verification.authenticationInfo.newCounter),
@@ -278,6 +287,6 @@ export const completeWebAuthnFactorAuthentication = async (params: {
       lastUsedAt: new Date(),
     },
   });
-  await consumeChallenge(challenge.id);
+  await consumeChallenge(challenge.id, db);
   return { ok: true as const, purpose: challenge.purpose as WebAuthnChallengePurpose };
 };

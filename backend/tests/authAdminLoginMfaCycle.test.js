@@ -84,8 +84,7 @@ mockModule("services/auth/sessionRiskService.js", {
 });
 
 mockModule("services/manufacturerScopeService.js", {
-  listManufacturerLicenseeLinks: async () => [],
-  normalizeLinkedLicensees: (links) => links,
+  resolveManufacturerSessionScope: async () => ({ selectedLicensee: null, linkedLicensees: [], linkedLicenseeIds: [] }),
 });
 
 mockModule("services/auth/emailVerificationService.js", {
@@ -96,8 +95,12 @@ let mockedMfaStatus = {
   enabled: true,
   lastUsedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
 };
+let failMfaStatusRead = false;
 mockModule("services/auth/mfaService.js", {
-  getAdminMfaStatus: async () => mockedMfaStatus,
+  getAdminMfaStatus: async () => {
+    if (failMfaStatusRead) throw new Error("MFA_STATUS_UNAVAILABLE");
+    return mockedMfaStatus;
+  },
   createAdminMfaChallenge: async () => ({
     ticket: "mfa-ticket",
     expiresAt: new Date(Date.now() + 5 * 60 * 1000),
@@ -170,6 +173,18 @@ const run = async () => {
   assert(
     auditEvents.some((entry) => entry?.action === "AUTH_LOGIN_MFA_CHALLENGE_REQUIRED"),
     "stale MFA login should emit challenge-required audit action"
+  );
+
+  failMfaStatusRead = true;
+  await assert.rejects(
+    loginWithPassword({
+      email: prismaUser.email,
+      password: "correct-password",
+      ipHash: "ip-hash",
+      userAgent: "agent",
+    }),
+    /MFA_STATUS_UNAVAILABLE/,
+    "MFA status failures must not be converted into an unenrolled bootstrap session"
   );
 
   console.log("admin login MFA cycle tests passed");

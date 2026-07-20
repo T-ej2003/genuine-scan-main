@@ -95,12 +95,14 @@ const databaseMock = {
   manufacturerLicenseeLink: {
     findMany: async ({ where, select }) => {
       if (where?.manufacturerId !== "manufacturer-a") return [];
-      if (select?.licenseeId) return [{ licenseeId: "lic-a" }];
+      if (select?.licenseeId && Object.keys(select).length === 1) return [{ licenseeId: "lic-a" }];
       return [
         {
           manufacturerId: "manufacturer-a",
           licenseeId: "lic-a",
           isPrimary: true,
+          createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-01-02T00:00:00.000Z"),
           licensee: { id: "lic-a", name: "Licensee A", prefix: "A", brandName: "A", orgId: "org-a", isActive: true },
         },
       ];

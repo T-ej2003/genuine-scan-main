@@ -356,11 +356,16 @@ const fakePrisma = {
   manufacturerLicenseeLink: {
     ...createModel(state.manufacturerLinks),
     findMany: async (args = {}) => {
-      const rows = pageRows(state.manufacturerLinks, args).map((link) => ({
+      const filtered = state.manufacturerLinks.filter((link) =>
+        !args.where?.manufacturerId || link.manufacturerId === args.where.manufacturerId
+      );
+      const rows = filtered.slice(0, args.take || filtered.length).map((link) => ({
         ...link,
+        createdAt: link.createdAt || now(),
+        updatedAt: link.updatedAt || now(),
         licensee: state.licensees.find((licensee) => licensee.id === link.licenseeId),
       }));
-      if (args.select?.licenseeId) return rows.map((row) => ({ licenseeId: row.licenseeId }));
+      if (args.select?.licenseeId && Object.keys(args.select).length === 1) return rows.map((row) => ({ licenseeId: row.licenseeId }));
       return rows;
     },
   },

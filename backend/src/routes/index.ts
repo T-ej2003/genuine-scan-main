@@ -9,6 +9,7 @@ import {
 } from "../middleware/auth";
 import { optionalCustomerVerifyAuth, requireCustomerVerifyAuth } from "../middleware/customerVerifyAuth";
 import { enforceTenantIsolation } from "../middleware/tenantIsolation";
+import { unsupportedWorkflowShutdown } from "../middleware/unsupportedWorkflowShutdown";
 import { sanitizeRequestInput } from "../middleware/requestSanitizer";
 import {
   requirePlatformAdmin,
@@ -303,6 +304,8 @@ const cookieReadRouter = Router();
 const cookieMutationRouter = Router();
 const protectedReadRouter = Router();
 const protectedMutationRouter = Router();
+protectedReadRouter.use(unsupportedWorkflowShutdown);
+protectedMutationRouter.use(unsupportedWorkflowShutdown);
 
 const buildPublicRateLimitPair = (params: {
   scope: string;

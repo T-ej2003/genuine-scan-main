@@ -10,6 +10,7 @@ export interface JWTPayload {
   role: UserRole;
   licenseeId: string | null;
   orgId: string | null;
+  scopeVersion?: string | null;
   linkedLicenseeIds?: string[] | null;
   sessionStage: "ACTIVE";
   authAssurance: AuthAssuranceLevel;
@@ -23,6 +24,7 @@ export interface MfaBootstrapPayload {
   role: UserRole;
   licenseeId: string | null;
   orgId: string | null;
+  scopeVersion?: string | null;
   linkedLicenseeIds?: string[] | null;
   sessionId: string;
   stage: "MFA_BOOTSTRAP";
@@ -34,6 +36,7 @@ export interface AuthenticatedSessionClaims {
   role: UserRole;
   licenseeId: string | null;
   orgId: string | null;
+  scopeVersion?: string | null;
   linkedLicenseeIds?: string[] | null;
   sessionStage: AuthSessionStage;
   authAssurance: AuthAssuranceLevel;

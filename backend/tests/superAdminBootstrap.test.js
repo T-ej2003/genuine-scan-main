@@ -139,8 +139,7 @@ mockModule("services/auth/sessionRiskService.js", {
 });
 
 mockModule("services/manufacturerScopeService.js", {
-  listManufacturerLicenseeLinks: async () => [],
-  normalizeLinkedLicensees: (links) => links,
+  resolveManufacturerSessionScope: async () => ({ selectedLicensee: null, linkedLicensees: [], linkedLicenseeIds: [] }),
 });
 
 mockModule("services/auth/mfaService.js", {

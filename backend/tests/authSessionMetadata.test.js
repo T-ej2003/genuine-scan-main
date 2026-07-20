@@ -63,8 +63,18 @@ mockModule("services/auth/sessionRiskService.js", {
 });
 
 mockModule("services/manufacturerScopeService.js", {
-  listManufacturerLicenseeLinks: async () => [],
-  normalizeLinkedLicensees: (value) => value,
+  resolveManufacturerSessionScope: async () => {
+    const selectedLicensee = {
+      id: "licensee-1",
+      name: "Licensee",
+      prefix: "AADS",
+      brandName: "MSCQR",
+      orgId: "org-1",
+      isPrimary: true,
+      scopeVersion: "2026-03-01T00:00:00.000Z",
+    };
+    return { selectedLicensee, linkedLicensees: [selectedLicensee], linkedLicenseeIds: [selectedLicensee.id] };
+  },
 });
 
 mockModule("services/auth/emailVerificationService.js", {

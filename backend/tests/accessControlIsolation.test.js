@@ -121,10 +121,28 @@ const createResponse = () => ({
     sessionStage: "ACTIVE",
     authAssurance: "PASSWORD",
   };
+  const manufacturerScopeDb = {
+    manufacturerLicenseeLink: {
+      findMany: async () => [{
+        licenseeId: "lic-a",
+        isPrimary: true,
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        updatedAt: new Date("2026-01-02T00:00:00.000Z"),
+        licensee: {
+          id: "lic-a",
+          name: "Licensee A",
+          prefix: "LICA",
+          brandName: null,
+          orgId: "org-a",
+        },
+      }],
+    },
+  };
 
   const scopedManufacturerQrWhere = await buildScopedWhere(manufacturerUser, {
     requestedLicenseeId: "lic-a",
     relationManufacturerField: "batch",
+    db: manufacturerScopeDb,
   });
   assert.deepStrictEqual(
     scopedManufacturerQrWhere,
@@ -133,7 +151,7 @@ const createResponse = () => ({
   );
 
   await assert.rejects(
-    () => buildScopedWhere(manufacturerUser, { requestedLicenseeId: "lic-b" }),
+    () => buildScopedWhere(manufacturerUser, { requestedLicenseeId: "lic-b", db: manufacturerScopeDb }),
     /Access denied/,
     "manufacturer query params cannot switch to another licensee"
   );

@@ -1,4 +1,5 @@
 import { createHash, createPublicKey, randomBytes, verify as cryptoVerify } from "crypto";
+import { Prisma } from "@prisma/client";
 
 import prisma from "../../config/database";
 import { buildTokenHashCandidates, hashToken, normalizeUserAgent, randomOpaqueToken } from "../../utils/security";
@@ -8,8 +9,13 @@ import {
   completeWebAuthnFactorAuthentication,
   completeWebAuthnFactorRegistration,
 } from "./webauthnMfaProvider";
+import { lockMfaState } from "./mfaAdapter";
 
 type WebAuthnChallengePurpose = "ENROLLMENT" | "LOGIN" | "STEP_UP";
+type WebAuthnDbClient = Pick<
+  Prisma.TransactionClient,
+  "$executeRaw" | "authWebAuthnChallenge" | "userMfaFactor" | "adminWebAuthnCredential"
+>;
 
 type StoredChallenge = {
   id: string;
@@ -144,10 +150,14 @@ const assertUserPresence = (flags: number) => {
   }
 };
 
-const loadChallengeByTicket = async (ticket: string, purpose?: WebAuthnChallengePurpose) => {
+const loadChallengeByTicket = async (
+  ticket: string,
+  purpose?: WebAuthnChallengePurpose,
+  db: WebAuthnDbClient = prisma
+) => {
   const ticketHashCandidates = buildTokenHashCandidates(ticket);
   const now = new Date();
-  const row = await prisma.authWebAuthnChallenge.findFirst({
+  const row = await db.authWebAuthnChallenge.findFirst({
     where: {
       ticketHash: { in: ticketHashCandidates },
       purpose: purpose || undefined,
@@ -160,13 +170,14 @@ const loadChallengeByTicket = async (ticket: string, purpose?: WebAuthnChallenge
   return row as StoredChallenge;
 };
 
-const consumeChallenge = async (id: string) => {
-  await prisma.authWebAuthnChallenge.update({
-    where: { id },
+const consumeChallenge = async (id: string, db: WebAuthnDbClient = prisma) => {
+  const consumed = await db.authWebAuthnChallenge.updateMany({
+    where: { id, consumedAt: null, expiresAt: { gt: new Date() } },
     data: {
       consumedAt: new Date(),
     },
   });
+  if (consumed.count !== 1) throw new Error("WEBAUTHN_CHALLENGE_NOT_FOUND");
 };
 
 export const listAdminWebAuthnCredentials = async (userId: string) => {
@@ -407,12 +418,15 @@ export const completeAdminWebAuthnChallenge = async (params: {
       userHandle?: string | null;
     };
   };
-}) => {
+}, db?: Prisma.TransactionClient): Promise<{ ok: true; purpose: WebAuthnChallengePurpose }> => {
+  if (!db) return prisma.$transaction((tx) => completeAdminWebAuthnChallenge(params, tx));
+
+  await lockMfaState(db, params.userId);
   try {
     return await completeWebAuthnFactorAuthentication({
       ...params,
       credential: params.credential as any,
-    });
+    }, db);
   } catch (error) {
     if (
       !(error instanceof Error) ||
@@ -422,13 +436,13 @@ export const completeAdminWebAuthnChallenge = async (params: {
     }
   }
 
-  const challenge = await loadChallengeByTicket(params.ticket);
+  const challenge = await loadChallengeByTicket(params.ticket, undefined, db);
   if (challenge.userId !== params.userId) {
     throw new Error("WEBAUTHN_CHALLENGE_USER_MISMATCH");
   }
 
   const credentialId = String(params.credential.rawId || params.credential.id || "").trim();
-  const storedCredential = await prisma.adminWebAuthnCredential.findFirst({
+  const storedCredential = await db.adminWebAuthnCredential.findFirst({
     where: {
       userId: params.userId,
       credentialId,
@@ -474,7 +488,7 @@ export const completeAdminWebAuthnChallenge = async (params: {
     throw new Error("WEBAUTHN_COUNTER_REPLAY");
   }
 
-  await prisma.adminWebAuthnCredential.update({
+  await db.adminWebAuthnCredential.update({
     where: { id: storedCredential.id },
     data: {
       counter: nextCounter > storedCredential.counter ? nextCounter : storedCredential.counter,
@@ -482,7 +496,7 @@ export const completeAdminWebAuthnChallenge = async (params: {
     },
   });
 
-  await consumeChallenge(challenge.id);
+  await consumeChallenge(challenge.id, db);
 
   return {
     ok: true as const,

@@ -1,4 +1,4 @@
-import { AuditLogOutboxStatus } from "@prisma/client";
+import { AuditLogOutboxStatus, Prisma } from "@prisma/client";
 
 import prisma from "../config/database";
 import { withDistributedLease } from "./distributedLeaseService";
@@ -24,8 +24,12 @@ const parseIntEnv = (key: string, fallback: number, min: number, max: number) =>
   return Math.max(min, Math.min(max, Math.floor(raw)));
 };
 
-export const queueAuditLogOutbox = async (payload: Record<string, unknown>, error?: unknown) => {
-  const store = getStore();
+export const queueAuditLogOutbox = async (
+  payload: Record<string, unknown>,
+  error?: unknown,
+  db?: Pick<Prisma.TransactionClient, "auditLogOutbox">
+) => {
+  const store = db?.auditLogOutbox || getStore();
   if (!store?.create) return null;
 
   try {
@@ -38,6 +42,7 @@ export const queueAuditLogOutbox = async (payload: Record<string, unknown>, erro
     });
     return String(row.id || "");
   } catch (queueError) {
+    if (db) throw queueError;
     console.warn("audit outbox enqueue skipped:", queueError);
     return null;
   }

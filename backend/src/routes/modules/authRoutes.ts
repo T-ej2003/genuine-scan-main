@@ -4,6 +4,7 @@ import {
   authenticate,
   authenticateAnySession,
   requireRecentAdminMfa,
+  requireRecentAdminMfaForSetup,
 } from "../../middleware/auth";
 import { requireAnyAdmin } from "../../middleware/rbac";
 import { requireCsrf } from "../../middleware/csrf";
@@ -283,8 +284,8 @@ export const createAuthRoutes = () => {
   router.post("/auth/step-up/password", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, passwordStepUpController);
 
   router.get("/auth/mfa/status", authenticateAnySession, sessionReadRouteLimiter, getAdminMfaStatusController);
-  router.post("/auth/mfa/setup/begin", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaSetupController);
-  router.post("/auth/mfa/setup/confirm", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, confirmAdminMfaSetupController);
+  router.post("/auth/mfa/setup/begin", mfaPreAuthRouteLimiter, authenticateAnySession, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaSetupController);
+  router.post("/auth/mfa/setup/confirm", mfaPreAuthRouteLimiter, authenticateAnySession, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, confirmAdminMfaSetupController);
   router.post("/auth/mfa/challenge/begin", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaChallengeController);
   router.post("/auth/mfa/challenge/complete", mfaPreAuthRouteLimiter, authenticateAnySession, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, completeAdminMfaChallengeController);
   router.post("/auth/mfa/step-up", mfaPreAuthRouteLimiter, authenticate, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, adminMfaStepUpController);

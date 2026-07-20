@@ -44,7 +44,19 @@ const mockModule = (relativePath, exportsValue) => {
         },
       },
       manufacturerLicenseeLink: {
-        findMany: async () => [],
+        findMany: async () => [{
+          licenseeId: "lic-a",
+          isPrimary: true,
+          createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-01-02T00:00:00.000Z"),
+          licensee: {
+            id: "lic-a",
+            name: "Licensee A",
+            prefix: "LICA",
+            brandName: null,
+            orgId: "org-a",
+          },
+        }],
       },
     },
   });

@@ -15,8 +15,7 @@ const mockModule = (relativePath, exportsValue) => {
 };
 
 let prismaUser = null;
-let rotateRefreshTokenResult = null;
-let passwordOnlyRefreshRevokeCount = 0;
+let refreshDecision = null;
 
 const prismaMock = {
   user: {
@@ -61,11 +60,25 @@ mockModule("services/auth/refreshTokenService.js", {
     row: { id: "session-1" },
     expiresAt: new Date("2026-03-16T12:00:00.000Z"),
   }),
-  rotateRefreshToken: async () => rotateRefreshTokenResult,
-  revokeAllUserRefreshTokens: async () => null,
-  revokePasswordOnlyRefreshTokensForUser: async () => {
-    passwordOnlyRefreshRevokeCount += 1;
+  rotateRefreshToken: async (input) => {
+    refreshDecision = await input.decide({
+      tx: prismaMock,
+      token: {
+        id: "legacy-session",
+        userId: prismaUser.id,
+        orgId: prismaUser.orgId,
+        expiresAt: new Date("2026-03-17T12:00:00.000Z"),
+        revokedAt: null,
+        replacedByTokenHash: null,
+        authenticatedAt: new Date("2026-03-16T11:00:00.000Z"),
+        mfaVerifiedAt: null,
+      },
+      now: new Date("2026-03-16T12:00:00.000Z"),
+    });
+    assert.strictEqual(refreshDecision.action, "consume");
+    return { ok: true, rotated: false, userId: prismaUser.id, value: refreshDecision.value };
   },
+  revokeAllUserRefreshTokens: async () => null,
   revokeRefreshTokenByRaw: async () => null,
 });
 
@@ -83,8 +96,7 @@ mockModule("services/auth/sessionRiskService.js", {
 });
 
 mockModule("services/manufacturerScopeService.js", {
-  listManufacturerLicenseeLinks: async () => [],
-  normalizeLinkedLicensees: (links) => links,
+  resolveManufacturerSessionScope: async () => ({ selectedLicensee: null, linkedLicensees: [], linkedLicenseeIds: [] }),
 });
 
 mockModule("services/auth/emailVerificationService.js", {
@@ -125,6 +137,7 @@ const run = async () => {
     password: "correct-password",
     ipHash: "ip-hash",
     userAgent: "agent",
+    requestId: "login-request-1",
   });
 
   assert.strictEqual(result.sessionStage, "MFA_BOOTSTRAP", "manufacturer password login should require MFA setup");
@@ -147,27 +160,20 @@ const run = async () => {
     password: "correct-password",
     ipHash: "ip-hash",
     userAgent: "agent",
+    requestId: "login-request-2",
   });
 
   assert.strictEqual(enrolledResult.sessionStage, "MFA_BOOTSTRAP", "manufacturer logout/login should require MFA challenge even when MFA was used recently");
   assert.strictEqual(enrolledResult.refreshToken, null, "manufacturer challenge session must not issue refresh before MFA");
   assert.strictEqual(enrolledResult.auth?.mfaEnrolled, true, "enrolled manufacturer should enter challenge mode");
 
-  rotateRefreshTokenResult = {
-    ok: true,
-    userId: prismaUser.id,
-    orgId: prismaUser.orgId,
-    newRawToken: "rotated-password-only-refresh",
-    newExpiresAt: new Date("2026-03-16T12:00:00.000Z"),
-    authenticatedAt: new Date("2026-03-16T11:00:00.000Z"),
-    mfaVerifiedAt: null,
-  };
-  passwordOnlyRefreshRevokeCount = 0;
+  refreshDecision = null;
 
   const refreshed = await refreshSession({
     rawRefreshToken: "legacy-password-only-refresh",
     ipHash: "ip-hash",
     userAgent: "agent",
+    requestId: "refresh-request-1",
   });
 
   assert.strictEqual(refreshed.ok, true, "valid legacy refresh should convert into a bootstrap session");
@@ -176,7 +182,8 @@ const run = async () => {
   assert.strictEqual(refreshed.refreshToken, null, "refresh bootstrap must not keep a password-only refresh token");
   assert.strictEqual(refreshed.auth?.authAssurance, "PASSWORD", "bootstrap remains password-only until MFA succeeds");
   assert.strictEqual(refreshed.auth?.stepUpRequired, true, "converted refresh must require MFA step-up");
-  assert.strictEqual(passwordOnlyRefreshRevokeCount, 1, "password-only refresh tokens should be revoked on conversion");
+  assert.strictEqual(refreshDecision.revokeScope, "password-only", "conversion must revoke every password-only refresh token");
+  assert.strictEqual(refreshDecision.revokeReason, "MFA_REQUIRED_AFTER_POLICY_CHANGE");
 
   console.log("manufacturer MFA login bootstrap tests passed");
 };

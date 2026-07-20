@@ -1,19 +1,23 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "crypto";
-import { AuthRiskLevel } from "@prisma/client";
+import { AuthRiskLevel, Prisma } from "@prisma/client";
 
 import prisma from "../../config/database";
 import { buildTokenHashCandidates, hashToken, matchesHashedToken, randomOpaqueToken } from "../../utils/security";
 import { logger } from "../../utils/logger";
 import { createAuditLogSafely, type AuditLogInput } from "../auditService";
 import { buildAdminMfaChallengeExpiry, buildAdminMfaChallengeTtlAuditDetails } from "./authDurationConfig";
+import { revokeAllUserRefreshTokens } from "./refreshTokenService";
 import {
   beginTotpMfaEnrollment,
   completeStableMfaLoginChallenge,
   confirmTotpMfaEnrollment,
   createStableMfaLoginChallenge,
   getAdminMfaAdapterStatus,
+  lockMfaState,
+  MfaAdapterError,
   rotateMfaBackupCodesWithAdapter,
   verifyMfaCodeWithAdapter,
+  type MfaEnrollmentMode,
 } from "./mfaAdapter";
 
 const TOTP_STEP_SECONDS = 30;
@@ -204,6 +208,27 @@ const auditMfaEvent = async (input: {
   await createAuditLogSafely(event).catch(() => undefined);
 };
 
+const mfaAuditOutboxRecord = (input: {
+    userId?: string | null;
+    action: string;
+    entityId?: string | null;
+    details?: Record<string, unknown>;
+    ipHash?: string | null;
+    userAgent?: string | null;
+  }) => ({
+  data: {
+    payload: {
+      ...(input.userId ? { userId: input.userId } : {}),
+      action: input.action,
+      entityType: "AuthMfaChallenge",
+      ...(input.entityId ? { entityId: input.entityId } : {}),
+      details: (input.details || {}) as Prisma.InputJsonObject,
+      ...(input.ipHash ? { ipHash: input.ipHash } : {}),
+      ...(input.userAgent ? { userAgent: input.userAgent } : {}),
+    } as Prisma.InputJsonObject,
+  },
+});
+
 const normalizeRiskLevel = (level?: AuthRiskLevel | string | null): AuthRiskLevel => {
   const value = String(level || "").toUpperCase();
   if (value === "CRITICAL") return AuthRiskLevel.CRITICAL;
@@ -216,23 +241,61 @@ export const getAdminMfaStatus = async (userId: string, db: LoginMfaDbClient = p
   return getAdminMfaAdapterStatus(userId, db);
 };
 
-export const beginAdminMfaSetup = async (params: { userId: string; email: string }) => {
-  return beginTotpMfaEnrollment(params);
+export const beginAdminMfaSetup = async (params: {
+  userId: string;
+  email: string;
+  mode: MfaEnrollmentMode;
+}, db?: Prisma.TransactionClient) => {
+  return beginTotpMfaEnrollment(params, db);
 };
 
-export const confirmAdminMfaSetup = async (params: { userId: string; code: string }) => {
-  return confirmTotpMfaEnrollment(params);
+export const confirmAdminMfaSetup = async (params: {
+  userId: string;
+  code: string;
+  mode: MfaEnrollmentMode;
+  audit?: { ipHash: string | null; userAgent: string | null };
+}, db?: Prisma.TransactionClient) => {
+  return confirmTotpMfaEnrollment(params, db);
 };
 
-export const disableAdminMfa = async (userId: string) => {
-  await prisma.adminMfaCredential.updateMany({
+export const disableAdminMfa = async (
+  userId: string,
+  db?: Prisma.TransactionClient,
+  audit?: { ipHash: string | null; userAgent: string | null }
+): Promise<{ enabled: false }> => {
+  if (!db) return prisma.$transaction((tx) => disableAdminMfa(userId, tx, audit));
+  await lockMfaState(db, userId);
+  const now = new Date();
+  await db.adminMfaCredential.updateMany({
     where: { userId },
     data: {
+      backupCodesHash: [],
       isEnabled: false,
       verifiedAt: null,
       lastUsedAt: null,
     },
   });
+  await db.userMfaFactor.updateMany({
+    where: { userId, disabledAt: null },
+    data: { disabledAt: now },
+  });
+  await db.adminWebAuthnCredential.deleteMany({ where: { userId } });
+  await db.userBackupCode.deleteMany({ where: { userId, usedAt: null } });
+  await revokeAllUserRefreshTokens({ userId, reason: "MFA_DISABLED", now }, db);
+  if (audit) {
+    await db.auditLogOutbox.create({
+      data: {
+        payload: {
+          userId,
+          action: "AUTH_MFA_DISABLED",
+          entityType: "User",
+          entityId: userId,
+          details: { actorUserId: userId },
+          ...audit,
+        },
+      },
+    });
+  }
 
   return { enabled: false };
 };
@@ -338,8 +401,11 @@ const consumeBackupCode = async (userId: string, codesHash: string[], provided: 
   return true;
 };
 
-export const verifyAdminMfaCode = async (params: { userId: string; code: string }) => {
-  return verifyMfaCodeWithAdapter(params);
+export const verifyAdminMfaCode = async (
+  params: { userId: string; code: string },
+  db?: Prisma.TransactionClient
+) => {
+  return verifyMfaCodeWithAdapter(params, db);
 };
 
 export const rotateAdminMfaBackupCodes = async (params: { userId: string; code: string }) => {
@@ -354,17 +420,44 @@ export const completeAdminMfaChallenge = async (params: {
   code: string;
   ipHash?: string | null;
   userAgent?: string | null;
-}) => {
+}, db?: Prisma.TransactionClient): Promise<{
+  userId: string;
+  riskScore: number;
+  riskLevel: AuthRiskLevel;
+  reasons: string[];
+  method: "TOTP" | "BACKUP_CODE";
+}> => {
+  if (!db) {
+    const outcome = await prisma.$transaction(async (tx) => {
+      try {
+        return { ok: true as const, value: await completeAdminMfaChallenge(params, tx) };
+      } catch (error) {
+        if (error instanceof MfaAdapterError && error.commitFailure) {
+          return { ok: false as const, error };
+        }
+        throw error;
+      }
+    });
+    if (!outcome.ok) throw outcome.error;
+    return outcome.value;
+  }
+
   try {
-    return await completeStableMfaLoginChallenge(params);
+    return await completeStableMfaLoginChallenge(params, db);
   } catch (error) {
-    if (error instanceof Error && error.message !== "MFA_CHALLENGE_NOT_FOUND") throw error;
+    if (
+      !(error instanceof Error) ||
+      error.message !== "MFA_CHALLENGE_NOT_FOUND" ||
+      (error instanceof MfaAdapterError && error.commitFailure)
+    ) {
+      throw error;
+    }
   }
 
   const ticketHashCandidates = buildTokenHashCandidates(String(params.ticket || "").trim());
   const now = new Date();
 
-  const challenge = await prisma.authMfaChallenge.findFirst({
+  const challenge = await db.authMfaChallenge.findFirst({
     where: {
       ticketHash: { in: ticketHashCandidates },
     },
@@ -385,44 +478,44 @@ export const completeAdminMfaChallenge = async (params: {
     },
   });
 
-  if (!challenge) throw new Error("MFA_CHALLENGE_NOT_FOUND");
-  if (challenge.userId !== params.userId) throw new Error("MFA_CHALLENGE_FORBIDDEN");
+  if (!challenge) throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
+  if (challenge.userId !== params.userId) throw new MfaAdapterError("MFA_CHALLENGE_FORBIDDEN", { status: 403 });
 
   if (challenge.sessionBindingHash) {
     const bindingCandidates = sessionBindingCandidates(params.sessionId);
     if (!bindingCandidates.length || !bindingCandidates.includes(challenge.sessionBindingHash)) {
-      throw new Error("MFA_CHALLENGE_NOT_FOUND");
+      throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
     }
   } else if (challenge.purpose === "admin_login") {
-    throw new Error("MFA_CHALLENGE_NOT_FOUND");
+    throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
   }
 
   if (challenge.supersededAt || challenge.consumedAt) {
-    throw new Error("MFA_CHALLENGE_NOT_FOUND");
+    throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
   }
 
   if (challenge.expiresAt.getTime() <= now.getTime()) {
-    await auditMfaEvent({
+    await db.auditLogOutbox.create(mfaAuditOutboxRecord({
       userId: challenge.userId,
       action: "AUTH_MFA_CHALLENGE_EXPIRED",
       entityId: challenge.id,
       details: { purpose: challenge.purpose, expiresAt: challenge.expiresAt.toISOString() },
       ipHash: params.ipHash,
       userAgent: params.userAgent,
-    });
-    throw new Error("MFA_CHALLENGE_NOT_FOUND");
+    }));
+    throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410, commitFailure: true });
   }
 
   if (challenge.attempts >= challenge.maxAttempts) {
-    await auditMfaEvent({
+    await db.auditLogOutbox.create(mfaAuditOutboxRecord({
       userId: challenge.userId,
       action: "AUTH_MFA_TOO_MANY_ATTEMPTS",
       entityId: challenge.id,
       details: { purpose: challenge.purpose, attempts: challenge.attempts, maxAttempts: challenge.maxAttempts },
       ipHash: params.ipHash,
       userAgent: params.userAgent,
-    });
-    throw new Error("MFA_TOO_MANY_ATTEMPTS");
+    }));
+    throw new MfaAdapterError("MFA_TOO_MANY_ATTEMPTS", { status: 429, retryAfterSeconds: 60, commitFailure: true });
   }
 
   const normalizedCode = String(params.code || "").trim();
@@ -437,19 +530,24 @@ export const completeAdminMfaChallenge = async (params: {
         : totpShapeOk || backupShapeOk;
   if (!codeShapeOk) {
     const nextAttempts = challenge.attempts + 1;
-    await prisma.authMfaChallenge.updateMany({
+    const updated = await db.authMfaChallenge.updateMany({
       where: { id: challenge.id, consumedAt: null, supersededAt: null },
       data: { attempts: { increment: 1 } },
     });
-    await auditMfaEvent({
+    if (updated.count !== 1) throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
+    await db.auditLogOutbox.create(mfaAuditOutboxRecord({
       userId: challenge.userId,
       action: nextAttempts >= challenge.maxAttempts ? "AUTH_MFA_TOO_MANY_ATTEMPTS" : "AUTH_MFA_FAILURE",
       entityId: challenge.id,
       details: { purpose: challenge.purpose, reason: "INVALID_CODE_SHAPE", attempts: nextAttempts, maxAttempts: challenge.maxAttempts },
       ipHash: params.ipHash,
       userAgent: params.userAgent,
+    }));
+    throw new MfaAdapterError(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE", {
+      status: nextAttempts >= challenge.maxAttempts ? 429 : 400,
+      retryAfterSeconds: nextAttempts >= challenge.maxAttempts ? 60 : undefined,
+      commitFailure: true,
     });
-    throw new Error(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE");
   }
 
   let verification: Awaited<ReturnType<typeof verifyAdminMfaCode>>;
@@ -457,29 +555,34 @@ export const completeAdminMfaChallenge = async (params: {
     verification = await verifyAdminMfaCode({
       userId: challenge.userId,
       code: normalizedCode,
-    });
+    }, db);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error || "");
     if (message === "INVALID_MFA_CODE") {
       const nextAttempts = challenge.attempts + 1;
-      await prisma.authMfaChallenge.updateMany({
+      const updated = await db.authMfaChallenge.updateMany({
         where: { id: challenge.id, consumedAt: null, supersededAt: null },
         data: { attempts: { increment: 1 } },
       });
-      await auditMfaEvent({
+      if (updated.count !== 1) throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
+      await db.auditLogOutbox.create(mfaAuditOutboxRecord({
         userId: challenge.userId,
         action: nextAttempts >= challenge.maxAttempts ? "AUTH_MFA_TOO_MANY_ATTEMPTS" : "AUTH_MFA_FAILURE",
         entityId: challenge.id,
         details: { purpose: challenge.purpose, attempts: nextAttempts, maxAttempts: challenge.maxAttempts },
         ipHash: params.ipHash,
         userAgent: params.userAgent,
+      }));
+      throw new MfaAdapterError(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE", {
+        status: nextAttempts >= challenge.maxAttempts ? 429 : 400,
+        retryAfterSeconds: nextAttempts >= challenge.maxAttempts ? 60 : undefined,
+        commitFailure: true,
       });
-      throw new Error(nextAttempts >= challenge.maxAttempts ? "MFA_TOO_MANY_ATTEMPTS" : "INVALID_MFA_CODE");
     }
     throw error;
   }
 
-  const consumed = await prisma.authMfaChallenge.updateMany({
+  const consumed = await db.authMfaChallenge.updateMany({
     where: {
       id: challenge.id,
       consumedAt: null,
@@ -494,10 +597,10 @@ export const completeAdminMfaChallenge = async (params: {
   });
 
   if (consumed.count !== 1) {
-    throw new Error("MFA_CHALLENGE_NOT_FOUND");
+    throw new MfaAdapterError("MFA_CHALLENGE_NOT_FOUND", { status: 410 });
   }
 
-  await auditMfaEvent({
+  await db.auditLogOutbox.create(mfaAuditOutboxRecord({
     userId: challenge.userId,
     action: verification.method === "BACKUP_CODE" ? "AUTH_MFA_BACKUP_CODE_USED" : "AUTH_MFA_SUCCESS",
     entityId: challenge.id,
@@ -509,7 +612,7 @@ export const completeAdminMfaChallenge = async (params: {
     },
     ipHash: params.ipHash,
     userAgent: params.userAgent,
-  });
+  }));
 
   return {
     userId: challenge.userId,

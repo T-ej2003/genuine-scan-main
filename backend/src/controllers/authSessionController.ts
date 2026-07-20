@@ -9,7 +9,9 @@ import {
   revokeRefreshTokenByRaw,
 } from "../services/auth/refreshTokenService";
 import { verifyAdminMfaCode } from "../services/auth/mfaService";
+import { withAdminMfaClaimsTransaction } from "../services/auth/authClaimsRlsContext";
 import { createAuditLog } from "../services/auditService";
+import { queueAuditLogOutbox } from "../services/auditLogOutboxService";
 import { getSessionSecurityOverview } from "../services/auth/sessionSecurityOverview";
 import {
   authResponseData,
@@ -17,6 +19,7 @@ import {
   getAuthClaims,
   getCurrentRefreshSession,
   getRefreshTokenFromRequest,
+  getRequestId,
   hashIp,
   isAdminMfaRequiredRole,
   mfaCodeSchema,
@@ -183,6 +186,10 @@ export const passwordStepUpController = async (req: Request, res: Response) => {
     authenticatedAt: now,
     mfaVerifiedAt: null,
     now,
+    requestId: getRequestId(req),
+    purpose: "manufacturer-bootstrap",
+    requestedLicenseeId: claims.licenseeId,
+    requestedScopeVersion: claims.scopeVersion,
   });
 
   const currentRefresh = getRefreshTokenFromRequest(req);
@@ -220,35 +227,39 @@ export const adminMfaStepUpController = async (req: Request, res: Response) => {
   }
 
   try {
-    await verifyAdminMfaCode({ userId: claims.userId, code: parsed.data.code });
-
     const ipHash = hashIp(req.ip);
     const userAgent = normalizeUserAgent(req.get("user-agent"));
     const now = new Date();
-    const session = await issueSessionForUser({
-      userId: claims.userId,
-      ipHash,
-      userAgent,
-      authAssurance: "ADMIN_MFA",
-      authenticatedAt: now,
-      mfaVerifiedAt: now,
-      now,
-    });
-
     const currentRefresh = getRefreshTokenFromRequest(req);
-    if (currentRefresh) {
-      await revokeRefreshTokenByRaw({ rawToken: currentRefresh, reason: "STEP_UP_REPLACED" });
-    }
-
-    await createAuditLog({
-      userId: claims.userId,
-      action: "AUTH_MFA_STEP_UP_SUCCESS",
-      entityType: "User",
-      entityId: claims.userId,
-      details: { method: "ADMIN_MFA" },
-      ipHash: ipHash || undefined,
-      userAgent: userAgent || undefined,
-    } as any);
+    const session = await withAdminMfaClaimsTransaction(claims, async (tx) => {
+      await verifyAdminMfaCode({ userId: claims.userId, code: parsed.data.code }, tx);
+      const nextSession = await issueSessionForUser({
+        userId: claims.userId,
+        ipHash,
+        userAgent,
+        authAssurance: "ADMIN_MFA",
+        authenticatedAt: now,
+        mfaVerifiedAt: now,
+        now,
+        requestId: getRequestId(req),
+        purpose: "manufacturer-bootstrap",
+        requestedLicenseeId: claims.licenseeId,
+        requestedScopeVersion: claims.scopeVersion,
+      }, tx);
+      if (currentRefresh) {
+        await revokeRefreshTokenByRaw({ rawToken: currentRefresh, reason: "STEP_UP_REPLACED", now }, tx);
+      }
+      await queueAuditLogOutbox({
+        userId: claims.userId,
+        action: "AUTH_MFA_STEP_UP_SUCCESS",
+        entityType: "User",
+        entityId: claims.userId,
+        details: { method: "ADMIN_MFA" },
+        ipHash,
+        userAgent,
+      }, undefined, tx);
+      return nextSession;
+    });
 
     setAuthCookies(res, session);
     return res.json({ success: true, data: authResponseData(session) });

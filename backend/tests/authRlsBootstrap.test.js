@@ -99,8 +99,7 @@ mockModule("services/auth/sessionRiskService.js", {
   assessAuthSessionRisk: async () => ({ score: 0, riskLevel: "LOW", reasons: [], shouldBlock: false }),
 });
 mockModule("services/manufacturerScopeService.js", {
-  listManufacturerLicenseeLinks: async () => [],
-  normalizeLinkedLicensees: () => [],
+  resolveManufacturerSessionScope: async () => ({ selectedLicensee: null, linkedLicensees: [], linkedLicenseeIds: [] }),
 });
 mockModule("services/auth/emailVerificationService.js", {
   isVerifiedAccount: (candidate) => Boolean(candidate.emailVerifiedAt),

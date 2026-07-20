@@ -53,6 +53,7 @@ const stagingRlsManufacturerPrintersReadTelemetryPaths = new Set([
   "/api/manufacturer/printers/",
 ]);
 const STAGING_RLS_MANUFACTURER_PRINTERS_READ_TELEMETRY_PATH = "/api/manufacturer/printers";
+const UNSUPPORTED_WORKFLOW_DENIAL_TELEMETRY_PATH = "/api/UNRESOLVED_PROTECTED_ROUTE";
 const isStagingRlsManufacturerPrintersReadTelemetryRoute = (method: string, pathName: string) =>
   method === "GET" && stagingRlsManufacturerPrintersReadTelemetryPaths.has(pathName);
 
@@ -140,7 +141,11 @@ export const createBackendApp = () => {
 
     res.on("finish", () => {
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
-      const pathName = req.originalUrl.split("?")[0] || req.path || "/";
+      const unsupportedWorkflowDenial =
+        (req as express.Request & { unsupportedWorkflowDenial?: boolean }).unsupportedWorkflowDenial === true;
+      const pathName = unsupportedWorkflowDenial
+        ? UNSUPPORTED_WORKFLOW_DENIAL_TELEMETRY_PATH
+        : req.originalUrl.split("?")[0] || req.path || "/";
       const claims = (req as express.Request & { user?: RequestClaimsSnapshot }).user || null;
       const isStagingRlsAllocationMapTelemetry =
         isStagingRlsBatchAllocationMapTelemetryRoute(req.method, pathName) &&
@@ -171,6 +176,11 @@ export const createBackendApp = () => {
         status: res.statusCode,
         durationMs,
       });
+
+      // The shutdown middleware emits its own bounded, identifier-free denial
+      // events. Emitting the generic per-request completion event as well would
+      // reintroduce an unbounded log stream during a denial burst.
+      if (unsupportedWorkflowDenial) return;
 
       const meta = {
         requestId,
