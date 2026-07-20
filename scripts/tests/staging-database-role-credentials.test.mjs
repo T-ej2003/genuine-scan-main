@@ -94,6 +94,21 @@ for (const failurePhase of ["first-role-password-assignment","password-transacti
 test("evidence is private, sanitized, and deterministically hashed",()=>{ const root=fs.mkdtempSync(path.join(os.tmpdir(),"mscqr-evidence-test-")); const credentialedUrl=["post","gresql://","u",":","p","@","mscqr-staging-db/x"].join(""); try { const dir=createPrivateEvidenceDirectory(root,new Date("2026-07-10T12:00:00Z")); writeSanitizedEvidence(dir,"summary.json",{url:credentialedUrl,token:"secret"},["secret"]); writeEvidenceChecksums(dir); assert.equal(fs.statSync(dir).mode & 0o777,0o700); for(const name of fs.readdirSync(dir)) assert.equal(fs.statSync(path.join(dir,name)).mode & 0o777,0o600); assert(!fs.readFileSync(path.join(dir,"summary.json"),"utf8").includes(credentialedUrl)); const checksum=fs.readFileSync(path.join(dir,"SHA256SUMS.txt"),"utf8"); assert.match(checksum,/^[a-f0-9]{64}  summary\.json\n$/); } finally { fs.rmSync(root,{recursive:true,force:true}); } });
 test("restrictive temporary credential directory cleanup works",()=>{ const dir=createRestrictiveTempDirectory(); fs.writeFileSync(path.join(dir,"credential"),"not-real",{mode:0o600}); assert.equal(fs.statSync(dir).mode&0o777,0o700); securelyRemoveDirectory(dir); assert.equal(fs.existsSync(dir),false); });
 test("shell wrappers are syntax valid and help is non-mutating",()=>{ for(const file of ["provision-staging-database-role-credentials.sh","verify-staging-database-role-permissions.sh","cutover-staging-ecs-database-role.sh","rollback-staging-ecs-database-role.sh"]) assert.equal(spawnSync("bash",["-n",path.join("scripts/aws",file)]).status,0); const result=spawnSync("scripts/aws/provision-staging-database-role-credentials.sh",["--help"],{encoding:"utf8"}); assert.equal(result.status,0); assert.match(result.stdout,/Default is read-only discovery/); });
-test("workflow never runs local psql, enables RLS, or puts secret values in command arguments",()=>{ const controller=fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs","utf8"); const executor=fs.readFileSync("backend/scripts/staging-database-role-vpc-executor.mjs","utf8"); assert.doesNotMatch(controller,/\bpsql\s*\(/); assert.doesNotMatch(`${controller}\n${executor}`,/ENABLE\s+ROW\s+LEVEL\s+SECURITY|CREATE\s+POLICY/i); assert.doesNotMatch(controller,/get-secret-value/); assert.doesNotMatch(controller,/--secret-string/); assert.match(executor,/VersionStages: \["AWSPENDING"\]/); });
+test("credential workflow cannot route full RLS or expose credential material",()=>{
+  const controller=fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs","utf8");
+  const executor=fs.readFileSync("backend/scripts/staging-database-role-vpc-executor.mjs","utf8");
+  assert.doesNotMatch(controller,/\bpsql\s*\(/);
+  assert.doesNotMatch(`${controller}\n${executor}`,/ENABLE\s+ROW\s+LEVEL\s+SECURITY|CREATE\s+POLICY/i);
+  assert.match(executor,/assertBlueExecutorModeAllowed\(MODE\)/);
+  assert.equal(executor.match(/full-rls-/g)?.length,1);
+  assert.doesNotMatch(executor,/FULL_RLS|full-rls-(?:capability|role|admin|runtime|verification|rollback)|mscqr_staging_(?:preauth|worker|scheduled|migration|operator)/);
+  assert.doesNotMatch(controller,/get-secret-value|--secret-string/);
+  assert.match(executor,/VersionStages: \["AWSPENDING"\]/);
+  assert.match(controller,/"lambda", "get-function-configuration"/);
+  assert.match(controller,/function:\$\{C\.brokerFunction\}:reviewed/);
+  assert.match(controller,/stopped\?\.taskDefinitionArn !== executor\.arn/);
+  assert.match(controller,/container\?\.imageDigest !== expectedDigest/);
+  assert.doesNotMatch(controller,/MSCQR_STAGING_DATABASE_ROLE_BROKER_VERSION|packageChecksumSha256|BROKER_PACKAGE_CHECKSUM/);
+});
 test("AWS CLI structured payloads use mode-0600 file references and contain no credential material",()=>{ const source=fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs","utf8"); assert.match(source,/--cli-input-json", `file:\/\/\$\{file\}`/); assert.match(source,/--payload", `fileb:\/\/\$\{requestFile\}`/); assert.doesNotMatch(source,/--overrides|SecretString|PGPASSWORD|DATABASE_URL=.*postgres/); });
 test("workflow installs signal cleanup handlers for restrictive temporary files",()=>{ const source=fs.readFileSync("scripts/aws/staging-database-role-credentials.mjs","utf8"); assert.match(source,/process\.once\(signal/); for(const signal of ["SIGINT","SIGTERM","SIGHUP"]) assert(source.includes(`"${signal}"`)); });

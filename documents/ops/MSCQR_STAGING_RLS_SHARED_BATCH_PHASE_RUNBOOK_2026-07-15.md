@@ -103,7 +103,7 @@ export AWS_REGION='eu-west-2'
 export MSCQR_STAGING_VPC_EXECUTOR='disposable-ecs-admin-task'
 export MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN='arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-database-role-admin:<reviewed-revision>'
 export MSCQR_STAGING_RLS_HELPER_IMAGE_REF='368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:<reviewed-digest>'
-export MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE='YES'
+export MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE='MSCQR_APPLY_STAGING_RLS_SHARED_BATCH_PHASE'
 scripts/aws/apply-staging-rls-shared-batch-phase.sh 2>&1 | tee "$MSCQR_SHARED_RLS_EVIDENCE_DIR/apply-task.json"
 unset MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE
 ```
@@ -220,7 +220,7 @@ export AWS_REGION='eu-west-2'
 export MSCQR_STAGING_VPC_EXECUTOR='disposable-ecs-admin-task'
 export MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN='arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-database-role-admin:<same-reviewed-revision-used-for-apply>'
 export MSCQR_STAGING_RLS_HELPER_IMAGE_REF='368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:<same-reviewed-digest-used-for-apply>'
-export MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK='YES'
+export MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK='MSCQR_ROLLBACK_STAGING_RLS_SHARED_BATCH_PHASE'
 scripts/aws/rollback-staging-rls-shared-batch-phase.sh 2>&1 | tee "$MSCQR_SHARED_RLS_EVIDENCE_DIR/rollback-task.json"
 unset MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK
 ```

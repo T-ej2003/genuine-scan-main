@@ -99,11 +99,11 @@ variable "allowed_operator_cidrs" {
 
 variable "backend_image_uri" {
   type        = string
-  description = "Immutable backend image URI for the staging ECS task, preferably digest-pinned."
+  description = "Exact digest-pinned backend image URI shared by the staging service and blue database-role executor."
 
   validation {
-    condition     = !can(regex("(?i)prod|production", var.backend_image_uri))
-    error_message = "backend_image_uri must not contain prod/production naming."
+    condition     = can(regex("^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$", var.backend_image_uri))
+    error_message = "backend_image_uri must be the exact digest-pinned MSCQR staging backend image in eu-west-2."
   }
 }
 

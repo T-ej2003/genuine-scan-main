@@ -3,16 +3,17 @@ locals {
   name_prefix       = "mscqr-staging"
   short_name_prefix = "mscqr-stg"
 
-  cluster_name        = "mscqr-staging-euw2-main"
-  service_name        = "mscqr-staging-backend-service-euw2"
-  task_family         = "mscqr-staging-backend"
-  alb_name            = "mscqr-stg-alb-euw2"
-  target_group_name   = "mscqr-stg-backend-tg-euw2"
-  log_group_name      = "/ecs/mscqr-staging-backend"
-  exec_log_group_name = "/aws/ecs/mscqr-staging/exec"
-  db_identifier       = "mscqr-staging-db"
-  redis_group_id      = "mscqr-staging-redis-euw2"
-  artifacts_bucket    = "mscqr-staging-euw2-artifacts-${var.account_id}"
+  cluster_name                        = "mscqr-staging-euw2-main"
+  service_name                        = "mscqr-staging-backend-service-euw2"
+  task_family                         = "mscqr-staging-backend"
+  alb_name                            = "mscqr-stg-alb-euw2"
+  target_group_name                   = "mscqr-stg-backend-tg-euw2"
+  log_group_name                      = "/ecs/mscqr-staging-backend"
+  exec_log_group_name                 = "/aws/ecs/mscqr-staging/exec"
+  database_role_broker_log_group_name = "/aws/lambda/mscqr-staging-database-role-executor-broker"
+  db_identifier                       = "mscqr-staging-db"
+  redis_group_id                      = "mscqr-staging-redis-euw2"
+  artifacts_bucket                    = "mscqr-staging-euw2-artifacts-${var.account_id}"
 
   common_tags = merge(
     {
@@ -53,7 +54,9 @@ locals {
     AUTH_MFA_ENCRYPTION_KEY         = var.staging_secret_arns.auth_mfa_encryption_key
   }
 
-  app_database_secret_arn_pattern = "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/staging/database-url/app-*"
+  app_database_secret_arn_pattern        = "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:mscqr/staging/database-url/app-*"
+  database_role_executor_contract_sha256 = filesha256("${path.module}/../../../documents/security/rls-program/staging-full-rls-executor-contract.json")
+  database_role_broker_source_sha256     = filesha256("${path.module}/lambda/database-role-executor-broker/index.mjs")
 }
 
 check "staging_name_guard" {
@@ -91,7 +94,7 @@ data "aws_iam_policy_document" "ecs_exec_logs_kms" {
   }
 
   statement {
-    sid    = "AllowCloudWatchLogsEncryptionForStagingExecLogGroup"
+    sid    = "AllowCloudWatchLogsEncryptionForReviewedStagingLogGroups"
     effect = "Allow"
 
     principals {
@@ -111,7 +114,10 @@ data "aws_iam_policy_document" "ecs_exec_logs_kms" {
     condition {
       test     = "ArnEquals"
       variable = "kms:EncryptionContext:aws:logs:arn"
-      values   = ["arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:${local.exec_log_group_name}"]
+      values = [
+        "arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:${local.exec_log_group_name}",
+        "arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:${local.database_role_broker_log_group_name}",
+      ]
     }
   }
 }
@@ -786,12 +792,21 @@ resource "aws_ecs_task_definition" "database_role_admin" {
     essential = true
     command   = ["node", "scripts/staging-database-role-vpc-executor.mjs"]
     environment = concat(
-      [{ name = "MSCQR_VPC_EXECUTOR_MODE", value = "probe" }],
+      [
+        { name = "MSCQR_VPC_EXECUTOR_MODE", value = "probe" },
+      ],
       [for entry in local.backend_environment : entry if startswith(entry.name, "MSCQR_STAGING_RLS_")]
     )
     secrets                = [{ name = "DATABASE_URL", valueFrom = var.staging_secret_arns.database_url }]
+    user                   = "node"
+    privileged             = false
     readonlyRootFilesystem = true
-    linuxParameters        = { initProcessEnabled = true }
+    linuxParameters = {
+      initProcessEnabled = true
+      capabilities       = { add = [], drop = ["ALL"] }
+      devices            = []
+      tmpfs              = []
+    }
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -849,8 +864,21 @@ resource "aws_iam_role_policy" "database_role_executor_broker" {
           StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
         }
       },
+      {
+        Sid      = "WriteOnlyReviewedBrokerLogs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.database_role_executor_broker.arn}:*"
+      },
     ]
   })
+}
+
+resource "aws_cloudwatch_log_group" "database_role_executor_broker" {
+  name              = local.database_role_broker_log_group_name
+  retention_in_days = 30
+  kms_key_id        = aws_kms_key.ecs_exec_logs.arn
+  tags              = merge(local.common_tags, { Component = "database-role-executor-broker" })
 }
 
 resource "aws_lambda_function" "database_role_executor_broker" {
@@ -863,17 +891,29 @@ resource "aws_lambda_function" "database_role_executor_broker" {
   memory_size                    = 128
   timeout                        = 30
   reserved_concurrent_executions = 1
+  publish                        = true
 
   environment {
     variables = {
-      BROKER_CLUSTER_ARN          = aws_ecs_cluster.staging.arn
-      BROKER_TASK_DEFINITION_ARN  = aws_ecs_task_definition.database_role_admin.arn
-      BROKER_PRIVATE_SUBNETS_JSON = jsonencode(var.app_private_subnet_ids)
-      BROKER_SECURITY_GROUPS_JSON = jsonencode([aws_security_group.ecs.id])
+      BROKER_CLUSTER_ARN              = aws_ecs_cluster.staging.arn
+      BROKER_TASK_DEFINITION_ARN      = aws_ecs_task_definition.database_role_admin.arn
+      BROKER_PRIVATE_SUBNETS_JSON     = jsonencode(var.app_private_subnet_ids)
+      BROKER_SECURITY_GROUPS_JSON     = jsonencode([aws_security_group.ecs.id])
+      BROKER_EXECUTOR_CONTRACT_SHA256 = local.database_role_executor_contract_sha256
+      BROKER_SOURCE_SHA256            = local.database_role_broker_source_sha256
     }
   }
 
   tags = merge(local.common_tags, { Component = "database-role-executor-broker" })
+
+  depends_on = [aws_cloudwatch_log_group.database_role_executor_broker]
+}
+
+resource "aws_lambda_alias" "database_role_executor_broker_reviewed" {
+  name             = "reviewed"
+  description      = "Immutable reviewed staging database-role executor broker"
+  function_name    = aws_lambda_function.database_role_executor_broker.function_name
+  function_version = aws_lambda_function.database_role_executor_broker.version
 }
 
 resource "aws_ecs_service" "backend" {

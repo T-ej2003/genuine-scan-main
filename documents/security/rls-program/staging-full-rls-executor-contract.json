@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 2,
+  "environment": "staging",
+  "status": "blue-executor-full-rls-disabled",
+  "deploymentModel": "blue-green-clean-room",
+  "blueExecutor": {
+    "database": "mscqr_staging",
+    "databaseAdministrator": "mscqr_staging_admin",
+    "taskFamily": "mscqr-staging-database-role-admin",
+    "allowedModes": [
+      "probe",
+      "provision",
+      "verify",
+      "rls-shared-apply",
+      "rls-shared-verify",
+      "rls-shared-rollback"
+    ],
+    "fullRlsMutationAllowed": false
+  },
+  "disabledFullRlsModes": [
+    "full-rls-capability-preflight",
+    "full-rls-role-provision",
+    "full-rls-role-verify",
+    "full-rls-admin-bootstrap",
+    "full-rls-admin-ownership",
+    "full-rls-runtime-policy",
+    "full-rls-verification",
+    "full-rls-rollback"
+  ],
+  "futureGreenExecutor": {
+    "required": true,
+    "implemented": false,
+    "databasePattern": "^mscqr_staging_rls_green_[a-z][a-z0-9_]{0,15}$",
+    "targetMustBeFresh": true,
+    "managedRolesMustBeNew": true,
+    "exactRoleAndSecretNames": "reserved-for-separate-reviewed-green-contract",
+    "separateTaskDefinitionRequired": true,
+    "separateAdministrativeSecretRequired": true
+  },
+  "executorTask": {
+    "family": "mscqr-staging-database-role-admin",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": [
+      "FARGATE"
+    ],
+    "cpu": "256",
+    "memory": "512",
+    "runtimePlatform": {
+      "operatingSystemFamily": "LINUX",
+      "cpuArchitecture": "X86_64"
+    },
+    "container": {
+      "name": "db-admin",
+      "essential": true,
+      "command": [
+        "node",
+        "scripts/staging-database-role-vpc-executor.mjs"
+      ],
+      "entryPoint": [],
+      "user": "node",
+      "privileged": false,
+      "readonlyRootFilesystem": true,
+      "environmentFiles": [],
+      "mountPoints": [],
+      "volumesFrom": [],
+      "linuxParameters": {
+        "initProcessEnabled": true,
+        "capabilities": {
+          "add": [],
+          "drop": [
+            "ALL"
+          ]
+        },
+        "devices": [],
+        "tmpfs": []
+      },
+      "portMappings": [],
+      "systemControls": [],
+      "ulimits": [],
+      "resourceRequirements": []
+    },
+    "volumes": [],
+    "ipcMode": null,
+    "pidMode": null,
+    "proxyConfiguration": null,
+    "ephemeralStorage": null,
+    "inferenceAccelerators": []
+  }
+}

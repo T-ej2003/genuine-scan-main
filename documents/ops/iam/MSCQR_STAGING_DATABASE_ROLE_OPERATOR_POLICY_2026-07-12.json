@@ -5,7 +5,24 @@
       "Sid": "InvokeOnlyReviewedDatabaseRoleExecutorBroker",
       "Effect": "Allow",
       "Action": "lambda:InvokeFunction",
-      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-staging-database-role-executor-broker"
+      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-staging-database-role-executor-broker:reviewed"
+    },
+    {
+      "Sid": "InspectOnlyReviewedDatabaseRoleExecutorBroker",
+      "Effect": "Allow",
+      "Action": "lambda:GetFunctionConfiguration",
+      "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-staging-database-role-executor-broker:reviewed"
+    },
+    {
+      "Sid": "DiscoverOnlyReviewedStagingDatabaseMetadata",
+      "Effect": "Allow",
+      "Action": "rds:DescribeDBInstances",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
     },
     {
       "Sid": "DescribeReviewedStagingBackendService",

@@ -57,6 +57,20 @@ const secretUrl = (raw) => {
     return typeof parsed === "string" ? parsed : parsed.DATABASE_URL || parsed.databaseUrl || parsed.url;
   } catch { return raw; }
 };
+
+export const BLUE_EXECUTOR_MODES = Object.freeze([
+  "probe", "provision", "verify",
+  "rls-shared-apply", "rls-shared-verify", "rls-shared-rollback",
+]);
+
+export function assertBlueExecutorModeAllowed(mode = MODE) {
+  if (typeof mode === "string" && mode.startsWith("full-rls-")) {
+    throw new Error("Full-RLS execution is disabled on the blue staging executor; use a separately reviewed green executor.");
+  }
+  if (!BLUE_EXECUTOR_MODES.includes(mode)) throw new Error("Mode is outside the reviewed blue executor set.");
+  return true;
+}
+
 const RLS_SHARED_MODES = Object.freeze({
   "rls-shared-apply": "mscqr_staging_rls_shared_batch_phase_apply_2026-07-15.sql",
   "rls-shared-verify": "mscqr_staging_rls_shared_batch_phase_verify_2026-07-15.sql",
@@ -138,7 +152,9 @@ export function runRlsSharedPhase(mode, rawDatabaseUrl = process.env.DATABASE_UR
   const evidenceLine = String(result.stdout || "").trim().split("\n").reverse().find((line) => line.trim().startsWith("{"));
   try { return JSON.parse(evidenceLine); } catch { throw new Error("Shared RLS SQL task returned invalid evidence."); }
 }
+
 const client = (url) => new PrismaClient({ datasources: { db: { url } }, log: [] });
+
 const password = () => crypto.randomBytes(48).toString("base64url");
 const roleUrl = (adminUrl, username, generatedPassword) => {
   const url = new URL(adminUrl);
@@ -365,10 +381,14 @@ async function compensate(admin, provisionMode, previousUrls, pending, before) {
   finally { compensating = false; }
 }
 
-export async function executeExecutor() {
-  if (!process.env.DATABASE_URL) throw new Error("Admin DATABASE_URL is unavailable inside the VPC executor.");
-  const adminUrl = process.env.DATABASE_URL;
-  const admin = client(adminUrl);
+export async function executeExecutor({
+  env = process.env,
+  clientFactory = client,
+} = {}) {
+  assertBlueExecutorModeAllowed(MODE);
+  if (!env.DATABASE_URL) throw new Error("Admin DATABASE_URL is unavailable inside the VPC executor.");
+  const adminUrl = env.DATABASE_URL;
+  const admin = clientFactory(adminUrl);
   const before = {};
   const previousUrls = {};
   const pending = {};

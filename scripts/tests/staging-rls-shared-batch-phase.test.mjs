@@ -7,6 +7,8 @@ import { runRlsSharedPhase } from "../../backend/scripts/staging-database-role-v
 import {
   APPLY_BLOCK_REASON,
   assertReviewedTopology,
+  assertSharedBrokerConfiguration,
+  assertSharedBrokerLaunch,
   parseSqlEvidence,
   taskEvidence,
   validateLocalGate,
@@ -143,10 +145,16 @@ test("rollout is absent from Prisma migrations and workflow automation", () => {
 
 test("AWS wrappers and controller are broker-only, confirmation-gated, and secret-free", () => {
   for (const shell of [source.applyShell, source.verifyShell, source.rollbackShell]) assert(shell.includes("set -euo pipefail"));
-  assert.match(source.applyShell, /MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE.*YES/);
-  assert.match(source.rollbackShell, /MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK.*YES/);
+  assert.match(source.applyShell, /MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE.*MSCQR_APPLY_STAGING_RLS_SHARED_BATCH_PHASE/);
+  assert.match(source.rollbackShell, /MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK.*MSCQR_ROLLBACK_STAGING_RLS_SHARED_BATCH_PHASE/);
   assert.match(source.controller, /"lambda", "invoke"/);
+  assert.match(source.controller, /function:\$\{C\.brokerFunction\}:reviewed/);
+  assert.match(source.controller, /"lambda", "get-function-configuration"/);
+  assert.match(source.controller, /APPLY_CONFIRMATION = "MSCQR_APPLY_STAGING_RLS_SHARED_BATCH_PHASE"/);
+  assert.match(source.controller, /ROLLBACK_CONFIRMATION = "MSCQR_ROLLBACK_STAGING_RLS_SHARED_BATCH_PHASE"/);
+  assert.match(source.controller, /const payload = \{ mode: brokerMode, \.\.\.\(confirmation \? \{ confirmation \} : \{\}\) \}/);
   assert.doesNotMatch(source.controller, /"ecs", "run-task"|get-secret-value|GetSecretValue|postgres(?:ql)?:\/\//i);
+  assert.doesNotMatch(source.controller, /packageChecksumSha256|BROKER_PACKAGE_CHECKSUM/);
   assert.match(source.controller, /cloudWatchLogStream/);
   assert.match(source.controller, /logs", "get-log-events/);
   assert.match(source.controller, /SQL evidence has an unsafe/);
@@ -251,13 +259,38 @@ test("controller locks stable revision 7 and canary revision 9 flag posture", ()
   assert.throws(() => assertReviewedTopology({ ...wrong, helperImageRef }), /unsafe/);
 });
 
+test("shared controller binds the reviewed alias version to the exact helper revision and source", () => {
+  const binding = { executorContractSha256: "b".repeat(64), brokerSourceSha256: "a".repeat(64) };
+  const configuration = { Version: "7", Environment: { Variables: {
+    BROKER_CLUSTER_ARN: `arn:aws:ecs:${region}:${account}:cluster/mscqr-staging-euw2-main`,
+    BROKER_TASK_DEFINITION_ARN: helperArn,
+    BROKER_EXECUTOR_CONTRACT_SHA256: binding.executorContractSha256,
+    BROKER_SOURCE_SHA256: binding.brokerSourceSha256,
+  } } };
+  assert.equal(assertSharedBrokerConfiguration(configuration, helperArn, binding), "7");
+  const taskArn = `arn:aws:ecs:${region}:${account}:task/mscqr-staging-euw2-main/task-id`;
+  const started = { status: "started", taskArn, taskDefinitionArn: helperArn, ...binding };
+  assert.equal(assertSharedBrokerLaunch({ StatusCode: 200, ExecutedVersion: "7" }, started, { reviewedVersion: "7", helperArn, binding }), taskArn);
+  assert.throws(() => assertSharedBrokerConfiguration({ ...configuration, Version: "$LATEST" }, helperArn, binding), /alias configuration/);
+  assert.throws(() => assertSharedBrokerConfiguration(configuration, helperArn.replace(":3", ":4"), binding), /alias configuration/);
+  assert.throws(() => assertSharedBrokerLaunch({ StatusCode: 200, ExecutedVersion: "6" }, started, { reviewedVersion: "7", helperArn, binding }), /reviewed shared-RLS/);
+  assert.throws(() => assertSharedBrokerLaunch({ StatusCode: 200, ExecutedVersion: "7" }, { ...started, taskDefinitionArn: helperArn.replace(":3", ":4") }, { reviewedVersion: "7", helperArn, binding }), /reviewed shared-RLS/);
+});
+
 test("controller blocks unsafe apply and validates stopped-task SQL evidence", () => {
   const env = { AWS_REGION: region, MSCQR_STAGING_VPC_EXECUTOR: "disposable-ecs-admin-task", MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN: helperArn, MSCQR_STAGING_RLS_HELPER_IMAGE_REF: helperImageRef };
   assert.throws(() => validateLocalGate("apply", env), /Set MSCQR_CONFIRM/);
   assert.throws(
     () => validateLocalGate("apply", { ...env, MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE: "YES" }),
+    /Set MSCQR_CONFIRM/,
+  );
+  assert.throws(
+    () => validateLocalGate("apply", { ...env, MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE: "MSCQR_APPLY_STAGING_RLS_SHARED_BATCH_PHASE" }),
     (error) => error.message === APPLY_BLOCK_REASON,
   );
+  assert.throws(() => validateLocalGate("rollback", env), /Set MSCQR_CONFIRM/);
+  assert.throws(() => validateLocalGate("rollback", { ...env, MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK: "YES" }), /Set MSCQR_CONFIRM/);
+  assert.equal(validateLocalGate("rollback", { ...env, MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK: "MSCQR_ROLLBACK_STAGING_RLS_SHARED_BATCH_PHASE" }), "rls-shared-rollback");
   assert.equal(validateLocalGate("verify", env), "rls-shared-verify");
   const sqlEvidence = {
     status: "staging_shared_batch_rls_verified", database: "mscqr_staging", protectedTables: 10,

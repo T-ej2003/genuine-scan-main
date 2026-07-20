@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { executorModeForCommand } from "../aws/staging-database-role-credentials.mjs";
-import { ROLES, RLS_READ_TABLES, assertCompleteVerification, assertRouteFlagsFalse, classifyProvisioningMode, databaseInvariants, ensureAllPlaceholders, verifyCredentials, verifyDeniedOperation } from "../../backend/scripts/staging-database-role-vpc-executor.mjs";
+import { assertReviewedBrokerConfiguration, assertReviewedBrokerLaunch, executorModeForCommand } from "../aws/staging-database-role-credentials.mjs";
+import { ROLES, RLS_READ_TABLES, assertBlueExecutorModeAllowed, assertCompleteVerification, assertRouteFlagsFalse, classifyProvisioningMode, databaseInvariants, ensureAllPlaceholders, verifyCredentials, verifyDeniedOperation } from "../../backend/scripts/staging-database-role-vpc-executor.mjs";
 
 function clientFactory(fault = "") {
   return (_url, key) => {
@@ -43,6 +43,7 @@ function clientFactory(fault = "") {
 const urls = Object.fromEntries(Object.keys(ROLES).map((key) => [key, ["postgresql:", "//", ROLES[key], ":", "fixture-value", "@", "mscqr-staging-db.invalid/mscqr_staging"].join("")]));
 
 test("controller verify invokes verify executor mode and never probe", () => { assert.equal(executorModeForCommand("verify"), "verify"); assert.notEqual(executorModeForCommand("verify"), "probe"); });
+test("credential controller binds the reviewed alias to the exact executor revision",()=>{ const expectedTaskDefinitionArn="arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-staging-database-role-admin:7"; const binding={executorContractSha256:"b".repeat(64),brokerSourceSha256:"a".repeat(64)}; const configuration={Version:"7",Environment:{Variables:{BROKER_CLUSTER_ARN:"arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-staging-euw2-main",BROKER_TASK_DEFINITION_ARN:expectedTaskDefinitionArn,BROKER_EXECUTOR_CONTRACT_SHA256:binding.executorContractSha256,BROKER_SOURCE_SHA256:binding.brokerSourceSha256}}}; assert.equal(assertReviewedBrokerConfiguration(configuration,expectedTaskDefinitionArn,binding),"7"); const taskArn="arn:aws:ecs:eu-west-2:368992683803:task/mscqr-staging-euw2-main/task-id"; const started={status:"started",taskArn,taskDefinitionArn:expectedTaskDefinitionArn,...binding}; assert.equal(assertReviewedBrokerLaunch({StatusCode:200,ExecutedVersion:"7"},started,{reviewedVersion:"7",expectedTaskDefinitionArn,binding}),taskArn); assert.throws(()=>assertReviewedBrokerConfiguration({...configuration,Version:"$LATEST"},expectedTaskDefinitionArn,binding),/alias configuration/); assert.throws(()=>assertReviewedBrokerLaunch({StatusCode:200,ExecutedVersion:"6"},started,{reviewedVersion:"7",expectedTaskDefinitionArn,binding}),/reviewed executor version/); assert.throws(()=>assertReviewedBrokerLaunch({StatusCode:200,ExecutedVersion:"7"},{...started,taskDefinitionArn:expectedTaskDefinitionArn.replace(":7",":8")},{reviewedVersion:"7",expectedTaskDefinitionArn,binding}),/reviewed executor version/); });
 test("complete permission matrix succeeds only with every advertised check", async () => { const result = await verifyCredentials(urls, { clientFactory: clientFactory() }); assert.equal(assertCompleteVerification(result), true); });
 for (const [fault, message] of [
   ["invalid-credentials", /authentication failed/],
@@ -56,6 +57,27 @@ for (const [fault, message] of [
 test("verification cannot report success with an incomplete matrix", async () => { const result = await verifyCredentials(urls, { clientFactory: clientFactory() }); result[0].permissionTests.pop(); assert.throws(() => assertCompleteVerification(result), /Missing expected denial|incomplete/); });
 test("verify requires zero RLS, FORCE RLS, and policy counts",async()=>{ const admin={ $queryRawUnsafe:async()=>[{database_name:"mscqr_staging",rls_enabled_count:0,force_rls_count:0,policy_count:0}]}; assert.equal((await databaseInvariants(admin)).policyCount,0); for(const key of ["rls_enabled_count","force_rls_count","policy_count"]){ admin.$queryRawUnsafe=async()=>[{database_name:"mscqr_staging",rls_enabled_count:0,force_rls_count:0,policy_count:0,[key]:1}]; await assert.rejects(databaseInvariants(admin),/invariants failed/); } });
 test("verify requires every staged RLS route flag to remain explicitly false",()=>{ const env={MSCQR_STAGING_RLS_BATCHES_READ_ENABLED:"false",MSCQR_STAGING_RLS_BATCH_ALLOCATION_MAP_ENABLED:"false",MSCQR_STAGING_RLS_MANUFACTURER_PRINTERS_READ_ENABLED:"false"}; assert.equal(assertRouteFlagsFalse(env),true); assert.throws(()=>assertRouteFlagsFalse({...env,MSCQR_STAGING_RLS_BATCHES_READ_ENABLED:"true"}),/explicitly false/); });
+
+const DISABLED_FULL_RLS_MODES = Object.freeze([
+  "full-rls-capability-preflight",
+  "full-rls-role-provision",
+  "full-rls-role-verify",
+  "full-rls-admin-bootstrap",
+  "full-rls-admin-ownership",
+  "full-rls-runtime-policy",
+  "full-rls-verification",
+  "full-rls-rollback",
+]);
+
+test("blue executor rejects every full-RLS mode while preserving reviewed legacy modes", () => {
+  for (const mode of DISABLED_FULL_RLS_MODES) {
+    assert.throws(() => assertBlueExecutorModeAllowed(mode), /disabled on the blue staging executor/);
+  }
+  for (const mode of ["probe", "provision", "verify", "rls-shared-apply", "rls-shared-verify", "rls-shared-rollback"]) {
+    assert.equal(assertBlueExecutorModeAllowed(mode), true);
+  }
+  for (const mode of ["install-rls", "cutover", "", null]) assert.throws(() => assertBlueExecutorModeAllowed(mode), /outside the reviewed/);
+});
 
 function probeClient({ deny = false, infrastructureFailure = false, rollbackFailure = false } = {}) {
   const state = { tables: new Set(), schemas: new Set(), rows: 0, begins: 0, rollbacks: 0, reusableChecks: 0 };

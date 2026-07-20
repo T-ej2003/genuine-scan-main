@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,8 +19,16 @@ const modes = Object.freeze({
 const helperArnPattern = new RegExp(`^arn:aws:ecs:${C.region}:${C.accountId}:task-definition/mscqr-staging-database-role-admin:[0-9]+$`);
 const helperImagePattern = new RegExp(`^${C.accountId}\\.dkr\\.ecr\\.${C.region}\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$`);
 const canaryArn = `arn:aws:ecs:${C.region}:${C.accountId}:task-definition/mscqr-staging-backend:9`;
-const brokerArn = `arn:aws:lambda:${C.region}:${C.accountId}:function:${C.brokerFunction}`;
+const brokerArn = `arn:aws:lambda:${C.region}:${C.accountId}:function:${C.brokerFunction}:reviewed`;
+const root = path.resolve(import.meta.dirname, "../..");
+const sha256File = (name) => crypto.createHash("sha256").update(fs.readFileSync(path.join(root, name))).digest("hex");
+const brokerBinding = Object.freeze({
+  executorContractSha256: sha256File("documents/security/rls-program/staging-full-rls-executor-contract.json"),
+  brokerSourceSha256: sha256File("infra/terraform/staging-api/lambda/database-role-executor-broker/index.mjs"),
+});
 export const APPLY_BLOCK_REASON = "Shared RLS apply is blocked: stable revision 7 has contextless User access and the reviewed User policies do not support legacy admin INSERT, DELETE, or cross-user UPDATE.";
+const APPLY_CONFIRMATION = "MSCQR_APPLY_STAGING_RLS_SHARED_BATCH_PHASE";
+const ROLLBACK_CONFIRMATION = "MSCQR_ROLLBACK_STAGING_RLS_SHARED_BATCH_PHASE";
 
 const run = (args) => {
   const result = spawnSync("aws", [...args, "--region", C.region, "--output", "json"], {
@@ -47,10 +56,36 @@ export function validateLocalGate(mode, env = process.env) {
   if (env.MSCQR_STAGING_VPC_EXECUTOR !== "disposable-ecs-admin-task") throw new Error("Reviewed disposable ECS admin executor must be selected.");
   if (!helperArnPattern.test(env.MSCQR_STAGING_DB_ADMIN_TASK_DEFINITION_ARN || "")) throw new Error("Exact reviewed staging database-role admin task definition ARN is required.");
   if (!helperImagePattern.test(env.MSCQR_STAGING_RLS_HELPER_IMAGE_REF || "")) throw new Error("Exact immutable staging RLS helper image digest reference is required.");
-  if (mode === "apply" && env.MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE !== "YES") throw new Error("Set MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE=YES.");
+  if (mode === "apply" && env.MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE !== APPLY_CONFIRMATION) throw new Error(`Set MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE=${APPLY_CONFIRMATION}.`);
   if (mode === "apply") throw new Error(APPLY_BLOCK_REASON);
-  if (mode === "rollback" && env.MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK !== "YES") throw new Error("Set MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK=YES.");
+  if (mode === "rollback" && env.MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK !== ROLLBACK_CONFIRMATION) throw new Error(`Set MSCQR_CONFIRM_STAGING_RLS_SHARED_BATCH_PHASE_ROLLBACK=${ROLLBACK_CONFIRMATION}.`);
   return modes[mode];
+}
+
+export function assertSharedBrokerConfiguration(configuration, helperArn, binding = brokerBinding) {
+  const version = String(configuration?.Version || "");
+  const variables = configuration?.Environment?.Variables || {};
+  if (!/^[1-9][0-9]*$/.test(version)
+      || variables.BROKER_CLUSTER_ARN !== `arn:aws:ecs:${C.region}:${C.accountId}:cluster/${C.cluster}`
+      || variables.BROKER_TASK_DEFINITION_ARN !== helperArn
+      || variables.BROKER_EXECUTOR_CONTRACT_SHA256 !== binding.executorContractSha256
+      || variables.BROKER_SOURCE_SHA256 !== binding.brokerSourceSha256) {
+    throw new Error("Reviewed broker alias configuration does not match the shared-RLS helper.");
+  }
+  return version;
+}
+
+export function assertSharedBrokerLaunch(metadata, started, { reviewedVersion, helperArn, binding = brokerBinding }) {
+  const expectedKeys = ["brokerSourceSha256", "executorContractSha256", "status", "taskArn", "taskDefinitionArn"];
+  const taskArnPrefix = `arn:aws:ecs:${C.region}:${C.accountId}:task/${C.cluster}/`;
+  if (metadata?.FunctionError || metadata?.StatusCode !== 200 || String(metadata?.ExecutedVersion || "") !== reviewedVersion
+      || Object.keys(started || {}).sort().join(",") !== expectedKeys.join(",")
+      || started.status !== "started" || started.taskDefinitionArn !== helperArn
+      || typeof started.taskArn !== "string" || !started.taskArn.startsWith(taskArnPrefix)
+      || Object.entries(binding).some(([name, value]) => started[name] !== value)) {
+    throw new Error("Broker refused or executed outside the reviewed shared-RLS helper binding.");
+  }
+  return started.taskArn;
 }
 
 export function assertReviewedTopology({ service, stableDefinition, canaryDefinition, helperDefinition, helperArn, helperImageRef }) {
@@ -186,28 +221,27 @@ export function execute(mode = command) {
   const canaryDefinition = run(["ecs", "describe-task-definition", "--task-definition", canaryArn]).taskDefinition;
   const helperDefinition = run(["ecs", "describe-task-definition", "--task-definition", helperArn]).taskDefinition;
   assertReviewedTopology({ service, stableDefinition, canaryDefinition, helperDefinition, helperArn, helperImageRef });
+  const brokerConfiguration = run(["lambda", "get-function-configuration", "--function-name", brokerArn]);
+  const reviewedVersion = assertSharedBrokerConfiguration(brokerConfiguration, helperArn);
 
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-staging-shared-rls-"));
   fs.chmodSync(directory, 0o700);
   try {
     const request = path.join(directory, "broker-request.json");
     const response = path.join(directory, "broker-response.json");
-    const payload = { mode: brokerMode, ...(["apply", "rollback"].includes(mode) ? { confirmation: "YES" } : {}) };
+    const confirmation = mode === "apply" ? APPLY_CONFIRMATION : mode === "rollback" ? ROLLBACK_CONFIRMATION : undefined;
+    const payload = { mode: brokerMode, ...(confirmation ? { confirmation } : {}) };
     fs.writeFileSync(request, JSON.stringify(payload), { mode: 0o600, flag: "wx" });
     const metadata = run([
       "lambda", "invoke", "--function-name", brokerArn,
       "--cli-binary-format", "raw-in-base64-out", "--payload", `fileb://${request}`, response,
     ]);
-    if (metadata.FunctionError || metadata.StatusCode !== 200) throw new Error("Broker refused the reviewed shared RLS helper request.");
     let started;
     try { started = JSON.parse(fs.readFileSync(response, "utf8")); }
     catch { throw new Error("Broker returned invalid task metadata."); }
-    const taskArnPrefix = `arn:aws:ecs:${C.region}:${C.accountId}:task/${C.cluster}/`;
-    if (started.status !== "started" || typeof started.taskArn !== "string" || !started.taskArn.startsWith(taskArnPrefix)) {
-      throw new Error("Broker returned a task outside the reviewed staging cluster.");
-    }
-    run(["ecs", "wait", "tasks-stopped", "--cluster", C.cluster, "--tasks", started.taskArn]);
-    const task = run(["ecs", "describe-tasks", "--cluster", C.cluster, "--tasks", started.taskArn]).tasks?.[0];
+    const taskArn = assertSharedBrokerLaunch(metadata, started, { reviewedVersion, helperArn });
+    run(["ecs", "wait", "tasks-stopped", "--cluster", C.cluster, "--tasks", taskArn]);
+    const task = run(["ecs", "describe-tasks", "--cluster", C.cluster, "--tasks", taskArn]).tasks?.[0];
     return taskEvidence(mode, task, helperArn, helperDefinition, helperImageRef, (logGroup, logStream) =>
       run(["logs", "get-log-events", "--log-group-name", logGroup, "--log-stream-name", logStream, "--start-from-head"]).events || []);
   } finally {
