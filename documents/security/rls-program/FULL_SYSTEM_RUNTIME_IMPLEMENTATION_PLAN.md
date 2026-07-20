@@ -1,12 +1,18 @@
 # Full-System Runtime Implementation Plan
 
-Status: next stage after workflow-level authorization freeze. This document is a plan only; it does not change runtime behavior, SQL, RLS, database objects, infrastructure, staging or production.
+Status: in progress after workflow-level authorization freeze. The clean-room foundation is local only; current staging and production databases remain unchanged.
 
 ## Objective and invariant
 
-Implement every active protected-table workflow against its frozen boundary, then certify the complete intended RLS system in a clean disposable PostgreSQL database. The programme must not activate RLS or claim completion from the current four implemented workflows alone. A partial four-workflow certification is explicitly prohibited as release, staging or production evidence.
+Implement every active protected-table workflow against its frozen boundary, then certify the complete intended RLS system in a fresh disposable PostgreSQL 18 database. The programme must not activate RLS or claim completion from the current five implemented workflows alone. A partial workflow certification is explicitly prohibited as release, staging or production evidence.
 
 The authorization sources are `command-semantics.json`, `context-boundary-families.json`, `pre-auth-functions.json`, `worker-boundaries.json`, `operator-boundaries.json`, `system-boundaries.json`, `manufacturer-bootstrap-boundary.json`, `platform-read-scope-boundary.json`, `policy-alert-actor-ceiling.json` and `public-read-contract.json`. Runtime code may implement these contracts; it may not widen them.
+
+## Runtime progress
+
+Batch 001 implemented the tenant-admin slice of `family-simple-tenant-scoped-reads-analyticsservice-2c20deef24`. Foundation follow-up added its frozen platform slice: a database-hydrated platform administrator requires fresh MFA and one active database-validated licensee/organization selector in the same attributed transaction. Database `User` and membership state remains authoritative and every populated unresolved-alert parent is validated before scoring. The current manifest records 428 workflows exactly once across 318 families: five implemented workflows, 59 contract-only workflows and 364 blocked workflows. Every implemented workflow remains application-path PostgreSQL pending.
+
+The batch stopped at `family-simple-tenant-scoped-reads-auditcontroller-627bac35ff`. Its `POST /api/audit/fraud-reports/:id/respond` root is a platform mutation with report lookup, audit append and delivery semantics, so it is incompatible with the batch's read-only repeatable-read transaction model. The exact evidence, limits and retained blocker are recorded in `FULL_SYSTEM_RUNTIME_BATCH_001_REVIEW.md`.
 
 ## Tier ordering
 
@@ -105,11 +111,17 @@ Every applicable family proves:
 
 ## Full-system disposable PostgreSQL certification
 
-Certification starts from a clean disposable cluster and deploys the complete reviewed schema, roles, grants, ownership, functions, policies, FORCE RLS settings and verification queries intended for activation. It must cover every protected table, runtime identity, command equivalence class, context/proof class, dependency chain and active workflow family—not a representative sample.
+Certification starts from a fresh template0-derived disposable database on an isolated PostgreSQL 18 cluster and deploys the complete reviewed schema, newly created roles, grants, ownership, functions, policies, FORCE RLS settings and verification queries intended for green activation. It must cover every protected table, runtime identity, command equivalence class, context/proof class, dependency chain and active workflow family—not a representative sample.
 
-Required evidence includes catalog ownership/grants/policies/functions/search paths; empty/forged/stale/cross-scope denial; own-scope allow; pre-auth/public function isolation; worker/operator/migration separation; recursion and timeout checks; mutation concurrency/replay; planner/index evidence; rollback checksum pairing; and complete route/job tests against the disposable database. Results are redacted, deterministic and checksum-bound to the reviewed artifacts.
+Required evidence includes catalog ownership/grants/policies/functions/search paths; empty/forged/stale/cross-scope denial; own-scope allow; pre-auth/public function isolation; worker/operator/migration separation; recursion and timeout checks; mutation concurrency/replay; planner/index evidence; checksum-paired clean-room destruction/marked-role cleanup; unchanged blue sentinel state; and complete route/job tests against the disposable database. Results are redacted, deterministic and checksum-bound to the reviewed artifacts.
 
-The existing four workflow certifications remain `pending` until this full-system run passes. They cannot be marked certified independently and cannot authorize staging activation.
+The existing five workflow certifications remain `pending` until the full-system workflow integration run passes. The local table-enforcement harness proves the 75 intended FORCE targets and residue-free failure cleanup, but it certifies zero essential application workflows; table/catalog proof cannot authorize green staging creation or traffic.
+
+## Accelerated local enforcement package progress
+
+The local package exists under `scripts/rls/sql/generated/` and `documents/security/rls-program/generated/`. It deterministically derives 77 table dispositions, 75 FORCE targets, exact certification-candidate grants for the runtime-implemented reads, fail-closed command policies for every other surface, canonical context helpers, ownership transfer, exact verification and clean-room destruction/marked-role cleanup. The generated contract inventory preserves all 59 contract-only workflows.
+
+`essential-workflow-allowlist.json` deliberately has zero enabled workflows and `launchBlocked=true`. The centralized protected-route shutdown therefore denies unsupported protected reads and mutations before business data access; auth, health and public routers are merely kept on their separate boundaries and are not declared SQL-ready by that exemption. Disposable PostgreSQL foundation proof does not change application-path status.
 
 ## Completion criteria
 
@@ -121,7 +133,7 @@ Runtime implementation is complete only when:
 - focused unit/route/job/concurrency tests pass;
 - generated manifests are deterministic and validators/mutation tests pass;
 - the clean full-system disposable PostgreSQL certification passes for every intended table, identity, function, policy and workflow class;
-- apply, verification and rollback artifacts are checksum-paired and separately reviewed;
+- apply, verification and clean-room destruction/role-cleanup artifacts are checksum-paired and reviewed at the defined wave/system gates;
 - no staging/production activation occurs without its distinct authorization, preflight, evidence and rollback gates.
 
 The next deterministic work item is emitted by `scripts/rls/context-boundary-next-family.mjs` with `programmeStage=full-system-runtime-implementation` and `workflowAuthorizationArchitecture=frozen`.
