@@ -3,7 +3,6 @@ import { AuthRiskLevel, Prisma } from "@prisma/client";
 import prisma from "../../config/database";
 import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
 import { logger } from "../../utils/logger";
-import { createAuditLogSafely, type AuditLogInput } from "../auditService";
 import { buildAdminMfaChallengeExpiry, buildAdminMfaChallengeTtlAuditDetails } from "./authDurationConfig";
 import {
   consumeLegacyBackupCode,
@@ -88,27 +87,6 @@ type TotpVerificationPathResult = {
   verified: boolean;
   attempted: number;
   operationalFailures: number;
-};
-
-const auditMfaEvent = async (input: {
-  userId?: string | null;
-  action: string;
-  entityType?: string;
-  entityId?: string | null;
-  details?: Record<string, unknown>;
-  ipHash?: string | null;
-  userAgent?: string | null;
-}) => {
-  const event: AuditLogInput = {
-    userId: input.userId || undefined,
-    action: input.action,
-    entityType: input.entityType || "MfaLoginChallenge",
-    entityId: input.entityId || undefined,
-    details: input.details || {},
-    ipHash: input.ipHash || undefined,
-    userAgent: input.userAgent || undefined,
-  };
-  await createAuditLogSafely(event).catch(() => undefined);
 };
 
 const mfaAuditOutboxRecord = (input: {
@@ -695,8 +673,11 @@ export const verifyMfaCodeWithAdapter = async (
   return db ? verify(db) : prisma.$transaction(verify);
 };
 
-export const rotateMfaBackupCodesWithAdapter = async (params: { userId: string; code: string }) => {
-  return prisma.$transaction(async (tx) => {
+export const rotateMfaBackupCodesWithAdapter = async (
+  params: { userId: string; code: string },
+  db?: Prisma.TransactionClient
+) => {
+  const rotate = async (tx: Prisma.TransactionClient) => {
     await verifyMfaCodeWithAdapter({ userId: params.userId, code: params.code }, tx);
     const backupCodes = generateBackupCodes();
     await replaceUserBackupCodes({ userId: params.userId, codes: backupCodes }, tx);
@@ -708,7 +689,8 @@ export const rotateMfaBackupCodesWithAdapter = async (params: { userId: string; 
       },
     });
     return { backupCodes };
-  });
+  };
+  return db ? rotate(db) : prisma.$transaction(rotate);
 };
 
 export const createStableMfaLoginChallenge = async (params: {
@@ -750,14 +732,14 @@ export const createStableMfaLoginChallenge = async (params: {
     ...ttlDetails,
   });
 
-  await auditMfaEvent({
+  await db.auditLogOutbox.create(mfaAuditOutboxRecord({
     userId: params.userId,
     action: "AUTH_MFA_CHALLENGE_ISSUED",
     entityId: challenge.id,
     details: { purpose, riskScore: challenge.riskScore, riskLevel: challenge.riskLevel, ...ttlDetails },
     ipHash: params.ipHash,
     userAgent: params.userAgent,
-  });
+  }));
 
   return { ticket, expiresAt };
 };

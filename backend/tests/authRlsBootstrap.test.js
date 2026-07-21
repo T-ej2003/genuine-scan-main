@@ -4,6 +4,7 @@ const path = require("node:path");
 const { UserRole, UserStatus } = require("@prisma/client");
 
 const distRoot = path.resolve(__dirname, "../dist");
+process.env.NODE_ENV = "test";
 const mockModule = (relativePath, exportsValue) => {
   const resolved = require.resolve(path.join(distRoot, relativePath));
   require.cache[resolved] = { id: resolved, filename: resolved, loaded: true, exports: exportsValue };
@@ -95,8 +96,15 @@ mockModule("services/auth/refreshTokenService.js", {
   revokeRefreshTokenByRaw: async () => null,
 });
 mockModule("services/auditService.js", { createAuditLog: async (entry) => { auditLogs.push(entry); } });
+mockModule("services/auditLogOutboxService.js", {
+  queueAuditLogOutbox: async (entry) => {
+    auditLogs.push(entry);
+    return "audit-outbox-1";
+  },
+});
 mockModule("services/auth/sessionRiskService.js", {
   assessAuthSessionRisk: async () => ({ score: 0, riskLevel: "LOW", reasons: [], shouldBlock: false }),
+  persistAuthSessionRisk: async () => null,
 });
 mockModule("services/manufacturerScopeService.js", {
   resolveManufacturerSessionScope: async () => ({ selectedLicensee: null, linkedLicensees: [], linkedLicenseeIds: [] }),
@@ -110,7 +118,14 @@ mockModule("services/auth/mfaService.js", {
 });
 
 const { loginWithPassword } = require("../dist/services/auth/authService");
-const login = (email, password) => loginWithPassword({ email, password, ipHash: "ip", userAgent: "ua" });
+let requestSequence = 0;
+const login = (email, password) => loginWithPassword({
+  email,
+  password,
+  ipHash: "ip",
+  userAgent: "ua",
+  requestId: `auth-rls-bootstrap-${++requestSequence}`,
+});
 const errorMessage = async (promise) => {
   try {
     await promise;
@@ -180,8 +195,8 @@ const run = async () => {
   assert.ok(user.lastLoginAt instanceof Date);
   assert.equal(user.passwordHash, "upgraded-hash");
   assert.equal(updates.length, 1, "successful auth state must update once inside verified context");
-  assert.equal(transactionCalls, 2, "verified login uses transaction-local context for update and MFA bootstrap");
-  assert.equal(contextWrites, 12, "each verified transaction establishes all six local context settings");
+  assert.equal(transactionCalls, 3, "verified login uses transaction-local context for state, risk, and MFA bootstrap");
+  assert.equal(contextWrites, 3, "each verified transaction installs the canonical context once");
 
   console.log("auth RLS bootstrap unit tests passed");
 };

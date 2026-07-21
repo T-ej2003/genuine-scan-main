@@ -1,12 +1,19 @@
 import { Response } from "express";
 import { z } from "zod";
-import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLog } from "../services/auditService";
 import { hashPassword, verifyPassword } from "../services/auth/passwordService";
 import { requestEmailChangeVerification } from "../services/auth/emailVerificationService";
-import { revokeAllUserRefreshTokens } from "../services/auth/refreshTokenService";
 import { normalizeEmailAddress } from "../utils/email";
+import { withCanonicalAuthClaims } from "../rls-waves/session-b/b01/canonicalAuthContext";
+import { installCanonicalDbContext } from "../lib/canonicalDbContext";
+import { getAdminStepUpWindowMinutes, getPasswordReauthWindowMinutes } from "../services/auth/authService";
+import {
+  changeAuthenticatedPassword,
+  loadAuthenticatedPasswordActor,
+  proveAuthenticatedPasswordStepUp,
+  requireRecentSensitiveSession,
+  updateAuthenticatedProfile,
+} from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
 
 const updateProfileSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
@@ -17,6 +24,13 @@ const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(8).max(200),
 }).strict();
+
+const requestId = (req: AuthRequest) =>
+  (() => {
+    const value = String((req as AuthRequest & { requestId?: string }).requestId || req.get("x-request-id") || "").trim();
+    if (!value) throw new Error("Request ID is required");
+    return value;
+  })();
 
 export const updateMyProfile = async (req: AuthRequest, res: Response) => {
   try {
@@ -35,78 +49,59 @@ export const updateMyProfile = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: "No changes provided" });
     }
 
-    let emailChangeResult: Awaited<ReturnType<typeof requestEmailChangeVerification>> | null = null;
-
-    if (parsed.data.email !== undefined) {
-      const normalizedEmail = normalizeEmailAddress(parsed.data.email);
-      if (!normalizedEmail) {
-        return res.status(400).json({ success: false, error: "Invalid email address" });
-      }
-      emailChangeResult = await requestEmailChangeVerification({
-        userId,
-        nextEmail: normalizedEmail,
-        actorUserId: userId,
-        actorIpAddress: req.ip,
-        actorUserAgent: req.get("user-agent"),
-      });
+    const normalizedEmail = parsed.data.email === undefined ? null : normalizeEmailAddress(parsed.data.email);
+    if (parsed.data.email !== undefined && !normalizedEmail) {
+      return res.status(400).json({ success: false, error: "Invalid email address" });
     }
 
-    const updated =
-      Object.keys(data).length > 0
-        ? await prisma.user.update({
-            where: { id: userId },
-            data,
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              pendingEmail: true,
-              pendingEmailRequestedAt: true,
-              emailVerifiedAt: true,
-              role: true,
-              licenseeId: true,
-              isActive: true,
-              createdAt: true,
-            },
-          })
-        : await prisma.user.findUnique({
-            where: { id: userId },
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              pendingEmail: true,
-              pendingEmailRequestedAt: true,
-              emailVerifiedAt: true,
-              role: true,
-              licenseeId: true,
-              isActive: true,
-              createdAt: true,
-            },
-          });
+    const result = await withCanonicalAuthClaims(req.user!, {
+      requestId: requestId(req),
+      purpose: "account-profile-update",
+    }, async (tx, context) => {
+      const now = new Date();
+      await requireRecentSensitiveSession({
+        sessionId: req.user!.sessionId!,
+        checkedAt: now,
+        maxPasswordAgeMinutes: getPasswordReauthWindowMinutes(),
+        maxMfaAgeMinutes: getAdminStepUpWindowMinutes(),
+      }, tx);
+      await installCanonicalDbContext(tx, { ...context, authAssurance: "step-up-verified" });
 
-    if (!updated) {
-      return res.status(404).json({ success: false, error: "User not found" });
-    }
-
-    await createAuditLog({
-      userId,
-      action: "UPDATE_MY_PROFILE",
-      entityType: "User",
-      entityId: userId,
-      details: {
-        changed: Object.keys(data),
-        pendingEmail: emailChangeResult && "pendingEmail" in emailChangeResult ? emailChangeResult.pendingEmail : null,
-      },
-      ipAddress: req.ip,
+      const emailChange = normalizedEmail
+        ? await requestEmailChangeVerification({
+            userId,
+            nextEmail: normalizedEmail,
+            actorUserId: userId,
+            actorIpAddress: req.ip,
+            actorUserAgent: req.get("user-agent"),
+          }, tx)
+        : null;
+      const updated = await updateAuthenticatedProfile({
+        name: data.name ?? null,
+        emailChangeRequested: emailChange?.verificationRequired === true,
+        auditPendingEmail: emailChange?.pendingEmail || null,
+        changedAt: now,
+      }, tx);
+      return { updated, emailChange };
     });
+    await result.emailChange?.deliver();
+    const { updated, emailChange: emailChangeResult } = result;
 
     return res.json({
       success: true,
       data: {
-        ...updated,
+        id: updated.id,
+        name: updated.name,
+        email: updated.email,
+        pendingEmail: updated.pendingEmail,
+        pendingEmailRequestedAt: updated.pendingEmailRequestedAt,
+        emailVerifiedAt: updated.emailVerifiedAt,
+        role: updated.role,
+        licenseeId: updated.licenseeId,
+        isActive: updated.isActive,
+        createdAt: updated.createdAt,
         emailChange:
-          emailChangeResult && "pendingEmail" in emailChangeResult
+          emailChangeResult?.verificationRequired
             ? {
                 verificationRequired: true,
                 pendingEmail: emailChangeResult.pendingEmail,
@@ -131,12 +126,10 @@ export const changeMyPassword = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, passwordHash: true },
-    });
-
-    if (!user) return res.status(404).json({ success: false, error: "User not found" });
+    const user = await withCanonicalAuthClaims(req.user!, {
+      requestId: requestId(req),
+      purpose: "account-password-credential-read",
+    }, loadAuthenticatedPasswordActor);
 
     if (!user.passwordHash) {
       return res.status(400).json({ success: false, error: "Account has no password set. Use password reset." });
@@ -149,28 +142,33 @@ export const changeMyPassword = async (req: AuthRequest, res: Response) => {
 
     const passwordHash = await hashPassword(parsed.data.newPassword);
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: { passwordHash },
-    });
-
-    await revokeAllUserRefreshTokens({
-      userId,
-      reason: "PASSWORD_CHANGED",
-    });
-
-    await createAuditLog({
-      userId,
-      action: "CHANGE_MY_PASSWORD",
-      entityType: "User",
-      entityId: userId,
-      details: {},
-      ipAddress: req.ip,
+    await withCanonicalAuthClaims(req.user!, {
+      requestId: requestId(req),
+      purpose: "account-password-change",
+    }, async (tx, context) => {
+      const changedAt = new Date();
+      await proveAuthenticatedPasswordStepUp({
+        sessionId: req.user!.sessionId!,
+        expectedPasswordHash: user.passwordHash!,
+        verifiedAt: changedAt,
+      }, tx);
+      await installCanonicalDbContext(tx, { ...context, authAssurance: "step-up-verified" });
+      return changeAuthenticatedPassword({
+        expectedPasswordHash: user.passwordHash!,
+        passwordHash,
+        changedAt,
+      }, tx);
     });
 
     return res.json({ success: true, data: { changed: true } });
   } catch (e) {
     console.error("changeMyPassword error:", e);
+    if (e instanceof Error && e.message === "PASSWORD_CHANGE_CONFLICT") {
+      return res.status(409).json({ success: false, error: "Password changed in another session. Try again." });
+    }
+    if (e instanceof Error && e.message === "STEP_UP_REQUIRED") {
+      return res.status(403).json({ success: false, error: "Recent authentication is required" });
+    }
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
 };

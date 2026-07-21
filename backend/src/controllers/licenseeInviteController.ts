@@ -1,13 +1,16 @@
 import { Response } from "express";
 import { z } from "zod";
-import { UserRole } from "@prisma/client";
-import prisma from "../config/database";
+import { Prisma, UserRole } from "@prisma/client";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLog } from "../services/auditService";
 import { createInvite } from "../services/auth/inviteService";
-import { maskEmailForLog } from "../services/mailTransportService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 import { hashIp, normalizeUserAgent } from "../utils/security";
+import {
+  isCanonicalAuthDenial,
+  withCanonicalAuthClaims,
+} from "../rls-waves/session-b/b01/canonicalAuthContext";
+import type { CanonicalDbContext } from "../lib/canonicalDbContext";
+import { clearAuthCookies } from "./authControllerShared";
 
 const licenseeIdParamSchema = z
   .object({
@@ -43,64 +46,27 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
     }
-
-    const licensee = await prisma.licensee.findUnique({
-      where: { id },
-      select: { id: true, name: true, orgId: true, isActive: true },
-    });
-    if (!licensee) return res.status(404).json({ success: false, error: "Licensee not found" });
-    if (!licensee.isActive) return res.status(409).json({ success: false, error: "Licensee is inactive" });
-
-    const requestedEmail = String(parsed.data.email || "").trim().toLowerCase();
-    const existingAdmin =
-      (await prisma.user.findFirst({
-        where: {
-          licenseeId: id,
-          role: { in: [UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN] },
-          status: "INVITED",
-          ...(requestedEmail ? { email: requestedEmail } : {}),
-        },
-        orderBy: { createdAt: "asc" },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          role: true,
-          status: true,
-        },
-      })) ||
-      (await prisma.user.findFirst({
-        where: {
-          licenseeId: id,
-          role: { in: [UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN] },
-          ...(requestedEmail ? { email: requestedEmail } : {}),
-        },
-        orderBy: { createdAt: "asc" },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          role: true,
-          status: true,
-        },
-      }));
-
-    if (!existingAdmin) {
-      return res.status(404).json({
-        success: false,
-        error: "No licensee admin user found. Create one first.",
-      });
-    }
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || req.get("x-request-id") || "").trim();
+    const databaseBoundary = {
+      run: <T>(callback: (db: Prisma.TransactionClient, context: CanonicalDbContext) => Promise<T>) =>
+        withCanonicalAuthClaims(
+          req.user!,
+          { requestId, purpose: "licensee-admin-invite-resend" },
+          callback
+        ),
+    };
 
     const invite = await createInvite({
-      email: existingAdmin.email,
-      name: existingAdmin.name || undefined,
-      role: existingAdmin.role,
+      email: parsed.data.email || null,
+      role: UserRole.LICENSEE_ADMIN,
       licenseeId: id,
       allowExistingInvitedUser: true,
+      requireExistingUser: true,
       createdByUserId: req.user!.userId,
+      actorSessionId: req.user!.sessionId,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
+      databaseBoundary,
     });
 
     if (!invite.inviteId) {
@@ -109,21 +75,6 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
         error: "Invite could not be created for this licensee admin.",
       });
     }
-
-    await createAuditLog({
-      userId: req.user!.userId,
-      licenseeId: id,
-      orgId: licensee.orgId || undefined,
-      action: "RESEND_LICENSEE_ADMIN_INVITE",
-      entityType: "Invite",
-      entityId: invite.inviteId,
-      details: {
-        licenseeName: licensee.name,
-        adminEmail: maskEmailForLog(existingAdmin.email),
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent"),
-    });
 
     return res.json({
       success: true,
@@ -147,6 +98,10 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
       },
     });
   } catch (e: any) {
+    if (isCanonicalAuthDenial(e)) {
+      clearAuthCookies(res);
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
     const msg = String(e?.message || "Failed to resend invite");
     const isConflict = /already active|different|disabled|not required/i.test(msg);
     return res.status(isConflict ? 409 : 500).json({

@@ -13,6 +13,20 @@ import {
 } from "../services/supportIntakeMailService";
 import { normalizeEmailAddress } from "../utils/email";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import {
+  b02BoundariesEnabled,
+  isB02AuthorizationError,
+  withB02AuthenticatedRequest,
+} from "../rls-waves/session-b/b02/authenticatedBoundary";
+import {
+  listRequestAccessRows as listRequestAccessRowsThroughBoundary,
+  updateRequestAccessRow as updateRequestAccessRowThroughBoundary,
+} from "../rls-waves/session-b/b02/authenticatedRepositories";
+import {
+  b02IdempotencyDigest,
+  submitPublicSupport as submitPublicSupportThroughBoundary,
+  submitRequestAccess as submitRequestAccessThroughBoundary,
+} from "../rls-waves/session-b/b02/publicBoundaryRepository";
 
 const nullableTrimmed = (max: number) => z.string().trim().max(max).optional().or(z.literal(""));
 const honeypotSchema = z.string().max(0).optional().or(z.literal(""));
@@ -88,6 +102,43 @@ export const submitPublicRequestAccess = async (req: Request, res: Response) => 
 
     const referenceCode = makeReferenceCode("RA");
     const data = parsed.data;
+
+    if (b02BoundariesEnabled()) {
+      const submittedAt = new Date();
+      const requestId = String((req as Request & { requestId?: string }).requestId || "").trim();
+      const accepted = await submitRequestAccessThroughBoundary(prisma, {
+        fullName: data.fullName,
+        workEmail: data.workEmail,
+        companyName: data.companyName,
+        roleTitle: data.role,
+        country: data.country,
+        monthlyVolume: data.monthlyGarmentVolume,
+        message: data.message,
+        sourcePage: data.sourcePage?.trim() || null,
+        referrer: data.referrer?.trim() || null,
+        submittedAt,
+        requestId,
+        idempotencyDigest: b02IdempotencyDigest({
+          workflow: "submit-request-access",
+          requestId,
+          workEmail: data.workEmail,
+          submittedAt: submittedAt.toISOString(),
+        }),
+      });
+      if (!accepted?.accepted) {
+        return res.status(503).json({ success: false, error: "Request access intake is temporarily unavailable." });
+      }
+      return res.status(201).json({
+        success: true,
+        data: {
+          referenceCode: accepted.publicReference,
+          status: "NEW",
+          emailDeliveryStatus: "QUEUED",
+          acknowledgementEmailDeliveryStatus: "QUEUED",
+          message: accepted.message,
+        },
+      });
+    }
 
     const created = await prisma.requestAccess.create({
       data: {
@@ -180,6 +231,41 @@ export const submitPublicSupportIssue = async (req: Request, res: Response) => {
 
     const referenceCode = makeReferenceCode("SUP");
     const data = parsed.data;
+    if (b02BoundariesEnabled()) {
+      const submittedAt = new Date();
+      const requestId = String((req as Request & { requestId?: string }).requestId || "").trim();
+      const accepted = await submitPublicSupportThroughBoundary(prisma, {
+        publicName: data.name,
+        publicEmail: data.email,
+        issueType: data.issueType,
+        title: data.title,
+        description: data.message,
+        productReference: data.productReference?.trim() || null,
+        sourcePath: data.sourcePath?.trim() || "/help/support",
+        pageUrl: data.pageUrl?.trim() || null,
+        submittedAt,
+        requestId,
+        idempotencyDigest: b02IdempotencyDigest({
+          workflow: "submit-public-support",
+          requestId,
+          publicEmail: data.email,
+          submittedAt: submittedAt.toISOString(),
+        }),
+      });
+      if (!accepted?.accepted) {
+        return res.status(503).json({ success: false, error: "Support intake is temporarily unavailable." });
+      }
+      return res.status(201).json({
+        success: true,
+        data: {
+          referenceCode: accepted.publicReference,
+          status: "OPEN",
+          emailDeliveryStatus: "QUEUED",
+          acknowledgementEmailDeliveryStatus: "QUEUED",
+          message: accepted.message,
+        },
+      });
+    }
     const created = await prisma.supportIssueReport.create({
       data: {
         referenceCode,
@@ -276,6 +362,21 @@ export const listRequestAccessRecords = async (req: Request, res: Response) => {
     }
     const limit = parsed.data.limit ?? 50;
     const offset = parsed.data.offset ?? 0;
+    if (b02BoundariesEnabled()) {
+      const data = await withB02AuthenticatedRequest(
+        req as Request & { user?: any },
+        { purpose: "request-access-read", assurance: "mfa-verified" },
+        async (tx) => {
+          const [records, total] = await listRequestAccessRowsThroughBoundary(tx, {
+            status: parsed.data.status,
+            limit,
+            offset,
+          });
+          return { records, total, limit, offset };
+        }
+      );
+      return res.json({ success: true, data });
+    }
     const where = parsed.data.status ? { status: parsed.data.status } : {};
     const [records, total] = await Promise.all([
       prisma.requestAccess.findMany({
@@ -292,6 +393,9 @@ export const listRequestAccessRecords = async (req: Request, res: Response) => {
     ]);
     return res.json({ success: true, data: { records, total, limit, offset } });
   } catch (error) {
+    if (isB02AuthorizationError(error)) {
+      return res.status(403).json({ success: false, error: "Request access authorization is stale or insufficient." });
+    }
     if (isPrismaMissingTableError(error, ["requestaccess"])) {
       warnStorageUnavailableOnce("request-access-list-storage", "[request-access] request access list storage unavailable.");
       return res.status(503).json({
@@ -312,6 +416,35 @@ export const patchRequestAccessRecord = async (req: Request, res: Response) => {
     const parsed = requestAccessStatusSchema.safeParse(req.body || {});
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request access update" });
+    }
+
+    if (b02BoundariesEnabled()) {
+      const updated = await withB02AuthenticatedRequest(
+        req as Request & { user?: any },
+        { purpose: "request-access-update", assurance: "mfa-verified" },
+        (tx, context) => updateRequestAccessRowThroughBoundary(tx, {
+          id,
+          actorUserId: context.userId,
+          status: parsed.data.status,
+          internalNote: parsed.data.internalNote,
+          assignedToUserId: parsed.data.assignedToUserId,
+        })
+      );
+      if (!updated) return res.status(404).json({ success: false, error: "Request access record not found" });
+      await createAuditLogSafely({
+        userId: authReq.user?.userId,
+        action: "REQUEST_ACCESS_UPDATED",
+        entityType: "RequestAccess",
+        entityId: id,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || undefined,
+        details: {
+          status: updated.status,
+          assignedToUserId: updated.assignedToUserId,
+          internalNoteChanged: parsed.data.internalNote !== undefined,
+        },
+      });
+      return res.json({ success: true, data: updated });
     }
 
     const existing = await prisma.requestAccess.findUnique({ where: { id } });
@@ -351,6 +484,9 @@ export const patchRequestAccessRecord = async (req: Request, res: Response) => {
 
     return res.json({ success: true, data: updated });
   } catch (error) {
+    if (isB02AuthorizationError(error)) {
+      return res.status(403).json({ success: false, error: "Request access authorization is stale or insufficient." });
+    }
     if (isPrismaMissingTableError(error, ["requestaccess"])) {
       warnStorageUnavailableOnce("request-access-update-storage", "[request-access] request access update storage unavailable.");
       return res.status(503).json({

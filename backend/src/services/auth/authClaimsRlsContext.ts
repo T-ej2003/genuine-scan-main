@@ -1,30 +1,18 @@
-import prisma from "../../config/database";
 import { Prisma } from "@prisma/client";
-// rls-prototype-approved-import: verified signed MFA claims establish session context.
-import { withRlsPrototypeTransaction } from "../../lib/rlsTransactionContextPrototype";
 import { AuthenticatedSessionClaims } from "../../types";
-import {
-  isManufacturerRole,
-  isPlatformSuperAdminRole,
-  issueSessionForUser,
-} from "./authService";
+import { issueSessionForUser } from "./authService";
 import { confirmAdminMfaSetup } from "./mfaService";
+import { withCanonicalAuthClaims } from "../../rls-waves/session-b/b01/canonicalAuthContext";
+import type { CanonicalDbContext } from "../../lib/canonicalDbContext";
 
 export const withAdminMfaClaimsTransaction = <T>(
   claims: AuthenticatedSessionClaims,
-  callback: (tx: Prisma.TransactionClient) => Promise<T>
-) => withRlsPrototypeTransaction(
-  prisma,
-  {
-    userId: claims.userId,
-    role: claims.role,
-    licenseeId: claims.licenseeId,
-    manufacturerId: isManufacturerRole(claims.role) ? claims.userId : null,
-    organizationId: claims.orgId,
-    isPlatformAdmin: isPlatformSuperAdminRole(claims.role),
-  },
-  callback
-);
+  callback: (tx: Prisma.TransactionClient, context: CanonicalDbContext) => Promise<T>,
+  context?: { requestId: string; purpose: string }
+) => {
+  if (!context) throw new Error("B01 MFA transaction requires request attribution");
+  return withCanonicalAuthClaims(claims, context, callback);
+};
 
 export const issueAdminMfaSessionFromClaims = (
   claims: AuthenticatedSessionClaims,
@@ -46,7 +34,7 @@ export const issueAdminMfaSessionFromClaims = (
     purpose: "manufacturer-bootstrap",
     requestedLicenseeId: input.requestedLicenseeId ?? claims.licenseeId,
     requestedScopeVersion: input.requestedScopeVersion ?? claims.scopeVersion,
-  }, tx)
+  }, tx), { requestId: input.requestId, purpose: "admin-mfa-session-issue" }
 );
 
 export const confirmAdminMfaEnrollmentAndIssueSessionFromClaims = (
@@ -81,11 +69,11 @@ export const confirmAdminMfaEnrollmentAndIssueSessionFromClaims = (
     requestedScopeVersion: input.requestedScopeVersion,
   }, tx);
   return session;
-});
+}, { requestId: input.requestId, purpose: "admin-mfa-enrollment-complete" });
 
 export const confirmAdminMfaReplacementFromClaims = (
   claims: AuthenticatedSessionClaims,
-  input: { code: string; ipHash: string | null; userAgent: string | null }
+  input: { code: string; ipHash: string | null; userAgent: string | null; requestId: string }
 ) => withAdminMfaClaimsTransaction(claims, async (tx) => {
   return confirmAdminMfaSetup({
     userId: claims.userId,
@@ -93,4 +81,4 @@ export const confirmAdminMfaReplacementFromClaims = (
     mode: "REPLACEMENT",
     audit: { ipHash: input.ipHash, userAgent: input.userAgent },
   }, tx);
-});
+}, { requestId: input.requestId, purpose: "admin-mfa-replacement-complete" });

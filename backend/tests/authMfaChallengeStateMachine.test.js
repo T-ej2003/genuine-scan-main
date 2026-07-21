@@ -190,6 +190,7 @@ const prismaMock = {
     updateMany: async ({ where, data }) => {
       let count = 0;
       for (const row of refreshTokens) {
+        if (where.id && row.id !== where.id) continue;
         if (where.userId && row.userId !== where.userId) continue;
         if (where.tokenHash?.in && !where.tokenHash.in.includes(row.tokenHash)) continue;
         if (where.revokedAt === null && row.revokedAt) continue;
@@ -396,6 +397,39 @@ const prismaMock = {
 };
 
 mockModule("config/database.js", { __esModule: true, default: prismaMock });
+mockModule("rls-waves/session-b/b01/sessionCredentialRepository.js", {
+  createRefreshTokenRecord: async (db, input) => {
+    const row = await db.refreshToken.create({
+      data: {
+        userId: input.userId,
+        orgId: input.orgId,
+        tokenHash: input.tokenHash,
+        expiresAt: input.expiresAt,
+        createdAt: input.createdAt,
+        createdIpHash: input.ipHash,
+        createdUserAgent: input.userAgent,
+        authenticatedAt: input.authenticatedAt,
+        mfaVerifiedAt: input.mfaVerifiedAt,
+      },
+    });
+    return { id: row.id, expiresAt: input.expiresAt };
+  },
+  revokeRefreshTokenByIdentifier: async (db, input) => {
+    const result = await db.refreshToken.updateMany({
+      where: { id: input.sessionId, userId: input.userId, revokedAt: null },
+      data: { revokedAt: input.revokedAt, revokedReason: input.reason },
+    });
+    return { revoked: result.count === 1 };
+  },
+  revokeAllRefreshTokenRecords: (db, input) => db.refreshToken.updateMany({
+    where: { userId: input.userId, revokedAt: null },
+    data: { revokedAt: input.revokedAt, revokedReason: input.reason },
+  }),
+});
+mockModule("rls-waves/session-b/b01/authenticatedSecurityRepository.js", {
+  loadAuthenticatedPasswordActor: (db) => db.user.findUnique({ where: { id: "admin-1" } }),
+  requireRecentMfaSession: async () => ({ verifiedAt: new Date() }),
+});
 mockModule("services/auditService.js", {
   createAuditLogSafely: async (entry) => {
     auditEvents.push(entry);
@@ -447,7 +481,16 @@ mockModule("services/auth/authClaimsRlsContext.js", {
     auditEvents.push({ action: "AUTH_MFA_REPLACED", userId: claims.userId });
     return result;
   },
-  withAdminMfaClaimsTransaction: (_claims, callback) => prismaMock.$transaction(callback),
+  withAdminMfaClaimsTransaction: (claims, callback, attribution) => prismaMock.$transaction((tx) => callback(tx, {
+    userId: claims.userId,
+    role: claims.role,
+    organizationId: claims.orgId || null,
+    licenseeId: claims.licenseeId || null,
+    manufacturerId: null,
+    authAssurance: claims.sessionStage === "ACTIVE" ? "mfa-verified" : "mfa-bootstrap",
+    requestId: attribution.requestId,
+    purpose: attribution.purpose,
+  })),
 });
 mockModule("utils/logger.js", {
   logger: {
@@ -505,7 +548,7 @@ const controllerResponse = () => ({
   },
 });
 
-const controllerRequest = (sessionStage, body = {}, cookies = {}) => ({
+const controllerRequest = (sessionStage, body = {}, cookies = {}, sessionId = "bootstrap-session-1") => ({
   body,
   cookies,
   ip: "127.0.0.1",
@@ -516,7 +559,7 @@ const controllerRequest = (sessionStage, body = {}, cookies = {}) => ({
     sessionStage,
     authAssurance: sessionStage === "ACTIVE" ? "ADMIN_MFA" : "PASSWORD",
     mfaVerifiedAt: sessionStage === "ACTIVE" ? new Date() : null,
-    sessionId: "bootstrap-session-1",
+    sessionId,
   },
   get: (name) => String(name || "").toLowerCase() === "user-agent" ? "test-agent" : "test-request-id",
 });
@@ -694,7 +737,7 @@ const run = async () => {
     code: controllerBeginResponse.body.data.backupCodes[2],
   }, {
     aq_refresh: sealCookieToken(currentRefresh, "auth.refresh"),
-  }), failedStepUpResponse);
+  }, "current-step-up-session"), failedStepUpResponse);
   assert.strictEqual(failedStepUpResponse.statusCode, 400);
   assert.strictEqual(backupCodeRows.filter((row) => row.usedAt).length, 1, "step-up audit failure must preserve the backup code");
   assert.strictEqual(refreshTokens.length, stepUpRefreshCount, "step-up audit failure must roll back refresh creation");
@@ -705,7 +748,7 @@ const run = async () => {
     code: controllerBeginResponse.body.data.backupCodes[2],
   }, {
     aq_refresh: sealCookieToken(currentRefresh, "auth.refresh"),
-  }), successfulStepUpResponse);
+  }, "current-step-up-session"), successfulStepUpResponse);
   assert.strictEqual(successfulStepUpResponse.statusCode, 200);
   assert.strictEqual(backupCodeRows.filter((row) => row.usedAt).length, 2, "successful step-up must consume the backup code once");
   assert(refreshTokens.find((row) => row.id === "current-step-up-session").revokedAt, "successful step-up must replace the current refresh session");

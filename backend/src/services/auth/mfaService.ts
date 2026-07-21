@@ -4,7 +4,6 @@ import { AuthRiskLevel, Prisma } from "@prisma/client";
 import prisma from "../../config/database";
 import { buildTokenHashCandidates, hashToken, matchesHashedToken, randomOpaqueToken } from "../../utils/security";
 import { logger } from "../../utils/logger";
-import { createAuditLogSafely, type AuditLogInput } from "../auditService";
 import { buildAdminMfaChallengeExpiry, buildAdminMfaChallengeTtlAuditDetails } from "./authDurationConfig";
 import { revokeAllUserRefreshTokens } from "./refreshTokenService";
 import {
@@ -23,7 +22,8 @@ import {
 const TOTP_STEP_SECONDS = 30;
 const TOTP_DIGITS = 6;
 const DEFAULT_TOTP_WINDOW = 1;
-type LoginMfaDbClient = NonNullable<Parameters<typeof getAdminMfaAdapterStatus>[1]>;
+type LoginMfaDbClient = NonNullable<Parameters<typeof getAdminMfaAdapterStatus>[1]>
+  & Pick<Prisma.TransactionClient, "authMfaChallenge">;
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = Number(String(process.env[key] || "").trim());
@@ -188,26 +188,6 @@ const sessionBindingCandidates = (sessionId?: string | null) => {
   return normalized ? buildTokenHashCandidates(sessionBindingValue(normalized)) : [];
 };
 
-const auditMfaEvent = async (input: {
-  userId?: string | null;
-  action: string;
-  entityId?: string | null;
-  details?: Record<string, unknown>;
-  ipHash?: string | null;
-  userAgent?: string | null;
-}) => {
-  const event: AuditLogInput = {
-    userId: input.userId || undefined,
-    action: input.action,
-    entityType: "AuthMfaChallenge",
-    entityId: input.entityId || undefined,
-    details: input.details || {},
-    ipHash: input.ipHash || undefined,
-    userAgent: input.userAgent || undefined,
-  };
-  await createAuditLogSafely(event).catch(() => undefined);
-};
-
 const mfaAuditOutboxRecord = (input: {
     userId?: string | null;
     action: string;
@@ -325,7 +305,7 @@ export const createAdminMfaChallenge = async (params: {
   const maxAttempts = Math.max(1, Math.min(10, params.maxAttempts || getMaxChallengeAttempts()));
 
   if (params.supersedeOpen !== false) {
-    await prisma.authMfaChallenge.updateMany({
+    await db.authMfaChallenge.updateMany({
       where: {
         userId: params.userId,
         purpose,
@@ -338,7 +318,7 @@ export const createAdminMfaChallenge = async (params: {
     });
   }
 
-  const challenge = await prisma.authMfaChallenge.create({
+  const challenge = await db.authMfaChallenge.create({
     data: {
       userId: params.userId,
       ticketHash,
@@ -362,7 +342,7 @@ export const createAdminMfaChallenge = async (params: {
     ...ttlDetails,
   });
 
-  await auditMfaEvent({
+  await db.auditLogOutbox.create(mfaAuditOutboxRecord({
     userId: params.userId,
     action: "AUTH_MFA_CHALLENGE_ISSUED",
     entityId: challenge.id,
@@ -375,7 +355,7 @@ export const createAdminMfaChallenge = async (params: {
     },
     ipHash: params.ipHash,
     userAgent: params.userAgent,
-  });
+  }));
 
   return {
     ticket: rawTicket,
@@ -383,7 +363,12 @@ export const createAdminMfaChallenge = async (params: {
   };
 };
 
-const consumeBackupCode = async (userId: string, codesHash: string[], provided: string) => {
+const consumeBackupCode = async (
+  userId: string,
+  codesHash: string[],
+  provided: string,
+  db: Pick<Prisma.TransactionClient, "adminMfaCredential"> = prisma
+) => {
   const index = codesHash.findIndex((entry) => {
     return matchesHashedToken(String(provided || "").trim().toUpperCase(), entry);
   });
@@ -391,7 +376,7 @@ const consumeBackupCode = async (userId: string, codesHash: string[], provided: 
 
   const updated = [...codesHash];
   updated.splice(index, 1);
-  await prisma.adminMfaCredential.update({
+  await db.adminMfaCredential.update({
     where: { userId },
     data: {
       backupCodesHash: updated,
@@ -408,8 +393,11 @@ export const verifyAdminMfaCode = async (
   return verifyMfaCodeWithAdapter(params, db);
 };
 
-export const rotateAdminMfaBackupCodes = async (params: { userId: string; code: string }) => {
-  return rotateMfaBackupCodesWithAdapter(params);
+export const rotateAdminMfaBackupCodes = async (
+  params: { userId: string; code: string },
+  db?: Prisma.TransactionClient
+) => {
+  return rotateMfaBackupCodesWithAdapter(params, db);
 };
 
 export const completeAdminMfaChallenge = async (params: {

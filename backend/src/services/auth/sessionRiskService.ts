@@ -1,7 +1,11 @@
 import { AuthRiskLevel, UserRole } from "@prisma/client";
 
-import prisma from "../../config/database";
 import { hashToken } from "../../utils/security";
+import {
+  loadRecentAuthSessionRiskInputs,
+  recordAuthSessionRiskSignal,
+} from "../../rls-waves/session-b/b01/authenticatedSecurityRepository";
+import type { Prisma } from "@prisma/client";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = Number(String(process.env[key] || "").trim());
@@ -37,7 +41,7 @@ export const assessAuthSessionRisk = async (input: {
   ipHash: string | null;
   userAgent: string | null;
   failedLoginAttempts: number;
-}) => {
+}, db: Pick<Prisma.TransactionClient, "$queryRaw">) => {
   const now = new Date();
   const reasons: string[] = [];
 
@@ -54,16 +58,7 @@ export const assessAuthSessionRisk = async (input: {
     reasons.push(`Recent failed login attempts: ${input.failedLoginAttempts}`);
   }
 
-  const recentSessions = await prisma.refreshToken.findMany({
-    where: { userId: input.userId },
-    orderBy: { createdAt: "desc" },
-    take: 5,
-    select: {
-      createdIpHash: true,
-      createdUserAgent: true,
-      createdAt: true,
-    },
-  });
+  const recentSessions = await loadRecentAuthSessionRiskInputs(db);
 
   const currentUserAgentHash = safeHash(input.userAgent);
 
@@ -100,21 +95,6 @@ export const assessAuthSessionRisk = async (input: {
   score = Math.max(0, Math.min(100, Math.round(score)));
   const riskLevel = toRiskLevel(score);
 
-  try {
-    await prisma.authSessionRiskSignal.create({
-      data: {
-        userId: input.userId,
-        riskScore: score,
-        riskLevel,
-        reasons,
-        ipHash: input.ipHash,
-        userAgentHash: currentUserAgentHash,
-      },
-    });
-  } catch {
-    // Best-effort telemetry; do not block login.
-  }
-
   const stepupThreshold = parseIntEnv("AUTH_RISK_STEPUP_THRESHOLD", 55);
   const blockThreshold = parseIntEnv("AUTH_RISK_BLOCK_THRESHOLD", 85);
 
@@ -126,3 +106,16 @@ export const assessAuthSessionRisk = async (input: {
     shouldBlock: score >= blockThreshold,
   };
 };
+
+export const persistAuthSessionRisk = (
+  input: { ipHash: string | null; userAgent: string | null },
+  risk: Awaited<ReturnType<typeof assessAuthSessionRisk>>,
+  db: Pick<Prisma.TransactionClient, "$queryRaw">
+) => recordAuthSessionRiskSignal({
+  riskScore: risk.score,
+  riskLevel: risk.riskLevel,
+  reasons: risk.reasons,
+  ipHash: input.ipHash,
+  userAgentHash: safeHash(input.userAgent),
+  recordedAt: new Date(),
+}, db);

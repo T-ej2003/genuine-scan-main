@@ -5,6 +5,18 @@ import {
 } from "@prisma/client";
 
 import prisma from "../config/database";
+import {
+  B03AuthenticatedFunctionBoundary,
+  b03AuthenticatedFunctionsEnabled,
+  createRoleNotifications as createRoleNotificationsThroughBoundary,
+  createUserNotification as createUserNotificationThroughBoundary,
+  listNotificationsForUser as listNotificationsForUserThroughBoundary,
+  markAllNotificationsRead as markAllNotificationsReadThroughBoundary,
+  markNotificationEmailed,
+  markNotificationRead as markNotificationReadThroughBoundary,
+  requireB03AuthenticatedFunctionBoundary,
+  resolveIncidentNotificationScope,
+} from "../rls-waves/session-b/b03/repositoryFunctions";
 import { sendIncidentEmail } from "./incidentEmailService";
 import { sendAuthEmail } from "./auth/authEmailService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
@@ -181,12 +193,89 @@ export const createRoleNotifications = async (params: {
   incidentId?: string | null;
   data?: any;
   channels?: NotificationChannel[];
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
   if (!canAudienceReceiveNotificationType(params.audience, params.type)) {
     return [] as any[];
   }
 
   const channels = params.channels && params.channels.length > 0 ? params.channels : [NotificationChannel.WEB];
+
+  if (b03AuthenticatedFunctionsEnabled()) {
+    const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+    const rows = await boundary.run((db) => createRoleNotificationsThroughBoundary(db, {
+      audience: params.audience,
+      title: params.title,
+      body: params.body,
+      notificationType: params.type,
+      licenseeId: params.licenseeId,
+      organizationId: params.orgId,
+      incidentId: params.incidentId,
+      data: params.data,
+      channels,
+      requestId: boundary.requestId,
+    }));
+    const created = Array.from(new Map(rows.map((row) => [row.channel, row.writeResult])).values());
+    const deliveryRows = rows.filter((row) => row.sideEffectRequired);
+    const users = Array.from(new Map(
+      deliveryRows.filter((row) => row.userId).map((row) => [row.userId!, row])
+    ).values());
+
+    for (const channel of channels) {
+      if (!deliveryRows.some((row) => row.channel === channel)) continue;
+      if (channel === NotificationChannel.WEB) {
+        emitNotificationEvent({
+          type: "created",
+          audience: params.audience,
+          notificationType: params.type,
+          licenseeId: params.licenseeId || null,
+          orgId: params.orgId || null,
+          incidentId: params.incidentId || null,
+          userIds: users.length ? users.map((user) => user.userId!) : undefined,
+        });
+      }
+      if (channel === NotificationChannel.EMAIL && params.incidentId) {
+        for (const user of users) {
+          if (!user.userEmail) continue;
+          await sendIncidentEmail({
+            incidentId: params.incidentId,
+            licenseeId: params.licenseeId || user.userLicenseeId,
+            toAddress: user.userEmail,
+            subject: params.title,
+            text: `${params.body}\n\nNotification type: ${params.type}`,
+            senderMode: "system",
+            template: `notify_${params.type}`,
+            databaseBoundary: boundary,
+          });
+        }
+      } else if (channel === NotificationChannel.EMAIL) {
+        await Promise.allSettled(users.filter((user) => user.userEmail).map((user) => sendAuthEmail({
+          toAddress: user.userEmail!,
+          subject: params.title,
+          text: `${params.body}\n\nNotification type: ${params.type}\nGenerated at: ${new Date().toISOString()}`,
+          template: `notify_${params.type}`,
+          licenseeId: params.licenseeId || user.userLicenseeId,
+          orgId: params.orgId || user.userOrganizationId,
+        })));
+      }
+    }
+
+    if (channels.includes(NotificationChannel.WEB)) {
+      await Promise.allSettled(users.filter((user) => user.userEmail && user.userRole).map((user) =>
+        sendRealtimeAlertEmailForNotification({
+          toAddress: user.userEmail!,
+          role: user.userRole as UserRole,
+          title: params.title,
+          body: params.body,
+          type: params.type,
+          licenseeId: params.licenseeId || user.userLicenseeId,
+          orgId: params.orgId || user.userOrganizationId,
+          data: params.data,
+        })
+      ));
+    }
+    return created;
+  }
 
   const userWhere: any = {
     isActive: true,
@@ -341,8 +430,75 @@ export const createUserNotification = async (params: {
   incidentId?: string | null;
   data?: any;
   channel?: NotificationChannel;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
   const channel = params.channel || NotificationChannel.WEB;
+
+  if (b03AuthenticatedFunctionsEnabled()) {
+    const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+    const row = await boundary.run((db) => createUserNotificationThroughBoundary(db, {
+      userId: params.userId,
+      title: params.title,
+      body: params.body,
+      notificationType: params.type,
+      licenseeId: params.licenseeId,
+      organizationId: params.orgId,
+      incidentId: params.incidentId,
+      data: params.data,
+      channel,
+      requestId: boundary.requestId,
+    }));
+    const created = row.notification as any;
+    if (!row.sideEffectRequired) return created;
+    if (channel === NotificationChannel.WEB) {
+      emitNotificationEvent({
+        type: "created",
+        audience: NotificationAudience.ALL,
+        notificationType: params.type,
+        licenseeId: params.licenseeId || null,
+        orgId: params.orgId || null,
+        incidentId: params.incidentId || null,
+        userIds: [params.userId],
+        notificationId: row.notificationId,
+      });
+      if (row.userEmail && row.userRole) {
+        const delivery = await sendRealtimeAlertEmailForNotification({
+          toAddress: row.userEmail,
+          role: row.userRole as UserRole,
+          title: params.title,
+          body: params.body,
+          type: params.type,
+          licenseeId: params.licenseeId || row.userLicenseeId,
+          orgId: params.orgId || row.userOrganizationId,
+          data: params.data,
+        });
+        if (delivery.delivered) {
+          await boundary.run((db) => markNotificationEmailed(db, {
+            notificationId: row.notificationId,
+            emailedAt: new Date(),
+            requestId: boundary.requestId,
+          }));
+        }
+      }
+    } else if (row.userEmail) {
+      const delivery = await sendAuthEmail({
+        toAddress: row.userEmail,
+        subject: params.title,
+        text: `${params.body}\n\nNotification type: ${params.type}\nGenerated at: ${new Date().toISOString()}`,
+        template: `notify_${params.type}`,
+        licenseeId: params.licenseeId || row.userLicenseeId,
+        orgId: params.orgId || row.userOrganizationId,
+      });
+      if (delivery.delivered) {
+        await boundary.run((db) => markNotificationEmailed(db, {
+          notificationId: row.notificationId,
+          emailedAt: new Date(),
+          requestId: boundary.requestId,
+        }));
+      }
+    }
+    return created;
+  }
 
   try {
     const created = await prisma.notification.create({
@@ -443,10 +599,19 @@ export const notifyIncidentLifecycle = async (params: {
   body: string;
   type: string;
   data?: any;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
   let manufacturerOrgId = params.manufacturerOrgId || null;
   if (!manufacturerOrgId && params.incidentId) {
-    const incidentScope = await prisma.incident.findUnique({
+    if (b03AuthenticatedFunctionsEnabled()) {
+      const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+      const incidentScope = await boundary.run((db) => resolveIncidentNotificationScope(db, params.incidentId));
+      if (params.licenseeId && incidentScope.licenseeId !== params.licenseeId) {
+        throw new Error("B03 incident notification scope changed");
+      }
+      manufacturerOrgId = incidentScope.manufacturerOrganizationId;
+    } else {
+      const incidentScope = await prisma.incident.findUnique({
       where: { id: params.incidentId },
       select: {
         qrCode: {
@@ -470,10 +635,11 @@ export const notifyIncidentLifecycle = async (params: {
       },
     });
 
-    manufacturerOrgId =
-      incidentScope?.qrCode?.batch?.manufacturer?.orgId ||
-      incidentScope?.scanEvent?.batch?.manufacturer?.orgId ||
-      null;
+      manufacturerOrgId =
+        incidentScope?.qrCode?.batch?.manufacturer?.orgId ||
+        incidentScope?.scanEvent?.batch?.manufacturer?.orgId ||
+        null;
+    }
   }
 
   const targets: Array<{ audience: NotificationAudience; licenseeId?: string | null; orgId?: string | null; channels?: NotificationChannel[] }> = [
@@ -507,6 +673,7 @@ export const notifyIncidentLifecycle = async (params: {
       incidentId: params.incidentId,
       data: params.data,
       channels: target.channels || [NotificationChannel.WEB],
+      databaseBoundary: params.databaseBoundary,
     });
   }
 };
@@ -521,7 +688,21 @@ const listNotificationsForUserUncached = async (params: {
   offset: number;
   unreadOnly?: boolean;
   cursor?: string | null;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
+  if (b03AuthenticatedFunctionsEnabled()) {
+    const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+    const result = await boundary.run((db) => listNotificationsForUserThroughBoundary(db, {
+      userId: params.userId,
+      limit: params.limit,
+      offset: params.offset,
+      unreadOnly: Boolean(params.unreadOnly),
+      cursor: params.cursor,
+      requestId: boundary.requestId,
+    }));
+    return { notifications: result.notifications as any[], total: result.total, unread: result.unread };
+  }
+
   const audience = normalizeRole(params.role);
   const hiddenTypes = hiddenNotificationTypesForRole(params.role);
 
@@ -617,6 +798,7 @@ export const listNotificationsForUser = async (params: {
   offset: number;
   unreadOnly?: boolean;
   cursor?: string | null;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
   const scopeKey = [
     params.userId,
@@ -630,9 +812,11 @@ export const listNotificationsForUser = async (params: {
     params.cursor || "offset",
   ].join(":");
 
-  const payload = await getOrComputeVersionedCache(NOTIFICATION_CACHE_NAMESPACE, scopeKey, NOTIFICATION_CACHE_TTL_SEC, () =>
-    listNotificationsForUserUncached(params)
-  );
+  const payload = b03AuthenticatedFunctionsEnabled()
+    ? await listNotificationsForUserUncached(params)
+    : await getOrComputeVersionedCache(NOTIFICATION_CACHE_NAMESPACE, scopeKey, NOTIFICATION_CACHE_TTL_SEC, () =>
+        listNotificationsForUserUncached(params)
+      );
 
   const nextCursor =
     payload.notifications.length === params.limit
@@ -652,7 +836,29 @@ export const markNotificationRead = async (params: {
   licenseeId?: string | null;
   licenseeIds?: string[] | null;
   orgId?: string | null;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
+  if (b03AuthenticatedFunctionsEnabled()) {
+    const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+    const result = await boundary.run((db) => markNotificationReadThroughBoundary(db, {
+      notificationId: params.notificationId,
+      userId: params.userId,
+      readAt: new Date(),
+      requestId: boundary.requestId,
+    }));
+    const notification = result.notification as any;
+    if (notification) {
+      emitNotificationEvent({
+        type: "read",
+        audience: NotificationAudience.ALL,
+        licenseeId: params.licenseeId || null,
+        userIds: [params.userId],
+        notificationId: String(notification.id || params.notificationId),
+      });
+    }
+    return notification;
+  }
+
   const audience = normalizeRole(params.role);
   const hiddenTypes = hiddenNotificationTypesForRole(params.role);
   try {
@@ -734,7 +940,24 @@ export const markAllNotificationsRead = async (params: {
   licenseeId?: string | null;
   licenseeIds?: string[] | null;
   orgId?: string | null;
+  databaseBoundary?: B03AuthenticatedFunctionBoundary;
 }) => {
+  if (b03AuthenticatedFunctionsEnabled()) {
+    const boundary = requireB03AuthenticatedFunctionBoundary(params.databaseBoundary);
+    const result = await boundary.run((db) => markAllNotificationsReadThroughBoundary(db, {
+      userId: params.userId,
+      readAt: new Date(),
+      requestId: boundary.requestId,
+    }));
+    emitNotificationEvent({
+      type: "read_all",
+      audience: NotificationAudience.ALL,
+      licenseeId: params.licenseeId || null,
+      userIds: [params.userId],
+    });
+    return result.count;
+  }
+
   const hiddenTypes = hiddenNotificationTypesForRole(params.role);
 
   const where: any = {

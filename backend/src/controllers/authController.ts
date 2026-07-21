@@ -1,22 +1,26 @@
 import { Request, Response } from "express";
-import { Prisma } from "@prisma/client";
-
 import { loginWithPassword, logoutSession, refreshSession } from "../services/auth/authService";
 import { acceptInvite, createInvite, getInvitePreview } from "../services/auth/inviteService";
 import { requestPasswordReset, resetPasswordWithToken } from "../services/auth/passwordResetService";
 import { confirmEmailVerification } from "../services/auth/emailVerificationService";
 import { isManufacturerRole, resolveManufacturerSessionScope } from "../services/manufacturerScopeService";
-// rls-prototype-approved-import: signed access claims establish auth/me context.
-import { withRlsPrototypeTransaction } from "../lib/rlsTransactionContextPrototype";
+import {
+  CanonicalAuthDenial,
+  isCanonicalAuthDenial,
+  withCanonicalAuthClaims,
+} from "../rls-waves/session-b/b01/canonicalAuthContext";
+import { loadAuthenticatedActor } from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
+import {
+  buildAuthState,
+  getCurrentRefreshSession,
+} from "../rls-waves/session-b/b01/authenticatedSessionProjection";
 import {
   acceptInviteSchema,
   authResponseData,
-  buildAuthState,
   clearAuthCookies,
   ensureCsrfCookie,
   forgotPasswordSchema,
   getAuthClaims,
-  getCurrentRefreshSession,
   getRefreshTokenFromRequest,
   getRequestId,
   hashIp,
@@ -25,25 +29,11 @@ import {
   loginSchema,
   normalizeAuthError,
   normalizeUserAgent,
-  prisma,
   resetPasswordSchema,
   refreshSessionSchema,
   setAuthCookies,
   verifyEmailSchema,
 } from "./authControllerShared";
-
-const authMeUserSelect = Prisma.validator<Prisma.UserSelect>()({
-  id: true,
-  email: true,
-  name: true,
-  role: true,
-  licenseeId: true,
-  orgId: true,
-  emailVerifiedAt: true,
-  pendingEmail: true,
-  pendingEmailRequestedAt: true,
-  licensee: { select: { id: true, name: true, prefix: true, brandName: true, orgId: true } },
-});
 
 export { adminMfaStepUpController, listSessions, passwordStepUpController, revokeAllSessionsController, revokeSessionController } from "./authSessionController";
 export {
@@ -60,6 +50,13 @@ export {
   getAdminMfaStatusController,
   rotateAdminMfaBackupCodesController,
 } from "./authAdminSecurityController";
+
+const denyInactiveSession = (error: unknown, res: Response) => {
+  if (!isCanonicalAuthDenial(error)) return false;
+  clearAuthCookies(res);
+  res.status(401).json({ success: false, error: "Not authenticated" });
+  return true;
+};
 
 export const login = async (req: Request, res: Response) => {
   try {
@@ -97,41 +94,41 @@ export const me = async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
 
-    const { user, manufacturerScope } = await withRlsPrototypeTransaction(
-      prisma,
-      {
-        userId: claims.userId,
-        role: claims.role,
-        licenseeId: isManufacturerRole(claims.role) ? null : claims.licenseeId,
-        manufacturerId: isManufacturerRole(claims.role) ? claims.userId : null,
-        organizationId: isManufacturerRole(claims.role) ? null : claims.orgId,
-        // auth/me only needs actor-self visibility; do not elevate from a stale claim.
-        isPlatformAdmin: false,
-      },
-      async (tx: Prisma.TransactionClient) => {
-        const scopedUser = await tx.user.findUnique({
-          where: { id: userId },
-          select: authMeUserSelect,
-        });
-        if (scopedUser && scopedUser.role !== claims.role) {
-          throw new Error("Account role changed");
+    const { actor, manufacturerScope, currentSession, auth } = await withCanonicalAuthClaims(
+      claims,
+      { requestId: getRequestId(req), purpose: "auth-me" },
+      async (tx, context) => {
+        const scopedUser = await loadAuthenticatedActor(tx);
+        if (scopedUser.id !== context.userId || scopedUser.role !== context.role) {
+          throw new CanonicalAuthDenial();
         }
-        const scope = scopedUser && isManufacturerRole(scopedUser.role)
+        const scope = isManufacturerRole(scopedUser.role)
           ? await resolveManufacturerSessionScope({
               manufacturerId: scopedUser.id,
               legacyLicenseeId: scopedUser.licenseeId,
               legacyOrgId: scopedUser.orgId,
-              requestedLicenseeId: claims.licenseeId,
-              requestedOrgId: claims.orgId,
+              requestedLicenseeId: context.licenseeId,
+              requestedOrgId: context.organizationId,
               requestedScopeVersion: claims.scopeVersion,
             }, tx)
           : null;
-        return { user: scopedUser, manufacturerScope: scope };
+        const session = await getCurrentRefreshSession(req, tx);
+        const authState = await buildAuthState(claims, scopedUser.role, scopedUser.id, session, tx);
+        return { actor: scopedUser, manufacturerScope: scope, currentSession: session, auth: authState };
       }
     );
-    if (!user) {
-      return res.status(404).json({ success: false, error: "User not found" });
-    }
+    const user = {
+      ...actor,
+      licensee: actor.licenseeRecordId
+        ? {
+            id: actor.licenseeRecordId,
+            name: actor.licenseeName || "",
+            prefix: actor.licenseePrefix || "",
+            brandName: actor.licenseeBrandName,
+            orgId: actor.licenseeOrgId,
+          }
+        : null,
+    };
     const manufacturer = isManufacturerRole(user.role);
     const primaryLicensee = manufacturer ? manufacturerScope?.selectedLicensee || null : user.licensee;
     const linkedLicensees = manufacturerScope?.linkedLicensees || [];
@@ -140,8 +137,6 @@ export const me = async (req: Request, res: Response) => {
     const scopeVersion = manufacturer ? manufacturerScope?.selectedLicensee?.scopeVersion ?? null : null;
 
     ensureCsrfCookie(req, res);
-    const currentSession = await getCurrentRefreshSession(req);
-    const auth = claims ? await buildAuthState(claims, user.role, user.id, currentSession) : null;
 
     return res.json({
       success: true,
@@ -173,6 +168,10 @@ export const me = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
+    if (denyInactiveSession(error, res)) return;
+    if (error instanceof Error && ["MANUFACTURER_SCOPE_DENIED", "MANUFACTURER_SCOPE_STALE"].includes(error.message)) {
+      return res.status(403).json({ success: false, error: "The current manufacturer workspace is unavailable." });
+    }
     console.error("Me error:", error);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }
@@ -218,19 +217,30 @@ export const refresh = async (req: Request, res: Response) => {
 
 export const logout = async (req: Request, res: Response) => {
   try {
-    const userId = getAuthClaims(req)?.userId;
-    if (!userId) return res.status(401).json({ success: false, error: "Not authenticated" });
-
-    await logoutSession({
-      userId,
-      rawRefreshToken: getRefreshTokenFromRequest(req),
-      ipHash: hashIp(req.ip),
-      userAgent: normalizeUserAgent(req.get("user-agent")),
-    });
+    const claims = getAuthClaims(req);
+    if (!claims?.userId || !claims.sessionId || claims.sessionStage !== "ACTIVE") {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+    const sessionId = claims.sessionId;
+    const requestId = getRequestId(req);
+    await withCanonicalAuthClaims(claims, { requestId, purpose: "auth-logout" }, (tx, context) =>
+      logoutSession({
+        userId: context.userId,
+        sessionId,
+        ipHash: hashIp(req.ip),
+        userAgent: normalizeUserAgent(req.get("user-agent")),
+        requestId,
+        organizationId: context.organizationId ?? null,
+        licenseeId: context.licenseeId ?? null,
+        manufacturerId: context.manufacturerId ?? null,
+        actorRole: context.role,
+      }, tx)
+    );
 
     clearAuthCookies(res);
     return res.json({ success: true, data: { loggedOut: true } });
   } catch (error) {
+    if (denyInactiveSession(error, res)) return;
     console.error("Logout error:", error);
     return res.status(500).json({ success: false, error: "Logout failed" });
   }
@@ -280,12 +290,14 @@ export const invite = async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
   }
 
-  const actorUserId = (req as any).user?.userId as string | undefined;
-  if (!actorUserId) {
+  const claims = getAuthClaims(req);
+  const actorUserId = claims?.userId;
+  if (!claims || !actorUserId) {
     return res.status(401).json({ success: false, error: "Not authenticated" });
   }
 
   try {
+    const requestId = getRequestId(req);
     const out = await createInvite({
       email: parsed.data.email,
       role: parsed.data.role,
@@ -294,8 +306,16 @@ export const invite = async (req: Request, res: Response) => {
       manufacturerId: parsed.data.manufacturerId || null,
       allowExistingInvitedUser: parsed.data.allowExistingInvitedUser || false,
       createdByUserId: actorUserId,
+      actorSessionId: claims.sessionId,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
+      databaseBoundary: {
+        run: (callback) => withCanonicalAuthClaims(
+          claims,
+          { requestId, purpose: "auth-invite-create" },
+          callback
+        ),
+      },
     });
     const emailSent = (out as any).emailSent === true || (out as any).emailDelivered === true;
     const inviteCreated = Boolean((out as any).inviteId || (out as any).inviteLink);
@@ -323,6 +343,7 @@ export const invite = async (req: Request, res: Response) => {
       },
     });
   } catch (error: any) {
+    if (denyInactiveSession(error, res)) return;
     const msg = String(error?.message || "Invite failed");
     const isConflict = /already active|different|disabled|not required|existing/i.test(msg);
     const isNotFound = /not found/i.test(msg);
@@ -350,6 +371,7 @@ export const acceptInviteController = async (req: Request, res: Response) => {
       rawToken: parsed.data.token,
       password: parsed.data.password,
       name: parsed.data.name || null,
+      requestId: getRequestId(req),
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
     });

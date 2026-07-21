@@ -24,7 +24,12 @@ import {
 } from "../services/auth/authClaimsRlsContext";
 import { getAdminStepUpWindowMinutes, issueSessionForUser } from "../services/auth/authService";
 import { lockMfaState, MfaAdapterError } from "../services/auth/mfaAdapter";
-import { revokeRefreshTokenByRaw } from "../services/auth/refreshTokenService";
+import { revokeRefreshTokenById } from "../services/auth/refreshTokenService";
+import { installCanonicalDbContext } from "../lib/canonicalDbContext";
+import {
+  loadAuthenticatedPasswordActor,
+  requireRecentMfaSession,
+} from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
 import { verifyPassword } from "../services/auth/passwordService";
 import { createAuditLog } from "../services/auditService";
 import { queueAuditLogOutbox } from "../services/auditLogOutboxService";
@@ -169,7 +174,12 @@ export const confirmAdminMfaSetupController = async (req: Request, res: Response
       return res.json({ success: true, data: authResponseData(session) });
     }
 
-    await confirmAdminMfaReplacementFromClaims(claims, { code: parsed.data.code, ipHash, userAgent });
+    await confirmAdminMfaReplacementFromClaims(claims, {
+      code: parsed.data.code,
+      ipHash,
+      userAgent,
+      requestId: getRequestId(req),
+    });
     return res.json({ success: true, data: { enabled: true } });
   } catch (error: any) {
     const message = String(error?.message || "");
@@ -346,7 +356,7 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
         }
         throw error;
       }
-    });
+    }, { requestId: getRequestId(req), purpose: "admin-mfa-login-complete" });
     if (!outcome.ok) throw outcome.error;
 
     setAuthCookies(res, outcome.session);
@@ -392,7 +402,7 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
 
 export const completeAdminWebAuthnChallengeController = async (req: Request, res: Response) => {
   const claims = getAuthClaims(req);
-  if (!claims?.userId) return res.status(401).json({ success: false, error: "Not authenticated" });
+  if (!claims?.userId || !claims.sessionId) return res.status(401).json({ success: false, error: "Not authenticated" });
   if (!isAdminMfaRequiredRole(claims.role)) {
     return res.status(403).json({ success: false, error: "WebAuthn is only available for admin MFA." });
   }
@@ -406,28 +416,40 @@ export const completeAdminWebAuthnChallengeController = async (req: Request, res
     const ipHash = hashIp(req.ip);
     const userAgent = normalizeUserAgent(req.get("user-agent"));
     const now = new Date();
-    const currentRefresh = getRefreshTokenFromRequest(req);
-    const session = await withAdminMfaClaimsTransaction(claims, async (tx) => {
+    const requestId = getRequestId(req);
+    const hasCurrentRefresh = Boolean(getRefreshTokenFromRequest(req));
+    const currentSessionId = claims.sessionId;
+    const session = await withAdminMfaClaimsTransaction(claims, async (tx, context) => {
       const completed = await completeAdminWebAuthnChallenge({
         userId: claims.userId,
         ticket: parsed.data.ticket,
         credential: parsed.data.credential,
       }, tx);
+      const steppedUp = await installCanonicalDbContext(tx, {
+        ...context,
+        authAssurance: "step-up-verified",
+        purpose: "admin-webauthn-challenge-complete",
+      });
       const nextSession = await issueSessionForUser({
-        userId: claims.userId,
+        userId: steppedUp.userId,
         ipHash,
         userAgent,
         authAssurance: "ADMIN_MFA",
         authenticatedAt: now,
         mfaVerifiedAt: now,
         now,
-        requestId: getRequestId(req),
+        requestId,
         purpose: "manufacturer-bootstrap",
         requestedLicenseeId: parsed.data.licenseeId ?? claims.licenseeId,
         requestedScopeVersion: parsed.data.scopeVersion ?? claims.scopeVersion,
       }, tx);
-      if (currentRefresh) {
-        await revokeRefreshTokenByRaw({ rawToken: currentRefresh, reason: "STEP_UP_REPLACED", now }, tx);
+      if (hasCurrentRefresh) {
+        await revokeRefreshTokenById({
+          sessionId: currentSessionId,
+          userId: steppedUp.userId,
+          reason: "STEP_UP_REPLACED",
+          now,
+        }, tx);
       }
       await queueAuditLogOutbox({
         userId: claims.userId,
@@ -437,9 +459,16 @@ export const completeAdminWebAuthnChallengeController = async (req: Request, res
         details: { method: "WEBAUTHN", purpose: completed.purpose },
         ipHash,
         userAgent,
-      }, undefined, tx);
+      }, undefined, tx, {
+        requestId,
+        organizationId: steppedUp.organizationId,
+        licenseeId: steppedUp.licenseeId,
+        manufacturerId: steppedUp.manufacturerId,
+        initiatingUserId: steppedUp.userId,
+        initiatingActorRoleSnapshot: steppedUp.role,
+      });
       return nextSession;
-    });
+    }, { requestId, purpose: "admin-webauthn-challenge-proof" });
 
     setAuthCookies(res, session);
     return res.json({ success: true, data: authResponseData(session) });
@@ -466,7 +495,11 @@ export const rotateAdminMfaBackupCodesController = async (req: Request, res: Res
   }
 
   try {
-    const rotated = await rotateAdminMfaBackupCodes({ userId: claims.userId, code: parsed.data.code });
+    const rotated = await withAdminMfaClaimsTransaction(
+      claims,
+      (tx) => rotateAdminMfaBackupCodes({ userId: claims.userId, code: parsed.data.code }, tx),
+      { requestId: getRequestId(req), purpose: "admin-mfa-backup-code-rotation" }
+    );
     return res.json({ success: true, data: rotated });
   } catch {
     return res.status(400).json({
@@ -492,20 +525,9 @@ export const disableAdminMfaController = async (req: Request, res: Response) => 
     const userAgent = normalizeUserAgent(req.get("user-agent"));
     await withAdminMfaClaimsTransaction(claims, async (tx) => {
       await lockMfaState(tx, claims.userId);
-      const user = await tx.user.findUnique({
-        where: { id: claims.userId },
-        select: {
-          passwordHash: true,
-          role: true,
-          status: true,
-          isActive: true,
-          disabledAt: true,
-          deletedAt: true,
-        },
-      });
+      const user = await loadAuthenticatedPasswordActor(tx);
       if (
         !user ||
-        user.role !== claims.role ||
         !isAdminMfaRequiredRole(user.role) ||
         !user.isActive ||
         user.status === "DISABLED" ||
@@ -516,16 +538,13 @@ export const disableAdminMfaController = async (req: Request, res: Response) => 
       }
 
       const now = new Date();
-      const verifiedAt = claims.mfaVerifiedAt ? new Date(claims.mfaVerifiedAt) : null;
-      if (
-        claims.authAssurance !== "ADMIN_MFA" ||
-        !verifiedAt ||
-        Number.isNaN(verifiedAt.getTime()) ||
-        verifiedAt.getTime() > now.getTime() ||
-        now.getTime() - verifiedAt.getTime() > getAdminStepUpWindowMinutes() * 60_000
-      ) {
+      await requireRecentMfaSession({
+        sessionId: claims.sessionId || "",
+        checkedAt: now,
+        maxAgeMinutes: getAdminStepUpWindowMinutes(),
+      }, tx).catch(() => {
         throw new Error("MFA_DISABLE_FRESHNESS_REQUIRED");
-      }
+      });
       if (!user.passwordHash) throw new Error("MFA_PASSWORD_CONFIRMATION_UNAVAILABLE");
       if (!await verifyPassword(user.passwordHash, parsed.data.currentPassword)) {
         throw new Error("INVALID_CURRENT_PASSWORD");
@@ -533,7 +552,7 @@ export const disableAdminMfaController = async (req: Request, res: Response) => 
 
       await verifyAdminMfaCode({ userId: claims.userId, code: parsed.data.code }, tx);
       await disableAdminMfa(claims.userId, tx, { ipHash, userAgent });
-    });
+    }, { requestId: getRequestId(req), purpose: "admin-mfa-disable" });
     clearAuthCookies(res);
     return res.json({ success: true, data: { enabled: false } });
   } catch (error) {
