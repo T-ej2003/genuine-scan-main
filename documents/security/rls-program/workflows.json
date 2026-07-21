@@ -5835,7 +5835,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/accountController.ts"
@@ -5897,7 +5897,7 @@
         "command-user-update-0ff7267155fe"
       ],
       "commandActorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "requiredAssurance": [
         "step-up-verified"
@@ -5914,7 +5914,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/accountController.ts"
@@ -5976,7 +5976,7 @@
         "command-user-update-3863a1acd7c2"
       ],
       "commandActorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "requiredAssurance": [
         "step-up-verified"
@@ -6433,8 +6433,6 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -6488,12 +6486,10 @@
         "command-audit-log-select-92ebfd6a1d0d"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -6578,7 +6574,7 @@
         "authenticated-user"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -6718,7 +6714,7 @@
         "authenticated-user"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -6872,8 +6868,6 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -6927,8 +6921,6 @@
         "command-compliance-pack-job-select-5cfef776b686"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "requiredAssurance": [
@@ -6946,8 +6938,6 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -7016,8 +7006,6 @@
         "command-incident-select-286ed812763b"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "requiredAssurance": [
@@ -7959,7 +7947,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -8036,7 +8024,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -8506,7 +8494,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -9848,8 +9836,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "manufacturer"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/printerAgentJobController.ts"
@@ -9933,11 +9920,10 @@
         "command-printer-select-8fb5b0cda000"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "manufacturer"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -10185,7 +10171,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "platform-admin"
+        "manufacturer"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/printerGatewayController.ts"
@@ -10247,10 +10233,10 @@
         "command-print-job-update-abe54ce77013"
       ],
       "commandActorClasses": [
-        "platform-admin"
+        "manufacturer"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -10264,8 +10250,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "manufacturer"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/printerGatewayController.ts"
@@ -10327,11 +10312,10 @@
         "command-print-job-update-f64cdef396d3"
       ],
       "commandActorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "manufacturer"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -11461,6 +11445,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -11552,6 +11537,7 @@
         "command-qrcode-update-487f22dd469a"
       ],
       "commandActorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "requiredAssurance": [
@@ -11569,6 +11555,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -11622,6 +11609,7 @@
         "command-qrcode-delete-98dcb65cc0d8"
       ],
       "commandActorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "requiredAssurance": [
@@ -11639,7 +11627,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/qrController.ts"
@@ -11746,7 +11734,7 @@
         "command-user-select-58fa2fc9edab"
       ],
       "commandActorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "requiredAssurance": [
         "mfa-verified"
@@ -11763,6 +11751,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -11840,6 +11829,7 @@
         "command-qrcode-update-9afc2de71395"
       ],
       "commandActorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "requiredAssurance": [
@@ -11913,7 +11903,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "step-up-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -12069,7 +12059,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "step-up-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -12083,7 +12073,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "canonicalSourceFiles": [
         "backend/src/controllers/qrController.ts"
@@ -12143,10 +12133,10 @@
         "command-qrcode-select-727bf510a736"
       ],
       "commandActorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -12545,6 +12535,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -12598,10 +12589,11 @@
         "command-qr-allocation-request-select-da091789ae59"
       ],
       "commandActorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -13362,6 +13354,8 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
+        "licensee-admin",
+        "operator",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -13422,10 +13416,12 @@
         "command-support-issue-report-select-9c4ad8bcc0b0"
       ],
       "commandActorClasses": [
+        "licensee-admin",
+        "operator",
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -13578,7 +13574,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -14129,6 +14125,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -14184,6 +14181,7 @@
         "command-security-policy-update-37d3969770a6"
       ],
       "commandActorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "requiredAssurance": [
@@ -14271,6 +14269,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -14354,6 +14353,7 @@
         "command-user-insert-6dd6313b7cc1"
       ],
       "commandActorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "requiredAssurance": [
@@ -14371,6 +14371,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -14495,6 +14496,7 @@
         "command-user-update-fcd02a1a5d81"
       ],
       "commandActorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "requiredAssurance": [
@@ -14577,7 +14579,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -14591,6 +14593,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -14651,10 +14654,11 @@
         "command-user-select-77a1dff5a8de"
       ],
       "commandActorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified"
+        "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -14747,6 +14751,7 @@
       "executionSurface": "http",
       "authenticationStage": "authenticated",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
@@ -14815,6 +14820,7 @@
         "command-user-update-433edd63287f"
       ],
       "commandActorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "requiredAssurance": [

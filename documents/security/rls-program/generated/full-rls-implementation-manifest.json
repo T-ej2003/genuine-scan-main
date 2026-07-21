@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "7f08aedd7b99948d07c0c927b1a6a4bb55a1ee59ac7c705e50e487b1ac21b31b",
+  "sourceContractSha256": "40c6c8cee5cba8ae7f912ee3eae289420d40219366e44c921ae8d4e0601d86cd",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -23,11 +23,11 @@
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "1158b7684a5348f91e83c36f595600722c70e60997f3b05ad3dc641889b56129"
+      "sha256": "0d060e74e607ada79976fe4df9c598e57a004d017aa18692fe33022da509796b"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "07d4e0f40b5defce8f28f698176b909f8002ffe5b9efde0fc668bdff4c80a72e"
+      "sha256": "b1a0813b92d4c1d58c2024c879ac23156637f4962c46e0fd5c39a6ff8d28eb37"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -43,7 +43,7 @@
     },
     {
       "path": "documents/security/rls-program/context-boundary-families.json",
-      "sha256": "509222d5684a62babe9668f74e600b9399e1e88ac2a4fd61c67639966936bdf2"
+      "sha256": "9a3d333b1a19d7da15fa88ebb062ef3a34519b191f35003f8abbf576c25f860b"
     },
     {
       "path": "documents/security/rls-program/workflow-three-session-partition.json",
@@ -67,7 +67,7 @@
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
-      "sha256": "56b0403d49a06e539ea3deb18f0444b4d05df6ccd37f4093da4697e82b6a2f5f"
+      "sha256": "6e3a10474df0c59eb3d2eec334c974497ae12472e864467ec25f82f75f024774"
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
@@ -111,7 +111,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:7f08aedd7b99948d07c0c927b1a6a4bb55a1ee59ac7c705e50e487b1ac21b31b",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:40c6c8cee5cba8ae7f912ee3eae289420d40219366e44c921ae8d4e0601d86cd",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

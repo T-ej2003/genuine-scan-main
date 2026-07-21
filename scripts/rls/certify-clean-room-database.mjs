@@ -177,7 +177,18 @@ const createGreenDatabase = (executorUrl, database) => {
   activeDatabases.add(database);
 };
 const dropGreenDatabase = (executorUrl, database) => {
-  if (databaseExists(executorUrl, database)) runPsql(executorUrl, ["-q", "-c", `DROP DATABASE ${quote(database)} WITH (FORCE)`], "drop disposable green database");
+  if (databaseExists(executorUrl, database)) {
+    runPsql(executorUrl, ["-q", "-c", `DO $$ BEGIN
+      FOR attempt IN 1..100 LOOP
+        EXIT WHEN NOT EXISTS (SELECT FROM pg_stat_activity WHERE datname=${lit(database)});
+        PERFORM pg_sleep(0.05);
+      END LOOP;
+      IF EXISTS (SELECT FROM pg_stat_activity WHERE datname=${lit(database)}) THEN
+        RAISE EXCEPTION 'disposable green database still has active sessions';
+      END IF;
+    END $$;`], "wait for disposable green sessions to disconnect");
+    runPsql(executorUrl, ["-q", "-c", `DROP DATABASE ${quote(database)}`], "drop disposable green database");
+  }
   activeDatabases.delete(database);
 };
 const cleanMarkedRoles = (executorUrl, database) => runSqlFile(executorUrl, "clean-room-cleanup.sql", "drop exact package-marked roles", [["candidate_database", database]]);

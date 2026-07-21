@@ -31,6 +31,18 @@ test("raw SQL inventory recognizes table clauses without treating data literals 
   assert.deepEqual(accesses.map((entry) => [entry.prismaModel, entry.command]), [["AuditLog", "INSERT"]]);
 });
 
+test("route authorization evidence is isolated to the exact registered handler", () => {
+  const { workflows, commandSemantics } = manifests();
+  const workflow = workflows.workflows.find((item) => item.id === "workflow-http-backend-src-controllers-qr-controller-ts-create-batch");
+  assert.deepEqual(workflow.commandActorClasses, ["licensee-admin"]);
+  for (const ruleId of workflow.commandRuleIds) {
+    const rule = commandSemantics.rules.find((item) => item.id === ruleId);
+    assert.deepEqual(rule.actorClasses, ["licensee-admin"]);
+    assert(rule.supportingEvidence.some((item) => item.includes("routes/index.ts:") && item.includes("requireLicenseeAdmin")));
+    assert(!rule.supportingEvidence.some((item) => item.includes("requirePlatformAdmin")), `${ruleId} inherited an adjacent route guard`);
+  }
+});
+
 test("named dashboard functions preserve both canonical workflows and exact protected commands", () => {
   const rows = scanProductionAccess().accesses.filter((entry) => entry.sourceFile === "backend/src/services/dashboardSnapshotService.ts");
   const byFunction = (functionName) => rows
@@ -134,7 +146,7 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   validateSystemBoundaryContracts(systemBoundaries, workflows);
   validateContextBoundaryPlan(generated, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract);
   assert.equal(generated.workflowCount, 428);
-  assert.equal(generated.familyCount, 317);
+  assert.equal(generated.familyCount, 314);
   const count = (eligibility) => generated.families.filter((family) => family.automationEligibility === eligibility).reduce((total, family) => total + family.workflowIds.length, 0);
   assert.equal(count("implemented"), 7);
   assert.equal(count("contract-only"), 59);

@@ -756,15 +756,50 @@ export const writeTableOwnershipReview = (tableManifest, graph) => {
   fs.writeFileSync(tableOwnershipReviewPath, `${lines.join("\n")}\n`);
 };
 
-const routeSource = () => fs.readFileSync(path.join(repoRoot, "backend/src/routes/index.ts"), "utf8");
-const routeEvidenceFor = (functionName, source = routeSource()) => {
-  const lines = source.split("\n");
-  const index = lines.findLastIndex((line) => new RegExp(`\\b${functionName}\\b`).test(line));
-  if (index < 0) return null;
-  const excerpt = lines.slice(Math.max(0, index - 14), index + 2).join(" ").replace(/\s+/g, " ");
-  const guards = ["authenticate", "requirePlatformAdmin", "requireLicenseeAdmin", "requireAnyAdmin", "requireManufacturer", "requireRecentAdminMfa", "requireRecentSensitiveAuth", "requireCustomerVerifyAuth", "optionalCustomerVerifyAuth", "enforceTenantIsolation", "requireCsrf"].filter((guard) => new RegExp(`\\b${guard}\\b`).test(excerpt));
-  const route = excerpt.match(/(?:get|post|put|patch|delete)\(\s*["']([^"']+)/)?.[1] || null;
-  return { source: `backend/src/routes/index.ts:${index + 1}`, route, guards };
+const ROUTE_GUARDS = ["authenticate", "requirePlatformAdmin", "requireLicenseeAdmin", "requireAnyAdmin", "requireManufacturer", "requireRecentAdminMfa", "requireRecentSensitiveAuth", "requireCustomerVerifyAuth", "optionalCustomerVerifyAuth", "enforceTenantIsolation", "requireCsrf"];
+let routeEvidenceByHandler;
+const routeEvidenceFor = (functionName) => {
+  if (!routeEvidenceByHandler) {
+    const ts = require(path.join(repoRoot, "backend/node_modules/typescript"));
+    routeEvidenceByHandler = new Map();
+    const files = [...walk(path.join(repoRoot, "backend/src/routes")), path.join(repoRoot, "backend/src/app.ts")];
+    for (const file of files) {
+      const source = fs.readFileSync(file, "utf8");
+      const ast = ts.createSourceFile(rel(file), source, ts.ScriptTarget.Latest, true);
+      const visit = (node) => {
+        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+          const method = node.expression.name.text.toUpperCase();
+          const route = node.arguments[0];
+          if (["GET", "POST", "PUT", "PATCH", "DELETE", "USE"].includes(method) && route && ts.isStringLiteralLike(route)) {
+            const identifiers = new Set();
+            const collect = (candidate) => {
+              if (ts.isIdentifier(candidate)) identifiers.add(candidate.text);
+              ts.forEachChild(candidate, collect);
+            };
+            node.arguments.slice(1).forEach(collect);
+            const line = ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1;
+            const registration = {
+              source: `${rel(file)}:${line}`,
+              method,
+              route: route.text,
+              guards: ROUTE_GUARDS.filter((guard) => identifiers.has(guard)),
+            };
+            for (const handler of identifiers) routeEvidenceByHandler.set(handler, [...(routeEvidenceByHandler.get(handler) || []), registration]);
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(ast);
+    }
+  }
+  const registrations = routeEvidenceByHandler.get(functionName) || [];
+  if (!registrations.length) return null;
+  return {
+    source: registrations[0].source,
+    route: registrations[0].route,
+    guards: [...new Set(registrations.flatMap((registration) => registration.guards))],
+    registrations,
+  };
 };
 
 const TRACE_TIMELINE_WORKFLOW_ID = "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline";

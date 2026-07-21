@@ -2987,7 +2987,8 @@
         "backend/src/controllers/auditController.ts",
         "backend/src/services/auditCsvExportService.ts",
         "backend/src/lib/canonicalDbContext.ts",
-        "backend/src/services/auditExportRedactionService.ts"
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/routes/auditRoutes.ts:185 guards=authenticate,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -3313,7 +3314,8 @@
         "backend/src/controllers/auditController.ts",
         "backend/src/lib/canonicalDbContext.ts",
         "backend/src/services/auditExportRedactionService.ts",
-        "backend/src/services/fraudReportQueryService.ts"
+        "backend/src/services/fraudReportQueryService.ts",
+        "backend/src/routes/auditRoutes.ts:208 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -3448,7 +3450,8 @@
         "backend/src/controllers/auditController.ts",
         "backend/src/lib/canonicalDbContext.ts",
         "backend/src/services/auditExportRedactionService.ts",
-        "backend/src/services/auditLogQueryService.ts"
+        "backend/src/services/auditLogQueryService.ts",
+        "backend/src/routes/auditRoutes.ts:173 guards=authenticate,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "manufacturer or licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -4017,7 +4020,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/authAdminSecurityController.ts",
-        "backend/src/routes/index.ts:54 guards=none"
+        "backend/src/routes/modules/authRoutes.ts:290 guards=requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -4612,7 +4615,8 @@
         "backend/src/controllers/auditController.ts",
         "backend/src/services/auditCsvExportService.ts",
         "backend/src/lib/canonicalDbContext.ts",
-        "backend/src/services/auditExportRedactionService.ts"
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/routes/auditRoutes.ts:185 guards=authenticate,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -5173,7 +5177,8 @@
         "backend/src/controllers/auditController.ts",
         "backend/src/lib/canonicalDbContext.ts",
         "backend/src/services/auditExportRedactionService.ts",
-        "backend/src/services/fraudReportQueryService.ts"
+        "backend/src/services/fraudReportQueryService.ts",
+        "backend/src/routes/auditRoutes.ts:208 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -5189,17 +5194,13 @@
       "tableId": "table-audit-log",
       "command": "SELECT",
       "actorClasses": [
-        "operator",
-        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
+      "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
-        "operator": "password-verified",
-        "licensee-admin": "password-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -5245,15 +5246,16 @@
         "workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report"
       ],
       "supportingEvidence": [
-        "backend/src/controllers/auditController.ts"
+        "backend/src/controllers/auditController.ts",
+        "backend/src/routes/auditRoutes.ts:227 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
-      "confidence": "medium",
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {
@@ -5317,7 +5319,8 @@
         "backend/src/controllers/auditController.ts",
         "backend/src/lib/canonicalDbContext.ts",
         "backend/src/services/auditExportRedactionService.ts",
-        "backend/src/services/auditLogQueryService.ts"
+        "backend/src/services/auditLogQueryService.ts",
+        "backend/src/routes/auditRoutes.ts:173 guards=authenticate,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "manufacturer or licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -6640,6 +6643,7 @@
       "tableId": "table-batch",
       "command": "DELETE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -6647,6 +6651,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -6691,10 +6696,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1756 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1756 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs DELETE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs DELETE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -6707,6 +6712,7 @@
       "tableId": "table-batch",
       "command": "DELETE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -6714,6 +6720,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -6758,10 +6765,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1755 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1755 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs DELETE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs DELETE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -6901,7 +6908,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1713 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1703 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "licensee-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -6917,14 +6924,14 @@
       "tableId": "table-batch",
       "command": "INSERT",
       "actorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "mfa-verified"
+        "licensee-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -6980,10 +6987,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1698 guards=authenticate,requirePlatformAdmin,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1698 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -7493,7 +7500,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1713 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1703 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "licensee-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -7882,6 +7889,7 @@
       "tableId": "table-batch",
       "command": "SELECT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -7889,6 +7897,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -7960,10 +7969,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1756 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1756 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -9100,6 +9109,7 @@
       "tableId": "table-batch",
       "command": "SELECT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -9107,6 +9117,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -9178,10 +9189,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1755 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1755 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -10501,7 +10512,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/tracePolicyController.ts",
-        "backend/src/routes/index.ts:2158 guards=authenticate,requireAnyAdmin,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2147 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -10688,7 +10699,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/print-job/createPrintJobHandler.ts",
-        "backend/src/routes/index.ts:1791 guards=authenticate,requireManufacturer,requireRecentSensitiveAuth,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1781 guards=authenticate,requireManufacturer,requireRecentSensitiveAuth,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "manufacturer using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -11067,6 +11078,7 @@
       "tableId": "table-batch",
       "command": "SELECT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -11074,6 +11086,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -11145,10 +11158,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1636 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1636 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -11475,7 +11488,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1713 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1703 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "licensee-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -11958,7 +11971,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1725 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1715 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -12212,6 +12225,7 @@
       "tableId": "table-batch",
       "command": "UPDATE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -12219,6 +12233,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -12275,10 +12290,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1636 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1636 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -12576,8 +12591,6 @@
       "tableId": "table-compliance-pack-job",
       "command": "SELECT",
       "actorClasses": [
-        "operator",
-        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -12585,8 +12598,6 @@
       ],
       "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "operator": "password-verified",
-        "licensee-admin": "password-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -12642,10 +12653,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/governanceController.ts",
-        "backend/src/routes/index.ts:289 guards=none"
+        "backend/src/routes/modules/governanceRoutes.ts:235 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
-        "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -12814,8 +12825,6 @@
       "tableId": "table-compliance-pack-job",
       "command": "SELECT",
       "actorClasses": [
-        "operator",
-        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -12823,8 +12832,6 @@
       ],
       "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "operator": "password-verified",
-        "licensee-admin": "password-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -12880,10 +12887,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/governanceController.ts",
-        "backend/src/routes/index.ts:288 guards=none"
+        "backend/src/routes/modules/governanceRoutes.ts:225 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
-        "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -17826,7 +17833,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
-        "backend/src/routes/index.ts:2352 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2273 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -17944,7 +17951,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
-        "backend/src/routes/index.ts:2268 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+        "backend/src/routes/index.ts:2260 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -18008,7 +18015,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
-        "backend/src/routes/index.ts:1549 guards=none"
+        "backend/src/routes/index.ts:1542 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -18142,7 +18149,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/feedbackHandlers.ts",
-        "backend/src/routes/index.ts:1539 guards=none"
+        "backend/src/routes/index.ts:1523 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -18794,7 +18801,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2324 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2324 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -19249,8 +19256,6 @@
       "tableId": "table-incident",
       "command": "SELECT",
       "actorClasses": [
-        "operator",
-        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -19258,8 +19263,6 @@
       ],
       "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "operator": "password-verified",
-        "licensee-admin": "password-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -19348,10 +19351,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/governanceController.ts",
-        "backend/src/routes/index.ts:289 guards=none"
+        "backend/src/routes/modules/governanceRoutes.ts:235 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
-        "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -20240,7 +20243,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2326 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2326 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -20261,7 +20264,7 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
         "platform-admin": "mfa-verified"
       },
@@ -20351,10 +20354,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2325 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2325 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -20576,7 +20579,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2328 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2328 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -20687,7 +20690,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2327 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2327 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -20798,7 +20801,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2339 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2330 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -21047,7 +21050,7 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
         "platform-admin": "mfa-verified"
       },
@@ -21137,10 +21140,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2323 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2323 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -21358,7 +21361,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2326 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2326 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -21449,7 +21452,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
-        "backend/src/routes/index.ts:1549 guards=none"
+        "backend/src/routes/index.ts:1542 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -21553,7 +21556,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/feedbackHandlers.ts",
-        "backend/src/routes/index.ts:1539 guards=none"
+        "backend/src/routes/index.ts:1523 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -23408,7 +23411,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/licenseeController.ts",
-        "backend/src/routes/index.ts:1614 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:1614 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -23430,6 +23433,7 @@
       "tableId": "table-licensee",
       "command": "SELECT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -23437,6 +23441,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -23487,10 +23492,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1635 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1635 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -23724,14 +23729,14 @@
       "tableId": "table-licensee",
       "command": "SELECT",
       "actorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "mfa-verified"
+        "licensee-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -23769,7 +23774,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
+      "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "ordinary-rls",
@@ -23781,10 +23786,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1698 guards=authenticate,requirePlatformAdmin,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1698 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -23942,6 +23947,7 @@
       "tableId": "table-licensee",
       "command": "SELECT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -23949,6 +23955,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -23999,10 +24006,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1632 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1632 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -24055,7 +24062,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/licenseeController.ts",
-        "backend/src/routes/index.ts:1610 guards=authenticate,requirePlatformAdmin"
+        "backend/src/routes/index.ts:1601 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -24737,7 +24744,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/licenseeController.ts",
-        "backend/src/routes/index.ts:1615 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:1615 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -24961,7 +24968,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/licenseeInviteController.ts",
-        "backend/src/routes/index.ts:1627 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:1618 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -25384,6 +25391,7 @@
       "tableId": "table-manufacturer-licensee-link",
       "command": "DELETE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -25391,6 +25399,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -25420,10 +25429,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1636 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1636 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs DELETE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs DELETE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -25831,6 +25840,7 @@
       "tableId": "table-manufacturer-licensee-link",
       "command": "SELECT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -25838,6 +25848,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -25873,10 +25884,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1632 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1632 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -26196,6 +26207,7 @@
       "tableId": "table-manufacturer-licensee-link",
       "command": "SELECT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -26203,6 +26215,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -26238,10 +26251,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1636 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1636 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -28452,7 +28465,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/claimHandlers.ts",
-        "backend/src/routes/index.ts:1481 guards=optionalCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1473 guards=optionalCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -28645,7 +28658,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/createOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1501 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1493 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -28812,7 +28825,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/acceptOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1521 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1513 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -28979,7 +28992,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/cancelOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1511 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1503 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -29130,7 +29143,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/acceptOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1521 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1513 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -29206,7 +29219,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/createOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1501 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1493 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -29357,7 +29370,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/cancelOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1511 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1503 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -29415,7 +29428,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/claimHandlers.ts",
-        "backend/src/routes/index.ts:1491 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1483 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -29473,7 +29486,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/acceptOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1521 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1513 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -29531,7 +29544,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/claimHandlers.ts",
-        "backend/src/routes/index.ts:1481 guards=optionalCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1473 guards=optionalCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -29589,7 +29602,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/createOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1501 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1493 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -30305,7 +30318,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irAlertController.ts",
-        "backend/src/routes/index.ts:2359 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2359 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -30452,7 +30465,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/tracePolicyController.ts",
-        "backend/src/routes/index.ts:2145 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2135 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -30527,7 +30540,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/tracePolicyController.ts",
-        "backend/src/routes/index.ts:2134 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2134 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -31006,7 +31019,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/tracePolicyController.ts",
-        "backend/src/routes/index.ts:2145 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2135 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
@@ -31386,7 +31399,7 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
         "platform-admin": "mfa-verified"
       },
@@ -31438,10 +31451,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irPolicyController.ts",
-        "backend/src/routes/index.ts:2355 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2355 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -35738,7 +35751,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/print-job/directPrintConfirmationHandlers.ts",
-        "backend/src/routes/index.ts:2091 guards=authenticate,requireManufacturer,requireRecentSensitiveAuth,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2081 guards=authenticate,requireManufacturer,requireRecentSensitiveAuth,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "manufacturer using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -41424,16 +41437,14 @@
       "tableId": "table-print-job",
       "command": "SELECT",
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "manufacturer"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "licensee-admin": "mfa-verified",
-        "platform-admin": "mfa-verified"
+        "manufacturer": "password-verified"
       },
       "scopeRule": "table-print-job row must join through table-batch on batchId=id; no alternative parent.",
       "allowedColumns": [
@@ -41509,7 +41520,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
+      "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "ordinary-rls",
@@ -41521,10 +41532,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/printerAgentJobController.ts",
-        "backend/src/routes/index.ts:1771 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1771 guards=none"
       ],
       "allowScenarios": [
-        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "manufacturer using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -41867,14 +41878,14 @@
       "tableId": "table-print-job",
       "command": "SELECT",
       "actorClasses": [
-        "platform-admin"
+        "manufacturer"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "mfa-verified"
+        "manufacturer": "password-verified"
       },
       "scopeRule": "table-print-job row must join through table-batch on batchId=id; no alternative parent.",
       "allowedColumns": [
@@ -41950,7 +41961,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
+      "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "ordinary-rls",
@@ -41962,10 +41973,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/printerGatewayController.ts",
-        "backend/src/routes/index.ts:1761 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1761 guards=none"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "manufacturer using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -43173,7 +43184,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/print-job/createPrintJobHandler.ts",
-        "backend/src/routes/index.ts:1791 guards=authenticate,requireManufacturer,requireRecentSensitiveAuth,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1781 guards=authenticate,requireManufacturer,requireRecentSensitiveAuth,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "manufacturer using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -43519,16 +43530,14 @@
       "tableId": "table-print-job",
       "command": "SELECT",
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "manufacturer"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "licensee-admin": "mfa-verified",
-        "platform-admin": "mfa-verified"
+        "manufacturer": "password-verified"
       },
       "scopeRule": "table-print-job row must join through table-batch on batchId=id; no alternative parent.",
       "allowedColumns": [
@@ -43604,7 +43613,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
+      "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "ordinary-rls",
@@ -43616,10 +43625,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/printerGatewayController.ts",
-        "backend/src/routes/index.ts:1765 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1765 guards=none"
       ],
       "allowScenarios": [
-        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "manufacturer using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -45194,16 +45203,14 @@
       "tableId": "table-print-job",
       "command": "UPDATE",
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "manufacturer"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "licensee-admin": "mfa-verified",
-        "platform-admin": "mfa-verified"
+        "manufacturer": "password-verified"
       },
       "scopeRule": "table-print-job row must join through table-batch on batchId=id; no alternative parent.",
       "allowedColumns": [
@@ -45283,10 +45290,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/printerAgentJobController.ts",
-        "backend/src/routes/index.ts:1771 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1771 guards=none"
       ],
       "allowScenarios": [
-        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "manufacturer using identity-authenticated-app at password-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -45503,14 +45510,14 @@
       "tableId": "table-print-job",
       "command": "UPDATE",
       "actorClasses": [
-        "platform-admin"
+        "manufacturer"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "mfa-verified"
+        "manufacturer": "password-verified"
       },
       "scopeRule": "table-print-job row must join through table-batch on batchId=id; no alternative parent.",
       "allowedColumns": [
@@ -45590,10 +45597,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/printerGatewayController.ts",
-        "backend/src/routes/index.ts:1761 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1761 guards=none"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "manufacturer using identity-authenticated-app at password-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -46116,16 +46123,14 @@
       "tableId": "table-print-job",
       "command": "UPDATE",
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "manufacturer"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "licensee-admin": "mfa-verified",
-        "platform-admin": "mfa-verified"
+        "manufacturer": "password-verified"
       },
       "scopeRule": "table-print-job row must join through table-batch on batchId=id; no alternative parent.",
       "allowedColumns": [
@@ -46205,10 +46210,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/printerGatewayController.ts",
-        "backend/src/routes/index.ts:1765 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1765 guards=none"
       ],
       "allowScenarios": [
-        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "manufacturer using identity-authenticated-app at password-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -53975,16 +53980,14 @@
       "tableId": "table-printer",
       "command": "SELECT",
       "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
+        "manufacturer"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "licensee-admin": "mfa-verified",
-        "platform-admin": "mfa-verified"
+        "manufacturer": "password-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -54055,7 +54058,7 @@
       "requiresNamedFunction": true,
       "namedFunctionClass": "authenticated-security-repository-function",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
+      "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "named-function",
@@ -54067,10 +54070,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/printerAgentJobController.ts",
-        "backend/src/routes/index.ts:1771 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1771 guards=none"
       ],
       "allowScenarios": [
-        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "manufacturer using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -56124,7 +56127,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrRequestController.ts",
-        "backend/src/routes/index.ts:2118 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2108 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -56208,7 +56211,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrRequestController.ts",
-        "backend/src/routes/index.ts:2121 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2121 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -56292,7 +56295,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrRequestController.ts",
-        "backend/src/routes/index.ts:2122 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2122 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -56308,13 +56311,15 @@
       "tableId": "table-qr-allocation-request",
       "command": "SELECT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -56376,10 +56381,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrRequestController.ts",
-        "backend/src/routes/index.ts:2120 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2120 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -56455,7 +56460,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrRequestController.ts",
-        "backend/src/routes/index.ts:2121 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2121 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -56534,7 +56539,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrRequestController.ts",
-        "backend/src/routes/index.ts:2122 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2122 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -57347,6 +57352,7 @@
       "tableId": "table-qrcode",
       "command": "DELETE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -57354,6 +57360,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -57409,10 +57416,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1757 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1757 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs DELETE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs DELETE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -58263,7 +58270,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/claimHandlers.ts",
-        "backend/src/routes/index.ts:1491 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1483 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -58900,7 +58907,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1713 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1703 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "licensee-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -59029,9 +59036,9 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "step-up-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "step-up-verified"
+        "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -59117,10 +59124,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1745 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireRecentSensitiveAuth,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1745 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -59246,9 +59253,9 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "step-up-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "step-up-verified"
+        "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -59334,10 +59341,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1746 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireRecentSensitiveAuth,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1746 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -59551,7 +59558,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/irIncidentController.ts",
-        "backend/src/routes/index.ts:2324 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2324 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -59971,7 +59978,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1682 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1682 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -59987,14 +59994,14 @@
       "tableId": "table-qrcode",
       "command": "SELECT",
       "actorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "mfa-verified"
+        "licensee-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -60068,7 +60075,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
+      "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "ordinary-rls",
@@ -60080,10 +60087,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1698 guards=authenticate,requirePlatformAdmin,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1698 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -60189,7 +60196,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/acceptOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1521 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1513 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -60629,14 +60636,14 @@
       "tableId": "table-qrcode",
       "command": "SELECT",
       "actorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "mfa-verified"
+        "authenticated-user": "password-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -60710,7 +60717,7 @@
       "requiresNamedFunction": false,
       "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
+      "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "ordinary-rls",
@@ -60722,10 +60729,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1752 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1752 guards=authenticate,enforceTenantIsolation"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -62907,7 +62914,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/claimHandlers.ts",
-        "backend/src/routes/index.ts:1481 guards=optionalCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1473 guards=optionalCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -63669,7 +63676,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/createOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1501 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1493 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -64074,7 +64081,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/cancelOwnershipTransferHandler.ts",
-        "backend/src/routes/index.ts:1511 guards=requireCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1503 guards=requireCustomerVerifyAuth"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -64473,7 +64480,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1713 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1703 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "licensee-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -64784,6 +64791,7 @@
       "tableId": "table-qrcode",
       "command": "UPDATE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -64791,6 +64799,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -64865,10 +64874,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1756 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1756 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -64962,7 +64971,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1682 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1682 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -64978,14 +64987,14 @@
       "tableId": "table-qrcode",
       "command": "UPDATE",
       "actorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "mfa-verified"
+        "licensee-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -65059,10 +65068,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1698 guards=authenticate,requirePlatformAdmin,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1698 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -65849,6 +65858,7 @@
       "tableId": "table-qrcode",
       "command": "UPDATE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -65856,6 +65866,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -65930,10 +65941,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1755 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1755 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -68953,7 +68964,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/publicIntakeController.ts",
-        "backend/src/routes/index.ts:1367 guards=none"
+        "backend/src/routes/index.ts:1362 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -69053,7 +69064,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/publicIntakeController.ts",
-        "backend/src/routes/index.ts:2179 guards=authenticate,requirePlatformAdmin,enforceTenantIsolation"
+        "backend/src/routes/index.ts:2172 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -69140,7 +69151,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/publicIntakeController.ts",
-        "backend/src/routes/index.ts:2190 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2181 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -69220,7 +69231,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/publicIntakeController.ts",
-        "backend/src/routes/index.ts:1367 guards=none"
+        "backend/src/routes/index.ts:1362 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -69317,7 +69328,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/publicIntakeController.ts",
-        "backend/src/routes/index.ts:2190 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2181 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -69436,7 +69447,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/telemetryController.ts",
-        "backend/src/routes/index.ts:1561 guards=optionalCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1553 guards=none"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -69496,7 +69507,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/telemetryController.ts",
-        "backend/src/routes/index.ts:2168 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+        "backend/src/routes/index.ts:2160 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -70090,6 +70101,7 @@
       "tableId": "table-security-policy",
       "command": "INSERT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -70097,6 +70109,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -70139,10 +70152,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/tracePolicyController.ts",
-        "backend/src/routes/index.ts:2133 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2133 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -70300,6 +70313,7 @@
       "tableId": "table-security-policy",
       "command": "UPDATE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -70307,6 +70321,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -70350,10 +70365,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/tracePolicyController.ts",
-        "backend/src/routes/index.ts:2133 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2133 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -70731,7 +70746,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1737 guards=authenticate,requireRecentSensitiveAuth,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1727 guards=authenticate,requireRecentSensitiveAuth,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "checker using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -71390,7 +71405,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/publicIntakeController.ts",
-        "backend/src/routes/index.ts:1374 guards=none"
+        "backend/src/routes/index.ts:1369 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -71497,7 +71512,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportIssueController.ts",
-        "backend/src/routes/index.ts:2229 guards=authenticate,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2217 guards=authenticate,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "operator or licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -71596,7 +71611,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportIssueController.ts",
-        "backend/src/routes/index.ts:2240 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2231 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -71619,10 +71634,10 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "operator": "mfa-verified",
-        "licensee-admin": "mfa-verified",
+        "operator": "password-verified",
+        "licensee-admin": "password-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -71699,10 +71714,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportIssueController.ts",
-        "backend/src/routes/index.ts:2250 guards=authenticate,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2242 guards=authenticate,enforceTenantIsolation"
       ],
       "allowScenarios": [
-        "operator or licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -71715,13 +71730,17 @@
       "tableId": "table-support-issue-report",
       "command": "SELECT",
       "actorClasses": [
+        "operator",
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
+        "operator": "password-verified",
+        "licensee-admin": "password-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -71798,10 +71817,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportIssueController.ts",
-        "backend/src/routes/index.ts:2216 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:2216 guards=authenticate,enforceTenantIsolation"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -71891,7 +71910,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportIssueController.ts",
-        "backend/src/routes/index.ts:2240 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2231 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -71978,7 +71997,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/publicIntakeController.ts",
-        "backend/src/routes/index.ts:1374 guards=none"
+        "backend/src/routes/index.ts:1369 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -72362,7 +72381,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportController.ts",
-        "backend/src/routes/index.ts:2214 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2205 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -72510,7 +72529,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportController.ts",
-        "backend/src/routes/index.ts:1551 guards=optionalCustomerVerifyAuth"
+        "backend/src/routes/index.ts:1551 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -72593,7 +72612,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/incidentController.ts",
-        "backend/src/routes/index.ts:1549 guards=none"
+        "backend/src/routes/index.ts:1542 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -72683,7 +72702,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportController.ts",
-        "backend/src/routes/index.ts:2192 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2192 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -72766,7 +72785,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportController.ts",
-        "backend/src/routes/index.ts:2193 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2193 guards=authenticate,requirePlatformAdmin"
       ],
       "allowScenarios": [
         "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
@@ -72842,7 +72861,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/verify/feedbackHandlers.ts",
-        "backend/src/routes/index.ts:1539 guards=none"
+        "backend/src/routes/index.ts:1523 guards=none"
       ],
       "allowScenarios": [
         "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
@@ -72933,7 +72952,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportController.ts",
-        "backend/src/routes/index.ts:2203 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2194 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -73082,7 +73101,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/supportController.ts",
-        "backend/src/routes/index.ts:2203 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:2194 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -74722,6 +74741,7 @@
       "tableId": "table-user",
       "command": "DELETE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -74729,6 +74749,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -74784,10 +74805,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1636 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1636 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs DELETE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs DELETE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -75199,6 +75220,7 @@
       "tableId": "table-user",
       "command": "INSERT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -75206,6 +75228,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -75265,10 +75288,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1632 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1632 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -77336,14 +77359,14 @@
       "tableId": "table-user",
       "command": "SELECT",
       "actorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "step-up-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "step-up-verified"
+        "authenticated-user": "step-up-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -77401,7 +77424,7 @@
       "requiresNamedFunction": true,
       "namedFunctionClass": "authenticated-security-repository-function",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
+      "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "named-function",
@@ -77413,10 +77436,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
-        "backend/src/routes/index.ts:2368 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2368 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "authenticated-user using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -77499,7 +77522,8 @@
         "backend/src/controllers/auditController.ts",
         "backend/src/services/auditCsvExportService.ts",
         "backend/src/lib/canonicalDbContext.ts",
-        "backend/src/services/auditExportRedactionService.ts"
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/routes/auditRoutes.ts:185 guards=authenticate,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -77684,7 +77708,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1713 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1703 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "licensee-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -77777,7 +77801,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/authController.ts",
-        "backend/src/routes/index.ts:41 guards=none"
+        "backend/src/routes/modules/authRoutes.ts:278 guards=none"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -77977,14 +78001,14 @@
       "tableId": "table-user",
       "command": "SELECT",
       "actorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "step-up-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "step-up-verified"
+        "authenticated-user": "step-up-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -78042,7 +78066,7 @@
       "requiresNamedFunction": true,
       "namedFunctionClass": "authenticated-security-repository-function",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
+      "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "named-function",
@@ -78054,10 +78078,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
-        "backend/src/routes/index.ts:2367 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2367 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "authenticated-user using identity-authenticated-app at step-up-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -78451,9 +78475,9 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
+      "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
+        "authenticated-user": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -78523,10 +78547,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/authAdminSecurityController.ts",
-        "backend/src/routes/index.ts:57 guards=none"
+        "backend/src/routes/modules/authRoutes.ts:293 guards=authenticate,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "authenticated-user using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -78831,14 +78855,14 @@
       "tableId": "table-user",
       "command": "SELECT",
       "actorClasses": [
-        "platform-admin"
+        "licensee-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "mfa-verified"
+        "licensee-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -78896,7 +78920,7 @@
       "requiresNamedFunction": true,
       "namedFunctionClass": "authenticated-security-repository-function",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
+      "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "named-function",
@@ -78908,10 +78932,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/qrController.ts",
-        "backend/src/routes/index.ts:1698 guards=authenticate,requirePlatformAdmin,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1698 guards=authenticate,requireLicenseeAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -79118,9 +79142,9 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "licensee-admin": "mfa-verified",
+        "licensee-admin": "password-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -79191,10 +79215,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1639 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1639 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
       ],
       "allowScenarios": [
-        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -79304,9 +79328,9 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
+      "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
+        "authenticated-user": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -79375,15 +79399,16 @@
         "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-begin-admin-web-authn-setup-controller"
       ],
       "supportingEvidence": [
-        "backend/src/controllers/authAdminSecurityController.ts"
+        "backend/src/controllers/authAdminSecurityController.ts",
+        "backend/src/routes/modules/authRoutes.ts:295 guards=authenticate,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "authenticated-user using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
-      "confidence": "medium",
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {
@@ -79487,13 +79512,15 @@
       "tableId": "table-user",
       "command": "SELECT",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -79564,10 +79591,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1634 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1634 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -80175,7 +80202,8 @@
         "backend/src/controllers/auditController.ts",
         "backend/src/lib/canonicalDbContext.ts",
         "backend/src/services/auditExportRedactionService.ts",
-        "backend/src/services/auditLogQueryService.ts"
+        "backend/src/services/auditLogQueryService.ts",
+        "backend/src/routes/auditRoutes.ts:173 guards=authenticate,requireRecentAdminMfa,enforceTenantIsolation"
       ],
       "allowScenarios": [
         "manufacturer or licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -81022,7 +81050,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/authSessionController.ts",
-        "backend/src/routes/index.ts:59 guards=none"
+        "backend/src/routes/modules/authRoutes.ts:284 guards=authenticate,requireCsrf"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -81905,7 +81933,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/licenseeInviteController.ts",
-        "backend/src/routes/index.ts:1627 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
+        "backend/src/routes/index.ts:1618 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireCsrf"
       ],
       "allowScenarios": [
         "platform-admin using identity-authenticated-app at mfa-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -82100,14 +82128,14 @@
       "tableId": "table-user",
       "command": "UPDATE",
       "actorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "step-up-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "step-up-verified"
+        "authenticated-user": "step-up-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -82170,10 +82198,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
-        "backend/src/routes/index.ts:2368 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2368 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at step-up-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "authenticated-user using identity-authenticated-app at step-up-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -82258,7 +82286,7 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1664 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1654 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
         "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -82274,14 +82302,14 @@
       "tableId": "table-user",
       "command": "UPDATE",
       "actorClasses": [
-        "platform-admin"
+        "authenticated-user"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "step-up-verified",
       "minimumAssuranceByActorClass": {
-        "platform-admin": "step-up-verified"
+        "authenticated-user": "step-up-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
       "allowedColumns": [
@@ -82344,10 +82372,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/accountController.ts",
-        "backend/src/routes/index.ts:2367 guards=authenticate,requirePlatformAdmin,requireRecentAdminMfa,requireRecentSensitiveAuth,requireCsrf"
+        "backend/src/routes/index.ts:2367 guards=authenticate,requireRecentSensitiveAuth,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at step-up-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "authenticated-user using identity-authenticated-app at step-up-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -82360,6 +82388,7 @@
       "tableId": "table-user",
       "command": "UPDATE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -82367,6 +82396,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -82430,10 +82460,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1635 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1635 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
@@ -83483,6 +83513,7 @@
       "tableId": "table-user",
       "command": "UPDATE",
       "actorClasses": [
+        "licensee-admin",
         "platform-admin"
       ],
       "runtimeIdentities": [
@@ -83490,6 +83521,7 @@
       ],
       "minimumAssurance": "mfa-verified",
       "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
         "platform-admin": "mfa-verified"
       },
       "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
@@ -83553,10 +83585,10 @@
       ],
       "supportingEvidence": [
         "backend/src/controllers/userController.ts",
-        "backend/src/routes/index.ts:1636 guards=authenticate,requirePlatformAdmin,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
+        "backend/src/routes/index.ts:1636 guards=authenticate,requireAnyAdmin,requireRecentAdminMfa,enforceTenantIsolation,requireCsrf"
       ],
       "allowScenarios": [
-        "platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or platform-admin using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."

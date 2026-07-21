@@ -21,12 +21,12 @@ Rules: 1021; workflows mapped: 428/428.
 | Value | Rules |
 |---|---:|
 | anonymous | 47 |
-| authenticated-user | 276 |
-| manufacturer | 255 |
-| operator | 92 |
+| authenticated-user | 281 |
+| manufacturer | 262 |
+| operator | 89 |
 | checker | 10 |
-| licensee-admin | 159 |
-| platform-admin | 248 |
+| licensee-admin | 178 |
+| platform-admin | 231 |
 | restricted-read | 16 |
 | pre-auth-runtime | 47 |
 | worker | 5 |
@@ -40,10 +40,10 @@ Rules: 1021; workflows mapped: 428/428.
 | Value | Rules |
 |---|---:|
 | none | 122 |
-| password-verified | 516 |
+| password-verified | 531 |
 | mfa-bootstrap | 4 |
-| mfa-verified | 241 |
-| step-up-verified | 17 |
+| mfa-verified | 228 |
+| step-up-verified | 15 |
 | system-verified | 33 |
 | operator-approved | 81 |
 | dual-approved-break-glass | 7 |
