@@ -4,7 +4,6 @@ import prisma from "../../../config/database";
 import {
   CanonicalAssurance,
   CanonicalDbContext,
-  installCanonicalDbContext,
   withCanonicalDbContext,
 } from "../../../lib/canonicalDbContext";
 import { getAdminStepUpWindowMinutes } from "../../../services/auth/authService";
@@ -139,7 +138,7 @@ const revalidatePlatformActor = async (
   if (rows.length !== 1 || rows[0].userId !== context.userId || rows[0].role !== context.role) {
     throw new C03AccessError("Platform actor is no longer authorized");
   }
-  return installCanonicalDbContext(tx, context);
+  return context;
 };
 
 const requireRevalidatedActor = (
@@ -181,10 +180,10 @@ const revalidateActorAndScope = async (
   `;
   const actor = requireRevalidatedActor(rows, context);
 
-  return installCanonicalDbContext(tx, {
+  return {
     ...context,
     organizationId: actor.organizationId,
-  });
+  };
 };
 
 const revalidateResourceActorAndScope = async (
@@ -260,11 +259,11 @@ const revalidateResourceActorAndScope = async (
       break;
   }
   const actor = requireRevalidatedActor(rows, context);
-  return installCanonicalDbContext(tx, {
+  return {
     ...context,
     organizationId: actor.organizationId,
     licenseeId: actor.licenseeId,
-  });
+  };
 };
 
 export const withC03ActorTransaction = async <T>(

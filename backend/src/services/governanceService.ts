@@ -2,12 +2,21 @@ import fs from "fs";
 import path from "path";
 import JSZip from "jszip";
 
-import { IncidentStatus, UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
 import { resolveUploadPath } from "../middleware/incidentUpload";
-import { createAuditLog } from "./auditService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
+import {
+  getOrCreateRetentionPolicyInTransaction,
+  generateComplianceReportInTransaction,
+  listTenantFeatureFlagsInTransaction,
+  loadIncidentEvidenceAuditSnapshotInTransaction,
+  RetentionLifecycleResult,
+  runRetentionLifecycleInTransaction,
+  updateRetentionPolicyInTransaction,
+  upsertTenantFeatureFlagInTransaction,
+} from "../rls-waves/session-c/c03/c03GovernanceRepository";
 
 type VerifyUxPolicy = {
   showTimelineCard: boolean;
@@ -244,23 +253,15 @@ export const resolveDuplicateRiskProfile = async (licenseeId?: string | null): P
   };
 };
 
-export const listTenantFeatureFlags = async (licenseeId: string) => {
-  try {
-    return await prisma.tenantFeatureFlag.findMany({
-      where: { licenseeId },
-      orderBy: [{ key: "asc" }],
-    });
-  } catch (error) {
-    if (isPrismaMissingTableError(error, ["tenantfeatureflag"])) {
-      warnStorageUnavailableOnce(
-        "tenant-feature-flag-list",
-        "[governance] TenantFeatureFlag table is unavailable. Returning empty flag list."
-      );
-      return [];
-    }
-    throw error;
-  }
+type GovernanceTransaction = Pick<Prisma.TransactionClient, "$queryRaw" | "tenantFeatureFlag">;
+
+const requireGovernanceTransaction = (db?: GovernanceTransaction): GovernanceTransaction => {
+  if (!db) throw new Error("C03 canonical governance transaction is required");
+  return db;
 };
+
+export const listTenantFeatureFlags = async (licenseeId: string, db?: GovernanceTransaction) =>
+  listTenantFeatureFlagsInTransaction(requireGovernanceTransaction(db), licenseeId);
 
 export const upsertTenantFeatureFlag = async (params: {
   licenseeId: string;
@@ -268,85 +269,15 @@ export const upsertTenantFeatureFlag = async (params: {
   enabled: boolean;
   config?: any;
   updatedByUserId?: string | null;
-}) => {
-  try {
-    return await prisma.tenantFeatureFlag.upsert({
-      where: {
-        licenseeId_key: {
-          licenseeId: params.licenseeId,
-          key: params.key,
-        },
-      },
-      update: {
-        enabled: params.enabled,
-        config: params.config ?? null,
-        updatedByUserId: params.updatedByUserId || null,
-      },
-      create: {
-        licenseeId: params.licenseeId,
-        key: params.key,
-        enabled: params.enabled,
-        config: params.config ?? null,
-        updatedByUserId: params.updatedByUserId || null,
-      },
-    });
-  } catch (error) {
-    if (isPrismaMissingTableError(error, ["tenantfeatureflag"])) {
-      warnStorageUnavailableOnce(
-        "tenant-feature-flag-upsert",
-        "[governance] TenantFeatureFlag table is unavailable. Returning no-op feature flag result."
-      );
-      const now = new Date();
-      return {
-        id: `ephemeral-${params.licenseeId}-${params.key}`,
-        licenseeId: params.licenseeId,
-        key: params.key,
-        enabled: params.enabled,
-        config: params.config ?? null,
-        updatedByUserId: params.updatedByUserId || null,
-        createdAt: now,
-        updatedAt: now,
-      } as any;
-    }
-    throw error;
-  }
-};
+}, db?: GovernanceTransaction) =>
+  upsertTenantFeatureFlagInTransaction<any>(requireGovernanceTransaction(db), {
+    key: params.key,
+    enabled: params.enabled,
+    config: params.config,
+  });
 
-export const getOrCreateRetentionPolicy = async (licenseeId: string) => {
-  try {
-    return await prisma.evidenceRetentionPolicy.upsert({
-      where: { licenseeId },
-      update: {},
-      create: {
-        licenseeId,
-        retentionDays: Number(process.env.RETENTION_DAYS || "180"),
-        purgeEnabled: false,
-        exportBeforePurge: true,
-        legalHoldTags: ["legal_hold", "compliance_hold"],
-      },
-    });
-  } catch (error) {
-    if (isPrismaMissingTableError(error, ["evidenceretentionpolicy"])) {
-      warnStorageUnavailableOnce(
-        "retention-policy-upsert",
-        "[governance] EvidenceRetentionPolicy table is unavailable. Using default retention policy in-memory."
-      );
-      const now = new Date();
-      return {
-        id: `ephemeral-retention-${licenseeId}`,
-        licenseeId,
-        retentionDays: Number(process.env.RETENTION_DAYS || "180"),
-        purgeEnabled: false,
-        exportBeforePurge: true,
-        legalHoldTags: ["legal_hold", "compliance_hold"],
-        createdAt: now,
-        updatedAt: now,
-        updatedByUserId: null,
-      } as any;
-    }
-    throw error;
-  }
-};
+export const getOrCreateRetentionPolicy = async (_licenseeId: string, db?: GovernanceTransaction) =>
+  getOrCreateRetentionPolicyInTransaction<any>(requireGovernanceTransaction(db));
 
 export const updateRetentionPolicy = async (params: {
   licenseeId: string;
@@ -355,181 +286,36 @@ export const updateRetentionPolicy = async (params: {
   exportBeforePurge?: boolean;
   legalHoldTags?: string[];
   updatedByUserId?: string | null;
-}) => {
-  try {
-    return await prisma.evidenceRetentionPolicy.upsert({
-      where: { licenseeId: params.licenseeId },
-      update: {
-        retentionDays: params.retentionDays,
-        purgeEnabled: params.purgeEnabled,
-        exportBeforePurge: params.exportBeforePurge,
-        legalHoldTags: params.legalHoldTags,
-        updatedByUserId: params.updatedByUserId || null,
-      },
-      create: {
-        licenseeId: params.licenseeId,
-        retentionDays: params.retentionDays ?? Number(process.env.RETENTION_DAYS || "180"),
-        purgeEnabled: Boolean(params.purgeEnabled),
-        exportBeforePurge: params.exportBeforePurge ?? true,
-        legalHoldTags: params.legalHoldTags || ["legal_hold", "compliance_hold"],
-        updatedByUserId: params.updatedByUserId || null,
-      },
-    });
-  } catch (error) {
-    if (isPrismaMissingTableError(error, ["evidenceretentionpolicy"])) {
-      warnStorageUnavailableOnce(
-        "retention-policy-update",
-        "[governance] EvidenceRetentionPolicy table is unavailable. Returning no-op retention policy update."
-      );
-      const now = new Date();
-      return {
-        id: `ephemeral-retention-${params.licenseeId}`,
-        licenseeId: params.licenseeId,
-        retentionDays: params.retentionDays ?? Number(process.env.RETENTION_DAYS || "180"),
-        purgeEnabled: Boolean(params.purgeEnabled),
-        exportBeforePurge: params.exportBeforePurge ?? true,
-        legalHoldTags: params.legalHoldTags || ["legal_hold", "compliance_hold"],
-        updatedByUserId: params.updatedByUserId || null,
-        createdAt: now,
-        updatedAt: now,
-      } as any;
-    }
-    throw error;
-  }
-};
-
-const filterRetentionCandidates = (rows: Array<any>, legalHoldTags: string[]) => {
-  const holdSet = new Set(legalHoldTags.map((t) => String(t || "").trim().toLowerCase()).filter(Boolean));
-  return rows.filter((row) => {
-    const tags = Array.isArray(row?.incident?.tags) ? row.incident.tags : [];
-    const hasHold = tags.some((tag: string) => holdSet.has(String(tag || "").toLowerCase()));
-    return !hasHold;
+}, db?: GovernanceTransaction) =>
+  updateRetentionPolicyInTransaction<any>(requireGovernanceTransaction(db), {
+    retentionDays: params.retentionDays,
+    purgeEnabled: params.purgeEnabled,
+    exportBeforePurge: params.exportBeforePurge,
+    legalHoldTags: params.legalHoldTags,
   });
-};
 
 export const runRetentionLifecycle = async (params: {
   licenseeId: string;
   startedByUserId?: string | null;
   mode: "PREVIEW" | "APPLY";
-}) => {
-  const policy = await getOrCreateRetentionPolicy(params.licenseeId);
-  const cutoffAt = new Date(Date.now() - policy.retentionDays * 24 * 60 * 60 * 1000);
-
-  const evidenceRows = await prisma.incidentEvidence.findMany({
-    where: {
-      incident: { licenseeId: params.licenseeId },
-      createdAt: { lt: cutoffAt },
-    },
-    include: {
-      incident: {
-        select: { id: true, tags: true },
-      },
-    },
+  approvalId?: string | null;
+}, db?: GovernanceTransaction): Promise<RetentionLifecycleResult> =>
+  runRetentionLifecycleInTransaction(requireGovernanceTransaction(db), {
+    mode: params.mode,
+    approvalId: params.approvalId,
   });
 
-  const eligible = filterRetentionCandidates(evidenceRows, policy.legalHoldTags || []);
-
-  let purged = 0;
-  let exported = 0;
-
-  if (params.mode === "APPLY" && policy.purgeEnabled && eligible.length > 0) {
-    if (policy.exportBeforePurge) {
-      exported = eligible.length;
-    }
-
-    const ids = eligible.map((row) => row.id);
-
+export const deleteCommittedRetentionArtifacts = (storageKeys: readonly string[] = []) => {
+  for (const key of storageKeys) {
+    const normalized = String(key || "").trim();
+    if (!normalized) continue;
+    const full = resolveUploadPath(normalized);
     try {
-      await prisma.incidentEvidenceFingerprint.deleteMany({
-        where: {
-          incidentEvidenceId: { in: ids },
-        },
-      });
-    } catch (error) {
-      if (!isPrismaMissingTableError(error, ["incidentevidencefingerprint"])) {
-        throw error;
-      }
-    }
-
-    await prisma.incidentEvidence.deleteMany({
-      where: {
-        id: { in: ids },
-      },
-    });
-
-    purged = ids.length;
-
-    for (const row of eligible) {
-      const key = String(row.storageKey || "").trim();
-      if (!key) continue;
-      const full = resolveUploadPath(key);
-      try {
-        if (fs.existsSync(full)) fs.unlinkSync(full);
-      } catch {
-        // Best effort file cleanup.
-      }
+      if (fs.existsSync(full)) fs.unlinkSync(full);
+    } catch {
+      // The database result is authoritative; storage cleanup is retried operationally.
     }
   }
-
-  let job: any;
-  try {
-    job = await prisma.evidenceRetentionJob.create({
-      data: {
-        licenseeId: params.licenseeId,
-        status:
-          params.mode === "APPLY" ? (policy.purgeEnabled ? "COMPLETED" : "FAILED") : "PREVIEW",
-        mode: params.mode,
-        cutoffAt,
-        recordsEvaluated: evidenceRows.length,
-        recordsPurged: purged,
-        recordsExported: exported,
-        startedByUserId: params.startedByUserId || null,
-        finishedAt: new Date(),
-        summary: {
-          policy,
-          eligibleCount: eligible.length,
-          skippedDueToLegalHold: evidenceRows.length - eligible.length,
-          purgeEnabled: policy.purgeEnabled,
-        },
-      },
-    });
-  } catch (error) {
-    if (!isPrismaMissingTableError(error, ["evidenceretentionjob"])) {
-      throw error;
-    }
-    warnStorageUnavailableOnce(
-      "retention-job-create",
-      "[governance] EvidenceRetentionJob table is unavailable. Returning in-memory retention job result."
-    );
-    job = {
-      id: `ephemeral-retention-job-${params.licenseeId}-${Date.now()}`,
-      licenseeId: params.licenseeId,
-      status: params.mode === "APPLY" ? (policy.purgeEnabled ? "COMPLETED" : "FAILED") : "PREVIEW",
-      mode: params.mode,
-      cutoffAt,
-      recordsEvaluated: evidenceRows.length,
-      recordsPurged: purged,
-      recordsExported: exported,
-      startedByUserId: params.startedByUserId || null,
-      finishedAt: new Date(),
-      summary: {
-        policy,
-        eligibleCount: eligible.length,
-        skippedDueToLegalHold: evidenceRows.length - eligible.length,
-        purgeEnabled: policy.purgeEnabled,
-      },
-    };
-  }
-
-  return {
-    job,
-    policy,
-    cutoffAt,
-    evaluated: evidenceRows.length,
-    eligible: eligible.length,
-    purged,
-    exported,
-  };
 };
 
 const escapeCsv = (value: any) => {
@@ -537,23 +323,23 @@ const escapeCsv = (value: any) => {
   return /[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
 };
 
-export const buildIncidentEvidenceAuditBundle = async (incidentId: string) => {
-  const incident = await prisma.incident.findUnique({
-    where: { id: incidentId },
-    include: {
-      events: { orderBy: { createdAt: "asc" } },
-      evidence: { orderBy: { createdAt: "asc" } },
-      evidenceFingerprints: { orderBy: { createdAt: "asc" } },
-      handoff: true,
-      supportTicket: {
-        include: {
-          messages: { orderBy: { createdAt: "asc" } },
-        },
-      },
-    },
-  });
+export type IncidentEvidenceAuditSnapshot = {
+  id: string;
+  events: Array<Record<string, any>>;
+  evidence: Array<Record<string, any> & { id: string; createdAt: string | Date }>;
+  evidenceFingerprints: Array<Record<string, any> & { incidentEvidenceId: string }>;
+  [key: string]: any;
+};
 
-  if (!incident) throw new Error("Incident not found");
+export const loadIncidentEvidenceAuditSnapshot = async (
+  incidentId: string,
+  db?: GovernanceTransaction
+) => loadIncidentEvidenceAuditSnapshotInTransaction<IncidentEvidenceAuditSnapshot>(
+  requireGovernanceTransaction(db),
+  incidentId
+);
+
+export const buildIncidentEvidenceAuditBundle = async (incident: IncidentEvidenceAuditSnapshot) => {
 
   const zip = new JSZip();
   const generatedAt = new Date().toISOString();
@@ -579,7 +365,7 @@ export const buildIncidentEvidenceAuditBundle = async (incidentId: string) => {
         escapeCsv(ev.storageKey || ""),
         escapeCsv(ev.fileType || ""),
         escapeCsv(ev.uploadedBy),
-        escapeCsv(ev.createdAt.toISOString()),
+        escapeCsv(new Date(ev.createdAt).toISOString()),
         escapeCsv(fp?.riskScore ?? ""),
         escapeCsv(fp?.sha256 || ""),
       ].join(",");
@@ -625,147 +411,8 @@ export const generateComplianceReport = async (params: {
   licenseeId?: string | null;
   from?: Date | null;
   to?: Date | null;
-}) => {
-  const scopedLicenseeId =
-    params.actor.role === UserRole.SUPER_ADMIN || params.actor.role === UserRole.PLATFORM_SUPER_ADMIN
-      ? params.licenseeId || null
-      : params.actor.licenseeId || null;
-
-  const range: any = {};
-  if (params.from && Number.isFinite(params.from.getTime())) range.gte = params.from;
-  if (params.to && Number.isFinite(params.to.getTime())) range.lte = params.to;
-
-  const incidentWhere: any = {};
-  const auditWhere: any = {};
-  if (Object.keys(range).length > 0) {
-    incidentWhere.createdAt = range;
-    auditWhere.createdAt = range;
-  }
-  if (scopedLicenseeId) {
-    incidentWhere.licenseeId = scopedLicenseeId;
-    auditWhere.licenseeId = scopedLicenseeId;
-  }
-
-  const [
-    totalIncidents,
-    resolvedIncidents,
-    breachedIncidents,
-    totalFraudReports,
-    totalAuditEvents,
-    failedLoginAttempts,
-    retentionPolicy,
-    handoffSummary,
-  ] = await Promise.all([
-    prisma.incident.count({ where: incidentWhere }),
-    prisma.incident.count({ where: { ...incidentWhere, status: { in: [IncidentStatus.RESOLVED, IncidentStatus.CLOSED] } } }),
-    prisma.incident.count({ where: { ...incidentWhere, slaDueAt: { lt: new Date() }, status: { notIn: [IncidentStatus.RESOLVED, IncidentStatus.CLOSED] } } }),
-    prisma.incident.count({ where: { ...incidentWhere, reportedBy: "CUSTOMER" } }),
-    prisma.auditLog.count({ where: auditWhere }),
-    prisma.auditLog.count({ where: { ...auditWhere, action: { contains: "LOGIN_FAILED" } } }),
-    scopedLicenseeId ? getOrCreateRetentionPolicy(scopedLicenseeId) : null,
-    prisma.incidentHandoff
-      .groupBy({
-        by: ["currentStage"],
-        _count: { _all: true },
-        where: scopedLicenseeId ? { incident: { licenseeId: scopedLicenseeId } } : undefined,
-      })
-      .catch((error) => {
-        if (isPrismaMissingTableError(error, ["incidenthandoff"])) {
-          warnStorageUnavailableOnce(
-            "incident-handoff-summary",
-            "[governance] IncidentHandoff table is unavailable. Compliance handoff summary will be empty."
-          );
-          return [];
-        }
-        throw error;
-      }),
-  ]);
-
-  const handoff = handoffSummary.reduce((acc, row) => {
-    acc[row.currentStage] = row._count._all;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const report = {
-    generatedAt: new Date().toISOString(),
-    appName: process.env.APP_NAME || "MSCQR",
-    scope: {
-      licenseeId: scopedLicenseeId,
-      from: params.from?.toISOString() || null,
-      to: params.to?.toISOString() || null,
-    },
-    compliance: {
-      ukGdpr: {
-        statement:
-          "Personal data is processed in accordance with UK GDPR and the Data Protection Act 2018.",
-        contact: process.env.DPO_EMAIL || process.env.SUPER_ADMIN_EMAIL || "support@mscqr.local",
-      },
-      securityAccess: {
-        roleBasedAccess: ["Super Admin", "Licensee", "Manufacturer"],
-        httpsEncrypted: true,
-        passwordHandling: "Secure password hashing and OTP controls are enforced.",
-        auditLogging: true,
-      },
-      incidentResponse: {
-        workflow: ["report intake", "review", "containment", "documentation", "resolution"],
-      },
-      qrUsagePolicy: {
-        uniqueTraceable: true,
-        singleUseWhereApplicable: true,
-        nonDuplicationRule: true,
-      },
-      auditRetentionDays: Number(process.env.RETENTION_DAYS || retentionPolicy?.retentionDays || 180),
-      hosting: {
-        provider: process.env.HOSTING_PROVIDER || "Cloud provider not set",
-        disclaimer: "Service is provided on a best-effort basis with reasonable security controls.",
-      },
-    },
-    metrics: {
-      incidents: {
-        total: totalIncidents,
-        resolved: resolvedIncidents,
-        slaBreachedOpen: breachedIncidents,
-        handoff,
-      },
-      fraudReports: totalFraudReports,
-      auditEvents: totalAuditEvents,
-      failedLogins: failedLoginAttempts,
-      retention: retentionPolicy
-        ? {
-            retentionDays: retentionPolicy.retentionDays,
-            purgeEnabled: retentionPolicy.purgeEnabled,
-            exportBeforePurge: retentionPolicy.exportBeforePurge,
-            legalHoldTags: retentionPolicy.legalHoldTags,
-          }
-        : null,
-    },
-  };
-
-  const controlMap = buildComplianceControls({
-    reportGeneratedAt: report.generatedAt,
-    resolvedIncidents,
-    totalIncidents,
-    breachedIncidents,
-    failedLoginAttempts,
-    totalAuditEvents,
-    retentionDays: Number(process.env.RETENTION_DAYS || retentionPolicy?.retentionDays || 180),
+}, db?: GovernanceTransaction) =>
+  generateComplianceReportInTransaction<any>(requireGovernanceTransaction(db), {
+    from: params.from,
+    to: params.to,
   });
-
-  (report as any).controls = controlMap.controls;
-  (report as any).controlSummary = controlMap.summary;
-
-  await createAuditLog({
-    userId: params.actor.userId,
-    licenseeId: scopedLicenseeId || undefined,
-    action: "COMPLIANCE_REPORT_GENERATED",
-    entityType: "ComplianceReport",
-    entityId: scopedLicenseeId || "GLOBAL",
-    details: {
-      from: report.scope.from,
-      to: report.scope.to,
-      incidents: totalIncidents,
-    },
-  });
-
-  return report;
-};

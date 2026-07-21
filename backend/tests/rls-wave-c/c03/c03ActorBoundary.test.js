@@ -20,8 +20,12 @@ const ids = {
 let queryResult = [];
 let queryError = null;
 let lastQuery = "";
+let executeCount = 0;
 const tx = {
-  $executeRaw: async () => 1,
+  $executeRaw: async () => {
+    executeCount += 1;
+    return 1;
+  },
   $queryRaw: async (strings) => {
     lastQuery = Array.from(strings).join("?");
     if (queryError) throw queryError;
@@ -72,9 +76,11 @@ const selectorBoundary = (overrides = {}) => ({
 
 const run = async () => {
   queryResult = [actorRow()];
+  executeCount = 0;
   const selector = await withC03ActorTransaction(selectorBoundary(), async (_db, context) => context);
   assert.equal(selector.licenseeId, ids.licensee);
   assert.match(lastQuery, /c03_revalidate_actor_scope/);
+  assert.equal(executeCount, 1, "canonical context must be installed exactly once");
 
   await assert.rejects(
     () => withC03ActorTransaction(selectorBoundary({ user: platform({ role: "MANUFACTURER" }) }), async () => null),
@@ -110,6 +116,7 @@ const run = async () => {
   );
 
   queryResult = [actorRow()];
+  executeCount = 0;
   const resource = await withC03ResourceTransaction({
     user: platform(),
     requestId: ids.request,
@@ -121,6 +128,7 @@ const run = async () => {
   }, async (_db, context) => context);
   assert.equal(resource.licenseeId, ids.licensee);
   assert.match(lastQuery, /c03_revalidate_incident_actor_scope/);
+  assert.equal(executeCount, 1, "resource context must be installed exactly once");
 
   queryError = new Error("function app_rls.c03_revalidate_incident_actor_scope does not exist");
   await assert.rejects(
