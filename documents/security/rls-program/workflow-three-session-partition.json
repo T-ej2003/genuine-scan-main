@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "foundationCommit": "061b3134ba89db84e0564b893e920a2601c14452",
+  "schemaVersion": 2,
+  "coordinationBaseCommit": "33cbe7ff019efefad242f654f0aa96c44c5b963c",
   "authoritativeSource": "documents/security/rls-program/workflows.json",
   "sessions": [
     {
@@ -8,9 +8,8 @@
       "role": "sole-integration-owner",
       "databaseNamespace": "mscqr_rls_wave_a_integration",
       "ownedSharedFiles": [
-        "backend/src/controllers/incidentController.ts",
-        "backend/src/services/compliancePackService.ts",
-        "backend/src/services/governanceService.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/routes/index.ts",
         "backend/src/services/replacementChainService.ts"
       ],
       "sessionBExclusiveProductionFiles": [
@@ -91,8 +90,49 @@
         "backend/src/services/verificationDecisionReadService.ts",
         "backend/src/services/verificationDecisionService.ts"
       ],
+      "sessionCExclusiveProductionFiles": [
+        "backend/prisma/seed.ts",
+        "backend/scripts/break-glass-mfa-reset.ts",
+        "backend/scripts/mscqr-print-test.js",
+        "backend/scripts/repair-admin-accounts.js",
+        "backend/scripts/resend-password-setup-link.js",
+        "backend/scripts/seed-enterprise-e2e.ts",
+        "backend/scripts/seed-launch-smoke-users.js",
+        "backend/scripts/seed-staging-rls-validation-data.js",
+        "backend/src/controllers/auditController.ts",
+        "backend/src/controllers/governanceController.ts",
+        "backend/src/controllers/incidentController.ts",
+        "backend/src/controllers/irAlertController.ts",
+        "backend/src/controllers/irIncidentController.ts",
+        "backend/src/controllers/irPolicyController.ts",
+        "backend/src/controllers/licenseeController.ts",
+        "backend/src/controllers/tracePolicyController.ts",
+        "backend/src/controllers/userController.ts",
+        "backend/src/routes/auditRoutes.ts",
+        "backend/src/services/attentionQueueService.ts",
+        "backend/src/services/auditCsvExportService.ts",
+        "backend/src/services/auditExportRedactionService.ts",
+        "backend/src/services/auditLogQueryService.ts",
+        "backend/src/services/auditService.ts",
+        "backend/src/services/auth/superAdminBootstrapService.ts",
+        "backend/src/services/compliancePackService.ts",
+        "backend/src/services/degradationEventService.ts",
+        "backend/src/services/forensicChainService.ts",
+        "backend/src/services/fraudReportQueryService.ts",
+        "backend/src/services/governanceService.ts",
+        "backend/src/services/immutableAuditExportService.ts",
+        "backend/src/services/incidentService.ts",
+        "backend/src/services/ir/incidentActionsService.ts",
+        "backend/src/services/ir/policyRuleEngineService.ts",
+        "backend/src/services/manufacturerScopeService.ts",
+        "backend/src/services/policyEngineService.ts",
+        "backend/src/services/sensitiveActionApprovalService.ts",
+        "backend/src/services/soarService.ts",
+        "backend/src/services/tamperEvidenceService.ts",
+        "backend/src/services/traceEventService.ts"
+      ],
       "exclusiveGlobalPathRules": [
-        "documents/security/rls-program/*.json except documents/security/rls-program/waves/session-b-auth-public-workers-result.json",
+        "documents/security/rls-program/*.json except the exact Session B and Session C wave-local result manifests",
         "documents/security/rls-program/generated/**",
         "scripts/rls/generate-*.mjs",
         "scripts/rls/certify-*.mjs",
@@ -105,8 +145,9 @@
         "scripts/aws/**staging**",
         "documents/security/rls-program/STAGING_FULL_RLS_*"
       ],
-      "workflowCount": 284,
-      "productionFileCount": 91,
+      "workflowCount": 177,
+      "workflowFamilyCount": 5,
+      "productionFileCount": 52,
       "existingTestFileCount": 0
     },
     {
@@ -123,12 +164,17 @@
       ],
       "integrationOwnerOnlyFiles": [
         "backend/src/controllers/incidentController.ts",
+        "backend/src/controllers/licenseeController.ts",
+        "backend/src/controllers/tracePolicyController.ts",
+        "backend/src/controllers/userController.ts",
+        "backend/src/routes/index.ts",
         "backend/src/services/compliancePackService.ts",
         "backend/src/services/governanceService.ts",
+        "backend/src/services/manufacturerScopeService.ts",
         "backend/src/services/replacementChainService.ts"
       ],
       "forbiddenGlobalPathRules": [
-        "documents/security/rls-program/*.json except documents/security/rls-program/waves/session-b-auth-public-workers-result.json",
+        "documents/security/rls-program/*.json except the exact Session B and Session C wave-local result manifests",
         "documents/security/rls-program/generated/**",
         "scripts/rls/generate-*.mjs",
         "scripts/rls/certify-*.mjs",
@@ -142,9 +188,56 @@
         "documents/security/rls-program/STAGING_FULL_RLS_*"
       ],
       "waveLocalResultManifest": "documents/security/rls-program/waves/session-b-auth-public-workers-result.json",
+      "originalBranchPoint": "061b3134ba89db84e0564b893e920a2601c14452",
       "workflowCount": 144,
+      "workflowFamilyCount": 3,
       "productionFileCount": 76,
       "existingTestFileCount": 47
+    },
+    {
+      "id": "session-c",
+      "role": "isolated-admin-governance-operator-wave",
+      "branch": "rls-wave-admin-governance-operator",
+      "worktree": "/Users/abhiramteja/Downloads/genuine-scan-rls-admin",
+      "databaseNamespace": "mscqr_rls_wave_c_admin_governance_operator",
+      "allowedNewPathRules": [
+        "backend/src/rls-waves/session-c/**",
+        "backend/tests/rls-wave-c/**",
+        "documents/security/rls-program/waves/session-c-admin-governance-operator-result.json",
+        "documents/security/rls-program/waves/session-c/**"
+      ],
+      "integrationOwnerOnlyFiles": [
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/routes/index.ts",
+        "backend/src/services/replacementChainService.ts"
+      ],
+      "prohibitedSharedFiles": [
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/routes/index.ts",
+        "backend/src/services/replacementChainService.ts"
+      ],
+      "forbiddenGlobalPathRules": [
+        "documents/security/rls-program/*.json except the exact Session B and Session C wave-local result manifests",
+        "documents/security/rls-program/generated/**",
+        "scripts/rls/generate-*.mjs",
+        "scripts/rls/certify-*.mjs",
+        "scripts/rls/lib/**",
+        "scripts/rls/sql/**",
+        "scripts/tests/full-database-rls-*.test.mjs",
+        "backend/prisma/schema.prisma",
+        "backend/prisma/migrations/**",
+        "infra/terraform/staging-api/**",
+        "scripts/aws/**staging**",
+        "documents/security/rls-program/STAGING_FULL_RLS_*"
+      ],
+      "waveLocalResultManifest": "documents/security/rls-program/waves/session-c-admin-governance-operator-result.json",
+      "requiredBaseAncestor": "33cbe7ff019efefad242f654f0aa96c44c5b963c",
+      "workflowCount": 107,
+      "workflowFamilyCount": 4,
+      "productionFileCount": 39,
+      "existingTestFileCount": 21
     }
   ],
   "waves": [
@@ -152,11 +245,6 @@
       "id": "a-01-tenant-manufacturer-platform-reads",
       "sessionId": "session-a",
       "contract": "Database-revalidated tenant, manufacturer and bounded platform reads, including dashboards and analytics; filters only narrow trusted scope."
-    },
-    {
-      "id": "a-02-tenant-platform-administration",
-      "sessionId": "session-a",
-      "contract": "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics."
     },
     {
       "id": "a-03-batch-qr-lifecycle",
@@ -169,24 +257,14 @@
       "contract": "Printing, printer trust, reissue, recovery, sample verification and release lifecycles without weakening existing behavior."
     },
     {
-      "id": "a-05-audit-fraud-trace-alerts",
-      "sessionId": "session-a",
-      "contract": "Audit, fraud, trace, alert and export paths with exact projections, attribution, immutable history and bounded scope."
-    },
-    {
-      "id": "a-06-governance-incidents-compliance",
-      "sessionId": "session-a",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries."
-    },
-    {
-      "id": "a-07-operator-migration-startup-cli",
-      "sessionId": "session-a",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted."
-    },
-    {
       "id": "a-08-runtime-idempotency-telemetry",
       "sessionId": "session-a",
       "contract": "Shared transaction idempotency and route telemetry with exact attribution, replay and tenant semantics."
+    },
+    {
+      "id": "a-09-system-integration-owner",
+      "sessionId": "session-a",
+      "contract": "The programme integration runner remains under the sole integration owner and cannot be delegated to an implementation worktree."
     },
     {
       "id": "b-01-auth-preauth-session-account-security",
@@ -202,343 +280,363 @@
       "id": "b-03-workers-scheduled-outbox-delivery",
       "sessionId": "session-b",
       "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution."
+    },
+    {
+      "id": "c-01-administration-general-mutations",
+      "sessionId": "session-c",
+      "contract": "Tenant and platform administration mutations with exact actor, assurance, lifecycle, concurrency, audit and column semantics."
+    },
+    {
+      "id": "c-02-audit-fraud-trace-alerts",
+      "sessionId": "session-c",
+      "contract": "Audit, fraud, trace, alert and export paths with exact projections, attribution, immutable history and bounded scope."
+    },
+    {
+      "id": "c-03-governance-policies-incidents-compliance",
+      "sessionId": "session-c",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries."
+    },
+    {
+      "id": "c-04-operator-recovery-startup-migration-cli",
+      "sessionId": "session-c",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted."
     }
   ],
   "assignments": [
     {
       "workflowId": "workflow-cli-backend-prisma-seed-ts-ensure-licensee",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureLicensee",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/prisma/seed.ts"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-prisma-seed-ts-main",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:main",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/prisma/seed.ts"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-break-glass-mfa-reset-ts-run",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:run",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/break-glass-mfa-reset.ts"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-mscqr-print-test-js-main",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:main",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/mscqr-print-test.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-administration-super-admin",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureAdministrationSuperAdmin",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/repair-admin-accounts.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-victoria-platform-admin-invite",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureVictoriaPlatformAdminInvite",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/repair-admin-accounts.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-repair-admin-accounts-js-main",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:main",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/repair-admin-accounts.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-resend-password-setup-link-js-find-actor",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:findActor",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/resend-password-setup-link.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-resend-password-setup-link-js-find-target-user",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:findTargetUser",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/resend-password-setup-link.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-reset-codes-for-batch",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:resetCodesForBatch",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-enterprise-e2e.ts"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:seed",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-enterprise-e2e.ts"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed-manufacturer-mfa-backup-codes",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:seedManufacturerMfaBackupCodes",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-enterprise-e2e.ts"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed-printer",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:seedPrinter",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-enterprise-e2e.ts"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-upsert-fresh-admin-mfa",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:upsertFreshAdminMfa",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-enterprise-e2e.ts"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-upsert-user",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:upsertUser",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-enterprise-e2e.ts"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-launch-smoke-users-js-ensure-licensee",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureLicensee",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-launch-smoke-users.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-launch-smoke-users-js-refresh-admin-mfa-marker",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:refreshAdminMfaMarker",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-launch-smoke-users.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-launch-smoke-users-js-seed-launch-smoke-users",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:seedLaunchSmokeUsers",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-launch-smoke-users.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-launch-smoke-users-js-upsert-launch-user",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:upsertLaunchUser",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-launch-smoke-users.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-batch",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureBatch",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-staging-rls-validation-data.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-licensee",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureLicensee",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-staging-rls-validation-data.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-manufacturer-link",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureManufacturerLink",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-staging-rls-validation-data.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-organization",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureOrganization",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-staging-rls-validation-data.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-codes",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureQrCodes",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-staging-rls-validation-data.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-range",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureQrRange",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-staging-rls-validation-data.js"
       ]
     },
     {
       "workflowId": "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-user",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:ensureUser",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/scripts/seed-staging-rls-validation-data.js"
       ]
@@ -546,12 +644,12 @@
     {
       "workflowId": "workflow-cli-scripts-run-system-integration-mjs-main",
       "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "waveId": "a-09-system-integration-owner",
+      "assignmentRuleId": "a09-system-integration-owner",
       "corroboratingRuleIds": [],
       "entryPoint": "cli:main",
       "executionSurface": "cli",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "The programme integration runner remains under the sole integration owner and cannot be delegated to an implementation worktree.",
       "canonicalSourceFiles": [
         "scripts/run-system-integration.mjs"
       ]
@@ -584,9 +682,9 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:exportLogsCsv",
       "executionSurface": "http",
@@ -601,9 +699,9 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:getFraudReports",
       "executionSurface": "http",
@@ -617,9 +715,9 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:getLogs",
       "executionSurface": "http",
@@ -633,9 +731,9 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:respondToFraudReport",
       "executionSurface": "http",
@@ -711,52 +809,52 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-governance-controller-ts-download-compliance-pack-job-controller",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:downloadCompliancePackJobController",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/governanceController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-governance-controller-ts-export-incident-evidence-bundle-controller",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:exportIncidentEvidenceBundleController",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/governanceController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-incident-controller-ts-add-incident-evidence",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:addIncidentEvidence",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/incidentController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-incident-controller-ts-patch-incident",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:patchIncident",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/incidentController.ts"
       ]
@@ -776,208 +874,208 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:serveIncidentEvidenceFile",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/incidentController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:listIrAlerts",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irAlertController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:patchIrAlert",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irAlertController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-incident-controller-ts-add-ir-incident-event",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:addIrIncidentEvent",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irIncidentController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-incident-controller-ts-create-ir-incident",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:createIrIncident",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irIncidentController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-incident-controller-ts-get-ir-incident",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:getIrIncident",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irIncidentController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-incident-controller-ts-list-ir-incidents",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:listIrIncidents",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irIncidentController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-incident-controller-ts-patch-ir-incident",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:patchIrIncident",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irIncidentController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-incident-controller-ts-resolve-org-admin-email",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:resolveOrgAdminEmail",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irIncidentController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-incident-controller-ts-review-ir-incident-customer-trust",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:reviewIrIncidentCustomerTrust",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irIncidentController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-incident-controller-ts-send-ir-incident-communication",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:sendIrIncidentCommunication",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irIncidentController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-policy-controller-ts-create-ir-policy",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:createIrPolicy",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irPolicyController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-policy-controller-ts-list-ir-policies",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:listIrPolicies",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irPolicyController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-ir-policy-controller-ts-patch-ir-policy",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:patchIrPolicy",
       "executionSurface": "http",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/controllers/irPolicyController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-licensee-controller-ts-create-licensee",
-      "sessionId": "session-a",
-      "waveId": "a-02-tenant-platform-administration",
-      "assignmentRuleId": "a02-licensee-user-mutation-root",
+      "sessionId": "session-c",
+      "waveId": "c-01-administration-general-mutations",
+      "assignmentRuleId": "c01-licensee-user-mutation-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:createLicensee",
       "executionSurface": "http",
-      "contract": "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
+      "contract": "Tenant and platform administration mutations with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
       "canonicalSourceFiles": [
         "backend/src/controllers/licenseeController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-licensee-controller-ts-delete-licensee",
-      "sessionId": "session-a",
-      "waveId": "a-02-tenant-platform-administration",
-      "assignmentRuleId": "a02-licensee-user-mutation-root",
+      "sessionId": "session-c",
+      "waveId": "c-01-administration-general-mutations",
+      "assignmentRuleId": "c01-licensee-user-mutation-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:deleteLicensee",
       "executionSurface": "http",
-      "contract": "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
+      "contract": "Tenant and platform administration mutations with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
       "canonicalSourceFiles": [
         "backend/src/controllers/licenseeController.ts"
       ]
@@ -1023,13 +1121,13 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-licensee-controller-ts-update-licensee",
-      "sessionId": "session-a",
-      "waveId": "a-02-tenant-platform-administration",
-      "assignmentRuleId": "a02-licensee-user-mutation-root",
+      "sessionId": "session-c",
+      "waveId": "c-01-administration-general-mutations",
+      "assignmentRuleId": "c01-licensee-user-mutation-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:updateLicensee",
       "executionSurface": "http",
-      "contract": "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
+      "contract": "Tenant and platform administration mutations with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
       "canonicalSourceFiles": [
         "backend/src/controllers/licenseeController.ts"
       ]
@@ -1686,9 +1784,9 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-trace-policy-controller-ts-acknowledge-policy-alert-controller",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:acknowledgePolicyAlertController",
       "executionSurface": "http",
@@ -1699,9 +1797,9 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-trace-policy-controller-ts-export-batch-audit-package-controller",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:exportBatchAuditPackageController",
       "executionSurface": "http",
@@ -1712,9 +1810,9 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-trace-policy-controller-ts-get-policy-alerts-controller",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:getPolicyAlertsController",
       "executionSurface": "http",
@@ -1725,9 +1823,9 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-trace-policy-controller-ts-update-policy-config-controller",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:updatePolicyConfigController",
       "executionSurface": "http",
@@ -1751,26 +1849,26 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-user-controller-ts-create-user",
-      "sessionId": "session-a",
-      "waveId": "a-02-tenant-platform-administration",
-      "assignmentRuleId": "a02-licensee-user-mutation-root",
+      "sessionId": "session-c",
+      "waveId": "c-01-administration-general-mutations",
+      "assignmentRuleId": "c01-licensee-user-mutation-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:createUser",
       "executionSurface": "http",
-      "contract": "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
+      "contract": "Tenant and platform administration mutations with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
       "canonicalSourceFiles": [
         "backend/src/controllers/userController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-user-controller-ts-delete-user",
-      "sessionId": "session-a",
-      "waveId": "a-02-tenant-platform-administration",
-      "assignmentRuleId": "a02-licensee-user-mutation-root",
+      "sessionId": "session-c",
+      "waveId": "c-01-administration-general-mutations",
+      "assignmentRuleId": "c01-licensee-user-mutation-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:deleteUser",
       "executionSurface": "http",
-      "contract": "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
+      "contract": "Tenant and platform administration mutations with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
       "canonicalSourceFiles": [
         "backend/src/controllers/userController.ts"
       ]
@@ -1803,26 +1901,26 @@
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-user-controller-ts-restore-manufacturer",
-      "sessionId": "session-a",
-      "waveId": "a-02-tenant-platform-administration",
-      "assignmentRuleId": "a02-licensee-user-mutation-root",
+      "sessionId": "session-c",
+      "waveId": "c-01-administration-general-mutations",
+      "assignmentRuleId": "c01-licensee-user-mutation-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:restoreManufacturer",
       "executionSurface": "http",
-      "contract": "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
+      "contract": "Tenant and platform administration mutations with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
       "canonicalSourceFiles": [
         "backend/src/controllers/userController.ts"
       ]
     },
     {
       "workflowId": "workflow-http-backend-src-controllers-user-controller-ts-update-user",
-      "sessionId": "session-a",
-      "waveId": "a-02-tenant-platform-administration",
-      "assignmentRuleId": "a02-licensee-user-mutation-root",
+      "sessionId": "session-c",
+      "waveId": "c-01-administration-general-mutations",
+      "assignmentRuleId": "c01-licensee-user-mutation-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:updateUser",
       "executionSurface": "http",
-      "contract": "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
+      "contract": "Tenant and platform administration mutations with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
       "canonicalSourceFiles": [
         "backend/src/controllers/userController.ts"
       ]
@@ -2024,9 +2122,9 @@
     },
     {
       "workflowId": "workflow-http-backend-src-services-attention-queue-service-ts-get-attention-queue-snapshot-uncached",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "http:getAttentionQueueSnapshotUncached",
       "executionSurface": "http",
@@ -2209,9 +2307,9 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-audit-service-ts-create-audit-log",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:createAuditLog",
       "executionSurface": "internal",
@@ -2222,9 +2320,9 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-audit-service-ts-get-audit-logs",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:getAuditLogs",
       "executionSurface": "internal",
@@ -2235,9 +2333,9 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-audit-service-ts-resolve-org-id",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:resolveOrgId",
       "executionSurface": "internal",
@@ -3158,39 +3256,39 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:listCompliancePackJobs",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/compliancePackService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-compliance-pack-service-ts-rebuild-compliance-pack-artifact-for-job",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:rebuildCompliancePackArtifactForJob",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/compliancePackService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-compliance-pack-service-ts-run-compliance-pack-job",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:runCompliancePackJob",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/compliancePackService.ts"
       ]
@@ -3457,78 +3555,78 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-degradation-event-service-ts-record-degradation-event",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:recordDegradationEvent",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/degradationEventService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-forensic-chain-service-ts-append-forensic-chain-from-audit-log",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:appendForensicChainFromAuditLog",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/forensicChainService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-governance-service-ts-build-incident-evidence-audit-bundle",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:buildIncidentEvidenceAuditBundle",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/governanceService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-governance-service-ts-generate-compliance-report",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:generateComplianceReport",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/governanceService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-governance-service-ts-get-or-create-retention-policy",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:getOrCreateRetentionPolicy",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/governanceService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:listTenantFeatureFlags",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/governanceService.ts"
       ]
@@ -3561,39 +3659,39 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-governance-service-ts-run-retention-lifecycle",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:runRetentionLifecycle",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/governanceService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-governance-service-ts-update-retention-policy",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:updateRetentionPolicy",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/governanceService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-governance-service-ts-upsert-tenant-feature-flag",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:upsertTenantFeatureFlag",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/governanceService.ts"
       ]
@@ -3639,9 +3737,9 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-immutable-audit-export-service-ts-build-immutable-batch-audit-package",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:buildImmutableBatchAuditPackage",
       "executionSurface": "internal",
@@ -3704,143 +3802,143 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-incident-service-ts-compute-severity",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:computeSeverity",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/incidentService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-incident-service-ts-compute-spam-signal",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:computeSpamSignal",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/incidentService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-incident-service-ts-create-incident-from-report",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:createIncidentFromReport",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/incidentService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-incident-service-ts-get-incident-by-id-scoped",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:getIncidentByIdScoped",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/incidentService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-incident-service-ts-list-incidents-scoped",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:listIncidentsScoped",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/incidentService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-incident-service-ts-record-incident-event",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:recordIncidentEvent",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/incidentService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-ir-incident-actions-service-ts-apply-containment-action",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:applyContainmentAction",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/ir/incidentActionsService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-ir-policy-rule-engine-service-ts-create-rule-alert-if-fresh",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:createRuleAlertIfFresh",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/ir/policyRuleEngineService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-ir-policy-rule-engine-service-ts-evaluate-policy-rules-for-incident-volume",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:evaluatePolicyRulesForIncidentVolume",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/ir/policyRuleEngineService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-ir-policy-rule-engine-service-ts-evaluate-policy-rules-for-scan",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:evaluatePolicyRulesForScan",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/ir/policyRuleEngineService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-ir-policy-rule-engine-service-ts-resolve-active-rules-for-licensee",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:resolveActiveRulesForLicensee",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/ir/policyRuleEngineService.ts"
       ]
@@ -4003,13 +4101,13 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-manufacturer-scope-service-ts-upsert-manufacturer-licensee-link",
-      "sessionId": "session-a",
-      "waveId": "a-02-tenant-platform-administration",
-      "assignmentRuleId": "a02-manufacturer-link-mutation-root",
+      "sessionId": "session-c",
+      "waveId": "c-01-administration-general-mutations",
+      "assignmentRuleId": "c01-manufacturer-link-mutation-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:upsertManufacturerLicenseeLink",
       "executionSurface": "internal",
-      "contract": "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
+      "contract": "Tenant and platform administration mutations with exact actor, assurance, lifecycle, concurrency, audit and column semantics.",
       "canonicalSourceFiles": [
         "backend/src/services/manufacturerScopeService.ts"
       ]
@@ -4367,39 +4465,39 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-policy-engine-service-ts-create-policy-alert-if-fresh",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:createPolicyAlertIfFresh",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/policyEngineService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-policy-engine-service-ts-evaluate-scan-and-enforce-policy",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:evaluateScanAndEnforcePolicy",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/policyEngineService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-policy-engine-service-ts-get-or-create-security-policy",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:getOrCreateSecurityPolicy",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/policyEngineService.ts"
       ]
@@ -5355,117 +5453,117 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-approve-sensitive-action-approval",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:approveSensitiveActionApproval",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/sensitiveActionApprovalService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-batch-release-review-blocker",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:batchReleaseReviewBlocker",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/sensitiveActionApprovalService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-create-sensitive-action-approval",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:createSensitiveActionApproval",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/sensitiveActionApprovalService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-execute-batch-block",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:executeBatchBlock",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/sensitiveActionApprovalService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-execute-batch-release",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:executeBatchRelease",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/sensitiveActionApprovalService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-execute-qr-block",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:executeQrBlock",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/sensitiveActionApprovalService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-expire-if-needed",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:expireIfNeeded",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/sensitiveActionApprovalService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-list-sensitive-action-approvals",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:listSensitiveActionApprovals",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/sensitiveActionApprovalService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-sensitive-action-approval-service-ts-reject-sensitive-action-approval",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:rejectSensitiveActionApproval",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/sensitiveActionApprovalService.ts"
       ]
@@ -5485,13 +5583,13 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-soar-service-ts-run-incident-auto-containment",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:runIncidentAutoContainment",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/soarService.ts"
       ]
@@ -5537,22 +5635,22 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-tamper-evidence-service-ts-run-tamper-evidence-checks",
-      "sessionId": "session-a",
-      "waveId": "a-06-governance-incidents-compliance",
-      "assignmentRuleId": "a06-governance-incident-compliance-root",
+      "sessionId": "session-c",
+      "waveId": "c-03-governance-policies-incidents-compliance",
+      "assignmentRuleId": "c03-governance-incident-compliance-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:runTamperEvidenceChecks",
       "executionSurface": "internal",
-      "contract": "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries.",
+      "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
         "backend/src/services/tamperEvidenceService.ts"
       ]
     },
     {
       "workflowId": "workflow-internal-backend-src-services-trace-event-service-ts-backfill-trace-events-from-audit-logs",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:backfillTraceEventsFromAuditLogs",
       "executionSurface": "internal",
@@ -5563,9 +5661,9 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-trace-event-service-ts-create-trace-event",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:createTraceEvent",
       "executionSurface": "internal",
@@ -5576,9 +5674,9 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-trace-event-service-ts-create-trace-event-from-audit-log",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:createTraceEventFromAuditLog",
       "executionSurface": "internal",
@@ -5589,9 +5687,9 @@
     },
     {
       "workflowId": "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline",
-      "sessionId": "session-a",
-      "waveId": "a-05-audit-fraud-trace-alerts",
-      "assignmentRuleId": "a05-audit-fraud-trace-root",
+      "sessionId": "session-c",
+      "waveId": "c-02-audit-fraud-trace-alerts",
+      "assignmentRuleId": "c02-audit-fraud-trace-root",
       "corroboratingRuleIds": [],
       "entryPoint": "internal:getTraceTimeline",
       "executionSurface": "internal",
@@ -5747,13 +5845,13 @@
     },
     {
       "workflowId": "workflow-startup-backend-src-services-auth-super-admin-bootstrap-service-ts-bootstrap-configured-super-admin",
-      "sessionId": "session-a",
-      "waveId": "a-07-operator-migration-startup-cli",
-      "assignmentRuleId": "a07-registered-cli-or-startup",
+      "sessionId": "session-c",
+      "waveId": "c-04-operator-recovery-startup-migration-cli",
+      "assignmentRuleId": "c04-registered-operator-recovery-cli-or-startup",
       "corroboratingRuleIds": [],
       "entryPoint": "startup:bootstrapConfiguredSuperAdmin",
       "executionSurface": "startup",
-      "contract": "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted.",
+      "contract": "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted.",
       "canonicalSourceFiles": [
         "backend/src/services/auth/superAdminBootstrapService.ts"
       ]
@@ -5787,13 +5885,23 @@
   ],
   "fileOwnership": {
     "sessionAOwnedSharedFiles": [
-      "backend/src/controllers/incidentController.ts",
-      "backend/src/services/compliancePackService.ts",
-      "backend/src/services/governanceService.ts",
-      "backend/src/services/replacementChainService.ts"
+      "backend/src/services/replacementChainService.ts",
+      "backend/src/routes/index.ts"
+    ],
+    "sessionAAdditionalProductionFiles": [
+      "backend/src/lib/canonicalDbContext.ts"
     ],
     "sessionBOwnedSharedFiles": [
       "backend/src/middleware/auth.ts"
+    ],
+    "sessionCOwnedSharedFiles": [
+      "backend/src/controllers/incidentController.ts",
+      "backend/src/controllers/licenseeController.ts",
+      "backend/src/controllers/tracePolicyController.ts",
+      "backend/src/controllers/userController.ts",
+      "backend/src/services/compliancePackService.ts",
+      "backend/src/services/governanceService.ts",
+      "backend/src/services/manufacturerScopeService.ts"
     ]
   },
   "validationSummary": {
@@ -5805,27 +5913,36 @@
     "unknownWorkflowIds": [],
     "genericCatchAllAssignments": [],
     "sessionCounts": {
-      "session-a": 284,
-      "session-b": 144
+      "session-a": 177,
+      "session-b": 144,
+      "session-c": 107
     },
     "waveCounts": {
       "a-01-tenant-manufacturer-platform-reads": 14,
-      "a-02-tenant-platform-administration": 8,
       "a-03-batch-qr-lifecycle": 46,
       "a-04-printing-reissue-recovery-release": 111,
-      "a-05-audit-fraud-trace-alerts": 17,
-      "a-06-governance-incidents-compliance": 55,
-      "a-07-operator-migration-startup-cli": 28,
       "a-08-runtime-idempotency-telemetry": 5,
+      "a-09-system-integration-owner": 1,
       "b-01-auth-preauth-session-account-security": 63,
       "b-02-public-proof-support-intake": 61,
-      "b-03-workers-scheduled-outbox-delivery": 20
+      "b-03-workers-scheduled-outbox-delivery": 20,
+      "c-01-administration-general-mutations": 8,
+      "c-02-audit-fraud-trace-alerts": 17,
+      "c-03-governance-policies-incidents-compliance": 55,
+      "c-04-operator-recovery-startup-migration-cli": 27
     },
+    "sessionBWorkflowSetSha256": "116815209a0a591ff122a0a7bac9a5958cfa4182742c8483d039261c7ba4e79a",
+    "sessionBWorkflowOwnershipPreserved": true,
     "sharedReferencedProductionFiles": [
       "backend/src/controllers/incidentController.ts",
+      "backend/src/controllers/licenseeController.ts",
+      "backend/src/controllers/tracePolicyController.ts",
+      "backend/src/controllers/userController.ts",
       "backend/src/middleware/auth.ts",
+      "backend/src/routes/index.ts",
       "backend/src/services/compliancePackService.ts",
       "backend/src/services/governanceService.ts",
+      "backend/src/services/manufacturerScopeService.ts",
       "backend/src/services/replacementChainService.ts"
     ],
     "editableProductionFileOverlap": []

@@ -6,8 +6,12 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const baseIndex = process.argv.indexOf("--base");
 const base = baseIndex >= 0 ? process.argv[baseIndex + 1] : "";
-if (!/^[0-9a-f]{7,40}$/.test(base)) throw new Error("Usage: node scripts/rls/check-session-b-file-ownership.mjs --base <session-b-start-sha>");
-const contract = JSON.parse(fs.readFileSync(path.join(repoRoot, "documents/security/rls-program/workflow-ownership-session-b.json"), "utf8"));
+const sessionIndex = process.argv.indexOf("--session");
+const session = sessionIndex >= 0 ? process.argv[sessionIndex + 1] : "session-b";
+if (!/^[0-9a-f]{7,40}$/.test(base) || !["session-b", "session-c"].includes(session)) {
+  throw new Error("Usage: node scripts/rls/check-session-b-file-ownership.mjs [--session session-b|session-c] --base <session-start-sha>");
+}
+const contract = JSON.parse(fs.readFileSync(path.join(repoRoot, `documents/security/rls-program/workflow-ownership-${session}.json`), "utf8"));
 const exactAllowed = new Set([...contract.productionFiles, ...contract.existingTestFiles]);
 const pathRuleAllows = (file) => contract.allowedNewPathRules.some((rule) => rule.endsWith("/**") ? file.startsWith(rule.slice(0, -2)) : file === rule);
 const output = execFileSync("git", ["diff", "--name-status", "--find-renames", `${base}...HEAD`], { cwd: repoRoot, encoding: "utf8" }).trim();
@@ -17,4 +21,4 @@ const prohibitedOperations = changedRows.filter(([status]) => /^[DR]/.test(statu
 const changedFiles = [...new Set([...changedRows.flatMap(([, ...files]) => files), ...untracked])].sort();
 const unauthorizedFiles = changedFiles.filter((file) => !exactAllowed.has(file) && !pathRuleAllows(file));
 if (prohibitedOperations.length || unauthorizedFiles.length) throw new Error(JSON.stringify({ prohibitedOperations, unauthorizedFiles }, null, 2));
-console.log(JSON.stringify({ valid: true, base, changedFiles: changedFiles.length, unauthorizedFiles: 0, prohibitedOperations: 0 }));
+console.log(JSON.stringify({ valid: true, session, base, changedFiles: changedFiles.length, unauthorizedFiles: 0, prohibitedOperations: 0 }));

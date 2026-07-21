@@ -1,6 +1,6 @@
 # Autonomous full staging RLS progress
 
-Last updated: 2026-07-20 (Europe/London)
+Last updated: 2026-07-21 (Europe/London)
 
 ## Current checkpoint
 
@@ -11,8 +11,9 @@ Last updated: 2026-07-20 (Europe/London)
 - Generated foundation: 39 policies, 34 direct policy slices and 78 exact column-privilege cells.
 - Deployment model: clean-room blue/green only. Current staging and production databases are untouched.
 - Final foundation commit: `061b3134ba89db84e0564b893e920a2601c14452` (certified artifacts committed in `2f9c6e8f724f8bb31ff1d5178f06c7b3bdf80348`).
-- Two-session partition commit: `8cec28edc9da2d39304bd0b3366cef7a2bb3a553`; 284 Session A workflows and 144 Session B workflows, with zero missing, duplicate, unknown, catch-all or overlapping editable production files.
+- The historical two-session partition commit is `8cec28edc9da2d39304bd0b3366cef7a2bb3a553`. It is superseded by the three-session partition based on certified checkpoint `33cbe7ff019efefad242f654f0aa96c44c5b963c`: 177 Session A, the unchanged 144 Session B and 107 Session C workflows, with zero missing, duplicate, unknown, catch-all or overlapping editable production/test files.
 - Session B worktree: `/Users/abhiramteja/Downloads/genuine-scan-rls-auth`, branch `rls-wave-auth-public-workers`, clean coordination head `f1163b83e039af7129c5879f0957a441d1219fa9`, certified branch point `061b3134ba89db84e0564b893e920a2601c14452`.
+- Session C worktree contract: `/Users/abhiramteja/Downloads/genuine-scan-rls-admin`, branch `rls-wave-admin-governance-operator`, required base ancestor `33cbe7ff019efefad242f654f0aa96c44c5b963c`, local database `mscqr_rls_wave_c_admin_governance_operator`.
 
 ## Foundation findings A-D
 
@@ -59,7 +60,7 @@ Exact certified artifact values:
 - Cleanup SQL SHA-256: `1790fba7eb6de1322227050c5c59c40cedc2a104e52e483456b44252725730b5`
 - Certification evidence SHA-256: `ee17cda136039666823c62566e2be6a6b8209b26d4d75c7504416bf7f0549099`
 
-Exact next task: continue Session A's tenant/manufacturer/platform read wave with the remaining licensee directory, manufacturer scope, selector, dashboard, inventory and SLA families. Session B remains isolated at the exact prompt in `TWO_SESSION_WORKFLOW_EXECUTION_HANDOFF.md`; integrate it only after its committed fresh-PostgreSQL wave gate and one review are green.
+Exact next task: commit the three-session coordination artifacts, create Session C's isolated worktree, then continue Session A's owned selector, dashboard, inventory and SLA reads. Session B and Session C remain isolated under `THREE_SESSION_WORKFLOW_EXECUTION_HANDOFF.md`; integrate each only after its committed fresh-PostgreSQL wave gate and single review are green.
 
 ## Session A read-wave application-path progress
 

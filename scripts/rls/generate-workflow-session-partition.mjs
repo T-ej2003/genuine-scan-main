@@ -1,24 +1,28 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const programRoot = path.join(repoRoot, "documents/security/rls-program");
 const workflows = JSON.parse(fs.readFileSync(path.join(programRoot, "workflows.json"), "utf8")).workflows;
-const foundationCommit = "061b3134ba89db84e0564b893e920a2601c14452";
+const coordinationBaseCommit = "33cbe7ff019efefad242f654f0aa96c44c5b963c";
+const originalSessionBWorkflowSetSha256 = "116815209a0a591ff122a0a7bac9a5958cfa4182742c8483d039261c7ba4e79a";
+const workflowSetSha256 = (ids) => crypto.createHash("sha256").update(`${[...ids].sort().join("\n")}\n`).digest("hex");
 
 const waves = [
   { id: "a-01-tenant-manufacturer-platform-reads", sessionId: "session-a", contract: "Database-revalidated tenant, manufacturer and bounded platform reads, including dashboards and analytics; filters only narrow trusted scope." },
-  { id: "a-02-tenant-platform-administration", sessionId: "session-a", contract: "Tenant and platform user/licensee administration with exact actor, assurance, lifecycle, concurrency, audit and column semantics." },
   { id: "a-03-batch-qr-lifecycle", sessionId: "session-a", contract: "Batch, QR, range, allocation, scan and lifecycle operations through tenant-bound transactions and database-enforced state transitions." },
   { id: "a-04-printing-reissue-recovery-release", sessionId: "session-a", contract: "Printing, printer trust, reissue, recovery, sample verification and release lifecycles without weakening existing behavior." },
-  { id: "a-05-audit-fraud-trace-alerts", sessionId: "session-a", contract: "Audit, fraud, trace, alert and export paths with exact projections, attribution, immutable history and bounded scope." },
-  { id: "a-06-governance-incidents-compliance", sessionId: "session-a", contract: "Governance, incident response, compliance, policy, evidence, approval and containment workflows under reviewed actor boundaries." },
-  { id: "a-07-operator-migration-startup-cli", sessionId: "session-a", contract: "Finite operator, migration, startup and CLI procedures; test/seed paths remain frozen-product prohibited where already contracted." },
   { id: "a-08-runtime-idempotency-telemetry", sessionId: "session-a", contract: "Shared transaction idempotency and route telemetry with exact attribution, replay and tenant semantics." },
+  { id: "a-09-system-integration-owner", sessionId: "session-a", contract: "The programme integration runner remains under the sole integration owner and cannot be delegated to an implementation worktree." },
   { id: "b-01-auth-preauth-session-account-security", sessionId: "session-b", contract: "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security." },
   { id: "b-02-public-proof-support-intake", sessionId: "session-b", contract: "Raw and signed QR verification, proof-bound public status, customer trust, ownership, support and intake with non-enumerable exact projections." },
   { id: "b-03-workers-scheduled-outbox-delivery", sessionId: "session-b", contract: "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution." },
+  { id: "c-01-administration-general-mutations", sessionId: "session-c", contract: "Tenant and platform administration mutations with exact actor, assurance, lifecycle, concurrency, audit and column semantics." },
+  { id: "c-02-audit-fraud-trace-alerts", sessionId: "session-c", contract: "Audit, fraud, trace, alert and export paths with exact projections, attribution, immutable history and bounded scope." },
+  { id: "c-03-governance-policies-incidents-compliance", sessionId: "session-c", contract: "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries." },
+  { id: "c-04-operator-recovery-startup-migration-cli", sessionId: "session-c", contract: "Finite operator, recovery, startup, migration and CLI procedures; test and seed paths remain frozen-product prohibited where already contracted." },
 ];
 const waveById = new Map(waves.map((wave) => [wave.id, wave]));
 const idMatches = (workflow, expression) => expression.test(workflow.id);
@@ -27,18 +31,20 @@ const isAuthAccountWorkflow = (workflow) => !isPlatformAdminStartup(workflow) &&
 const isPublicProofWorkflow = (workflow) => !isAuthAccountWorkflow(workflow) && (Boolean(workflow.publicReadContractBoundaryId || workflow.publicAccessClass) || (workflow.authenticationStage === "pre-authentication" && workflow.authorizationBoundaryType === "public-proof-boundary") || idMatches(workflow, /backend-src-(?:controllers-(?:public-intake-controller|support-controller|support-issue-controller|verify-)|services-(?:customer-trust-service|customer-verification-session-service|customer-webauthn-service|public-verification-post-scan-service|support-workflow-service|verification-decision-read-service|verification-decision-service))/));
 const isWorkerDeliveryWorkflow = (workflow) => !isAuthAccountWorkflow(workflow) && !isPublicProofWorkflow(workflow) && (["worker", "scheduled"].includes(workflow.executionSurface) || Boolean(workflow.workerBoundaryId || workflow.producesWorkerBoundaryId) || idMatches(workflow, /backend-src-services-(?:analytics-rollup-service|audit-log-outbox-service|incident-email-service|notification-service|siem-outbox-service)/));
 const isSessionBWorkflow = (workflow) => isAuthAccountWorkflow(workflow) || isPublicProofWorkflow(workflow) || isWorkerDeliveryWorkflow(workflow);
+const isSystemIntegrationRunner = (workflow) => workflow.id === "workflow-cli-scripts-run-system-integration-mjs-main";
 
 const rules = [
   { id: "b01-auth-preauth-account-contract", waveId: "b-01-auth-preauth-session-account-security", match: isAuthAccountWorkflow },
   { id: "b02-public-proof-support-contract", waveId: "b-02-public-proof-support-intake", match: isPublicProofWorkflow },
   { id: "b03-worker-schedule-delivery-contract", waveId: "b-03-workers-scheduled-outbox-delivery", match: isWorkerDeliveryWorkflow },
-  { id: "a07-registered-cli-or-startup", waveId: "a-07-operator-migration-startup-cli", match: (workflow) => !isSessionBWorkflow(workflow) && ["cli", "startup"].includes(workflow.executionSurface) },
+  { id: "a09-system-integration-owner", waveId: "a-09-system-integration-owner", match: isSystemIntegrationRunner },
+  { id: "c04-registered-operator-recovery-cli-or-startup", waveId: "c-04-operator-recovery-startup-migration-cli", match: (workflow) => !isSessionBWorkflow(workflow) && !isSystemIntegrationRunner(workflow) && ["cli", "startup"].includes(workflow.executionSurface) },
   { id: "a04-printing-release-root", waveId: "a-04-printing-reissue-recovery-release", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-(?:controllers-(?:print-job-|printer-agent-job-controller|printer-gateway-controller)|printing-|services-(?:batch-print-lifecycle-reconciliation-service|batch-release-service|local-agent|network-direct-print-service|network-ipp-print-service|print|printer|replacement-chain-service|sample-scan-policy-service))/) },
   { id: "a03-batch-qr-root", waveId: "a-03-batch-qr-lifecycle", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-(?:controllers-(?:qr-controller|qr-log-controller|qr-request-controller)|services-(?:batch-allocation-service|batch-state-machine-service|legacy-qr-rotation-service|qr-allocation-service|qr-provenance-backfill-service|qr-service|qr-tracking-analytics-service|scan-insight-service|scan-log-reporting-service))/) },
-  { id: "a05-audit-fraud-trace-root", waveId: "a-05-audit-fraud-trace-alerts", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-(?:controllers-(?:audit-controller|trace-policy-controller)|routes-audit-routes|services-(?:attention-queue-service|audit-csv-export-service|audit-export-redaction-service|audit-log-query-service|audit-service|fraud-report-query-service|immutable-audit-export-service|trace-event-service))/) },
-  { id: "a06-governance-incident-compliance-root", waveId: "a-06-governance-incidents-compliance", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-(?:controllers-(?:governance-controller|incident-controller|ir-alert-controller|ir-incident-controller|ir-policy-controller)|services-(?:compliance-pack-service|degradation-event-service|forensic-chain-service|governance-service|incident-service|ir-|policy-engine-service|sensitive-action-approval-service|soar-service|tamper-evidence-service))/) },
-  { id: "a02-licensee-user-mutation-root", waveId: "a-02-tenant-platform-administration", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-controllers-(?:licensee-controller|user-controller)/) && /^(?:http:)?(?:create|delete|restore|update)/i.test(workflow.entryPoint) },
-  { id: "a02-manufacturer-link-mutation-root", waveId: "a-02-tenant-platform-administration", match: (workflow) => !isSessionBWorkflow(workflow) && workflow.entryPoint === "internal:upsertManufacturerLicenseeLink" },
+  { id: "c02-audit-fraud-trace-root", waveId: "c-02-audit-fraud-trace-alerts", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-(?:controllers-(?:audit-controller|trace-policy-controller)|routes-audit-routes|services-(?:attention-queue-service|audit-csv-export-service|audit-export-redaction-service|audit-log-query-service|audit-service|fraud-report-query-service|immutable-audit-export-service|trace-event-service))/) },
+  { id: "c03-governance-incident-compliance-root", waveId: "c-03-governance-policies-incidents-compliance", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-(?:controllers-(?:governance-controller|incident-controller|ir-alert-controller|ir-incident-controller|ir-policy-controller)|services-(?:compliance-pack-service|degradation-event-service|forensic-chain-service|governance-service|incident-service|ir-|policy-engine-service|sensitive-action-approval-service|soar-service|tamper-evidence-service))/) },
+  { id: "c01-licensee-user-mutation-root", waveId: "c-01-administration-general-mutations", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-controllers-(?:licensee-controller|user-controller)/) && /^(?:http:)?(?:create|delete|restore|update)/i.test(workflow.entryPoint) },
+  { id: "c01-manufacturer-link-mutation-root", waveId: "c-01-administration-general-mutations", match: (workflow) => !isSessionBWorkflow(workflow) && workflow.entryPoint === "internal:upsertManufacturerLicenseeLink" },
   { id: "a01-licensee-user-read-root", waveId: "a-01-tenant-manufacturer-platform-reads", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-controllers-(?:licensee-controller|user-controller)/) && /^(?:http:)?(?:assert|get|export|list)/i.test(workflow.entryPoint) },
   { id: "a01-tenant-read-service-root", waveId: "a-01-tenant-manufacturer-platform-reads", match: (workflow) => !isSessionBWorkflow(workflow) && workflow.entryPoint !== "internal:upsertManufacturerLicenseeLink" && idMatches(workflow, /backend-src-services-(?:access-control-service|analytics-service|dashboard-snapshot-service|manufacturer-scope-service)/) },
   { id: "a08-idempotency-telemetry-root", waveId: "a-08-runtime-idempotency-telemetry", match: (workflow) => !isSessionBWorkflow(workflow) && idMatches(workflow, /backend-src-(?:controllers-telemetry-controller|services-idempotency-service)/) },
@@ -46,7 +52,7 @@ const rules = [
 
 const assignments = workflows.map((workflow) => {
   const matchingRules = rules.filter((rule) => rule.match(workflow));
-  if (matchingRules.length === 0) throw new Error(`Workflow has no explicit two-session contract: ${workflow.id}`);
+  if (matchingRules.length === 0) throw new Error(`Workflow has no explicit three-session contract: ${workflow.id}`);
   const matchingWaveIds = [...new Set(matchingRules.map((rule) => rule.waveId))];
   if (matchingWaveIds.length !== 1) throw new Error(`Workflow matches conflicting wave contracts: ${workflow.id} -> ${matchingWaveIds.join(", ")}`);
   const rule = matchingRules[0];
@@ -77,15 +83,26 @@ if (workflows.length !== 428 || assignments.length !== 428 || missingWorkflowIds
 const filesForSession = (sessionId) => new Set(assignments.filter((row) => row.sessionId === sessionId).flatMap((row) => row.canonicalSourceFiles));
 const referencedA = filesForSession("session-a");
 const referencedB = filesForSession("session-b");
-const sharedFiles = [...referencedA].filter((file) => referencedB.has(file)).sort();
+const referencedC = filesForSession("session-c");
+const sharedFiles = [...new Set([...referencedA, ...referencedB, ...referencedC])]
+  .filter((file) => [referencedA, referencedB, referencedC].filter((files) => files.has(file)).length > 1)
+  .sort();
 const sessionAOwnedSharedFiles = [
-  "backend/src/controllers/incidentController.ts",
-  "backend/src/services/compliancePackService.ts",
-  "backend/src/services/governanceService.ts",
   "backend/src/services/replacementChainService.ts",
+  "backend/src/routes/index.ts",
 ];
 const sessionBOwnedSharedFiles = ["backend/src/middleware/auth.ts"];
-const expectedSharedFiles = [...sessionAOwnedSharedFiles, ...sessionBOwnedSharedFiles].sort();
+const sessionCOwnedSharedFiles = [
+  "backend/src/controllers/incidentController.ts",
+  "backend/src/controllers/licenseeController.ts",
+  "backend/src/controllers/tracePolicyController.ts",
+  "backend/src/controllers/userController.ts",
+  "backend/src/services/compliancePackService.ts",
+  "backend/src/services/governanceService.ts",
+  "backend/src/services/manufacturerScopeService.ts",
+];
+const sessionAAdditionalProductionFiles = ["backend/src/lib/canonicalDbContext.ts"];
+const expectedSharedFiles = [...sessionAOwnedSharedFiles, ...sessionBOwnedSharedFiles, ...sessionCOwnedSharedFiles].sort();
 if (JSON.stringify(sharedFiles) !== JSON.stringify(expectedSharedFiles)) throw new Error(`Shared production-file inventory drifted: ${JSON.stringify(sharedFiles)}`);
 
 const listSourceFiles = (relativeDirectory) => fs.readdirSync(path.join(repoRoot, relativeDirectory), { withFileTypes: true }).flatMap((entry) => {
@@ -110,10 +127,24 @@ const sessionBAdditionalProductionFiles = [
   "backend/src/services/supportIntakeMailService.ts",
 ];
 for (const file of sessionBAdditionalProductionFiles) if (!fs.existsSync(path.join(repoRoot, file))) throw new Error(`Session B production ownership file is missing: ${file}`);
-const sessionAProductionFiles = [...new Set([...referencedA].filter((file) => !sessionBOwnedSharedFiles.includes(file)).concat(sessionAOwnedSharedFiles))].sort();
-const sessionBProductionFiles = [...new Set([...referencedB].filter((file) => !sessionAOwnedSharedFiles.includes(file)).concat(sessionBOwnedSharedFiles, sessionBAdditionalProductionFiles))].sort();
-const fileOwnershipOverlap = sessionAProductionFiles.filter((file) => sessionBProductionFiles.includes(file));
-if (fileOwnershipOverlap.length) throw new Error(`Editable production files overlap: ${fileOwnershipOverlap.join(", ")}`);
+const sessionAProductionFiles = [...new Set([...referencedA]
+  .filter((file) => !sessionBOwnedSharedFiles.includes(file) && !sessionCOwnedSharedFiles.includes(file))
+  .concat(sessionAOwnedSharedFiles, sessionAAdditionalProductionFiles))].sort();
+const sessionBProductionFiles = [...new Set([...referencedB]
+  .filter((file) => !sessionAOwnedSharedFiles.includes(file) && !sessionCOwnedSharedFiles.includes(file))
+  .concat(sessionBOwnedSharedFiles, sessionBAdditionalProductionFiles))].sort();
+const sessionCProductionFiles = [...new Set([...referencedC]
+  .filter((file) => !sessionAOwnedSharedFiles.includes(file) && !sessionAAdditionalProductionFiles.includes(file) && !sessionBOwnedSharedFiles.includes(file))
+  .concat(sessionCOwnedSharedFiles))].sort();
+const productionFilesBySession = new Map([
+  ["session-a", sessionAProductionFiles],
+  ["session-b", sessionBProductionFiles],
+  ["session-c", sessionCProductionFiles],
+]);
+const productionFileOwners = new Map();
+for (const [sessionId, files] of productionFilesBySession) for (const file of files) productionFileOwners.set(file, [...(productionFileOwners.get(file) || []), sessionId]);
+const fileOwnershipOverlap = [...productionFileOwners].filter(([, owners]) => owners.length > 1).map(([file, owners]) => ({ file, owners }));
+if (fileOwnershipOverlap.length) throw new Error(`Editable production files overlap: ${JSON.stringify(fileOwnershipOverlap)}`);
 
 const sessionBExistingTestFiles = [
   "backend/tests/authAdminLoginMfaCycle.test.js",
@@ -166,8 +197,33 @@ const sessionBExistingTestFiles = [
 ];
 for (const file of sessionBExistingTestFiles) if (!fs.existsSync(path.join(repoRoot, file))) throw new Error(`Session B test ownership file is missing: ${file}`);
 
+const sessionCExistingTestFiles = [
+  "backend/tests/adminAccountRepairScript.test.js",
+  "backend/tests/auditCsvExportContext.test.js",
+  "backend/tests/auditLogQueryContext.test.js",
+  "backend/tests/breakGlassGenerateGate.test.js",
+  "backend/tests/compliancePackService.test.js",
+  "backend/tests/duplicateRiskEngine.test.js",
+  "backend/tests/fraudReportQueryContext.test.js",
+  "backend/tests/governanceComplianceDownloadResilience.test.js",
+  "backend/tests/incidentMvp.test.js",
+  "backend/tests/incidentPdfExport.test.js",
+  "backend/tests/irIncidentListFilters.test.js",
+  "backend/tests/irPaginationQueryRegression.test.js",
+  "backend/tests/launchSmokeSeedScript.test.js",
+  "backend/tests/p3MigrationDrift.test.js",
+  "backend/tests/p3MigrationReplay.test.js",
+  "backend/tests/passwordSetupLinkScript.test.js",
+  "backend/tests/phaseE2RoleTenantIdor.test.js",
+  "backend/tests/prismaChecksumSmokeScript.test.js",
+  "backend/tests/stagingRlsValidationSeedScript.test.js",
+  "backend/tests/superAdminBootstrap.test.js",
+  "backend/tests/traceTimelineContext.test.js",
+];
+for (const file of sessionCExistingTestFiles) if (!fs.existsSync(path.join(repoRoot, file))) throw new Error(`Session C test ownership file is missing: ${file}`);
+
 const exclusiveGlobalPathRules = [
-  "documents/security/rls-program/*.json except documents/security/rls-program/waves/session-b-auth-public-workers-result.json",
+  "documents/security/rls-program/*.json except the exact Session B and Session C wave-local result manifests",
   "documents/security/rls-program/generated/**",
   "scripts/rls/generate-*.mjs",
   "scripts/rls/certify-*.mjs",
@@ -180,15 +236,24 @@ const exclusiveGlobalPathRules = [
   "scripts/aws/**staging**",
   "documents/security/rls-program/STAGING_FULL_RLS_*",
 ];
+const workflowFamiliesForSession = (sessionId) => waves
+  .filter((wave) => wave.sessionId === sessionId)
+  .map((wave) => ({
+    waveId: wave.id,
+    contract: wave.contract,
+    workflowIds: assignments.filter((row) => row.waveId === wave.id).map((row) => row.workflowId),
+  }));
 const sessions = [
   {
     id: "session-a",
     role: "sole-integration-owner",
     databaseNamespace: "mscqr_rls_wave_a_integration",
     workflowIds: assignments.filter((row) => row.sessionId === "session-a").map((row) => row.workflowId),
+    workflowFamilies: workflowFamiliesForSession("session-a"),
     productionFiles: sessionAProductionFiles,
-    ownedSharedFiles: sessionAOwnedSharedFiles,
+    ownedSharedFiles: [...sessionAOwnedSharedFiles, ...sessionAAdditionalProductionFiles].sort(),
     sessionBExclusiveProductionFiles: sessionBProductionFiles,
+    sessionCExclusiveProductionFiles: sessionCProductionFiles,
     exclusiveGlobalPathRules,
   },
   {
@@ -198,6 +263,7 @@ const sessions = [
     worktree: "/Users/abhiramteja/Downloads/genuine-scan-rls-auth",
     databaseNamespace: "mscqr_rls_wave_b_auth_public_workers",
     workflowIds: assignments.filter((row) => row.sessionId === "session-b").map((row) => row.workflowId),
+    workflowFamilies: workflowFamiliesForSession("session-b"),
     productionFiles: sessionBProductionFiles,
     existingTestFiles: sessionBExistingTestFiles,
     allowedNewPathRules: [
@@ -206,11 +272,39 @@ const sessions = [
       "documents/security/rls-program/waves/session-b-auth-public-workers-result.json",
       "documents/security/rls-program/waves/session-b/**",
     ],
-    integrationOwnerOnlyFiles: sessionAOwnedSharedFiles,
+    integrationOwnerOnlyFiles: [...sessionAOwnedSharedFiles, ...sessionCOwnedSharedFiles].sort(),
     forbiddenGlobalPathRules: exclusiveGlobalPathRules,
     waveLocalResultManifest: "documents/security/rls-program/waves/session-b-auth-public-workers-result.json",
+    originalBranchPoint: "061b3134ba89db84e0564b893e920a2601c14452",
+  },
+  {
+    id: "session-c",
+    role: "isolated-admin-governance-operator-wave",
+    branch: "rls-wave-admin-governance-operator",
+    worktree: "/Users/abhiramteja/Downloads/genuine-scan-rls-admin",
+    databaseNamespace: "mscqr_rls_wave_c_admin_governance_operator",
+    workflowIds: assignments.filter((row) => row.sessionId === "session-c").map((row) => row.workflowId),
+    workflowFamilies: workflowFamiliesForSession("session-c"),
+    productionFiles: sessionCProductionFiles,
+    existingTestFiles: sessionCExistingTestFiles,
+    allowedNewPathRules: [
+      "backend/src/rls-waves/session-c/**",
+      "backend/tests/rls-wave-c/**",
+      "documents/security/rls-program/waves/session-c-admin-governance-operator-result.json",
+      "documents/security/rls-program/waves/session-c/**",
+    ],
+    integrationOwnerOnlyFiles: [...sessionAOwnedSharedFiles, ...sessionAAdditionalProductionFiles, ...sessionBOwnedSharedFiles].sort(),
+    prohibitedSharedFiles: [...sessionAOwnedSharedFiles, ...sessionAAdditionalProductionFiles, ...sessionBOwnedSharedFiles].sort(),
+    forbiddenGlobalPathRules: exclusiveGlobalPathRules,
+    waveLocalResultManifest: "documents/security/rls-program/waves/session-c-admin-governance-operator-result.json",
+    requiredBaseAncestor: coordinationBaseCommit,
   },
 ];
+
+const sessionBWorkflowSetSha256 = workflowSetSha256(sessions.find((session) => session.id === "session-b").workflowIds);
+if (sessionBWorkflowSetSha256 !== originalSessionBWorkflowSetSha256) {
+  throw new Error(`Session B workflow ownership changed without an explicit handoff: ${sessionBWorkflowSetSha256}`);
+}
 
 const summary = {
   authoritativeWorkflowCount: workflows.length,
@@ -222,14 +316,39 @@ const summary = {
   genericCatchAllAssignments: assignments.filter((row) => /fallback|catch.?all|remaining|misc/i.test(`${row.waveId}:${row.assignmentRuleId}`)).map((row) => row.workflowId),
   sessionCounts: Object.fromEntries(sessions.map((session) => [session.id, session.workflowIds.length])),
   waveCounts: Object.fromEntries(waves.map((wave) => [wave.id, assignments.filter((row) => row.waveId === wave.id).length])),
+  sessionBWorkflowSetSha256,
+  sessionBWorkflowOwnershipPreserved: true,
   sharedReferencedProductionFiles: sharedFiles,
   editableProductionFileOverlap: fileOwnershipOverlap,
 };
 if (summary.genericCatchAllAssignments.length) throw new Error(`Generic catch-all assignments are prohibited: ${summary.genericCatchAllAssignments.join(", ")}`);
 
 const stable = (value) => `${JSON.stringify(value, null, 2)}\n`;
-const partition = { schemaVersion: 1, foundationCommit, authoritativeSource: "documents/security/rls-program/workflows.json", sessions: sessions.map(({ workflowIds, productionFiles, existingTestFiles, ...session }) => ({ ...session, workflowCount: workflowIds.length, productionFileCount: productionFiles.length, existingTestFileCount: existingTestFiles?.length || 0 })), waves, assignments, fileOwnership: { sessionAOwnedSharedFiles, sessionBOwnedSharedFiles }, validationSummary: summary };
+const partition = {
+  schemaVersion: 2,
+  coordinationBaseCommit,
+  authoritativeSource: "documents/security/rls-program/workflows.json",
+  sessions: sessions.map(({ workflowIds, productionFiles, existingTestFiles, workflowFamilies, ...session }) => ({
+    ...session,
+    workflowCount: workflowIds.length,
+    workflowFamilyCount: workflowFamilies.length,
+    productionFileCount: productionFiles.length,
+    existingTestFileCount: existingTestFiles?.length || 0,
+  })),
+  waves,
+  assignments,
+  fileOwnership: { sessionAOwnedSharedFiles, sessionAAdditionalProductionFiles, sessionBOwnedSharedFiles, sessionCOwnedSharedFiles },
+  validationSummary: summary,
+};
 fs.mkdirSync(path.join(programRoot, "waves"), { recursive: true });
-fs.writeFileSync(path.join(programRoot, "workflow-two-session-partition.json"), stable(partition));
-for (const session of sessions) fs.writeFileSync(path.join(programRoot, `workflow-ownership-${session.id}.json`), stable({ schemaVersion: 1, foundationCommit, ...session, workflowCount: session.workflowIds.length }));
+fs.writeFileSync(path.join(programRoot, "workflow-three-session-partition.json"), stable(partition));
+for (const session of sessions) fs.writeFileSync(path.join(programRoot, `workflow-ownership-${session.id}.json`), stable({
+  schemaVersion: 2,
+  coordinationBaseCommit,
+  ...session,
+  workflowCount: session.workflowIds.length,
+  workflowFamilyCount: session.workflowFamilies.length,
+  productionFileCount: session.productionFiles.length,
+  existingTestFileCount: session.existingTestFiles?.length || 0,
+}));
 console.log(stable(summary).trim());
