@@ -4,14 +4,24 @@ import { z } from "zod";
 import { Prisma, UserRole } from "@prisma/client";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLog } from "../services/auditService";
+import { createAuditLogInTransaction } from "../services/auditService";
 import { randomUUID } from "crypto";
 import { hashPassword } from "../services/auth/passwordService";
 import { createInvite } from "../services/auth/inviteService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
-import { beginIdempotentAction, completeIdempotentAction, extractIdempotencyKey } from "../services/idempotencyService";
+import { extractIdempotencyKey } from "../services/idempotencyService";
 import { maskEmailForLog } from "../services/mailTransportService";
+import { withCanonicalDbContext } from "../lib/canonicalDbContext";
+import {
+  AdministrationAccessError,
+  administrationPurposes,
+  buildAdministrationBoundary,
+  createLicenseeInTransaction,
+  deleteLicenseeInTransaction,
+  installAdministrationResultScope,
+  updateLicenseeInTransaction,
+} from "../rls-waves/session-c/c01/administrationRepository";
 
 const prefixSchema = z
   .string()
@@ -128,6 +138,35 @@ const licenseeConflictMessage = (target?: unknown) => {
   return "A brand or admin with these details already exists.";
 };
 
+const administrationRequestId = (req: AuthRequest) =>
+  String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+
+const administrationErrorResponse = (error: unknown) => {
+  if (error instanceof AdministrationAccessError) {
+    return { status: error.statusCode, error: error.message };
+  }
+  const message = String((error as any)?.meta?.message || (error as any)?.message || "");
+  if (/SESSION_C_DUPLICATE_LICENSEE_OR_ADMIN/.test(message)) {
+    return { status: 409, error: "A brand or admin with these details already exists." };
+  }
+  if (/SESSION_C_LICENSEE_LINKED_DATA/.test(message)) {
+    return { status: 400, error: "Licensee has linked data. Deactivate it instead of hard deleting." };
+  }
+  if (/SESSION_C_LICENSEE_NOT_FOUND/.test(message)) {
+    return { status: 404, error: "Licensee not found" };
+  }
+  if (/SESSION_C_(DISABLED_OR_STALE_ACTOR|STALE_PLATFORM_SCOPE|WRONG_ROLE|INVALID_CONTEXT|FOREIGN_SCOPE)/.test(message)) {
+    return { status: 403, error: "Administration authority is stale or invalid." };
+  }
+  if (/SESSION_C_IDEMPOTENCY_(CONFLICT|IN_PROGRESS)/.test(message)) {
+    return { status: 409, error: "This request conflicts with an existing operation." };
+  }
+  if (/40001|could not serialize access/i.test(message)) {
+    return { status: 409, error: "This administration change conflicted with another request. Please retry." };
+  }
+  return null;
+};
+
 const buildLicenseeCreateResponse = (params: { created: boolean; licensee: any; adminUser: any; adminInvite: any; warning?: string | null }) => {
   const inviteCreated = Boolean(params.adminInvite?.inviteId || params.adminInvite?.inviteLink);
   const emailSent = params.adminInvite?.emailSent === true || params.adminInvite?.emailDelivered === true;
@@ -177,17 +216,6 @@ const buildLicenseeCreateResponse = (params: { created: boolean; licensee: any; 
 };
 
 export const createLicensee = async (req: AuthRequest, res: Response) => {
-  let idempotency: any;
-
-  const completeAndSend = async (statusCode: number, payload: any) => {
-    await completeIdempotentAction({
-      keyHash: idempotency?.keyHash,
-      statusCode,
-      responsePayload: payload,
-    });
-    return res.status(statusCode).json(payload);
-  };
-
   try {
     if (req.user?.role !== UserRole.SUPER_ADMIN && req.user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
       return res.status(403).json({ success: false, error: "Insufficient permissions" });
@@ -205,29 +233,11 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
     }
 
     const payload = parsed.data;
-    try {
-      idempotency = await beginIdempotentAction({
-        action: "licensee.create",
-        scope: req.user?.userId || "platform",
-        idempotencyKey: extractIdempotencyKey(req.headers as any, req.body as any),
-        requestPayload: payload,
-        required: false,
-        ttlSeconds: 1_800,
-      });
-    } catch (error) {
-      const mapped = mapIdempotencyError(error);
-      if (mapped) return res.status(mapped.status).json({ success: false, error: mapped.error, code: "IDEMPOTENCY_CONFLICT" });
-      throw error;
-    }
-    if (idempotency?.replayed) {
-      return res.status(idempotency.statusCode || 200).json(idempotency.responsePayload || { success: true });
-    }
-
     const licenseePayload = isNewFormat(payload) ? payload.licensee : payload;
     const adminPayload = isNewFormat(payload) ? payload.admin : payload.admin;
 
     if (!adminPayload) {
-      return completeAndSend(400, {
+      return res.status(400).json({
         success: false,
         error: "Admin credentials are required when creating a licensee.",
       });
@@ -235,114 +245,77 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
 
     const prefix = licenseePayload.prefix.toUpperCase();
 
-    const exists = await prisma.licensee.findUnique({ where: { prefix } });
-    if (exists) {
-      return completeAndSend(409, {
-        success: false,
-        error: "A brand with this prefix already exists.",
-        code: "DUPLICATE_LICENSEE_OR_ADMIN",
-      });
-    }
-
     const email = adminPayload.email.toLowerCase();
     const sendInvite = Boolean(adminPayload.sendInvite);
     const adminPassword = String(adminPayload.password || "").trim();
 
     if (!sendInvite && adminPassword.length < 6) {
-      return completeAndSend(400, {
+      return res.status(400).json({
         success: false,
         error: "Admin password must be at least 6 characters when invite mode is disabled.",
       });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser) {
-      return completeAndSend(409, {
-        success: false,
-        error: "An admin with this email already exists.",
-        code: "DUPLICATE_LICENSEE_OR_ADMIN",
-      });
-    }
-
-    const result = await prisma.$transaction(async (tx) => {
-      const id = randomUUID();
-
-      await tx.organization.create({
-        data: {
-          id,
-          name: licenseePayload.name,
-          isActive: licenseePayload.isActive ?? true,
-        },
-      });
-
-      const lic = await tx.licensee.create({
-        data: {
-          id,
-          orgId: id,
-          name: licenseePayload.name,
-          prefix,
-          description: licenseePayload.description?.trim() ? licenseePayload.description.trim() : null,
-          brandName: licenseePayload.brandName?.trim() ? licenseePayload.brandName.trim() : null,
-          location: licenseePayload.location?.trim() ? licenseePayload.location.trim() : null,
-          website: licenseePayload.website?.trim() ? licenseePayload.website.trim() : null,
-          supportEmail: licenseePayload.supportEmail?.trim()
-            ? licenseePayload.supportEmail.trim().toLowerCase()
-            : null,
-          supportPhone: licenseePayload.supportPhone?.trim() ? licenseePayload.supportPhone.trim() : null,
-          isActive: licenseePayload.isActive ?? true,
-        },
-      });
-
-      const adminUser = sendInvite
-        ? null
-        : await tx.user.create({
-            data: {
-              email,
-              name: adminPayload.name,
-              passwordHash: await hashPassword(adminPassword),
-              emailVerifiedAt: new Date(),
-              role: UserRole.LICENSEE_ADMIN,
-              licenseeId: lic.id,
-              orgId: lic.orgId,
-              status: "ACTIVE",
-              isActive: true,
-              deletedAt: null,
+    const boundary = buildAdministrationBoundary(req.user!, {
+      purpose: administrationPurposes.createLicensee,
+      requestId: administrationRequestId(req),
+    });
+    const passwordHash = sendInvite ? null : await hashPassword(adminPassword);
+    const result = await withCanonicalDbContext(
+      prisma,
+      boundary.context,
+      async (tx, installedContext) => {
+        const created = await createLicenseeInTransaction<any>(tx, {
+          id: randomUUID(),
+          idempotencyKey: extractIdempotencyKey(req.headers as any, req.body as any),
+          licensee: {
+            name: licenseePayload.name,
+            prefix,
+            description: licenseePayload.description?.trim() || null,
+            brandName: licenseePayload.brandName?.trim() || null,
+            location: licenseePayload.location?.trim() || null,
+            website: licenseePayload.website?.trim() || null,
+            supportEmail: licenseePayload.supportEmail?.trim().toLowerCase() || null,
+            supportPhone: licenseePayload.supportPhone?.trim() || null,
+            isActive: licenseePayload.isActive ?? true,
+          },
+          admin: {
+            email,
+            name: adminPayload.name,
+            passwordHash,
+            sendInvite,
+          },
+        });
+        const scopedContext = await installAdministrationResultScope(tx, installedContext, {
+          licenseeId: created.licensee?.id,
+          organizationId: created.licensee?.orgId,
+        });
+        if (!created.replayed) {
+          await createAuditLogInTransaction(tx, scopedContext, {
+            action: sendInvite ? "CREATE_LICENSEE_WITH_ADMIN_INVITE" : "CREATE_LICENSEE_WITH_ADMIN",
+            entityType: "Licensee",
+            entityId: created.licensee.id,
+            details: {
+              workflowId: "workflow-http-backend-src-controllers-licensee-controller-ts-create-licensee",
+              requestId: scopedContext.requestId,
+              purposeCode: scopedContext.purpose,
+              licenseeName: created.licensee.name,
+              prefix: created.licensee.prefix,
+              adminEmail: maskEmailForLog(email),
+              sendInvite,
             },
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              role: true,
-              licenseeId: true,
-              isActive: true,
-              status: true,
-              createdAt: true,
-            },
+            ipAddress: req.ip,
+            userAgent: req.get("user-agent"),
           });
-
-      return { licensee: lic, adminUser };
-    });
-
-    await createAuditLog({
-      userId: req.user!.userId,
-      licenseeId: result.licensee.id,
-      orgId: result.licensee.orgId,
-      action: sendInvite ? "CREATE_LICENSEE_WITH_ADMIN_INVITE" : "CREATE_LICENSEE_WITH_ADMIN",
-      entityType: "Licensee",
-      entityId: result.licensee.id,
-      details: {
-        licenseeName: result.licensee.name,
-        prefix: result.licensee.prefix,
-        adminEmail: maskEmailForLog(email),
-        sendInvite,
+        }
+        return created;
       },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent"),
-    });
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
 
-    let adminInvite: any = null;
+    let adminInvite: any = result.adminInvite || null;
     let warning: string | null = null;
-    if (sendInvite) {
+    if (sendInvite && !result.replayed && !adminInvite) {
       try {
         adminInvite = await createInvite({
           email,
@@ -366,16 +339,18 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
       warning,
     };
     const responsePayload = buildLicenseeCreateResponse({
-      created: true,
+      created: !result.replayed,
       licensee: out.licensee,
       adminUser: out.adminUser,
       adminInvite: out.adminInvite,
       warning: out.warning,
     });
-    return completeAndSend(201, responsePayload);
+    return res.status(result.replayed ? 200 : 201).json(responsePayload);
   } catch (e: any) {
+    const mapped = administrationErrorResponse(e);
+    if (mapped) return res.status(mapped.status).json({ success: false, error: mapped.error });
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      return completeAndSend(409, { success: false, error: licenseeConflictMessage(e.meta?.target), code: "DUPLICATE_LICENSEE_OR_ADMIN" });
+      return res.status(409).json({ success: false, error: licenseeConflictMessage(e.meta?.target), code: "DUPLICATE_LICENSEE_OR_ADMIN" });
     }
     console.error("createLicensee error:", { name: e?.name, code: e?.code });
     return res.status(500).json({ success: false, error: "Brand could not be created. Please retry or contact support." });
@@ -525,20 +500,42 @@ export const updateLicensee = async (req: AuthRequest, res: Response) => {
     }
     if (parsed.data.isActive !== undefined) data.isActive = parsed.data.isActive;
 
-    const updated = await prisma.licensee.update({ where: { id }, data });
-
-    await createAuditLog({
-      userId: req.user?.userId,
-      licenseeId: updated.id,
-      action: "UPDATE_LICENSEE",
-      entityType: "Licensee",
-      entityId: id,
-      details: { changed: Object.keys(data) },
-      ipAddress: req.ip,
+    const boundary = buildAdministrationBoundary(req.user!, {
+      purpose: administrationPurposes.updateLicensee,
+      requestId: administrationRequestId(req),
+      targetLicenseeId: id,
     });
+    const updated = await withCanonicalDbContext(
+      prisma,
+      boundary.context,
+      async (tx, installedContext) => {
+        const result = await updateLicenseeInTransaction<any>(tx, { id, patch: data });
+        const scopedContext = await installAdministrationResultScope(tx, installedContext, {
+          licenseeId: result.licensee?.id,
+          organizationId: result.licensee?.orgId,
+        });
+        await createAuditLogInTransaction(tx, scopedContext, {
+          action: "UPDATE_LICENSEE",
+          entityType: "Licensee",
+          entityId: id,
+          details: {
+            workflowId: "workflow-http-backend-src-controllers-licensee-controller-ts-update-licensee",
+            requestId: scopedContext.requestId,
+            purposeCode: scopedContext.purpose,
+            changed: Object.keys(data),
+          },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+        });
+        return result.licensee;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
 
     return res.json({ success: true, data: updated });
   } catch (e: any) {
+    const mapped = administrationErrorResponse(e);
+    if (mapped) return res.status(mapped.status).json({ success: false, error: mapped.error });
     console.error("updateLicensee error:", e);
     return res.status(500).json({ success: false, error: e.message || "Internal server error" });
   }
@@ -552,33 +549,41 @@ export const deleteLicensee = async (req: AuthRequest, res: Response) => {
     }
     const { id } = paramsParsed.data;
 
-    const [users, batches, ranges, codes] = await Promise.all([
-      prisma.user.count({ where: { licenseeId: id } }),
-      prisma.batch.count({ where: { licenseeId: id } }),
-      prisma.qRRange.count({ where: { licenseeId: id } }),
-      prisma.qRCode.count({ where: { licenseeId: id } }),
-    ]);
-
-    if (users || batches || ranges || codes) {
-      return res.status(400).json({
-        success: false,
-        error: "Licensee has linked data. Deactivate it instead of hard deleting.",
-      });
-    }
-
-    await prisma.licensee.delete({ where: { id } });
-
-    await createAuditLog({
-      userId: req.user?.userId,
-      action: "HARD_DELETE_LICENSEE",
-      entityType: "Licensee",
-      entityId: id,
-      details: {},
-      ipAddress: req.ip,
+    const boundary = buildAdministrationBoundary(req.user!, {
+      purpose: administrationPurposes.deleteLicensee,
+      requestId: administrationRequestId(req),
+      targetLicenseeId: id,
     });
+    const deleted = await withCanonicalDbContext(
+      prisma,
+      boundary.context,
+      async (tx, installedContext) => {
+        const result = await deleteLicenseeInTransaction<any>(tx, { id });
+        const scopedContext = await installAdministrationResultScope(tx, installedContext, {
+          licenseeId: result.licenseeId,
+          organizationId: result.organizationId,
+        });
+        await createAuditLogInTransaction(tx, scopedContext, {
+          action: "HARD_DELETE_LICENSEE",
+          entityType: "Licensee",
+          entityId: id,
+          details: {
+            workflowId: "workflow-http-backend-src-controllers-licensee-controller-ts-delete-licensee",
+            requestId: scopedContext.requestId,
+            purposeCode: scopedContext.purpose,
+          },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+        });
+        return { deletedId: id };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
 
-    return res.json({ success: true, data: { deletedId: id } });
+    return res.json({ success: true, data: deleted });
   } catch (e: any) {
+    const mapped = administrationErrorResponse(e);
+    if (mapped) return res.status(mapped.status).json({ success: false, error: mapped.error });
     console.error("deleteLicensee error:", e);
     return res.status(500).json({ success: false, error: e.message || "Internal server error" });
   }
