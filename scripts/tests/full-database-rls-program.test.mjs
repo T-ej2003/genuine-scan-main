@@ -31,6 +31,34 @@ test("raw SQL inventory recognizes table clauses without treating data literals 
   assert.deepEqual(accesses.map((entry) => [entry.prismaModel, entry.command]), [["AuditLog", "INSERT"]]);
 });
 
+test("named dashboard functions preserve both canonical workflows and exact protected commands", () => {
+  const rows = scanProductionAccess().accesses.filter((entry) => entry.sourceFile === "backend/src/services/dashboardSnapshotService.ts");
+  const byFunction = (functionName) => rows
+    .filter((entry) => entry.function === functionName)
+    .map((entry) => `${entry.prismaModel}:${entry.command}`)
+    .sort();
+  assert.deepEqual(byFunction("computeDashboardSnapshot"), [
+    "AuditLog:INSERT",
+    "AuditLog:SELECT",
+    "Licensee:SELECT",
+    "ManufacturerLicenseeLink:SELECT",
+    "Organization:SELECT",
+    "User:SELECT",
+  ]);
+  assert.deepEqual(byFunction("loadInventoryAggregate"), [
+    "AuditLog:INSERT",
+    "AuditLog:SELECT",
+    "Batch:SELECT",
+    "InventoryStatusRollup:SELECT",
+    "Licensee:SELECT",
+    "ManufacturerLicenseeLink:SELECT",
+    "Organization:SELECT",
+    "QRCode:SELECT",
+    "User:SELECT",
+  ]);
+  assert(rows.every((entry) => entry.method.startsWith("$function:app_rls.dashboard_snapshot_")));
+});
+
 test("stable IDs and references are unique and valid", () => {
   const { tables, workflows, identities, decisions, commandSemantics } = manifests();
   for (const items of [tables.tables, workflows.workflows, identities.identities, decisions.decisions, commandSemantics.rules]) assert.equal(new Set(items.map((item) => item.id)).size, items.length);
@@ -93,11 +121,11 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   validateSystemBoundaryContracts(systemBoundaries, workflows);
   validateContextBoundaryPlan(generated, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract);
   assert.equal(generated.workflowCount, 428);
-  assert.equal(generated.familyCount, 318);
+  assert.equal(generated.familyCount, 317);
   const count = (eligibility) => generated.families.filter((family) => family.automationEligibility === eligibility).reduce((total, family) => total + family.workflowIds.length, 0);
-  assert.equal(count("implemented"), 5);
+  assert.equal(count("implemented"), 7);
   assert.equal(count("contract-only"), 59);
-  assert.equal(count("blocked"), 364);
+  assert.equal(count("blocked"), 362);
   assert.equal(count("auto-implementable"), 0);
   const mfaDisableWorkflowId = "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa";
   const mfaDisableFamily = generated.families.find((family) => family.workflowIds.includes(mfaDisableWorkflowId));
@@ -330,13 +358,13 @@ test("bounded read-family batch is scoped, evidenced, and fail closed", () => {
   const batch = JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8"));
   assert(validateContextBoundaryReadBatch(batch, families, workflows, commandSemantics, tables));
   assert.equal(batch.selectedFamilies.length, 17);
-  assert.equal(batch.selectionTotals.workflowsConsidered, 24);
+  assert.equal(batch.selectionTotals.workflowsConsidered, 25);
   assert.equal(batch.selectionTotals.reclassifiedFamilies, 2);
   assert.equal(batch.selectionTotals.splitFamilies, 4);
   assert.equal(batch.selectionTotals.childFamiliesCreated, 8);
   assert.equal(batch.selectionTotals.contractOnlyWorkflows, 2);
   assert.equal(batch.selectionTotals.newlyImplementedWorkflows, 0);
-  assert.equal(batch.selectionTotals.blockedWorkflows, 22);
+  assert.equal(batch.selectionTotals.blockedWorkflows, 23);
 
   const reject = (mutate, pattern) => {
     const candidateBatch = structuredClone(batch);
@@ -669,6 +697,7 @@ test("clean-room full-RLS foundation remains exact and fail closed", () => {
   const commandSemantics = JSON.parse(fs.readFileSync(commandSemanticsPath, "utf8"));
   assert.equal(allowlist.launchBlocked, true);
   assert.equal(allowlist.certification.enabledWorkflowCount, 0);
+  assert.equal(allowlist.certification.essentialWorkflowCount, allowlist.workflows.length);
   assert.deepEqual(allowlist.protectedRouteGate.enabledRoutes, shutdown.enabledProtectedRoutes);
   assert.equal(generated.tables.length, 77);
   assert.equal(generated.tables.filter((entry) => entry.rls === "ENABLE AND FORCE").length, 75);
@@ -676,7 +705,7 @@ test("clean-room full-RLS foundation remains exact and fail closed", () => {
   assert.deepEqual(validateGeneratedPackage({ manifest: generated, policies, privileges, commandSemantics }), {
     tables: 77,
     forceRlsTargets: 75,
-    policies: 39,
+    policies: 48,
     directPolicySlices: 34,
     columnPrivilegeCells: 78,
   });

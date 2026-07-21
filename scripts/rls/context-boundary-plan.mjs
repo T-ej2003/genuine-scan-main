@@ -529,8 +529,16 @@ export const validateContextBoundaryReadBatch = (batch, familyManifest, workflow
         || (family.automationEligibility === "contract-only"
           && family.approvedBoundaryIds?.includes("public-read-contract-v1")
           && family.workflowIds.every((id) => workflowById.get(id).publicReadContractBoundaryId === "public-read-contract-v1"))
+        || (family.automationEligibility === "implemented"
+          && family.workflowIds.every((id) => {
+            const workflow = workflowById.get(id);
+            return workflow?.implementationStatus === "complete"
+              && workflow.postgresqlCertificationStatus === "certified"
+              && workflow.applicationPathCertificationEvidence?.status === "application-path-certified"
+              && workflow.applicationPathCertificationEvidence?.postgresqlMajor === 18;
+          }))
       );
-      assert(retainsBlockerOrUsesFrozenPublicContract, `${selected.familyId} blocker was silently cleared`);
+      assert(retainsBlockerOrUsesFrozenPublicContract, `${selected.familyId} blocker was cleared without a certified successor boundary`);
     }
     if (selected.resolution === "split-blocked") {
       splitFamilies += 1;

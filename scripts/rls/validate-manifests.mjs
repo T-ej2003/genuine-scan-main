@@ -207,6 +207,7 @@ const generatedRls = JSON.parse(fs.readFileSync("documents/security/rls-program/
 const generatedPolicies = JSON.parse(fs.readFileSync("documents/security/rls-program/generated/policy-inventory-report.json", "utf8"));
 const generatedPrivileges = JSON.parse(fs.readFileSync("documents/security/rls-program/generated/column-privilege-report.json", "utf8"));
 assert.equal(new Set(essentialAllowlist.workflows.map((entry) => entry.workflowId)).size, essentialAllowlist.workflows.length, "essential allowlist duplicates workflows");
+assert.equal(essentialAllowlist.certification.essentialWorkflowCount, essentialAllowlist.workflows.length, "essential allowlist count drifted");
 for (const entry of essentialAllowlist.workflows) assert(workflowIds.has(entry.workflowId), `essential allowlist references unknown workflow ${entry.workflowId}`);
 assert.deepEqual(essentialAllowlist.protectedRouteGate.enabledRoutes, shutdown.enabledProtectedRoutes, "launch allowlist and shutdown middleware manifest drifted");
 assert.equal(essentialAllowlist.certification.enabledWorkflowCount, essentialAllowlist.workflows.filter((entry) => entry.launchDisposition === "enabled").length, "enabled workflow certification count drifted");

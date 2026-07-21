@@ -490,6 +490,281 @@ ${resetRole}
 UPDATE mscqr_rls_install.state SET phase='runtime-grants-installed' WHERE singleton;
 `;
 
+const dashboardSnapshotFunctionsSql = `
+CREATE FUNCTION app_rls.dashboard_scope_fingerprint(requested_licensee_id text) RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE
+  selector text := NULLIF(btrim(requested_licensee_id),'');
+  actor_licensee_id text;
+  actor_organization_id text;
+  membership_count bigint;
+  primary_count bigint;
+  membership_fingerprint text;
+BEGIN
+  IF NOT app_rls.attributed_request()
+     OR app_rls.current_purpose()<>'dashboard-snapshot-read'
+     OR app_rls.current_user_id() IS NULL
+     OR app_rls.current_role() IS NULL
+     OR app_rls.current_request_id() !~ '^[A-Za-z0-9._:-]{1,128}$'
+  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  IF selector IS NOT NULL AND selector !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  IF ((${platformRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() NOT IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
+     OR (${tenantAdminRoles} AND app_rls.current_assurance() NOT IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
+     OR NOT (${platformRoles} OR ${tenantAdminRoles} OR ${manufacturerRoles})
+  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+
+  SELECT u.${q("licenseeId")},u.${q("orgId")} INTO actor_licensee_id,actor_organization_id
+  FROM public.${q("User")} u
+  WHERE u.${q("id")}=app_rls.current_user_id()
+    AND u.${q("role")}::text=app_rls.current_role()
+    AND u.${q("isActive")}=TRUE AND u.${q("status")}='ACTIVE'
+    AND u.${q("deletedAt")} IS NULL AND u.${q("disabledAt")} IS NULL;
+  IF NOT FOUND THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+
+  IF ${tenantAdminRoles} THEN
+    IF app_rls.current_licensee_id() IS NULL OR app_rls.current_organization_id() IS NULL
+       OR app_rls.current_manufacturer_id() IS NOT NULL
+       OR actor_licensee_id IS DISTINCT FROM app_rls.current_licensee_id()
+       OR actor_organization_id IS DISTINCT FROM app_rls.current_organization_id()
+       OR (selector IS NOT NULL AND selector IS DISTINCT FROM app_rls.current_licensee_id())
+       OR NOT EXISTS (
+         SELECT 1 FROM public.${q("Licensee")} l JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+         WHERE l.${q("id")}=app_rls.current_licensee_id() AND l.${q("orgId")}=app_rls.current_organization_id()
+           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+       )
+    THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+    RETURN md5(concat_ws('|','tenant',app_rls.current_user_id(),app_rls.current_role(),app_rls.current_licensee_id(),app_rls.current_organization_id()));
+  END IF;
+
+  IF ${manufacturerRoles} THEN
+    IF app_rls.current_manufacturer_id() IS DISTINCT FROM app_rls.current_user_id()
+       OR app_rls.current_organization_id() IS NOT NULL
+       OR app_rls.current_licensee_id() IS DISTINCT FROM selector
+    THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+    SELECT count(*),count(*) FILTER (WHERE ml.${q("isPrimary")}),string_agg(ml.${q("licenseeId")}||':'||ml.${q("isPrimary")}::text||':'||extract(epoch FROM ml.${q("updatedAt")})::text,',' ORDER BY ml.${q("licenseeId")})
+      INTO membership_count,primary_count,membership_fingerprint
+    FROM public.${q("ManufacturerLicenseeLink")} ml
+    JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+    JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+    WHERE ml.${q("manufacturerId")}=app_rls.current_user_id()
+      AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE;
+    IF membership_count NOT BETWEEN 1 AND 100 OR primary_count>1
+       OR (actor_licensee_id IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
+         JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+         JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+         WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=actor_licensee_id
+           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+       ))
+       OR (actor_organization_id IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
+         JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+         JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+         WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND l.${q("orgId")}=actor_organization_id
+           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+       ))
+       OR (selector IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
+         JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+         JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+         WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=selector
+           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+       ))
+    THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+    RETURN md5(concat_ws('|','manufacturer',app_rls.current_user_id(),app_rls.current_role(),coalesce(selector,'all'),membership_fingerprint));
+  END IF;
+
+  IF app_rls.current_manufacturer_id() IS NOT NULL OR app_rls.current_organization_id() IS NOT NULL
+     OR app_rls.current_licensee_id() IS DISTINCT FROM selector
+     OR (selector IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM public.${q("Licensee")} l JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+       WHERE l.${q("id")}=selector AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+     ))
+  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  RETURN md5(concat_ws('|','platform',app_rls.current_user_id(),app_rls.current_role(),coalesce(selector,'global')));
+END
+$function$;
+
+CREATE FUNCTION app_rls.authorize_dashboard_snapshot(audit_id text,requested_licensee_id text,route_surface text) RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE
+  fingerprint text;
+  audit_organization_id text := app_rls.current_organization_id();
+BEGIN
+  IF audit_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR route_surface NOT IN ('GET /api/dashboard/stats','GET /api/events/dashboard')
+  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  fingerprint := app_rls.dashboard_scope_fingerprint(requested_licensee_id);
+  IF app_rls.current_licensee_id() IS NOT NULL AND audit_organization_id IS NULL THEN
+    SELECT l.${q("orgId")} INTO audit_organization_id
+    FROM public.${q("Licensee")} l JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+    WHERE l.${q("id")}=app_rls.current_licensee_id()
+      AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  END IF;
+  INSERT INTO public.${q("AuditLog")}
+    (${q("id")},${q("userId")},${q("orgId")},${q("licenseeId")},${q("action")},${q("entityType")},${q("entityId")},${q("details")})
+  VALUES (
+    lower(audit_id),app_rls.current_user_id(),audit_organization_id,app_rls.current_licensee_id(),
+    'DASHBOARD_SNAPSHOT_READ','DashboardSnapshot',coalesce(app_rls.current_licensee_id(),app_rls.current_user_id()),
+    jsonb_build_object(
+      'actorId',app_rls.current_user_id(),'role',app_rls.current_role(),'assurance',app_rls.current_assurance(),
+      'requestId',app_rls.current_request_id(),'purposeCode',app_rls.current_purpose(),'route',route_surface,
+      'scopeFingerprint',fingerprint,'outcome','SUCCESS','workflowIds',jsonb_build_array(
+        'workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot',
+        'workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate'
+      )
+    )
+  ) ON CONFLICT (${q("id")}) DO NOTHING;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.${q("AuditLog")} a
+    WHERE a.${q("id")}=lower(audit_id) AND a.${q("userId")}=app_rls.current_user_id()
+      AND a.${q("orgId")} IS NOT DISTINCT FROM audit_organization_id
+      AND a.${q("licenseeId")} IS NOT DISTINCT FROM app_rls.current_licensee_id()
+      AND a.${q("action")}='DASHBOARD_SNAPSHOT_READ' AND a.${q("entityType")}='DashboardSnapshot'
+      AND a.${q("entityId")}=coalesce(app_rls.current_licensee_id(),app_rls.current_user_id())
+      AND a.${q("details")}->>'actorId'=app_rls.current_user_id()
+      AND a.${q("details")}->>'role'=app_rls.current_role()
+      AND a.${q("details")}->>'assurance'=app_rls.current_assurance()
+      AND a.${q("details")}->>'requestId'=app_rls.current_request_id()
+      AND a.${q("details")}->>'purposeCode'='dashboard-snapshot-read'
+      AND a.${q("details")}->>'route'=route_surface
+      AND a.${q("details")}->>'scopeFingerprint'=fingerprint
+      AND a.${q("details")}->>'outcome'='SUCCESS'
+      AND a.${q("details")}->'workflowIds'=jsonb_build_array(
+        'workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot',
+        'workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate'
+      )
+  ) THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  RETURN fingerprint;
+END
+$function$;
+
+CREATE FUNCTION app_rls.dashboard_snapshot_scope(audit_id text,requested_licensee_id text,route_surface text)
+RETURNS TABLE(scope_fingerprint text) LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+  SELECT app_rls.authorize_dashboard_snapshot(audit_id,requested_licensee_id,route_surface)
+$function$;
+
+CREATE FUNCTION app_rls.dashboard_snapshot_data(audit_id text,requested_licensee_id text,route_surface text,expected_scope_fingerprint text)
+RETURNS TABLE(
+  total_qr_codes bigint,active_licensees bigint,manufacturers bigint,total_batches bigint,
+  dormant bigint,active bigint,activated bigint,allocated bigint,printed bigint,redeemed bigint,blocked bigint,scanned bigint,
+  rollup_authoritative boolean
+) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE
+  fingerprint text;
+  rollup_total bigint;
+  rollup_dormant bigint;
+  rollup_active bigint;
+  rollup_activated bigint;
+  rollup_allocated bigint;
+  rollup_printed bigint;
+  rollup_redeemed bigint;
+  rollup_blocked bigint;
+  rollup_scanned bigint;
+BEGIN
+  fingerprint := app_rls.authorize_dashboard_snapshot(audit_id,requested_licensee_id,route_surface);
+  IF expected_scope_fingerprint IS DISTINCT FROM fingerprint THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+
+  IF ${manufacturerRoles} THEN
+    SELECT count(*) INTO active_licensees
+    FROM public.${q("Licensee")} l
+    JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+    WHERE EXISTS (
+      SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
+      WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=l.${q("id")}
+    ) AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE;
+  ELSIF ${platformRoles} AND app_rls.current_licensee_id() IS NULL THEN
+    SELECT count(*) INTO active_licensees
+    FROM public.${q("Licensee")} l
+    WHERE l.${q("isActive")}=TRUE;
+  ELSE
+    SELECT count(*) INTO active_licensees
+    FROM public.${q("Licensee")} l
+    JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+    WHERE l.${q("id")}=app_rls.current_licensee_id()
+      AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE;
+  END IF;
+
+  SELECT count(*) INTO manufacturers
+  FROM public.${q("User")} u
+  WHERE u.${q("role")} IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND u.${q("isActive")}=TRUE
+    AND (
+      (${manufacturerRoles} AND u.${q("id")}=app_rls.current_user_id())
+      OR (${platformRoles} AND app_rls.current_licensee_id() IS NULL)
+      OR ((${tenantAdminRoles} OR ${platformRoles}) AND app_rls.current_licensee_id() IS NOT NULL AND (
+        u.${q("licenseeId")}=app_rls.current_licensee_id()
+        OR EXISTS (SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml WHERE ml.${q("manufacturerId")}=u.${q("id")} AND ml.${q("licenseeId")}=app_rls.current_licensee_id())
+      ))
+    );
+
+  SELECT count(*) INTO total_batches
+  FROM public.${q("Batch")} b
+  WHERE (
+    (${manufacturerRoles} AND b.${q("manufacturerId")}=app_rls.current_user_id() AND EXISTS (
+      SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
+      JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+      JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+      WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=b.${q("licenseeId")}
+        AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+        AND (app_rls.current_licensee_id() IS NULL OR ml.${q("licenseeId")}=app_rls.current_licensee_id())
+    ))
+    OR (${tenantAdminRoles} AND b.${q("licenseeId")}=app_rls.current_licensee_id())
+    OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR b.${q("licenseeId")}=app_rls.current_licensee_id()))
+  );
+
+  SELECT coalesce(sum(r.${q("totalCodes")}),0),coalesce(sum(r.${q("dormant")}),0),coalesce(sum(r.${q("active")}),0),
+         coalesce(sum(r.${q("activated")}),0),coalesce(sum(r.${q("allocated")}),0),coalesce(sum(r.${q("printed")}),0),
+         coalesce(sum(r.${q("redeemed")}),0),coalesce(sum(r.${q("blocked")}),0),coalesce(sum(r.${q("scanned")}),0)
+    INTO rollup_total,rollup_dormant,rollup_active,rollup_activated,rollup_allocated,rollup_printed,rollup_redeemed,rollup_blocked,rollup_scanned
+  FROM public.${q("InventoryStatusRollup")} r
+  WHERE (
+    (${manufacturerRoles} AND r.${q("manufacturerId")}=app_rls.current_user_id() AND EXISTS (
+      SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
+      JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+      JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+      WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=r.${q("licenseeId")}
+        AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+        AND (app_rls.current_licensee_id() IS NULL OR ml.${q("licenseeId")}=app_rls.current_licensee_id())
+    ))
+    OR (${tenantAdminRoles} AND r.${q("licenseeId")}=app_rls.current_licensee_id())
+    OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR r.${q("licenseeId")}=app_rls.current_licensee_id()))
+  );
+
+  IF rollup_total>0 OR rollup_dormant>0 OR rollup_active>0 OR rollup_activated>0 OR rollup_allocated>0
+     OR rollup_printed>0 OR rollup_redeemed>0 OR rollup_blocked>0 OR rollup_scanned>0
+  THEN
+    rollup_authoritative:=TRUE;
+    total_qr_codes:=rollup_total; dormant:=rollup_dormant; active:=rollup_active; activated:=rollup_activated;
+    allocated:=rollup_allocated; printed:=rollup_printed; redeemed:=rollup_redeemed; blocked:=rollup_blocked; scanned:=rollup_scanned;
+  ELSE
+    rollup_authoritative:=FALSE;
+    SELECT count(*),count(*) FILTER (WHERE qcode.${q("status")}='DORMANT'),count(*) FILTER (WHERE qcode.${q("status")}='ACTIVE'),
+           count(*) FILTER (WHERE qcode.${q("status")}='ACTIVATED'),count(*) FILTER (WHERE qcode.${q("status")}='ALLOCATED'),
+           count(*) FILTER (WHERE qcode.${q("status")}='PRINTED'),count(*) FILTER (WHERE qcode.${q("status")}='REDEEMED'),
+           count(*) FILTER (WHERE qcode.${q("status")}='BLOCKED'),count(*) FILTER (WHERE qcode.${q("status")}='SCANNED')
+      INTO total_qr_codes,dormant,active,activated,allocated,printed,redeemed,blocked,scanned
+    FROM public.${q("QRCode")} qcode
+    WHERE (
+      (${manufacturerRoles} AND EXISTS (
+        SELECT 1 FROM public.${q("Batch")} b WHERE b.${q("id")}=qcode.${q("batchId")} AND b.${q("manufacturerId")}=app_rls.current_user_id()
+      ) AND EXISTS (
+        SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
+        JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+        JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+        WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=qcode.${q("licenseeId")}
+          AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+          AND (app_rls.current_licensee_id() IS NULL OR ml.${q("licenseeId")}=app_rls.current_licensee_id())
+      ))
+      OR (${tenantAdminRoles} AND qcode.${q("licenseeId")}=app_rls.current_licensee_id())
+      OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR qcode.${q("licenseeId")}=app_rls.current_licensee_id()))
+    );
+  END IF;
+  RETURN NEXT;
+END
+$function$;`;
+
 const contextHelpersSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
 ${requirePackagePhaseSql("ownership-installed", "context helpers")}
@@ -544,8 +819,11 @@ CREATE FUNCTION app_rls.platform_audit_log_details(log_ids text[]) RETURNS TABLE
     AND app_rls.current_purpose()='platform-audit-log-read' AND cardinality(log_ids) BETWEEN 1 AND 500
     AND a.${q("licenseeId")}=app_rls.current_licensee_id() AND a.${q("id")}=ANY(log_ids)
 $$;
+${dashboardSnapshotFunctionsSql}
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_rls FROM PUBLIC;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app_rls TO ${q(roleNames.app)};
+REVOKE EXECUTE ON FUNCTION app_rls.dashboard_scope_fingerprint(text) FROM ${q(roleNames.app)};
+REVOKE EXECUTE ON FUNCTION app_rls.authorize_dashboard_snapshot(text,text,text) FROM ${q(roleNames.app)};
 ${resetRole}
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
@@ -570,13 +848,125 @@ UPDATE mscqr_rls_install.state SET phase='context-helpers-installed' WHERE singl
 `;
 
 const internalSourceRuleIds = ["command-audit-log-insert-97535583a8fe", "command-audit-log-select-97535583a8fe", "command-policy-rule-select-509547f03abe", "command-trace-event-select-f571cd9ea8dd"];
+const dashboardWorkflowIds = new Set([
+  "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+  "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
+]);
+const dashboardSourceRuleIds = commandSemantics.rules
+  .filter((rule) => rule.supportingWorkflowIds?.some((workflowId) => dashboardWorkflowIds.has(workflowId)))
+  .map((rule) => rule.id)
+  .sort();
+if (dashboardSourceRuleIds.length !== 15) throw new Error(`Expected 15 exact dashboard source rules, found ${dashboardSourceRuleIds.length}`);
+const dashboardRuleIdsFor = (table, command) => {
+  const tableId = tables.find((item) => item.physicalTable === table)?.id;
+  const ids = commandSemantics.rules
+    .filter((rule) => rule.tableId === tableId && rule.command === command && rule.supportingWorkflowIds?.some((workflowId) => dashboardWorkflowIds.has(workflowId)))
+    .map((rule) => rule.id)
+    .sort();
+  if (!ids.length) throw new Error(`Dashboard policy ${table}:${command} has no exact source rule`);
+  return ids;
+};
+const dashboardPolicyBase = `(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (
+  ((${platformRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
+  OR (${tenantAdminRoles} AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
+))`;
 const internalPolicies = [
   { table: "User", name: "full_rls_internal_actor_user", predicate: `(((${q("id")}=app_rls.current_user_id() AND ${q("role")}::text=app_rls.current_role()) OR (((${tenantAdminRoles} OR ${platformRoles}) AND app_rls.current_purpose()='tenant-risk-analytics') AND ${q("role")} IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) OR (${platformRoles} AND app_rls.current_purpose()='platform-audit-log-read' AND ${q("licenseeId")}=app_rls.current_licensee_id())) AND ${q("isActive")}=TRUE AND ${q("status")}='ACTIVE' AND ${q("deletedAt")} IS NULL AND ${q("disabledAt")} IS NULL)` },
   { table: "ManufacturerLicenseeLink", name: "full_rls_internal_manufacturer_link", predicate: `${q("licenseeId")}=app_rls.current_licensee_id() AND ((${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id()) OR ((${tenantAdminRoles} OR ${platformRoles}) AND app_rls.current_purpose()='tenant-risk-analytics'))` },
   { table: "Licensee", name: "full_rls_internal_manufacturer_licensee", predicate: `${q("id")}=app_rls.current_licensee_id() AND (app_rls.current_organization_id() IS NULL OR ${q("orgId")}=app_rls.current_organization_id()) AND ${q("isActive")}=TRUE AND ${q("suspendedAt")} IS NULL` },
   { table: "Organization", name: "full_rls_internal_manufacturer_org", predicate: `((${q("id")}=app_rls.current_organization_id()) OR (${platformRoles} AND app_rls.current_purpose() IN ('tenant-risk-analytics','platform-audit-log-read') AND EXISTS (SELECT 1 FROM public.${q("Licensee")} scope_licensee WHERE scope_licensee.${q("id")}=app_rls.current_licensee_id() AND scope_licensee.${q("orgId")}=${q("Organization")}.${q("id")}))) AND ${q("isActive")}=TRUE` },
   { table: "AuditLog", name: "full_rls_internal_platform_audit_details", predicate: `${platformRoles} AND app_rls.current_purpose()='platform-audit-log-read' AND ${q("licenseeId")}=app_rls.current_licensee_id()` },
-].map((policy) => ({ ...policy, sourceCommandRuleIds: internalSourceRuleIds, actors: ["licensee-admin", "manufacturer", "platform-admin"], assurance: "source-rule-specific", purpose: ["tenant-risk-analytics", "audit-log-read", "platform-audit-log-read", "trace-timeline-read"], scopePredicate: policy.predicate, command: "SELECT", columns: [], certificationStatus: "pending", internalHelperOnly: true }));
+].map((policy) => ({ ...policy, sourceCommandRuleIds: internalSourceRuleIds, actors: ["licensee-admin", "manufacturer", "platform-admin"], assurance: "source-rule-specific", purpose: ["tenant-risk-analytics", "audit-log-read", "platform-audit-log-read", "trace-timeline-read"], scopeType: "internal-manufacturer-validation", scopePredicate: policy.predicate, command: "SELECT", columns: [], certificationStatus: "pending", internalHelperOnly: true }))
+  .concat([
+    {
+      table: "User", name: "full_rls_internal_dashboard_manufacturer_user", command: "SELECT",
+      columns: ["id", "role", "isActive", "status", "deletedAt", "disabledAt", "licenseeId", "orgId"],
+      predicate: `${dashboardPolicyBase} AND ${q("role")} IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND ${q("isActive")}=TRUE AND (
+        (${manufacturerRoles} AND ${q("id")}=app_rls.current_user_id())
+        OR (${platformRoles} AND app_rls.current_licensee_id() IS NULL)
+        OR ((${tenantAdminRoles} OR ${platformRoles}) AND app_rls.current_licensee_id() IS NOT NULL AND (${q("licenseeId")}=app_rls.current_licensee_id() OR EXISTS (
+          SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml WHERE ml.${q("manufacturerId")}=${q("User")}.${q("id")} AND ml.${q("licenseeId")}=app_rls.current_licensee_id()
+        )))
+      )`,
+    },
+    {
+      table: "ManufacturerLicenseeLink", name: "full_rls_internal_dashboard_manufacturer_link", command: "SELECT",
+      columns: ["manufacturerId", "licenseeId", "isPrimary", "updatedAt"],
+      predicate: `${dashboardPolicyBase} AND (
+        (${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id())
+        OR (${tenantAdminRoles} AND ${q("licenseeId")}=app_rls.current_licensee_id())
+        OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+      )`,
+    },
+    {
+      table: "Licensee", name: "full_rls_internal_dashboard_licensee", command: "SELECT",
+      columns: ["id", "orgId", "isActive", "suspendedAt"],
+      predicate: `${dashboardPolicyBase} AND (
+        (${manufacturerRoles} AND ${q("isActive")}=TRUE AND ${q("suspendedAt")} IS NULL AND EXISTS (SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=${q("Licensee")}.${q("id")}))
+        OR (${tenantAdminRoles} AND ${q("id")}=app_rls.current_licensee_id() AND ${q("orgId")}=app_rls.current_organization_id() AND ${q("isActive")}=TRUE AND ${q("suspendedAt")} IS NULL)
+        OR (${platformRoles} AND ((app_rls.current_licensee_id() IS NULL AND ${q("isActive")}=TRUE) OR (${q("id")}=app_rls.current_licensee_id() AND ${q("isActive")}=TRUE AND ${q("suspendedAt")} IS NULL)))
+      )`,
+    },
+    {
+      table: "Organization", name: "full_rls_internal_dashboard_organization", command: "SELECT",
+      columns: ["id", "isActive"],
+      predicate: `${dashboardPolicyBase} AND ${q("isActive")}=TRUE AND (
+        (${tenantAdminRoles} AND ${q("id")}=app_rls.current_organization_id())
+        OR (${manufacturerRoles} AND EXISTS (
+          SELECT 1 FROM public.${q("Licensee")} l JOIN public.${q("ManufacturerLicenseeLink")} ml ON ml.${q("licenseeId")}=l.${q("id")}
+          WHERE l.${q("orgId")}=${q("Organization")}.${q("id")} AND ml.${q("manufacturerId")}=app_rls.current_user_id()
+            AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL
+        ))
+        OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR EXISTS (
+          SELECT 1 FROM public.${q("Licensee")} l WHERE l.${q("id")}=app_rls.current_licensee_id() AND l.${q("orgId")}=${q("Organization")}.${q("id")}
+        )))
+      )`,
+    },
+    {
+      table: "Batch", name: "full_rls_internal_dashboard_batch", command: "SELECT",
+      columns: ["id", "licenseeId", "manufacturerId"],
+      predicate: `${dashboardPolicyBase} AND (
+        (${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id() AND EXISTS (SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")} JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")} WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=${q("Batch")}.${q("licenseeId")} AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE) AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+        OR (${tenantAdminRoles} AND ${q("licenseeId")}=app_rls.current_licensee_id())
+        OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+      )`,
+    },
+    {
+      table: "QRCode", name: "full_rls_internal_dashboard_qrcode", command: "SELECT",
+      columns: ["batchId", "licenseeId", "status"],
+      predicate: `${dashboardPolicyBase} AND (
+        (${manufacturerRoles} AND EXISTS (SELECT 1 FROM public.${q("Batch")} b WHERE b.${q("id")}=${q("QRCode")}.${q("batchId")} AND b.${q("manufacturerId")}=app_rls.current_user_id()) AND EXISTS (SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")} JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")} WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=${q("QRCode")}.${q("licenseeId")} AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE) AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+        OR (${tenantAdminRoles} AND ${q("licenseeId")}=app_rls.current_licensee_id())
+        OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+      )`,
+    },
+    {
+      table: "InventoryStatusRollup", name: "full_rls_internal_dashboard_rollup", command: "SELECT",
+      columns: ["licenseeId", "manufacturerId", "totalCodes", "dormant", "active", "activated", "allocated", "printed", "redeemed", "blocked", "scanned"],
+      predicate: `${dashboardPolicyBase} AND (
+        (${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id() AND EXISTS (SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")} JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")} WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=${q("InventoryStatusRollup")}.${q("licenseeId")} AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE) AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+        OR (${tenantAdminRoles} AND ${q("licenseeId")}=app_rls.current_licensee_id())
+        OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+      )`,
+    },
+    ...["SELECT", "INSERT"].map((command) => ({
+      table: "AuditLog", name: `full_rls_internal_dashboard_audit_${command.toLowerCase()}`, command,
+      columns: ["id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details"],
+      predicate: `${dashboardPolicyBase} AND ${q("userId")}=app_rls.current_user_id() AND ${q("action")}='DASHBOARD_SNAPSHOT_READ' AND ${q("entityType")}='DashboardSnapshot' AND ${q("details")}->>'requestId'=app_rls.current_request_id() AND ${q("details")}->>'purposeCode'='dashboard-snapshot-read' AND ${q("details")}->>'route' IN ('GET /api/dashboard/stats','GET /api/events/dashboard')`,
+    })),
+  ].map((policy) => ({
+    ...policy,
+    projectedColumns: policy.columns,
+    columns: [],
+    sourceCommandRuleIds: dashboardRuleIdsFor(policy.table, policy.command),
+    actors: ["licensee-admin", "manufacturer", "platform-admin"],
+    assurance: "source-rule-specific",
+    purpose: ["dashboard-snapshot-read"],
+    scopeType: "database-revalidated-dashboard-aggregate",
+    scopePredicate: policy.predicate,
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })));
 
 const policyStatements = forceTargets.flatMap((table) => [`ALTER TABLE public.${q(table.physicalTable)} ENABLE ROW LEVEL SECURITY;`, `ALTER TABLE public.${q(table.physicalTable)} FORCE ROW LEVEL SECURITY;`]);
 for (const slice of slices) {
@@ -585,8 +975,9 @@ for (const slice of slices) {
   policyStatements.push(`COMMENT ON POLICY ${q(slice.policyName)} ON public.${q(slice.table)} IS ${lit(JSON.stringify({ sourceCommandRuleIds: slice.sourceCommandRuleIds, actors: slice.actors, assurance: slice.minimumAssurance, purpose: slice.purposeCodes, scope: slice.scopeType, workflowId: slice.workflowId }))};`);
 }
 for (const policy of internalPolicies) {
-  policyStatements.push(`CREATE POLICY ${q(policy.name)} ON public.${q(policy.table)} AS PERMISSIVE FOR SELECT TO ${q(roleNames.owner)} USING (${policy.predicate});`);
-  policyStatements.push(`COMMENT ON POLICY ${q(policy.name)} ON public.${q(policy.table)} IS ${lit(JSON.stringify({ sourceCommandRuleIds: policy.sourceCommandRuleIds, actors: policy.actors, assurance: policy.assurance, purpose: policy.purpose, scope: "internal-manufacturer-validation" }))};`);
+  const clause = policy.command === "INSERT" ? `WITH CHECK (${policy.predicate})` : `USING (${policy.predicate})`;
+  policyStatements.push(`CREATE POLICY ${q(policy.name)} ON public.${q(policy.table)} AS PERMISSIVE FOR ${policy.command} TO ${q(roleNames.owner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policy.name)} ON public.${q(policy.table)} IS ${lit(JSON.stringify({ sourceCommandRuleIds: policy.sourceCommandRuleIds, actors: policy.actors, assurance: policy.assurance, purpose: policy.purpose, scope: policy.scopeType }))};`);
 }
 const policiesSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
@@ -634,6 +1025,7 @@ const expectedDatabaseAclSelect = expectedRowsSelect([
 const expectedRoutineIdentities = [
   ["app_rls", "actor_scope_valid", ""],
   ["app_rls", "attributed_request", ""],
+  ["app_rls", "authorize_dashboard_snapshot", "audit_id text, requested_licensee_id text, route_surface text"],
   ["app_rls", "current_assurance", ""],
   ["app_rls", "current_licensee_id", ""],
   ["app_rls", "current_manufacturer_id", ""],
@@ -642,6 +1034,9 @@ const expectedRoutineIdentities = [
   ["app_rls", "current_request_id", ""],
   ["app_rls", "current_role", ""],
   ["app_rls", "current_user_id", ""],
+  ["app_rls", "dashboard_scope_fingerprint", "requested_licensee_id text"],
+  ["app_rls", "dashboard_snapshot_data", "audit_id text, requested_licensee_id text, route_surface text, expected_scope_fingerprint text"],
+  ["app_rls", "dashboard_snapshot_scope", "audit_id text, requested_licensee_id text, route_surface text"],
   ["app_rls", "install_actor_context", "user_id text, actor_role text, organization_id text, licensee_id text, manufacturer_id text, assurance text, request_id text, purpose_code text"],
   ["app_rls", "manufacturer_scope_valid", "target_manufacturer_id text"],
   ["app_rls", "platform_audit_log_details", "log_ids text[]"],

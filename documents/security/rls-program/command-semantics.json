@@ -206,6 +206,191 @@
       ]
     },
     {
+      "id": "sql-profile-dashboard-snapshot-scope-licensee-admin",
+      "workflowId": "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+      "route": "GET /api/dashboard/stats",
+      "routes": [
+        "GET /api/dashboard/stats",
+        "GET /api/events/dashboard"
+      ],
+      "functionSignature": "app_rls.dashboard_snapshot_scope(text,text,text)",
+      "actorClass": "licensee-admin",
+      "roleValues": [
+        "LICENSEE_ADMIN",
+        "ORG_ADMIN"
+      ],
+      "minimumAssurance": "password-verified",
+      "purposeCodes": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "status": "named-function-candidate",
+      "commandRuleIds": [
+        "command-audit-log-insert-e3ba477495b1",
+        "command-audit-log-select-e3ba477495b1",
+        "command-licensee-select-e3ba477495b1",
+        "command-manufacturer-licensee-link-select-e3ba477495b1",
+        "command-organization-select-e3ba477495b1",
+        "command-user-select-e3ba477495b1"
+      ]
+    },
+    {
+      "id": "sql-profile-dashboard-snapshot-scope-manufacturer",
+      "workflowId": "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+      "route": "GET /api/dashboard/stats",
+      "routes": [
+        "GET /api/dashboard/stats",
+        "GET /api/events/dashboard"
+      ],
+      "functionSignature": "app_rls.dashboard_snapshot_scope(text,text,text)",
+      "actorClass": "manufacturer",
+      "roleValues": [
+        "MANUFACTURER",
+        "MANUFACTURER_ADMIN",
+        "MANUFACTURER_USER"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "purposeCodes": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "canonical-manufacturer-active-licensee-set",
+      "status": "named-function-candidate",
+      "commandRuleIds": [
+        "command-audit-log-insert-e3ba477495b1",
+        "command-audit-log-select-e3ba477495b1",
+        "command-licensee-select-e3ba477495b1",
+        "command-manufacturer-licensee-link-select-e3ba477495b1",
+        "command-organization-select-e3ba477495b1",
+        "command-user-select-e3ba477495b1"
+      ]
+    },
+    {
+      "id": "sql-profile-dashboard-snapshot-scope-platform-admin",
+      "workflowId": "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+      "route": "GET /api/dashboard/stats",
+      "routes": [
+        "GET /api/dashboard/stats",
+        "GET /api/events/dashboard"
+      ],
+      "functionSignature": "app_rls.dashboard_snapshot_scope(text,text,text)",
+      "actorClass": "platform-admin",
+      "roleValues": [
+        "SUPER_ADMIN",
+        "PLATFORM_SUPER_ADMIN"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "purposeCodes": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-validated-global-or-selected-licensee-aggregate",
+      "status": "named-function-candidate",
+      "commandRuleIds": [
+        "command-audit-log-insert-e3ba477495b1",
+        "command-audit-log-select-e3ba477495b1",
+        "command-licensee-select-e3ba477495b1",
+        "command-manufacturer-licensee-link-select-e3ba477495b1",
+        "command-organization-select-e3ba477495b1",
+        "command-user-select-e3ba477495b1"
+      ]
+    },
+    {
+      "id": "sql-profile-dashboard-snapshot-data-licensee-admin",
+      "workflowId": "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
+      "route": "GET /api/dashboard/stats",
+      "routes": [
+        "GET /api/dashboard/stats",
+        "GET /api/events/dashboard"
+      ],
+      "functionSignature": "app_rls.dashboard_snapshot_data(text,text,text,text)",
+      "actorClass": "licensee-admin",
+      "roleValues": [
+        "LICENSEE_ADMIN",
+        "ORG_ADMIN"
+      ],
+      "minimumAssurance": "password-verified",
+      "purposeCodes": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "canonical-licensee-organization",
+      "status": "named-function-candidate",
+      "commandRuleIds": [
+        "command-audit-log-insert-f64d10600903",
+        "command-audit-log-select-f64d10600903",
+        "command-batch-select-f64d10600903",
+        "command-inventory-status-rollup-select-f64d10600903",
+        "command-licensee-select-f64d10600903",
+        "command-manufacturer-licensee-link-select-f64d10600903",
+        "command-organization-select-f64d10600903",
+        "command-qrcode-select-f64d10600903",
+        "command-user-select-f64d10600903"
+      ]
+    },
+    {
+      "id": "sql-profile-dashboard-snapshot-data-manufacturer",
+      "workflowId": "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
+      "route": "GET /api/dashboard/stats",
+      "routes": [
+        "GET /api/dashboard/stats",
+        "GET /api/events/dashboard"
+      ],
+      "functionSignature": "app_rls.dashboard_snapshot_data(text,text,text,text)",
+      "actorClass": "manufacturer",
+      "roleValues": [
+        "MANUFACTURER",
+        "MANUFACTURER_ADMIN",
+        "MANUFACTURER_USER"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "purposeCodes": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "canonical-manufacturer-active-licensee-set",
+      "status": "named-function-candidate",
+      "commandRuleIds": [
+        "command-audit-log-insert-f64d10600903",
+        "command-audit-log-select-f64d10600903",
+        "command-batch-select-f64d10600903",
+        "command-inventory-status-rollup-select-f64d10600903",
+        "command-licensee-select-f64d10600903",
+        "command-manufacturer-licensee-link-select-f64d10600903",
+        "command-organization-select-f64d10600903",
+        "command-qrcode-select-f64d10600903",
+        "command-user-select-f64d10600903"
+      ]
+    },
+    {
+      "id": "sql-profile-dashboard-snapshot-data-platform-admin",
+      "workflowId": "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
+      "route": "GET /api/dashboard/stats",
+      "routes": [
+        "GET /api/dashboard/stats",
+        "GET /api/events/dashboard"
+      ],
+      "functionSignature": "app_rls.dashboard_snapshot_data(text,text,text,text)",
+      "actorClass": "platform-admin",
+      "roleValues": [
+        "SUPER_ADMIN",
+        "PLATFORM_SUPER_ADMIN"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "purposeCodes": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-validated-global-or-selected-licensee-aggregate",
+      "status": "named-function-candidate",
+      "commandRuleIds": [
+        "command-audit-log-insert-f64d10600903",
+        "command-audit-log-select-f64d10600903",
+        "command-batch-select-f64d10600903",
+        "command-inventory-status-rollup-select-f64d10600903",
+        "command-licensee-select-f64d10600903",
+        "command-manufacturer-licensee-link-select-f64d10600903",
+        "command-organization-select-f64d10600903",
+        "command-qrcode-select-f64d10600903",
+        "command-user-select-f64d10600903"
+      ]
+    },
+    {
       "id": "sql-profile-blocked-platform-and-incompatible-projections",
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv",
@@ -3339,6 +3524,152 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-audit-log-insert-e3ba477495b1",
+      "tableId": "table-audit-log",
+      "command": "INSERT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "details",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "New row preserves Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-audit-log-insert-f64d10600903",
+      "tableId": "table-audit-log",
+      "command": "INSERT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "details",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "New row preserves Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-audit-log-insert-f6a24dac1201",
       "tableId": "table-audit-log",
       "command": "INSERT",
@@ -5067,6 +5398,152 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-audit-log-select-e3ba477495b1",
+      "tableId": "table-audit-log",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "details",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-audit-log-select-f64d10600903",
+      "tableId": "table-audit-log",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "details",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {
@@ -10223,99 +10700,6 @@
       "status": "architecture-resolved"
     },
     {
-      "id": "command-batch-select-e3ba477495b1",
-      "tableId": "table-batch",
-      "command": "SELECT",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "minimumAssurance": "password-verified",
-      "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
-      },
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-      "allowedColumns": [
-        "createdAt",
-        "endCode",
-        "id",
-        "licenseeId",
-        "lifecycleState",
-        "manufacturerId",
-        "metadata",
-        "name",
-        "parentBatchId",
-        "printPackDownloadedAt",
-        "printPackDownloadedByUserId",
-        "printedAt",
-        "releasedAt",
-        "releasedByUserId",
-        "rootBatchId",
-        "sampleScanPolicy",
-        "startCode",
-        "suspendedAt",
-        "suspendedReason",
-        "totalCodes",
-        "updatedAt"
-      ],
-      "protectedColumns": [
-        "createdAt",
-        "endCode",
-        "id",
-        "licenseeId",
-        "lifecycleState",
-        "manufacturerId",
-        "metadata",
-        "releasedAt",
-        "startCode",
-        "updatedAt"
-      ],
-      "allowedLifecycleStates": [
-        "lifecycleState=DRAFT",
-        "lifecycleState=CODES_GENERATED",
-        "lifecycleState=PRINT_ACKNOWLEDGED",
-        "lifecycleState=PRINT_CONFIRMED",
-        "lifecycleState=SAMPLE_VERIFIED",
-        "lifecycleState=RELEASED",
-        "lifecycleState=FAILED",
-        "lifecycleState=VOIDED",
-        "releasedAt=NULL",
-        "releasedAt=SERVER_TIMESTAMP_SET"
-      ],
-      "forbiddenLifecycleStates": [],
-      "lifecycleColumns": [
-        "lifecycleState",
-        "releasedAt"
-      ],
-      "withCheckRule": "not-applicable",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
-      "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "ordinary-rls",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
-      ],
-      "supportingEvidence": [
-        "backend/src/services/dashboardSnapshotService.ts"
-      ],
-      "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
-      ],
-      "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
-      ],
-      "confidence": "medium",
-      "status": "architecture-resolved"
-    },
-    {
       "id": "command-batch-select-ed65fe74b639",
       "tableId": "table-batch",
       "command": "SELECT",
@@ -10499,6 +10883,90 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-batch-select-f64d10600903",
+      "tableId": "table-batch",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "id",
+        "licenseeId",
+        "manufacturerId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "endCode",
+        "id",
+        "licenseeId",
+        "lifecycleState",
+        "manufacturerId",
+        "metadata",
+        "releasedAt",
+        "startCode",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "lifecycleState=DRAFT",
+        "lifecycleState=CODES_GENERATED",
+        "lifecycleState=PRINT_ACKNOWLEDGED",
+        "lifecycleState=PRINT_CONFIRMED",
+        "lifecycleState=SAMPLE_VERIFIED",
+        "lifecycleState=RELEASED",
+        "lifecycleState=FAILED",
+        "lifecycleState=VOIDED",
+        "releasedAt=NULL",
+        "releasedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "lifecycleState",
+        "releasedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {
@@ -21544,32 +22012,32 @@
       "tableId": "table-inventory-status-rollup",
       "command": "SELECT",
       "actorClasses": [
-        "authenticated-user"
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
       },
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
       "allowedColumns": [
-        "activated",
         "active",
+        "activated",
         "allocated",
-        "batchId",
         "blocked",
-        "createdAt",
         "dormant",
         "licenseeId",
         "manufacturerId",
         "printed",
         "redeemed",
-        "refreshedAt",
         "scanned",
-        "totalCodes",
-        "updatedAt"
+        "totalCodes"
       ],
       "protectedColumns": [
         "createdAt",
@@ -21581,13 +22049,13 @@
       "forbiddenLifecycleStates": [],
       "lifecycleColumns": [],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
+      "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "ordinary-rls",
+      "authorizationBoundary": "named-function",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -21595,15 +22063,20 @@
         "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
       ],
       "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
         "backend/src/services/dashboardSnapshotService.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
-      "confidence": "medium",
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {
@@ -24145,33 +24618,25 @@
       "tableId": "table-licensee",
       "command": "SELECT",
       "actorClasses": [
-        "authenticated-user"
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
       },
-      "scopeRule": "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
       "allowedColumns": [
-        "brandName",
-        "createdAt",
-        "description",
         "id",
         "isActive",
-        "location",
-        "metadata",
-        "name",
         "orgId",
-        "prefix",
-        "supportEmail",
-        "supportPhone",
-        "suspendedAt",
-        "suspendedReason",
-        "updatedAt",
-        "website"
+        "suspendedAt"
       ],
       "protectedColumns": [
         "createdAt",
@@ -24187,13 +24652,13 @@
       "forbiddenLifecycleStates": [],
       "lifecycleColumns": [],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
+      "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "ordinary-rls",
+      "authorizationBoundary": "named-function",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -24201,15 +24666,20 @@
         "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
       ],
       "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
         "backend/src/services/dashboardSnapshotService.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
-      "confidence": "medium",
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {
@@ -24281,6 +24751,75 @@
       ],
       "platformReadScopeBoundaryId": "platform-read-scope-v1",
       "platformReadScopeClass": "licensee-bounded-read",
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-licensee-select-f64d10600903",
+      "tableId": "table-licensee",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "id",
+        "isActive",
+        "orgId",
+        "suspendedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "location",
+        "metadata",
+        "orgId",
+        "supportEmail",
+        "supportPhone",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -25521,6 +26060,136 @@
         "operator-boundary-staging-rls-fixture"
       ],
       "operatorBoundaryStatus": "resolved"
+    },
+    {
+      "id": "command-manufacturer-licensee-link-select-e3ba477495b1",
+      "tableId": "table-manufacturer-licensee-link",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "isPrimary",
+        "licenseeId",
+        "manufacturerId",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "licenseeId",
+        "manufacturerId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-manufacturer-licensee-link-select-f64d10600903",
+      "tableId": "table-manufacturer-licensee-link",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "isPrimary",
+        "licenseeId",
+        "manufacturerId",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "licenseeId",
+        "manufacturerId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
     },
     {
       "id": "command-manufacturer-licensee-link-select-fcd02a1a5d81",
@@ -27280,6 +27949,130 @@
         "operator-boundary-staging-rls-fixture"
       ],
       "operatorBoundaryStatus": "resolved"
+    },
+    {
+      "id": "command-organization-select-e3ba477495b1",
+      "tableId": "table-organization",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "id",
+        "isActive"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-organization-select-f64d10600903",
+      "tableId": "table-organization",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "id",
+        "isActive"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
     },
     {
       "id": "command-organization-select-restricted-read",
@@ -62451,114 +63244,6 @@
       "status": "architecture-resolved"
     },
     {
-      "id": "command-qrcode-select-e3ba477495b1",
-      "tableId": "table-qrcode",
-      "command": "SELECT",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "minimumAssurance": "password-verified",
-      "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
-      },
-      "scopeRule": "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-      "allowedColumns": [
-        "batchId",
-        "blockedAt",
-        "code",
-        "createdAt",
-        "customerVerifiableAt",
-        "displayCode",
-        "id",
-        "issuanceMode",
-        "lastScanDevice",
-        "lastScanIp",
-        "lastScanUserAgent",
-        "lastSignedVerificationAt",
-        "lastSignedVerificationDeviceHash",
-        "lastSignedVerificationIpHash",
-        "licenseeId",
-        "printJobId",
-        "printedAt",
-        "printedByUserId",
-        "redeemedAt",
-        "redeemedDeviceFingerprint",
-        "replayEpoch",
-        "scanCount",
-        "scannedAt",
-        "signedFirstSeenAt",
-        "status",
-        "tokenExpiresAt",
-        "tokenHash",
-        "tokenIssuedAt",
-        "tokenNonce",
-        "underInvestigationAt",
-        "underInvestigationReason",
-        "updatedAt"
-      ],
-      "protectedColumns": [
-        "code",
-        "createdAt",
-        "displayCode",
-        "id",
-        "lastScanUserAgent",
-        "lastSignedVerificationDeviceHash",
-        "lastSignedVerificationIpHash",
-        "licenseeId",
-        "status",
-        "tokenExpiresAt",
-        "tokenHash",
-        "tokenIssuedAt",
-        "tokenNonce",
-        "updatedAt"
-      ],
-      "allowedLifecycleStates": [
-        "status=DORMANT",
-        "status=ACTIVE",
-        "status=ALLOCATED",
-        "status=ACTIVATED",
-        "status=PRINTED",
-        "status=REDEEMED",
-        "status=BLOCKED",
-        "status=SCANNED",
-        "tokenExpiresAt=NULL",
-        "tokenExpiresAt=SERVER_TIMESTAMP_SET"
-      ],
-      "forbiddenLifecycleStates": [],
-      "lifecycleColumns": [
-        "status",
-        "tokenExpiresAt"
-      ],
-      "withCheckRule": "not-applicable",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
-      "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "ordinary-rls",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
-      ],
-      "supportingEvidence": [
-        "backend/src/services/dashboardSnapshotService.ts"
-      ],
-      "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
-      ],
-      "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
-      ],
-      "confidence": "medium",
-      "status": "architecture-resolved"
-    },
-    {
       "id": "command-qrcode-select-e6d252fb244e",
       "tableId": "table-qrcode",
       "command": "SELECT",
@@ -63092,6 +63777,94 @@
       "publicReadContractBoundaryId": "public-read-contract-v1",
       "publicAccessClass": "proof-bound-public-status",
       "publicFunctionId": "public-fn-read-verification-session",
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-qrcode-select-f64d10600903",
+      "tableId": "table-qrcode",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "batchId",
+        "licenseeId",
+        "status"
+      ],
+      "protectedColumns": [
+        "code",
+        "createdAt",
+        "displayCode",
+        "id",
+        "lastScanUserAgent",
+        "lastSignedVerificationDeviceHash",
+        "lastSignedVerificationIpHash",
+        "licenseeId",
+        "status",
+        "tokenExpiresAt",
+        "tokenHash",
+        "tokenIssuedAt",
+        "tokenNonce",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=DORMANT",
+        "status=ACTIVE",
+        "status=ALLOCATED",
+        "status=ACTIVATED",
+        "status=PRINTED",
+        "status=REDEEMED",
+        "status=BLOCKED",
+        "status=SCANNED",
+        "tokenExpiresAt=NULL",
+        "tokenExpiresAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "status",
+        "tokenExpiresAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -80659,33 +81432,29 @@
       "tableId": "table-user",
       "command": "SELECT",
       "actorClasses": [
-        "authenticated-user"
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
       "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
       },
-      "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
       "allowedColumns": [
-        "createdAt",
         "deletedAt",
         "disabledAt",
-        "disabledReason",
-        "failedLoginAttempts",
         "id",
         "isActive",
-        "lastLoginAt",
         "licenseeId",
-        "lockedUntil",
-        "name",
         "orgId",
         "role",
-        "status",
-        "updatedAt",
-        "website"
+        "status"
       ],
       "protectedColumns": [
         "createdAt",
@@ -80722,9 +81491,9 @@
       ],
       "withCheckRule": "not-applicable",
       "requiresNamedFunction": true,
-      "namedFunctionClass": "authenticated-security-repository-function",
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
       "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
+      "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
       "authorizationBoundary": "named-function",
@@ -80735,15 +81504,20 @@
         "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
       ],
       "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
         "backend/src/services/dashboardSnapshotService.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
       ],
       "denyScenarios": [
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
-      "confidence": "medium",
+      "confidence": "high",
       "status": "architecture-resolved"
     },
     {
@@ -80859,6 +81633,99 @@
         "status": "resolved"
       },
       "preAuthFunctionId": "preauth-fn-request-password-reset"
+    },
+    {
+      "id": "command-user-select-f64d10600903",
+      "tableId": "table-user",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee.",
+      "allowedColumns": [
+        "deletedAt",
+        "disabledAt",
+        "id",
+        "isActive",
+        "licenseeId",
+        "orgId",
+        "role",
+        "status"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "email",
+        "emailVerifiedAt",
+        "id",
+        "licenseeId",
+        "location",
+        "metadata",
+        "orgId",
+        "passwordHash",
+        "pendingEmail",
+        "pendingEmailRequestedAt",
+        "role",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "deletedAt=NULL",
+        "deletedAt=SERVER_TIMESTAMP_SET",
+        "disabledAt=NULL",
+        "disabledAt=SERVER_TIMESTAMP_SET",
+        "status=INVITED",
+        "status=ACTIVE",
+        "status=DISABLED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "deletedAt",
+        "disabledAt",
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-dashboard-snapshot-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "supportingEvidence": [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "allowScenarios": [
+        "licensee-admin or manufacturer or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
     },
     {
       "id": "command-user-select-fcb995864029",

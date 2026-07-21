@@ -64,6 +64,28 @@
       "userFacingFallback": "Existing workflow behavior remains unchanged until its exact boundary is certified."
     },
     {
+      "workflowId": "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+      "routeOrRoot": "GET /api/dashboard/stats and initial/delta authorization for GET /api/events/dashboard",
+      "requiredActor": "database-revalidated active tenant administrator, MFA-verified manufacturer or fresh-MFA platform administrator",
+      "requiredBoundary": "canonical dashboard-snapshot-read context plus app_rls.dashboard_snapshot_scope(text,text,text)",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "exact dashboard scope function, internal helper EXECUTE denial and application-path PostgreSQL 18 proof",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate; the registered routes remain functional before activation",
+      "userFacingFallback": "Existing dashboard REST and SSE behavior remains unchanged until the shared authorization family is certified."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
+      "routeOrRoot": "GET /api/dashboard/stats and initial snapshot for GET /api/events/dashboard",
+      "requiredActor": "database-revalidated active tenant administrator, MFA-verified manufacturer or fresh-MFA platform administrator",
+      "requiredBoundary": "canonical dashboard-snapshot-read context plus app_rls.dashboard_snapshot_data(text,text,text,text)",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "exact dashboard data function, rollup/fallback semantic proof and application-path PostgreSQL 18 proof",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate; the registered routes remain functional before activation",
+      "userFacingFallback": "Existing aggregate, sparse fallback and cache behavior remains unchanged until certified."
+    },
+    {
       "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
       "routeOrRoot": "GET /api/audit/logs",
       "requiredActor": "frozen bounded audit viewer",
@@ -198,7 +220,7 @@
   ],
   "certification": {
     "enabledWorkflowCount": 0,
-    "essentialWorkflowCount": 17,
+    "essentialWorkflowCount": 18,
     "disposablePostgresqlStatus": "pending",
     "activationRule": "launchBlocked may become false only after every enabled essential workflow passes real-path disposable PostgreSQL certification"
   }

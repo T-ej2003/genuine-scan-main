@@ -17,13 +17,13 @@
   },
   "selectionTotals": {
     "familiesConsidered": 17,
-    "workflowsConsidered": 24,
+    "workflowsConsidered": 25,
     "reclassifiedFamilies": 2,
     "splitFamilies": 4,
     "childFamiliesCreated": 8,
     "contractOnlyWorkflows": 2,
     "newlyImplementedWorkflows": 0,
-    "blockedWorkflows": 22
+    "blockedWorkflows": 23
   },
   "blockerCountsBefore": {
     "unresolved-boundary": 12,
@@ -311,9 +311,10 @@
     {
       "familyId": "family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887",
       "workflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
         "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
       ],
-      "reviewedRisk": "low",
+      "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
         "family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887"

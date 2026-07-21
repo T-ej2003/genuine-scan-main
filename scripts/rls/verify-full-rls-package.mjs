@@ -19,6 +19,7 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
   const rules = new Map(commandSemantics.rules.map((rule) => [rule.id, rule]));
   const profiles = commandSemantics.sqlCertificationProfiles || [];
   const directProfiles = profiles.filter((profile) => profile.status === "direct-policy-candidate");
+  const namedProfiles = profiles.filter((profile) => profile.status === "named-function-candidate");
   const blockedProfiles = profiles.filter((profile) => profile.status === "direct-policy-blocked");
   const profileBySlice = new Map();
 
@@ -36,6 +37,23 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
       profileBySlice.set(`${profile.workflowId}|${profile.actorClass}|${ruleId}`, profile);
     }
   }
+  for (const profile of namedProfiles) {
+    ensure(profile.workflowId && profile.route && profile.routes?.length && profile.actorClass, `${profile.id} lacks workflow, routes or actor`);
+    ensure(profile.functionSignature?.startsWith("app_rls.") && profile.minimumAssurance && profile.purposeCodes?.length && profile.scopeType, `${profile.id} lacks an exact named-function boundary`);
+    for (const ruleId of profile.commandRuleIds || []) {
+      const rule = rules.get(ruleId);
+      ensure(rule, `${profile.id} references unknown command rule ${ruleId}`);
+      ensure(rule.supportingWorkflowIds?.includes(profile.workflowId), `${profile.id}/${ruleId} workflow mismatch`);
+      ensure(rule.actorClasses?.includes(profile.actorClass), `${profile.id}/${ruleId} actor is broader than its source rule`);
+      const required = rule.minimumAssuranceByActorClass?.[profile.actorClass] || rule.minimumAssurance;
+      ensure(required === profile.minimumAssurance, `${profile.id}/${ruleId} weakens actor-specific assurance`);
+      ensure(rule.status === "architecture-resolved" && rule.requiresNamedFunction, `${profile.id}/${ruleId} is not a named-function rule`);
+    }
+  }
+  const dashboardProfiles = namedProfiles.filter((profile) => profile.id.startsWith("sql-profile-dashboard-snapshot-"));
+  ensure(dashboardProfiles.length === 6, "Dashboard snapshot named-function profiles are incomplete");
+  ensure(equal(dashboardProfiles.map((profile) => profile.actorClass), ["licensee-admin", "manufacturer", "platform-admin"]), "Dashboard snapshot actor profiles drifted");
+  ensure(dashboardProfiles.every((profile) => equal(profile.routes, ["GET /api/dashboard/stats", "GET /api/events/dashboard"]) && equal(profile.purposeCodes, ["dashboard-snapshot-read"])), "Dashboard snapshot route or purpose profiles drifted");
   ensure(blockedProfiles.some((profile) => profile.status === "direct-policy-blocked" && profile.blockers?.length), "Blocked direct-policy contracts were lost");
   ensure(manifest.deploymentModel === "clean-room-blue-green", "Generated package is not clean-room blue/green");
   ensure(manifest.counts.tables === 77 && manifest.counts.forceRlsTargets === 75 && manifest.counts.migrationOnly === 2, "Generated full-RLS table counts drifted");

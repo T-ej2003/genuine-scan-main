@@ -5,13 +5,13 @@ This deterministic pass groups every canonical workflow and fails closed where e
 ## Outcome
 
 - Canonical workflows: 428
-- Families: 318
+- Families: 317
 - Already implemented: 3
-- Newly implemented in this pass: 2
+- Newly implemented in this pass: 4
 - Contract-only: 59
-- Blocked: 364
+- Blocked: 362
 - Auto-implementable but pending: 0
-- PostgreSQL certification pending: 5
+- PostgreSQL certification pending: 7
 
 No remaining ordinary workflow was auto-edited: the inventory does not yet prove both a human-reviewed scope and complete root-to-repository transaction propagation. That is a safety stop, not a compatibility claim.
 
@@ -25,19 +25,18 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 | dedicated-platform-projection-pending | 2 | Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification. |
 | incompatible-read-mutation-root | 1 | Move this workflow to a focused platform mutation batch: require one database-validated licensee/report scope and purpose, then perform report lookup, compare-and-set/idempotency, immutable response attribution and durable delivery enqueue in one canonical transaction with focused replay/concurrency tests. |
 | incompatible-shared-auth-roots | 1 | Separate the invitation mutation lookup from the actor-bootstrap repository before runtime implementation. |
-| incomplete-root-transaction | 1 | Move every protected snapshot query for each compatible root into one canonical transaction before implementing this leaf read. |
 | manufacturer-bootstrap-postgresql-certification-pending | 1 | Certify the implemented actor-context repository through the final generated package on disposable PostgreSQL. |
 | mutation-concurrency-proof | 195 | Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation. |
-| named-function-prerequisite | 168 | Implement and certify the exact approved function contract before replacing ordinary Prisma access. |
+| named-function-prerequisite | 167 | Implement and certify the exact approved function contract before replacing ordinary Prisma access. |
 | out-of-scope-mutation-root | 1 | Review the complete message mutation, idempotency, audit and transaction boundary in a later high-risk batch. |
 | out-of-scope-shared-mutation-root | 1 | Move organization resolution into each owning audit transaction or an approved audit system boundary in a mutation-focused batch. |
 | platform-read-runtime-pending | 6 | Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification. |
 | prohibited-platform-read | 1 | Retire the broad export or design a separately reviewed bounded projection; this boundary authorizes no export implementation. |
 | unregistered-dead-path | 1 | Delete it after a separate dead-code review, or attach it to one registered root with exact scope and transaction evidence. |
-| unresolved-boundary | 248 | Reconcile middleware, actor classes and command rules into one approved boundary type. |
-| unreviewed-scope | 344 | Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code. |
-| unverified-execution-path | 344 | Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests. |
-| unverified-root-call-chain | 256 | Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client. |
+| unresolved-boundary | 247 | Reconcile middleware, actor classes and command rules into one approved boundary type. |
+| unreviewed-scope | 343 | Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code. |
+| unverified-execution-path | 343 | Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests. |
+| unverified-root-call-chain | 255 | Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client. |
 
 ## Families
 
@@ -46,7 +45,7 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 | family-simple-tenant-scoped-reads-analyticsservice-2c20deef24 | simple tenant-scoped reads | 1 | medium | implemented | implemented | none |
 | family-simple-tenant-scoped-reads-auditcontroller-627bac35ff | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-auditcontroller-627bac35ff-incompatible-read-mutation-root |
 | family-simple-tenant-scoped-reads-compliancepackservice-27fa200139 | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-compliancepackservice-27fa200139-platform-read-runtime-pending |
-| family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887 | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-incomplete-root-transaction |
+| family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887 | simple tenant-scoped reads | 2 | high | implemented | implemented | none |
 | family-simple-tenant-scoped-reads-governancecontroller-96e2eb4bcd | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-governancecontroller-96e2eb4bcd-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-governancecontroller-96e2eb4bcd-unverified-execution-path |
 | family-simple-tenant-scoped-reads-idempotencyservice-555b944311 | simple tenant-scoped reads | 1 | low | blocked | blocked | blocker-family-simple-tenant-scoped-reads-idempotencyservice-555b944311-unresolved-boundary, blocker-family-simple-tenant-scoped-reads-idempotencyservice-555b944311-unreviewed-scope, blocker-family-simple-tenant-scoped-reads-idempotencyservice-555b944311-unverified-execution-path, blocker-family-simple-tenant-scoped-reads-idempotencyservice-555b944311-unverified-root-call-chain |
 | family-simple-tenant-scoped-reads-incidentcontroller-d1709363b9 | simple tenant-scoped reads | 1 | medium | blocked | blocked | blocker-family-simple-tenant-scoped-reads-incidentcontroller-d1709363b9-platform-read-runtime-pending |
@@ -241,7 +240,6 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 | family-account-and-security-mutations-customerwebauthnservice-db98640e27 | account and security mutations | 1 | critical | blocked | blocked | blocker-family-account-and-security-mutations-customerwebauthnservice-db98640e27-mutation-concurrency-proof, blocker-family-account-and-security-mutations-customerwebauthnservice-db98640e27-named-function-prerequisite, blocker-family-account-and-security-mutations-customerwebauthnservice-db98640e27-unresolved-boundary, blocker-family-account-and-security-mutations-customerwebauthnservice-db98640e27-unreviewed-scope, blocker-family-account-and-security-mutations-customerwebauthnservice-db98640e27-unverified-execution-path, blocker-family-account-and-security-mutations-customerwebauthnservice-db98640e27-unverified-root-call-chain |
 | family-account-and-security-mutations-customerwebauthnservice-de088e9e84 | account and security mutations | 1 | critical | blocked | blocked | blocker-family-account-and-security-mutations-customerwebauthnservice-de088e9e84-mutation-concurrency-proof, blocker-family-account-and-security-mutations-customerwebauthnservice-de088e9e84-named-function-prerequisite, blocker-family-account-and-security-mutations-customerwebauthnservice-de088e9e84-unresolved-boundary, blocker-family-account-and-security-mutations-customerwebauthnservice-de088e9e84-unreviewed-scope, blocker-family-account-and-security-mutations-customerwebauthnservice-de088e9e84-unverified-execution-path, blocker-family-account-and-security-mutations-customerwebauthnservice-de088e9e84-unverified-root-call-chain |
 | family-account-and-security-mutations-customerwebauthnservice-e4b0dc54e6 | account and security mutations | 1 | critical | blocked | blocked | blocker-family-account-and-security-mutations-customerwebauthnservice-e4b0dc54e6-mutation-concurrency-proof, blocker-family-account-and-security-mutations-customerwebauthnservice-e4b0dc54e6-named-function-prerequisite, blocker-family-account-and-security-mutations-customerwebauthnservice-e4b0dc54e6-unresolved-boundary, blocker-family-account-and-security-mutations-customerwebauthnservice-e4b0dc54e6-unreviewed-scope, blocker-family-account-and-security-mutations-customerwebauthnservice-e4b0dc54e6-unverified-execution-path, blocker-family-account-and-security-mutations-customerwebauthnservice-e4b0dc54e6-unverified-root-call-chain |
-| family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e | account and security mutations | 1 | critical | blocked | blocked | blocker-family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e-named-function-prerequisite, blocker-family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e-unresolved-boundary, blocker-family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e-unreviewed-scope, blocker-family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e-unverified-execution-path, blocker-family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e-unverified-root-call-chain |
 | family-account-and-security-mutations-governancecontroller-b4b1f2d626 | account and security mutations | 1 | critical | blocked | blocked | blocker-family-account-and-security-mutations-governancecontroller-b4b1f2d626-named-function-prerequisite, blocker-family-account-and-security-mutations-governancecontroller-b4b1f2d626-unreviewed-scope, blocker-family-account-and-security-mutations-governancecontroller-b4b1f2d626-unverified-execution-path |
 | family-account-and-security-mutations-governanceservice-fab0398df0 | account and security mutations | 2 | critical | blocked | blocked | blocker-family-account-and-security-mutations-governanceservice-fab0398df0-named-function-prerequisite, blocker-family-account-and-security-mutations-governanceservice-fab0398df0-unresolved-boundary, blocker-family-account-and-security-mutations-governanceservice-fab0398df0-unreviewed-scope, blocker-family-account-and-security-mutations-governanceservice-fab0398df0-unverified-execution-path, blocker-family-account-and-security-mutations-governanceservice-fab0398df0-unverified-root-call-chain |
 | family-account-and-security-mutations-incidentactionsservice-24f0c4d66e | account and security mutations | 1 | critical | blocked | blocked | blocker-family-account-and-security-mutations-incidentactionsservice-24f0c4d66e-mutation-concurrency-proof, blocker-family-account-and-security-mutations-incidentactionsservice-24f0c4d66e-named-function-prerequisite, blocker-family-account-and-security-mutations-incidentactionsservice-24f0c4d66e-unresolved-boundary, blocker-family-account-and-security-mutations-incidentactionsservice-24f0c4d66e-unreviewed-scope, blocker-family-account-and-security-mutations-incidentactionsservice-24f0c4d66e-unverified-execution-path, blocker-family-account-and-security-mutations-incidentactionsservice-24f0c4d66e-unverified-root-call-chain |
@@ -365,12 +363,12 @@ No remaining ordinary workflow was auto-edited: the inventory does not yet prove
 ## Bounded read-only batch
 
 - Families considered: 17
-- Workflows considered: 24
+- Workflows considered: 25
 - Families reclassified: 2
 - Families split: 4
 - Child families created: 8
 - Workflows implemented: 0
-- Workflows retained as blocked: 22
+- Workflows retained as blocked: 23
 - Special identities remain contract-only; no human context was synthesized.
 - Split and blocked entries retain exact root, scope, command and product-decision evidence.
 - The four implemented programme workflows remain pending disposable PostgreSQL certification.

@@ -398,6 +398,27 @@ const rawCommandsFor = (method, sql) => {
 const rawTableNamesFor = (sql) => [...sql.matchAll(
   /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|FROM|JOIN)\s+(?:ONLY\s+)?(?:(?:"(?:[^"]|"")*"|[a-z_][\w$]*)\s*\.\s*)?(?:"((?:[^"]|"")*)"|([a-z_][\w$]*))/gi
 )].map((match) => (match[1] || match[2]).replaceAll('""', '"').toLowerCase());
+const DATABASE_FUNCTION_ACCESSES = new Map([
+  ["app_rls.dashboard_snapshot_scope", [
+    ["AuditLog", "INSERT"],
+    ["AuditLog", "SELECT"],
+    ["Licensee", "SELECT"],
+    ["ManufacturerLicenseeLink", "SELECT"],
+    ["Organization", "SELECT"],
+    ["User", "SELECT"],
+  ]],
+  ["app_rls.dashboard_snapshot_data", [
+    ["AuditLog", "INSERT"],
+    ["AuditLog", "SELECT"],
+    ["Batch", "SELECT"],
+    ["InventoryStatusRollup", "SELECT"],
+    ["Licensee", "SELECT"],
+    ["ManufacturerLicenseeLink", "SELECT"],
+    ["Organization", "SELECT"],
+    ["QRCode", "SELECT"],
+    ["User", "SELECT"],
+  ]],
+]);
 const WORKFLOW_SURFACE_OVERRIDES = new Map([
   ["backend/src/services/attentionQueueService.ts:getAttentionQueueSnapshotUncached", "http"],
   ["backend/src/services/auditLogOutboxService.ts:queueAuditLogOutbox", "internal"],
@@ -446,6 +467,7 @@ export const scanProductionAccess = () => {
   const ts = require(path.join(repoRoot, "backend/node_modules/typescript"));
   const models = parseSchema();
   const delegates = new Map(models.map((model) => [model.name[0].toLowerCase() + model.name.slice(1), model]));
+  const modelsByName = new Map(models.map((model) => [model.name, model]));
   const physical = new Map(models.map((model) => [model.physicalTable.toLowerCase(), model]));
   const { reachable, all, roots } = reachableSourceFiles();
   const active = [...new Set([...reachable, ...scriptEntrypoints()])].sort();
@@ -462,7 +484,18 @@ export const scanProductionAccess = () => {
       if (recorded.has(locator)) return;
       recorded.add(locator);
       const semanticLocator = `${rel(file)}:${fn}:${model.name}:${method}`;
-      accesses.push({ id: ACCESS_ID_OVERRIDES.get(semanticLocator) || hashId("access", locator), sourceFile: rel(file), line, function: fn, tableId: `table-${slug(model.physicalTable)}`, prismaModel: model.name, command, method, executionSurface: surface, production, registrationEvidence: roots.has(file) ? "registered-entrypoint" : reachable.has(file) ? "reachable-from-registered-entrypoint" : "unregistered", evidence: evidence.replace(/\s+/g, " ").slice(0, 350) });
+      const semanticFunctionAccess = method.startsWith("$function:");
+      accesses.push({ id: ACCESS_ID_OVERRIDES.get(semanticLocator) || hashId("access", semanticFunctionAccess ? `${semanticLocator}:${command}` : locator), sourceFile: rel(file), line, function: fn, tableId: `table-${slug(model.physicalTable)}`, prismaModel: model.name, command, method, executionSurface: surface, production, registrationEvidence: roots.has(file) ? "registered-entrypoint" : reachable.has(file) ? "reachable-from-registered-entrypoint" : "unregistered", evidence: evidence.replace(/\s+/g, " ").slice(0, 350) });
+    };
+    const recordDatabaseFunctionAccesses = (node, raw) => {
+      for (const [functionName, entries] of DATABASE_FUNCTION_ACCESSES) {
+        if (!new RegExp(`\\b${functionName.replaceAll(".", "\\.")}\\s*\\(`, "i").test(raw)) continue;
+        for (const [modelName, command] of entries) {
+          const model = modelsByName.get(modelName);
+          assert(model, `${functionName} references unknown Prisma model ${modelName}`);
+          record(node, model, `$function:${functionName}`, command, raw);
+        }
+      }
     };
     const delegateCandidates = (node, result = new Set()) => {
       if (ts.isPropertyAccessExpression(node) && delegates.has(node.name.text)) result.add(delegates.get(node.name.text));
@@ -522,6 +555,7 @@ export const scanProductionAccess = () => {
         }
         if (rawMethods.has(method)) {
           const raw = node.getText(ast);
+          recordDatabaseFunctionAccesses(node, raw);
           for (const name of new Set(rawTableNamesFor(raw))) {
             const model = physical.get(name);
             if (model) for (const command of rawCommandsFor(method, raw)) record(node, model, method, command, raw);
@@ -530,6 +564,7 @@ export const scanProductionAccess = () => {
       }
       if (ts.isTaggedTemplateExpression(node) && ts.isPropertyAccessExpression(node.tag) && rawMethods.has(node.tag.name.text)) {
         const raw = node.getText(ast);
+        recordDatabaseFunctionAccesses(node, raw);
         for (const name of new Set(rawTableNamesFor(raw))) {
           const model = physical.get(name);
           if (model) for (const command of rawCommandsFor(node.tag.name.text, raw)) record(node, model, node.tag.name.text, command, raw);
@@ -675,6 +710,24 @@ const routeEvidenceFor = (functionName, source = routeSource()) => {
 
 const TRACE_TIMELINE_WORKFLOW_ID = "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline";
 const RISK_ANALYTICS_WORKFLOW_ID = "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics";
+const DASHBOARD_SNAPSHOT_WORKFLOW_IDS = [
+  "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+  "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
+];
+const DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET = new Set(DASHBOARD_SNAPSHOT_WORKFLOW_IDS);
+const DASHBOARD_SNAPSHOT_COLUMNS = {
+  "table-audit-log": {
+    INSERT: ["action", "details", "entityId", "entityType", "id", "licenseeId", "orgId", "userId"],
+    SELECT: ["action", "details", "entityId", "entityType", "id", "licenseeId", "orgId", "userId"],
+  },
+  "table-batch": { SELECT: ["id", "licenseeId", "manufacturerId"] },
+  "table-inventory-status-rollup": { SELECT: ["active", "activated", "allocated", "blocked", "dormant", "licenseeId", "manufacturerId", "printed", "redeemed", "scanned", "totalCodes"] },
+  "table-licensee": { SELECT: ["id", "isActive", "orgId", "suspendedAt"] },
+  "table-manufacturer-licensee-link": { SELECT: ["isPrimary", "licenseeId", "manufacturerId", "updatedAt"] },
+  "table-organization": { SELECT: ["id", "isActive"] },
+  "table-qrcode": { SELECT: ["batchId", "licenseeId", "status"] },
+  "table-user": { SELECT: ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "orgId", "role", "status"] },
+};
 
 const commandActorsFor = (workflow, table, routeEvidence) => {
   const text = `${workflow.id} ${workflow.canonicalSourceFiles.join(" ")}`.toLowerCase();
@@ -683,6 +736,7 @@ const commandActorsFor = (workflow, table, routeEvidence) => {
   if (workflow.id === FRAUD_REPORTS_WORKFLOW_ID) return ["platform-admin"];
   if (workflow.id === TRACE_TIMELINE_WORKFLOW_ID) return ["authenticated-user", "manufacturer", "licensee-admin", "platform-admin"];
   if (workflow.id === RISK_ANALYTICS_WORKFLOW_ID) return ["licensee-admin", "platform-admin"];
+  if (DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET.has(workflow.id)) return ["licensee-admin", "manufacturer", "platform-admin"];
   if (workflow.authorizationBoundaryType === "operator-break-glass") return ["break-glass"];
   if (workflow.authorizationBoundaryType === "pre-auth-security-function") return ["anonymous", "pre-auth-runtime"];
   if (workflow.executionSurface === "worker") return ["worker"];
@@ -719,6 +773,7 @@ const runtimeIdentityForCommand = (workflow) => workflow.authorizationBoundaryTy
 
 const assuranceForCommand = (workflow, actors, command, table, routeEvidence) => {
   if (workflow.id === RISK_ANALYTICS_WORKFLOW_ID) return "password-verified";
+  if (DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET.has(workflow.id)) return "password-verified";
   if (workflow.platformReadRequiredAssurance) return workflow.platformReadRequiredAssurance;
   const guards = new Set(routeEvidence?.guards || []);
   if (workflow.id === AUDIT_CSV_EXPORT_WORKFLOW_ID) return "password-verified";
@@ -814,6 +869,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   const platformReadScope = workflow.platformReadScopeBoundaryId === PLATFORM_READ_SCOPE_BOUNDARY_ID;
   const policyAlertActorCeiling = workflow.policyAlertActorCeilingBoundaryId === POLICY_ALERT_ACTOR_CEILING_ID;
   const publicReadContract = workflow.publicReadContractBoundaryId === PUBLIC_READ_CONTRACT_ID;
+  const dashboardSnapshot = DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET.has(workflow.id);
   const securityFunction = table.primaryCategory === "security-sensitive" && (command !== "SELECT" || table.sensitiveColumns.length > 0) && !auditCsvExport && !auditLogsRead && !fraudReportsRead && workflow.id !== RISK_ANALYTICS_WORKFLOW_ID;
   const preAuthFunction = actors.includes("pre-auth-runtime");
   const workerBoundary = actors.some((actor) => ["worker", "scheduled-job"].includes(actor));
@@ -833,6 +889,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   if (policyAlertActorCeiling) allowedColumns = workflow.policyAlertAllowedColumnsByTableAndCommand?.[table.id]?.[command] || [];
   if (publicReadContract && workflow.publicReadProjectionProfile) allowedColumns = workflow.publicReadAllowedColumnsByTableAndCommand?.[table.id]?.[command] || [];
   if (workflow.id === RISK_ANALYTICS_WORKFLOW_ID) allowedColumns = workflow.riskAnalyticsAllowedColumnsByTableAndCommand?.[table.id]?.[command] || [];
+  if (dashboardSnapshot) allowedColumns = DASHBOARD_SNAPSHOT_COLUMNS[table.id]?.[command] || [];
   const hardDeleteSemantics = command === "DELETE" ? deleteSemanticsFor(table, workflow) : "not-applicable";
   const approvalClass = actors.includes("break-glass") ? "dual-approved-break-glass"
     : actors.includes("operator-admin") ? "operator-approved"
@@ -841,13 +898,13 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
           : "none";
   const requiresApproval = approvalClass !== "none";
   const dedicatedPlatformProjection = platformReadScope && ["dedicated-aggregate-projection", "dedicated-directory-projection"].includes(workflow.platformReadExecutionBoundary);
-  const requiresNamedFunction = preAuthFunction || securityFunction || rawEvidence || dedicatedPlatformProjection;
+  const requiresNamedFunction = preAuthFunction || securityFunction || rawEvidence || dedicatedPlatformProjection || dashboardSnapshot;
   const boundaryMode = platformReadScope && workflow.platformReadScopeClass === "prohibited-platform-read"
     ? "prohibited"
     : workerBoundary ? "restricted-worker" : operatorApproval ? "operator-approval" : requiresNamedFunction ? "named-function" : "ordinary-rls";
   const minimumAssuranceByActorClass = Object.fromEntries(actors.map((actor) => [
     actor,
-    workflow.platformReadRequiredAssuranceByActorClass?.[actor] || (
+    workflow.dashboardSnapshotRequiredAssuranceByActorClass?.[actor] || workflow.platformReadRequiredAssuranceByActorClass?.[actor] || (
       actor === "platform-admin" && ["none", "password-verified", "mfa-bootstrap"].includes(assurance) ? "mfa-verified" : assurance
     ),
   ]));
@@ -877,6 +934,8 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
       ? "Authenticated tenant actors require their canonical licensee; manufacturers additionally require their own actor ID and one linked licensee; platform administrators require fresh MFA, one explicit licensee and purpose. Filters only narrow scope."
       : workflow.id === RISK_ANALYTICS_WORKFLOW_ID
       ? "An ACTIVE database-hydrated LICENSEE_ADMIN or ORG_ADMIN uses its nonblank canonical licensee and organization. A database-hydrated platform administrator requires fresh MFA and one active database-validated licensee and organization selector. Fixed tenant-risk-analytics purpose, request attribution, bounded candidates/dimensions and identical tenant predicates are mandatory; blank or foreign scope is denied."
+      : dashboardSnapshot
+      ? "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee."
       : scopeRuleFor(table, actors),
     allowedColumns,
     protectedColumns,
@@ -889,7 +948,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
         ? "New row preserves trusted actor, tenant, request and purpose context. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary."
         : `New row preserves ${scopeRuleFor(table, actors)} Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.`,
     requiresNamedFunction,
-    namedFunctionClass: requiresNamedFunction ? (dedicatedPlatformProjection ? `exact-${workflow.platformReadExecutionBoundary}` : preAuthFunction ? "narrow-pre-auth-security-definer" : rawEvidence ? "exact-reviewed-query-function" : "authenticated-security-repository-function") : "none",
+    namedFunctionClass: requiresNamedFunction ? (dashboardSnapshot ? "exact-dashboard-snapshot-function" : dedicatedPlatformProjection ? `exact-${workflow.platformReadExecutionBoundary}` : preAuthFunction ? "narrow-pre-auth-security-definer" : rawEvidence ? "exact-reviewed-query-function" : "authenticated-security-repository-function") : "none",
     requiresRestrictedWorkerBoundary: workerBoundary,
     requiresAuditEvent: publicReadContract || manufacturerBootstrap || policyAlertActorCeiling || workflow.approvedReadAttribution === true || command !== "SELECT" || actors.some((actor) => ["platform-admin", "operator", "operator-admin", "break-glass"].includes(actor)),
     requiresApproval,
@@ -1027,6 +1086,50 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
       actorClass: "manufacturer", roleValues: ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"], minimumAssurance: "password-verified", purposeCodes: ["trace-timeline-read"],
       scopeType: "canonical-manufacturer-linked-licensee", status: "direct-policy-candidate", commandRuleIds: ruleIdsFor(TRACE_TIMELINE_WORKFLOW_ID),
     },
+    ...DASHBOARD_SNAPSHOT_WORKFLOW_IDS.flatMap((workflowId, index) => [
+      {
+        id: `sql-profile-dashboard-snapshot-${index === 0 ? "scope" : "data"}-licensee-admin`,
+        workflowId,
+        route: "GET /api/dashboard/stats",
+        routes: ["GET /api/dashboard/stats", "GET /api/events/dashboard"],
+        functionSignature: index === 0 ? "app_rls.dashboard_snapshot_scope(text,text,text)" : "app_rls.dashboard_snapshot_data(text,text,text,text)",
+        actorClass: "licensee-admin",
+        roleValues: ["LICENSEE_ADMIN", "ORG_ADMIN"],
+        minimumAssurance: "password-verified",
+        purposeCodes: ["dashboard-snapshot-read"],
+        scopeType: "canonical-licensee-organization",
+        status: "named-function-candidate",
+        commandRuleIds: ruleIdsFor(workflowId),
+      },
+      {
+        id: `sql-profile-dashboard-snapshot-${index === 0 ? "scope" : "data"}-manufacturer`,
+        workflowId,
+        route: "GET /api/dashboard/stats",
+        routes: ["GET /api/dashboard/stats", "GET /api/events/dashboard"],
+        functionSignature: index === 0 ? "app_rls.dashboard_snapshot_scope(text,text,text)" : "app_rls.dashboard_snapshot_data(text,text,text,text)",
+        actorClass: "manufacturer",
+        roleValues: ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"],
+        minimumAssurance: "mfa-verified",
+        purposeCodes: ["dashboard-snapshot-read"],
+        scopeType: "canonical-manufacturer-active-licensee-set",
+        status: "named-function-candidate",
+        commandRuleIds: ruleIdsFor(workflowId),
+      },
+      {
+        id: `sql-profile-dashboard-snapshot-${index === 0 ? "scope" : "data"}-platform-admin`,
+        workflowId,
+        route: "GET /api/dashboard/stats",
+        routes: ["GET /api/dashboard/stats", "GET /api/events/dashboard"],
+        functionSignature: index === 0 ? "app_rls.dashboard_snapshot_scope(text,text,text)" : "app_rls.dashboard_snapshot_data(text,text,text,text)",
+        actorClass: "platform-admin",
+        roleValues: ["SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"],
+        minimumAssurance: "mfa-verified",
+        purposeCodes: ["dashboard-snapshot-read"],
+        scopeType: "database-validated-global-or-selected-licensee-aggregate",
+        status: "named-function-candidate",
+        commandRuleIds: ruleIdsFor(workflowId),
+      },
+    ]),
     {
       id: "sql-profile-blocked-platform-and-incompatible-projections",
       workflowIds: [AUDIT_CSV_EXPORT_WORKFLOW_ID, FRAUD_REPORTS_WORKFLOW_ID, TRACE_TIMELINE_WORKFLOW_ID],
@@ -2159,6 +2262,132 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
       "table-user": { SELECT: ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"] },
     },
   });
+
+  for (const workflowId of DASHBOARD_SNAPSHOT_WORKFLOW_IDS) {
+    const dashboardWorkflow = workflowManifest.workflows.find((item) => item.id === workflowId);
+    assert(dashboardWorkflow, `${workflowId} runtime workflow missing`);
+    const scopeWorkflow = workflowId.endsWith("compute-dashboard-snapshot");
+    Object.assign(dashboardWorkflow, {
+      authenticationStage: "authenticated",
+      actorClasses: ["licensee-admin", "manufacturer", "platform-admin"],
+      runtimeImplementedActorClasses: ["licensee-admin", "manufacturer", "platform-admin"],
+      runtimeBlockedActorClasses: [],
+      platformRuntimeStatus: "application-path-certified",
+      platformRuntimeBlockers: [],
+      canonicalSourceFiles: [
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts",
+      ],
+      tenantScopeRule: "An ACTIVE database-revalidated tenant administrator uses its canonical licensee and organization; an ACTIVE manufacturer uses its current active linked-licensee set or one linked selector; an ACTIVE platform administrator requires fresh MFA and may use the reviewed global aggregate or one active selected licensee. Every REST, SSE snapshot and SSE delta request uses fixed purpose dashboard-snapshot-read and immutable request attribution.",
+      contextRequirements: [
+        "transaction-local canonical actor context",
+        "database-revalidated ACTIVE actor, role and scope",
+        "actor-specific password or fresh-MFA assurance",
+        "fixed allowlisted dashboard-snapshot-read purpose",
+        "one REPEATABLE READ transaction with immutable per-request attribution",
+        "exact dashboard named-function execution with no direct application table privilege",
+      ],
+      contextRequirementsSource: "human-reviewed",
+      authorizationBoundaryType: "authenticated-context",
+      expectedAllowedScenarios: [
+        "An ACTIVE LICENSEE_ADMIN or ORG_ADMIN reads its active tenant dashboard through the REST or SSE root.",
+        "An ACTIVE manufacturer reads aggregates across all current active links or narrows to one current linked licensee.",
+        "An ACTIVE fresh-MFA platform administrator reads the reviewed global aggregate or one active selected licensee.",
+        "A cache hit revalidates actor and scope in PostgreSQL and commits one immutable dashboard read attribution before delivery.",
+        "Rollup totals remain authoritative when any rollup counter is nonzero; otherwise QR status rows provide the existing fallback.",
+      ],
+      expectedDeniedScenarios: [
+        "Blank or malformed context, wrong purpose, wrong role, lower platform assurance and inactive actors are denied.",
+        "Foreign, inactive, suspended or revoked tenant/manufacturer scope is denied before cached or fresh data is delivered.",
+        "Direct application table access, internal helper execution and prohibited User or QRCode columns are denied.",
+        "A protected query before canonical context or use of global Prisma in the dashboard family is denied.",
+      ],
+      currentCompatibilityStatus: "compatible",
+      implementationStatus: "complete",
+      contextBoundaryBlockers: [],
+      requiredUnitTests: ["backend/tests/dashboardSnapshotContext.test.js"],
+      requiredDisposablePostgresqlTests: ["backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js"],
+      unresolvedDecisions: [],
+      contextBoundaryStatus: "implemented",
+      implementationFamilyId: "family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887",
+      contextBoundaryCategory: "simple tenant-scoped reads",
+      approvedReadAttribution: true,
+      implementationFiles: [
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/services/dashboardSnapshotService.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/routes/modules/realtimeRoutes.ts",
+      ],
+      testFiles: [
+        "backend/tests/dashboardSnapshotContext.test.js",
+        "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js",
+      ],
+      canonicalContextKeys: ["app.user_id", "app.role", "app.organization_id", "app.licensee_id", "app.manufacturer_id", "app.auth_assurance", "app.request_id", "app.purpose"],
+      sameTransactionGuarantee: true,
+      protectedQueryClient: "transaction-client-only",
+      consistentReadScopeGuarantee: true,
+      routeRootVerified: true,
+      aggregateScopeStatus: "database-revalidated-tenant-manufacturer-or-platform",
+      postgresqlCertificationStatus: "certified",
+      applicationPathCertificationEvidence: {
+        status: "application-path-certified",
+        postgresqlMajor: 18,
+        testFile: "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js",
+        harnessFile: "scripts/rls/certify-clean-room-database.mjs",
+        runtimeRole: "identity-authenticated-app",
+        positiveActors: ["licensee-admin", "manufacturer", "platform-admin"],
+        deniedCases: ["blank-context", "foreign-scope", "forged-role", "stale-membership", "wrong-assurance", "wrong-purpose"],
+        atomicAttributionVerified: true,
+        exactColumnPrivilegesVerified: true,
+      },
+      dashboardSnapshotFunction: scopeWorkflow
+        ? "app_rls.dashboard_snapshot_scope(text,text,text)"
+        : "app_rls.dashboard_snapshot_data(text,text,text,text)",
+      dashboardSnapshotAllowedColumnsByTableAndCommand: DASHBOARD_SNAPSHOT_COLUMNS,
+      dashboardSnapshotRequiredAssuranceByActorClass: {
+        "licensee-admin": "password-verified",
+        manufacturer: "mfa-verified",
+        "platform-admin": "mfa-verified",
+      },
+      contextBoundaryPlanningEvidence: {
+        reviewedAt: "2026-07-21",
+        registeredRootCallChainVerified: true,
+        protectedQueryTraceComplete: true,
+        sameTransactionFeasible: true,
+        focusedTestsDeterministic: true,
+        databaseConcurrencyVerified: true,
+      },
+      resolvedContextBlockerIds: [
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-incomplete-root-transaction",
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-named-function-prerequisite",
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unresolved-boundary",
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unreviewed-scope",
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unverified-execution-path",
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unverified-root-call-chain",
+      ],
+      rootCallChainEvidence: [
+        "realtimeRoutes registers GET /dashboard/stats and GET /events/dashboard behind authentication, tenant isolation and bounded route/IP/actor limiters.",
+        "dashboardController and eventsController call dashboardSnapshotService; every protected snapshot query is inside one canonical REPEATABLE READ transaction.",
+        "SSE initial snapshots and deltas share the same database-revalidated actor, scope, assurance, purpose and attribution family.",
+      ],
+      scopeEvidence: [
+        "Tenant actor licensee and organization claims are matched to the ACTIVE User, Licensee and Organization rows in PostgreSQL.",
+        "Manufacturer selectors only narrow the current active ManufacturerLicenseeLink set; the membership fingerprint is revalidated before every cache hit.",
+        "Platform global and selected aggregates require a database ACTIVE actor and fresh-MFA canonical assurance; selected licensees and organizations must be active.",
+      ],
+      responseProjection: [
+        "REST preserves success.data totalQRCodes, activeLicensees, manufacturers and totalBatches.",
+        "SSE preserves the existing summary plus QR status aggregate; no protected predicate or secret column is serialized.",
+      ],
+    });
+  }
 
   const nextWorkflow = workflowManifest.workflows.find((item) => item.id === "workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report");
   assert(nextWorkflow, "respond-to-fraud-report runtime workflow missing");

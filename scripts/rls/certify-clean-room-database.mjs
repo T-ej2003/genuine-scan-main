@@ -42,6 +42,10 @@ const ids = {
 const riskAnalyticsUserColumns = ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"];
 const prohibitedRiskAnalyticsUserColumns = ["createdAt", "disabledReason", "email", "emailVerifiedAt", "failedLoginAttempts", "lastLoginAt", "location", "lockedUntil", "metadata", "passwordHash", "pendingEmail", "pendingEmailRequestedAt", "updatedAt", "website"];
 const riskAnalyticsWorkflowId = "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics";
+const dashboardSnapshotWorkflowIds = [
+  "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+  "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
+];
 let runCounter = 0;
 const activeDatabases = new Set();
 
@@ -135,6 +139,24 @@ const runRiskAnalyticsApplicationPath = (appUrl, env) => {
   if (result.status !== 0) throw new Error(`Risk analytics application-path certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
   if (!/application-path proof passed/.test(result.stdout || "")) throw new Error("Risk analytics application-path certification did not emit its success marker");
   return { workflowId: riskAnalyticsWorkflowId, status: "application-path-certified", postgresqlMajor: 18 };
+};
+const runDashboardSnapshotApplicationPath = (appUrl, bootstrapUrl, env) => {
+  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js")], {
+    cwd: root,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      DATABASE_URL: appUrl,
+      MSCQR_DASHBOARD_BOOTSTRAP_URL: bootstrapUrl,
+      MSCQR_DASHBOARD_POSTGRES18_TEST: "true",
+      MSCQR_DASHBOARD_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_DASHBOARD_POSTGRES18_TEST",
+    },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`Dashboard snapshot application-path certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/application-path proof passed/.test(result.stdout || "")) throw new Error("Dashboard snapshot application-path certification did not emit its success marker");
+  return { workflowIds: dashboardSnapshotWorkflowIds, status: "application-path-certified", postgresqlMajor: 18 };
 };
 const injectBeforeCommit = (file, label) => {
   const source = fs.readFileSync(path.join(sqlRoot, file), "utf8");
@@ -619,7 +641,10 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     certifySemantics(urls.bootstrap, urls.app);
     const fixtureRows = Number(scalar(urls.bootstrap, "SELECT sum(row_count) FROM (SELECT (xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM public.%I',c.relname),false,true,'')))[1]::text::bigint AS row_count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_prisma_migrations') counts", "count disposable certification fixture rows"));
     if (!fixtureRows) throw new Error("Final semantic certification did not load its declared disposable fixtures");
-    const applicationPathResults = [runRiskAnalyticsApplicationPath(urls.app, env)];
+    const applicationPathResults = [
+      runRiskAnalyticsApplicationPath(urls.app, env),
+      runDashboardSnapshotApplicationPath(urls.app, urls.bootstrap, env),
+    ];
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
     return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
@@ -719,7 +744,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     const finalRun = runSuccessfulCertification({ adminUrl, maintenanceDatabase, manifest, execution, policies, privileges, env, blueUrl, expectedBlueFingerprint });
     result.tablesCertified = finalRun.tablesCertified;
     result.applicationPathResults = finalRun.applicationPathResults;
-    result.applicationPathCertifiedWorkflowIds = finalRun.applicationPathResults.map((entry) => entry.workflowId);
+    result.applicationPathCertifiedWorkflowIds = finalRun.applicationPathResults.flatMap((entry) => entry.workflowIds || [entry.workflowId]);
     result.workflowsApplicationPathCertified = result.applicationPathCertifiedWorkflowIds.length;
     result.catalogTamperResults = finalRun.catalogTamperResults;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;

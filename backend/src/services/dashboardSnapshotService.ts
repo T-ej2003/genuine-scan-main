@@ -1,15 +1,29 @@
-import { UserRole } from "@prisma/client";
+import { createHash, randomUUID } from "node:crypto";
+
+import { Prisma, UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
+import { CanonicalDbContext, withCanonicalDbContext } from "../lib/canonicalDbContext";
 import { AuthRequest } from "../middleware/auth";
-import { buildScopedWhere, resolveRequestedLicenseeScope } from "./accessControlService";
+import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { summarizeQrStatusCounts } from "./qrStatusMetrics";
 import { getOrComputeVersionedCache } from "./versionedCacheService";
 
 const DASHBOARD_CACHE_NAMESPACE = "dashboard-snapshot";
 const DASHBOARD_CACHE_TTL_SEC = 20;
+const DASHBOARD_PURPOSE = "dashboard-snapshot-read";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
-type DashboardSnapshot = {
+const manufacturerRoles = new Set<UserRole>([
+  UserRole.MANUFACTURER,
+  UserRole.MANUFACTURER_ADMIN,
+  UserRole.MANUFACTURER_USER,
+]);
+const tenantRoles = new Set<UserRole>([UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN]);
+const platformRoles = new Set<UserRole>([UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN]);
+
+export type DashboardSnapshot = {
   totalQRCodes: number;
   activeLicensees: number;
   manufacturers: number;
@@ -17,163 +31,228 @@ type DashboardSnapshot = {
   qr: {
     total: number;
     byStatus: Record<string, number>;
-  };
+  } & ReturnType<typeof summarizeQrStatusCounts>;
 };
 
-const isManufacturerRole = (role: UserRole) =>
-  role === UserRole.MANUFACTURER ||
-  role === UserRole.MANUFACTURER_ADMIN ||
-  role === UserRole.MANUFACTURER_USER;
-
-const loadInventoryAggregate = async (params: {
-  role: UserRole;
-  userId: string;
-  requestedLicenseeId?: string | null;
-  accessibleLicenseeIds?: string[] | null;
-}) => {
-  const where: Record<string, unknown> = {};
-  if (isManufacturerRole(params.role)) {
-    where.manufacturerId = params.userId;
-  }
-  if (params.requestedLicenseeId) {
-    where.licenseeId = params.requestedLicenseeId;
-  } else if (params.accessibleLicenseeIds && params.accessibleLicenseeIds.length > 0) {
-    where.licenseeId =
-      params.accessibleLicenseeIds.length === 1 ? params.accessibleLicenseeIds[0] : { in: params.accessibleLicenseeIds };
-  }
-
-  const rollupAggregate = await prisma.inventoryStatusRollup.aggregate({
-    where,
-    _sum: {
-      totalCodes: true,
-      dormant: true,
-      active: true,
-      activated: true,
-      allocated: true,
-      printed: true,
-      redeemed: true,
-      blocked: true,
-      scanned: true,
-    },
-  });
-
-  const hasRollups = Object.values(rollupAggregate._sum || {}).some((value) => Number(value || 0) > 0);
-  if (!hasRollups) return null;
-
-  const byStatus = {
-    DORMANT: Number(rollupAggregate._sum?.dormant || 0),
-    ACTIVE: Number(rollupAggregate._sum?.active || 0),
-    ACTIVATED: Number(rollupAggregate._sum?.activated || 0),
-    ALLOCATED: Number(rollupAggregate._sum?.allocated || 0),
-    PRINTED: Number(rollupAggregate._sum?.printed || 0),
-    REDEEMED: Number(rollupAggregate._sum?.redeemed || 0),
-    BLOCKED: Number(rollupAggregate._sum?.blocked || 0),
-    SCANNED: Number(rollupAggregate._sum?.scanned || 0),
-  } satisfies Record<string, number>;
-
-  return {
-    totalQRCodes: Number(rollupAggregate._sum?.totalCodes || 0),
-    byStatus,
-  };
+type DashboardBoundary = {
+  context: CanonicalDbContext;
+  auditId: string;
+  requestedLicenseeId: string | null;
+  routeSurface: "GET /api/dashboard/stats" | "GET /api/events/dashboard";
 };
 
-const computeDashboardSnapshot = async (req: AuthRequest): Promise<DashboardSnapshot> => {
-  if (!req.user) throw new Error("Not authenticated");
+type DashboardDataRow = {
+  total_qr_codes: bigint | number | string;
+  active_licensees: bigint | number | string;
+  manufacturers: bigint | number | string;
+  total_batches: bigint | number | string;
+  dormant: bigint | number | string;
+  active: bigint | number | string;
+  activated: bigint | number | string;
+  allocated: bigint | number | string;
+  printed: bigint | number | string;
+  redeemed: bigint | number | string;
+  blocked: bigint | number | string;
+  scanned: bigint | number | string;
+  rollup_authoritative: boolean;
+};
 
-  const role = req.user.role;
-  const userId = req.user.userId;
-  const requestedLicenseeId = String(req.query?.licenseeId || "").trim() || null;
-  const scope = await resolveRequestedLicenseeScope(req.user, requestedLicenseeId);
+export class DashboardSnapshotAccessError extends Error {
+  constructor(message = "Access denied to dashboard snapshot") {
+    super(message);
+  }
+}
 
-  const qrWhere: any = await buildScopedWhere(req.user, {
-    requestedLicenseeId,
-    relationManufacturerField: "batch",
-  });
-  const batchWhere: any = await buildScopedWhere(req.user, {
-    requestedLicenseeId,
-    manufacturerField: "manufacturerId",
-  });
-  const manufacturersWhere: any = {
-    role: { in: [UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER] },
-    isActive: true,
-  };
+const routeSurface = (req: AuthRequest): DashboardBoundary["routeSurface"] => {
+  const path = String(req.originalUrl || req.path || "").split("?", 1)[0].replace(/\/$/, "");
+  if (path === "/api/dashboard/stats" || path === "/dashboard/stats") return "GET /api/dashboard/stats";
+  if (path === "/api/events/dashboard" || path === "/events/dashboard") return "GET /api/events/dashboard";
+  throw new DashboardSnapshotAccessError();
+};
 
-  if (isManufacturerRole(role)) {
-    manufacturersWhere.id = userId;
-  } else if (scope.scopeLicenseeId) {
-    manufacturersWhere.OR = [
-      { licenseeId: scope.scopeLicenseeId },
-      { manufacturerLicenseeLinks: { some: { licenseeId: scope.scopeLicenseeId } } },
-    ];
-  } else if (scope.accessibleLicenseeIds && scope.accessibleLicenseeIds.length > 0) {
-    const licenseeFilter =
-      scope.accessibleLicenseeIds.length === 1 ? scope.accessibleLicenseeIds[0] : { in: scope.accessibleLicenseeIds };
-    manufacturersWhere.OR = [
-      { licenseeId: licenseeFilter },
-      { manufacturerLicenseeLinks: { some: { licenseeId: licenseeFilter } } },
-    ];
+const normalizeLicenseeSelector = (raw: unknown) => {
+  if (raw == null || raw === "") return null;
+  if (typeof raw !== "string") throw new DashboardSnapshotAccessError();
+  const normalized = raw.trim();
+  if (!UUID.test(normalized)) throw new DashboardSnapshotAccessError();
+  return normalized.toLowerCase();
+};
+const requestedLicensee = (req: AuthRequest) => normalizeLicenseeSelector(req.query?.licenseeId);
+
+export const buildDashboardSnapshotBoundary = (
+  req: AuthRequest,
+  now = Date.now(),
+  selectorOverride?: string | null
+): DashboardBoundary => {
+  const user = req.user;
+  const userId = String(user?.userId || "").trim().toLowerCase();
+  const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+  if (!user || !UUID.test(userId) || user.sessionStage !== "ACTIVE" || !REQUEST_ID.test(requestId)) {
+    throw new DashboardSnapshotAccessError();
   }
 
-  const inventoryAggregate = await loadInventoryAggregate({
-    role,
-    userId,
-    requestedLicenseeId: scope.scopeLicenseeId,
-    accessibleLicenseeIds: scope.accessibleLicenseeIds,
-  });
+  const selector = selectorOverride === undefined ? requestedLicensee(req) : normalizeLicenseeSelector(selectorOverride);
+  const tenant = tenantRoles.has(user.role);
+  const manufacturer = manufacturerRoles.has(user.role);
+  const platform = platformRoles.has(user.role);
+  if (!tenant && !manufacturer && !platform) throw new DashboardSnapshotAccessError();
 
-  const [activeLicensees, manufacturers, totalBatches, fallbackQrGrouped, fallbackQrTotal] = await Promise.all([
-    role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN
-      ? prisma.licensee.count({ where: { ...(scope.scopeLicenseeId ? { id: scope.scopeLicenseeId } : {}), isActive: true } })
-      : scope.accessibleLicenseeIds && scope.accessibleLicenseeIds.length > 0
-        ? prisma.licensee.count({ where: { id: { in: scope.accessibleLicenseeIds }, isActive: true } })
-        : scope.scopeLicenseeId
-          ? prisma.licensee.count({ where: { id: scope.scopeLicenseeId, isActive: true } })
-          : 0,
-    prisma.user.count({ where: manufacturersWhere }),
-    prisma.batch.count({ where: batchWhere }),
-    inventoryAggregate
-      ? Promise.resolve([])
-      : prisma.qRCode.groupBy({
-          by: ["status"],
-          where: qrWhere,
-          _count: true,
-        }),
-    inventoryAggregate ? Promise.resolve(inventoryAggregate.totalQRCodes) : prisma.qRCode.count({ where: qrWhere }),
-  ]);
-
-  const byStatus = inventoryAggregate
-    ? inventoryAggregate.byStatus
-    : fallbackQrGrouped.reduce((acc, row) => {
-        acc[row.status] = row._count;
-        return acc;
-      }, {} as Record<string, number>);
+  const claimedLicenseeId = String(user.licenseeId || "").trim().toLowerCase();
+  const claimedOrganizationId = String(user.orgId || "").trim().toLowerCase();
+  if (tenant) {
+    if (!UUID.test(claimedLicenseeId) || !UUID.test(claimedOrganizationId) || selector && selector !== claimedLicenseeId) {
+      throw new DashboardSnapshotAccessError();
+    }
+  }
+  if (platform || manufacturer) {
+    const verifiedAt = Date.parse(String(user.mfaVerifiedAt || ""));
+    const ageMs = now - verifiedAt;
+    if (
+      (platform && (claimedLicenseeId || claimedOrganizationId)) ||
+      user.authAssurance !== "ADMIN_MFA" ||
+      !Number.isFinite(verifiedAt) ||
+      ageMs < -60_000 ||
+      ageMs > getAdminStepUpWindowMinutes() * 60_000
+    ) {
+      throw new DashboardSnapshotAccessError();
+    }
+  } else if (user.authAssurance !== "PASSWORD" && user.authAssurance !== "ADMIN_MFA") {
+    throw new DashboardSnapshotAccessError();
+  }
 
   return {
-    totalQRCodes: fallbackQrTotal,
-    activeLicensees,
-    manufacturers,
-    totalBatches,
-    qr: {
-      total: fallbackQrTotal,
-      byStatus,
-      ...summarizeQrStatusCounts(byStatus),
+    auditId: randomUUID(),
+    requestedLicenseeId: selector,
+    routeSurface: routeSurface(req),
+    context: {
+      userId,
+      role: user.role,
+      organizationId: tenant ? claimedOrganizationId : null,
+      licenseeId: tenant ? claimedLicenseeId : selector,
+      manufacturerId: manufacturer ? userId : null,
+      authAssurance: user.authAssurance === "ADMIN_MFA" ? "mfa-verified" : "password-verified",
+      requestId,
+      purpose: DASHBOARD_PURPOSE,
     },
   };
 };
 
-const makeScopeKey = (req: AuthRequest) => {
-  if (!req.user) return "anonymous";
-  return [
-    req.user.role,
-    req.user.userId,
-    String(req.query?.licenseeId || "").trim() || "all",
-    req.user.licenseeId || "none",
-    req.user.orgId || "none",
-  ].join(":");
+const count = (value: bigint | number | string, field: string) => {
+  const normalized = Number(value);
+  if (!Number.isSafeInteger(normalized) || normalized < 0) {
+    throw new Error(`Dashboard snapshot returned an invalid ${field} count`);
+  }
+  return normalized;
+};
+
+export const loadInventoryAggregate = async (
+  tx: Prisma.TransactionClient,
+  boundary: DashboardBoundary,
+  expectedScopeFingerprint: string
+): Promise<DashboardSnapshot> => {
+  const [row] = await tx.$queryRaw<DashboardDataRow[]>`
+    SELECT *
+    FROM app_rls.dashboard_snapshot_data(
+      ${boundary.auditId},
+      ${boundary.requestedLicenseeId},
+      ${boundary.routeSurface},
+      ${expectedScopeFingerprint}
+    )
+  `;
+  if (!row) throw new Error("Dashboard snapshot function returned no result");
+
+  const allStatuses = {
+    DORMANT: count(row.dormant, "dormant"),
+    ACTIVE: count(row.active, "active"),
+    ACTIVATED: count(row.activated, "activated"),
+    ALLOCATED: count(row.allocated, "allocated"),
+    PRINTED: count(row.printed, "printed"),
+    REDEEMED: count(row.redeemed, "redeemed"),
+    BLOCKED: count(row.blocked, "blocked"),
+    SCANNED: count(row.scanned, "scanned"),
+  };
+  if (typeof row.rollup_authoritative !== "boolean") throw new Error("Dashboard snapshot returned an invalid rollup mode");
+  const byStatus = row.rollup_authoritative
+    ? allStatuses
+    : Object.fromEntries(Object.entries(allStatuses).filter(([, value]) => value > 0));
+  const totalQRCodes = count(row.total_qr_codes, "QR code");
+  return {
+    totalQRCodes,
+    activeLicensees: count(row.active_licensees, "active licensee"),
+    manufacturers: count(row.manufacturers, "manufacturer"),
+    totalBatches: count(row.total_batches, "batch"),
+    qr: { total: totalQRCodes, byStatus, ...summarizeQrStatusCounts(byStatus) },
+  };
+};
+
+export const computeDashboardSnapshot = async (
+  tx: Prisma.TransactionClient,
+  boundary: DashboardBoundary,
+  options: { scopeOnly?: boolean } = {}
+): Promise<DashboardSnapshot | null> => {
+  const [scope] = await tx.$queryRaw<Array<{ scope_fingerprint: string }>>`
+    SELECT scope_fingerprint
+    FROM app_rls.dashboard_snapshot_scope(
+      ${boundary.auditId},
+      ${boundary.requestedLicenseeId},
+      ${boundary.routeSurface}
+    )
+  `;
+  const fingerprint = String(scope?.scope_fingerprint || "");
+  if (!/^[0-9a-f]{32}$/i.test(fingerprint)) throw new DashboardSnapshotAccessError();
+  if (options.scopeOnly) return null;
+  const cacheKey = createHash("sha256").update(`v1:${fingerprint}`).digest("hex");
+  return getOrComputeVersionedCache(DASHBOARD_CACHE_NAMESPACE, cacheKey, DASHBOARD_CACHE_TTL_SEC, () =>
+    loadInventoryAggregate(tx, boundary, fingerprint)
+  );
 };
 
 export const getDashboardSnapshot = async (req: AuthRequest) => {
-  return getOrComputeVersionedCache(DASHBOARD_CACHE_NAMESPACE, makeScopeKey(req), DASHBOARD_CACHE_TTL_SEC, () =>
-    computeDashboardSnapshot(req)
-  );
+  const boundary = buildDashboardSnapshotBoundary(req);
+  try {
+    const snapshot = await withCanonicalDbContext(
+      prisma,
+      boundary.context,
+      (tx) => computeDashboardSnapshot(tx, boundary),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+    );
+    if (!snapshot) throw new Error("Dashboard snapshot function returned no result");
+    return snapshot;
+  } catch (error) {
+    if (error instanceof DashboardSnapshotAccessError || /dashboard access denied/i.test(String((error as Error)?.message))) {
+      throw new DashboardSnapshotAccessError();
+    }
+    throw error;
+  }
+};
+
+export const canDeliverDashboardAuditDelta = async (req: AuthRequest, eventLicenseeId: unknown) => {
+  try {
+    if (!req.user) return false;
+    const originalSelector = requestedLicensee(req);
+    if (eventLicenseeId == null || eventLicenseeId === "") {
+      if (originalSelector || !platformRoles.has(req.user.role)) return false;
+      const boundary = buildDashboardSnapshotBoundary(req);
+      await withCanonicalDbContext(
+        prisma,
+        boundary.context,
+        (tx) => computeDashboardSnapshot(tx, boundary, { scopeOnly: true }),
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+      );
+      return true;
+    }
+
+    const eventScope = String(eventLicenseeId).trim().toLowerCase();
+    if (!UUID.test(eventScope) || originalSelector && originalSelector !== eventScope) return false;
+    const boundary = buildDashboardSnapshotBoundary(req, Date.now(), eventScope);
+    await withCanonicalDbContext(
+      prisma,
+      boundary.context,
+      (tx) => computeDashboardSnapshot(tx, boundary, { scopeOnly: true }),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+    );
+    return true;
+  } catch {
+    return false;
+  }
 };

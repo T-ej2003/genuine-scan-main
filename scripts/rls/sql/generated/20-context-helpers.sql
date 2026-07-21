@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='31314331260d1ce2f31399e33eb04cb87fcad6450368f99e3c7ea303efd74e3f'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:31314331260d1ce2f31399e33eb04cb87fcad6450368f99e3c7ea303efd74e3f'
+    AND source_contract_sha256='87c127f611e6ec3914521158958d4bf5ad7388590d0eca08c6c67c045e3298a3'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:87c127f611e6ec3914521158958d4bf5ad7388590d0eca08c6c67c045e3298a3'
     AND administrator_role='certification-administrator'
     AND phase='ownership-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'context helpers lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:31314331260d1ce2f31399e33eb04cb87fcad6450368f99e3c7ea303efd74e3f')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:87c127f611e6ec3914521158958d4bf5ad7388590d0eca08c6c67c045e3298a3')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -88,8 +88,284 @@ CREATE FUNCTION app_rls.platform_audit_log_details(log_ids text[]) RETURNS TABLE
     AND app_rls.current_purpose()='platform-audit-log-read' AND cardinality(log_ids) BETWEEN 1 AND 500
     AND a."licenseeId"=app_rls.current_licensee_id() AND a."id"=ANY(log_ids)
 $$;
+
+CREATE FUNCTION app_rls.dashboard_scope_fingerprint(requested_licensee_id text) RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE
+  selector text := NULLIF(btrim(requested_licensee_id),'');
+  actor_licensee_id text;
+  actor_organization_id text;
+  membership_count bigint;
+  primary_count bigint;
+  membership_fingerprint text;
+BEGIN
+  IF NOT app_rls.attributed_request()
+     OR app_rls.current_purpose()<>'dashboard-snapshot-read'
+     OR app_rls.current_user_id() IS NULL
+     OR app_rls.current_role() IS NULL
+     OR app_rls.current_request_id() !~ '^[A-Za-z0-9._:-]{1,128}$'
+  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  IF selector IS NOT NULL AND selector !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  IF ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() NOT IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
+     OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() NOT IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
+     OR NOT (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'))
+  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+
+  SELECT u."licenseeId",u."orgId" INTO actor_licensee_id,actor_organization_id
+  FROM public."User" u
+  WHERE u."id"=app_rls.current_user_id()
+    AND u."role"::text=app_rls.current_role()
+    AND u."isActive"=TRUE AND u."status"='ACTIVE'
+    AND u."deletedAt" IS NULL AND u."disabledAt" IS NULL;
+  IF NOT FOUND THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+
+  IF app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN
+    IF app_rls.current_licensee_id() IS NULL OR app_rls.current_organization_id() IS NULL
+       OR app_rls.current_manufacturer_id() IS NOT NULL
+       OR actor_licensee_id IS DISTINCT FROM app_rls.current_licensee_id()
+       OR actor_organization_id IS DISTINCT FROM app_rls.current_organization_id()
+       OR (selector IS NOT NULL AND selector IS DISTINCT FROM app_rls.current_licensee_id())
+       OR NOT EXISTS (
+         SELECT 1 FROM public."Licensee" l JOIN public."Organization" o ON o."id"=l."orgId"
+         WHERE l."id"=app_rls.current_licensee_id() AND l."orgId"=app_rls.current_organization_id()
+           AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE
+       )
+    THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+    RETURN md5(concat_ws('|','tenant',app_rls.current_user_id(),app_rls.current_role(),app_rls.current_licensee_id(),app_rls.current_organization_id()));
+  END IF;
+
+  IF app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN
+    IF app_rls.current_manufacturer_id() IS DISTINCT FROM app_rls.current_user_id()
+       OR app_rls.current_organization_id() IS NOT NULL
+       OR app_rls.current_licensee_id() IS DISTINCT FROM selector
+    THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+    SELECT count(*),count(*) FILTER (WHERE ml."isPrimary"),string_agg(ml."licenseeId"||':'||ml."isPrimary"::text||':'||extract(epoch FROM ml."updatedAt")::text,',' ORDER BY ml."licenseeId")
+      INTO membership_count,primary_count,membership_fingerprint
+    FROM public."ManufacturerLicenseeLink" ml
+    JOIN public."Licensee" l ON l."id"=ml."licenseeId"
+    JOIN public."Organization" o ON o."id"=l."orgId"
+    WHERE ml."manufacturerId"=app_rls.current_user_id()
+      AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE;
+    IF membership_count NOT BETWEEN 1 AND 100 OR primary_count>1
+       OR (actor_licensee_id IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+         JOIN public."Licensee" l ON l."id"=ml."licenseeId"
+         JOIN public."Organization" o ON o."id"=l."orgId"
+         WHERE ml."manufacturerId"=app_rls.current_user_id() AND ml."licenseeId"=actor_licensee_id
+           AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE
+       ))
+       OR (actor_organization_id IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+         JOIN public."Licensee" l ON l."id"=ml."licenseeId"
+         JOIN public."Organization" o ON o."id"=l."orgId"
+         WHERE ml."manufacturerId"=app_rls.current_user_id() AND l."orgId"=actor_organization_id
+           AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE
+       ))
+       OR (selector IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+         JOIN public."Licensee" l ON l."id"=ml."licenseeId"
+         JOIN public."Organization" o ON o."id"=l."orgId"
+         WHERE ml."manufacturerId"=app_rls.current_user_id() AND ml."licenseeId"=selector
+           AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE
+       ))
+    THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+    RETURN md5(concat_ws('|','manufacturer',app_rls.current_user_id(),app_rls.current_role(),coalesce(selector,'all'),membership_fingerprint));
+  END IF;
+
+  IF app_rls.current_manufacturer_id() IS NOT NULL OR app_rls.current_organization_id() IS NOT NULL
+     OR app_rls.current_licensee_id() IS DISTINCT FROM selector
+     OR (selector IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM public."Licensee" l JOIN public."Organization" o ON o."id"=l."orgId"
+       WHERE l."id"=selector AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE
+     ))
+  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  RETURN md5(concat_ws('|','platform',app_rls.current_user_id(),app_rls.current_role(),coalesce(selector,'global')));
+END
+$function$;
+
+CREATE FUNCTION app_rls.authorize_dashboard_snapshot(audit_id text,requested_licensee_id text,route_surface text) RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE
+  fingerprint text;
+  audit_organization_id text := app_rls.current_organization_id();
+BEGIN
+  IF audit_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR route_surface NOT IN ('GET /api/dashboard/stats','GET /api/events/dashboard')
+  THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  fingerprint := app_rls.dashboard_scope_fingerprint(requested_licensee_id);
+  IF app_rls.current_licensee_id() IS NOT NULL AND audit_organization_id IS NULL THEN
+    SELECT l."orgId" INTO audit_organization_id
+    FROM public."Licensee" l JOIN public."Organization" o ON o."id"=l."orgId"
+    WHERE l."id"=app_rls.current_licensee_id()
+      AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  END IF;
+  INSERT INTO public."AuditLog"
+    ("id","userId","orgId","licenseeId","action","entityType","entityId","details")
+  VALUES (
+    lower(audit_id),app_rls.current_user_id(),audit_organization_id,app_rls.current_licensee_id(),
+    'DASHBOARD_SNAPSHOT_READ','DashboardSnapshot',coalesce(app_rls.current_licensee_id(),app_rls.current_user_id()),
+    jsonb_build_object(
+      'actorId',app_rls.current_user_id(),'role',app_rls.current_role(),'assurance',app_rls.current_assurance(),
+      'requestId',app_rls.current_request_id(),'purposeCode',app_rls.current_purpose(),'route',route_surface,
+      'scopeFingerprint',fingerprint,'outcome','SUCCESS','workflowIds',jsonb_build_array(
+        'workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot',
+        'workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate'
+      )
+    )
+  ) ON CONFLICT ("id") DO NOTHING;
+  IF NOT EXISTS (
+    SELECT 1 FROM public."AuditLog" a
+    WHERE a."id"=lower(audit_id) AND a."userId"=app_rls.current_user_id()
+      AND a."orgId" IS NOT DISTINCT FROM audit_organization_id
+      AND a."licenseeId" IS NOT DISTINCT FROM app_rls.current_licensee_id()
+      AND a."action"='DASHBOARD_SNAPSHOT_READ' AND a."entityType"='DashboardSnapshot'
+      AND a."entityId"=coalesce(app_rls.current_licensee_id(),app_rls.current_user_id())
+      AND a."details"->>'actorId'=app_rls.current_user_id()
+      AND a."details"->>'role'=app_rls.current_role()
+      AND a."details"->>'assurance'=app_rls.current_assurance()
+      AND a."details"->>'requestId'=app_rls.current_request_id()
+      AND a."details"->>'purposeCode'='dashboard-snapshot-read'
+      AND a."details"->>'route'=route_surface
+      AND a."details"->>'scopeFingerprint'=fingerprint
+      AND a."details"->>'outcome'='SUCCESS'
+      AND a."details"->'workflowIds'=jsonb_build_array(
+        'workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot',
+        'workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate'
+      )
+  ) THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+  RETURN fingerprint;
+END
+$function$;
+
+CREATE FUNCTION app_rls.dashboard_snapshot_scope(audit_id text,requested_licensee_id text,route_surface text)
+RETURNS TABLE(scope_fingerprint text) LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+  SELECT app_rls.authorize_dashboard_snapshot(audit_id,requested_licensee_id,route_surface)
+$function$;
+
+CREATE FUNCTION app_rls.dashboard_snapshot_data(audit_id text,requested_licensee_id text,route_surface text,expected_scope_fingerprint text)
+RETURNS TABLE(
+  total_qr_codes bigint,active_licensees bigint,manufacturers bigint,total_batches bigint,
+  dormant bigint,active bigint,activated bigint,allocated bigint,printed bigint,redeemed bigint,blocked bigint,scanned bigint,
+  rollup_authoritative boolean
+) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE
+  fingerprint text;
+  rollup_total bigint;
+  rollup_dormant bigint;
+  rollup_active bigint;
+  rollup_activated bigint;
+  rollup_allocated bigint;
+  rollup_printed bigint;
+  rollup_redeemed bigint;
+  rollup_blocked bigint;
+  rollup_scanned bigint;
+BEGIN
+  fingerprint := app_rls.authorize_dashboard_snapshot(audit_id,requested_licensee_id,route_surface);
+  IF expected_scope_fingerprint IS DISTINCT FROM fingerprint THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
+
+  IF app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN
+    SELECT count(*) INTO active_licensees
+    FROM public."Licensee" l
+    JOIN public."Organization" o ON o."id"=l."orgId"
+    WHERE EXISTS (
+      SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+      WHERE ml."manufacturerId"=app_rls.current_user_id() AND ml."licenseeId"=l."id"
+    ) AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE;
+  ELSIF app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_licensee_id() IS NULL THEN
+    SELECT count(*) INTO active_licensees
+    FROM public."Licensee" l
+    WHERE l."isActive"=TRUE;
+  ELSE
+    SELECT count(*) INTO active_licensees
+    FROM public."Licensee" l
+    JOIN public."Organization" o ON o."id"=l."orgId"
+    WHERE l."id"=app_rls.current_licensee_id()
+      AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE;
+  END IF;
+
+  SELECT count(*) INTO manufacturers
+  FROM public."User" u
+  WHERE u."role" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND u."isActive"=TRUE
+    AND (
+      (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND u."id"=app_rls.current_user_id())
+      OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_licensee_id() IS NULL)
+      OR ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_licensee_id() IS NOT NULL AND (
+        u."licenseeId"=app_rls.current_licensee_id()
+        OR EXISTS (SELECT 1 FROM public."ManufacturerLicenseeLink" ml WHERE ml."manufacturerId"=u."id" AND ml."licenseeId"=app_rls.current_licensee_id())
+      ))
+    );
+
+  SELECT count(*) INTO total_batches
+  FROM public."Batch" b
+  WHERE (
+    (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND b."manufacturerId"=app_rls.current_user_id() AND EXISTS (
+      SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+      JOIN public."Licensee" l ON l."id"=ml."licenseeId"
+      JOIN public."Organization" o ON o."id"=l."orgId"
+      WHERE ml."manufacturerId"=app_rls.current_user_id() AND ml."licenseeId"=b."licenseeId"
+        AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE
+        AND (app_rls.current_licensee_id() IS NULL OR ml."licenseeId"=app_rls.current_licensee_id())
+    ))
+    OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND b."licenseeId"=app_rls.current_licensee_id())
+    OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR b."licenseeId"=app_rls.current_licensee_id()))
+  );
+
+  SELECT coalesce(sum(r."totalCodes"),0),coalesce(sum(r."dormant"),0),coalesce(sum(r."active"),0),
+         coalesce(sum(r."activated"),0),coalesce(sum(r."allocated"),0),coalesce(sum(r."printed"),0),
+         coalesce(sum(r."redeemed"),0),coalesce(sum(r."blocked"),0),coalesce(sum(r."scanned"),0)
+    INTO rollup_total,rollup_dormant,rollup_active,rollup_activated,rollup_allocated,rollup_printed,rollup_redeemed,rollup_blocked,rollup_scanned
+  FROM public."InventoryStatusRollup" r
+  WHERE (
+    (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND r."manufacturerId"=app_rls.current_user_id() AND EXISTS (
+      SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+      JOIN public."Licensee" l ON l."id"=ml."licenseeId"
+      JOIN public."Organization" o ON o."id"=l."orgId"
+      WHERE ml."manufacturerId"=app_rls.current_user_id() AND ml."licenseeId"=r."licenseeId"
+        AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE
+        AND (app_rls.current_licensee_id() IS NULL OR ml."licenseeId"=app_rls.current_licensee_id())
+    ))
+    OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND r."licenseeId"=app_rls.current_licensee_id())
+    OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR r."licenseeId"=app_rls.current_licensee_id()))
+  );
+
+  IF rollup_total>0 OR rollup_dormant>0 OR rollup_active>0 OR rollup_activated>0 OR rollup_allocated>0
+     OR rollup_printed>0 OR rollup_redeemed>0 OR rollup_blocked>0 OR rollup_scanned>0
+  THEN
+    rollup_authoritative:=TRUE;
+    total_qr_codes:=rollup_total; dormant:=rollup_dormant; active:=rollup_active; activated:=rollup_activated;
+    allocated:=rollup_allocated; printed:=rollup_printed; redeemed:=rollup_redeemed; blocked:=rollup_blocked; scanned:=rollup_scanned;
+  ELSE
+    rollup_authoritative:=FALSE;
+    SELECT count(*),count(*) FILTER (WHERE qcode."status"='DORMANT'),count(*) FILTER (WHERE qcode."status"='ACTIVE'),
+           count(*) FILTER (WHERE qcode."status"='ACTIVATED'),count(*) FILTER (WHERE qcode."status"='ALLOCATED'),
+           count(*) FILTER (WHERE qcode."status"='PRINTED'),count(*) FILTER (WHERE qcode."status"='REDEEMED'),
+           count(*) FILTER (WHERE qcode."status"='BLOCKED'),count(*) FILTER (WHERE qcode."status"='SCANNED')
+      INTO total_qr_codes,dormant,active,activated,allocated,printed,redeemed,blocked,scanned
+    FROM public."QRCode" qcode
+    WHERE (
+      (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND EXISTS (
+        SELECT 1 FROM public."Batch" b WHERE b."id"=qcode."batchId" AND b."manufacturerId"=app_rls.current_user_id()
+      ) AND EXISTS (
+        SELECT 1 FROM public."ManufacturerLicenseeLink" ml
+        JOIN public."Licensee" l ON l."id"=ml."licenseeId"
+        JOIN public."Organization" o ON o."id"=l."orgId"
+        WHERE ml."manufacturerId"=app_rls.current_user_id() AND ml."licenseeId"=qcode."licenseeId"
+          AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE
+          AND (app_rls.current_licensee_id() IS NULL OR ml."licenseeId"=app_rls.current_licensee_id())
+      ))
+      OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND qcode."licenseeId"=app_rls.current_licensee_id())
+      OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR qcode."licenseeId"=app_rls.current_licensee_id()))
+    );
+  END IF;
+  RETURN NEXT;
+END
+$function$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_rls FROM PUBLIC;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app_rls TO "mscqr_rls_cert_app";
+REVOKE EXECUTE ON FUNCTION app_rls.dashboard_scope_fingerprint(text) FROM "mscqr_rls_cert_app";
+REVOKE EXECUTE ON FUNCTION app_rls.authorize_dashboard_snapshot(text,text,text) FROM "mscqr_rls_cert_app";
 RESET ROLE;
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,

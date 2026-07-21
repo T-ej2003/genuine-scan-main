@@ -18,7 +18,7 @@
     "backend/prisma/schema.prisma"
   ],
   "workflowCount": 428,
-  "familyCount": 318,
+  "familyCount": 317,
   "baselineImplementedWorkflowIds": [
     "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv",
     "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports",
@@ -549,22 +549,35 @@
       "id": "family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
         "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
       ],
       "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
         "internal"
       ],
-      "controllerFiles": [],
+      "controllerFiles": [
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts"
+      ],
       "serviceFiles": [
         "backend/src/services/dashboardSnapshotService.ts"
       ],
       "repositoryFiles": [],
       "protectedTables": [
-        "table-inventory-status-rollup"
+        "table-audit-log",
+        "table-batch",
+        "table-inventory-status-rollup",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-qrcode",
+        "table-user"
       ],
       "actorClasses": [
-        "authenticated-user"
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
       ],
       "pendingActorClasses": [],
       "pendingActorBlockers": [],
@@ -583,28 +596,174 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-inventory-status-rollup-select-f64d10600903"
+        "command-audit-log-insert-e3ba477495b1",
+        "command-audit-log-insert-f64d10600903",
+        "command-audit-log-select-e3ba477495b1",
+        "command-audit-log-select-f64d10600903",
+        "command-batch-select-f64d10600903",
+        "command-inventory-status-rollup-select-f64d10600903",
+        "command-licensee-select-e3ba477495b1",
+        "command-licensee-select-f64d10600903",
+        "command-manufacturer-licensee-link-select-e3ba477495b1",
+        "command-manufacturer-licensee-link-select-f64d10600903",
+        "command-organization-select-e3ba477495b1",
+        "command-organization-select-f64d10600903",
+        "command-qrcode-select-f64d10600903",
+        "command-user-select-e3ba477495b1",
+        "command-user-select-f64d10600903"
       ],
       "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee."
       ],
-      "lifecycleStateRequirements": [],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
-      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "low",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
+      "lifecycleStateRequirements": [
         {
-          "code": "incomplete-root-transaction",
-          "reason": "The helper is only one protected query inside HTTP and SSE snapshot roots that still use global Prisma.",
-          "remediation": "Move every protected snapshot query for each compatible root into one canonical transaction before implementing this leaf read.",
-          "id": "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-incomplete-root-transaction"
+          "commandRuleId": "command-batch-select-f64d10600903",
+          "columns": [
+            "lifecycleState",
+            "releasedAt"
+          ],
+          "allowed": [
+            "lifecycleState=DRAFT",
+            "lifecycleState=CODES_GENERATED",
+            "lifecycleState=PRINT_ACKNOWLEDGED",
+            "lifecycleState=PRINT_CONFIRMED",
+            "lifecycleState=SAMPLE_VERIFIED",
+            "lifecycleState=RELEASED",
+            "lifecycleState=FAILED",
+            "lifecycleState=VOIDED",
+            "releasedAt=NULL",
+            "releasedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-qrcode-select-f64d10600903",
+          "columns": [
+            "status",
+            "tokenExpiresAt"
+          ],
+          "allowed": [
+            "status=DORMANT",
+            "status=ACTIVE",
+            "status=ALLOCATED",
+            "status=ACTIVATED",
+            "status=PRINTED",
+            "status=REDEEMED",
+            "status=BLOCKED",
+            "status=SCANNED",
+            "tokenExpiresAt=NULL",
+            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-e3ba477495b1",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-f64d10600903",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
         }
       ],
-      "implementationStatus": "blocked",
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "Retain the reviewed transaction-client-only service and focused contract tests; do not broaden the boundary.",
+      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
+      "riskLevel": "high",
+      "automationEligibility": "implemented",
+      "governingBoundaryIds": [],
+      "blockers": [],
+      "implementationStatus": "implemented",
+      "resolvedBlockerIds": [
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-incomplete-root-transaction",
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-named-function-prerequisite",
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unresolved-boundary",
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unreviewed-scope",
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unverified-execution-path",
+        "blocker-family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887-unverified-root-call-chain"
+      ],
+      "rootCallChainEvidence": [
+        "SSE initial snapshots and deltas share the same database-revalidated actor, scope, assurance, purpose and attribution family.",
+        "dashboardController and eventsController call dashboardSnapshotService; every protected snapshot query is inside one canonical REPEATABLE READ transaction.",
+        "realtimeRoutes registers GET /dashboard/stats and GET /events/dashboard behind authentication, tenant isolation and bounded route/IP/actor limiters."
+      ],
+      "scopeEvidence": [
+        "Manufacturer selectors only narrow the current active ManufacturerLicenseeLink set; the membership fingerprint is revalidated before every cache hit.",
+        "Platform global and selected aggregates require a database ACTIVE actor and fresh-MFA canonical assurance; selected licensees and organizations must be active.",
+        "Tenant actor licensee and organization claims are matched to the ACTIVE User, Licensee and Organization rows in PostgreSQL."
+      ],
+      "implementationFiles": [
+        "backend/src/controllers/dashboardController.ts",
+        "backend/src/controllers/eventsController.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/routes/modules/realtimeRoutes.ts",
+        "backend/src/services/dashboardSnapshotService.ts"
+      ],
+      "testFiles": [
+        "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js",
+        "backend/tests/dashboardSnapshotContext.test.js"
+      ],
+      "contextKeys": [
+        "app.auth_assurance",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.organization_id",
+        "app.purpose",
+        "app.request_id",
+        "app.role",
+        "app.user_id"
+      ],
+      "sameTransactionGuarantee": true,
+      "responseProjection": [
+        "REST preserves success.data totalQRCodes, activeLicensees, manufacturers and totalBatches.",
+        "SSE preserves the existing summary plus QR status aggregate; no protected predicate or secret column is serialized."
+      ],
+      "allowScenarios": [
+        "A cache hit revalidates actor and scope in PostgreSQL and commits one immutable dashboard read attribution before delivery.",
+        "An ACTIVE LICENSEE_ADMIN or ORG_ADMIN reads its active tenant dashboard through the REST or SSE root.",
+        "An ACTIVE fresh-MFA platform administrator reads the reviewed global aggregate or one active selected licensee.",
+        "An ACTIVE manufacturer reads aggregates across all current active links or narrows to one current linked licensee.",
+        "Rollup totals remain authoritative when any rollup counter is nonzero; otherwise QR status rows provide the existing fallback."
+      ],
+      "denyScenarios": [
+        "A protected query before canonical context or use of global Prisma in the dashboard family is denied.",
+        "Blank or malformed context, wrong purpose, wrong role, lower platform assurance and inactive actors are denied.",
+        "Direct application table access, internal helper execution and prohibited User or QRCode columns are denied.",
+        "Foreign, inactive, suspended or revoked tenant/manufacturer scope is denied before cached or fresh data is delivered."
+      ],
+      "postgresqlCertificationStatus": [
+        "certified"
+      ],
       "changeSizeGuard": {
         "maximumProductionFiles": 15,
         "maximumTestFiles": 10,
@@ -27604,163 +27763,6 @@
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
           "id": "blocker-family-account-and-security-mutations-customerwebauthnservice-e4b0dc54e6-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
-      "id": "family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e",
-      "category": "account and security mutations",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/dashboardSnapshotService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-batch",
-        "table-licensee",
-        "table-qrcode",
-        "table-user"
-      ],
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "pendingActorClasses": [],
-      "pendingActorBlockers": [],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-batch-select-e3ba477495b1",
-        "command-licensee-select-e3ba477495b1",
-        "command-qrcode-select-e3ba477495b1",
-        "command-user-select-e3ba477495b1"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-        "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-        "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-batch-select-e3ba477495b1",
-          "columns": [
-            "lifecycleState",
-            "releasedAt"
-          ],
-          "allowed": [
-            "lifecycleState=DRAFT",
-            "lifecycleState=CODES_GENERATED",
-            "lifecycleState=PRINT_ACKNOWLEDGED",
-            "lifecycleState=PRINT_CONFIRMED",
-            "lifecycleState=SAMPLE_VERIFIED",
-            "lifecycleState=RELEASED",
-            "lifecycleState=FAILED",
-            "lifecycleState=VOIDED",
-            "releasedAt=NULL",
-            "releasedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-qrcode-select-e3ba477495b1",
-          "columns": [
-            "status",
-            "tokenExpiresAt"
-          ],
-          "allowed": [
-            "status=DORMANT",
-            "status=ACTIVE",
-            "status=ALLOCATED",
-            "status=ACTIVATED",
-            "status=PRINTED",
-            "status=REDEEMED",
-            "status=BLOCKED",
-            "status=SCANNED",
-            "tokenExpiresAt=NULL",
-            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-user-select-e3ba477495b1",
-          "columns": [
-            "deletedAt",
-            "disabledAt",
-            "status"
-          ],
-          "allowed": [
-            "deletedAt=NULL",
-            "deletedAt=SERVER_TIMESTAMP_SET",
-            "disabledAt=NULL",
-            "disabledAt=SERVER_TIMESTAMP_SET",
-            "status=INVITED",
-            "status=ACTIVE",
-            "status=DISABLED"
-          ],
-          "forbidden": []
-        }
-      ],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
-      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
-      "riskLevel": "critical",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "named-function-prerequisite",
-          "reason": "At least one command rule requires a named function boundary.",
-          "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e-named-function-prerequisite"
-        },
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-dashboardsnapshotservice-b6ab22539e-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",

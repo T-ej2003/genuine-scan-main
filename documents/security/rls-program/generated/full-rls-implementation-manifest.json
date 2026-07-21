@@ -15,19 +15,19 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "31314331260d1ce2f31399e33eb04cb87fcad6450368f99e3c7ea303efd74e3f",
+  "sourceContractSha256": "87c127f611e6ec3914521158958d4bf5ad7388590d0eca08c6c67c045e3298a3",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
-      "sha256": "abc0f277420613ba8443a0a4e3af09f33e3399b811eb01be4a72bc874add459a"
+      "sha256": "3fc6b7630b7171e375ec2f0fcd8a3d26eb0080589e9a79fe02c5d7f79b957780"
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "36ffbe8b88cdbaf2c5761e5d09bcb79fea966eb91cf0c089a18ddfc95d8e2ddb"
+      "sha256": "b9248c5c9ceb7894e9a4ee18e8ae114e252b95e5b871b4d3854068ddb2bb88ac"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "7f0f50605e75bdd58171131063d2e143888ad97b45f351e984b609615cd0180c"
+      "sha256": "07d4e0f40b5defce8f28f698176b909f8002ffe5b9efde0fc668bdff4c80a72e"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -39,11 +39,11 @@
     },
     {
       "path": "documents/security/rls-program/essential-workflow-allowlist.json",
-      "sha256": "915395b052435341f98359ebd7dcd42ee2abbfa4299859c143e0d98a4c2b4c58"
+      "sha256": "b499ec743a9b4830e7b188b4c702720e638e60859bbebc160e14b028b8ed30d8"
     },
     {
       "path": "documents/security/rls-program/context-boundary-families.json",
-      "sha256": "0b868b8214ff2c11d37796fc994e3b1422e72ce7586618a7c7465fe51197b104"
+      "sha256": "509222d5684a62babe9668f74e600b9399e1e88ac2a4fd61c67639966936bdf2"
     },
     {
       "path": "backend/prisma/schema.prisma",
@@ -55,7 +55,7 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "ffbf47d8b72da521bfbbc04206cc205deedd9a87945873e57bef027a6814e3e4"
+      "sha256": "1a1fed01df961f393c9a358edce8c7b1cc4be969990c034bc9fb587b4b9b509c"
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
@@ -67,9 +67,9 @@
     "tables": 77,
     "forceRlsTargets": 75,
     "migrationOnly": 2,
-    "certificationCandidateWorkflows": 5,
+    "certificationCandidateWorkflows": 7,
     "directPolicySlices": 34,
-    "generatedPolicies": 39,
+    "generatedPolicies": 48,
     "columnPrivilegeCells": 78,
     "prismaMigrations": 48,
     "prismaEnums": 58
@@ -85,7 +85,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:31314331260d1ce2f31399e33eb04cb87fcad6450368f99e3c7ea303efd74e3f",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:87c127f611e6ec3914521158958d4bf5ad7388590d0eca08c6c67c045e3298a3",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

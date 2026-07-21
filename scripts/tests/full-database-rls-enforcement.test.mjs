@@ -32,11 +32,11 @@ test("full RLS generator covers all tables with fail-closed dispositions", () =>
 test("generated direct policies preserve exact actor, assurance, purpose and column semantics", () => {
   const inputs = packageInputs();
   const result = validateGeneratedPackage(inputs);
-  assert.equal(result.policies, 39);
+  assert.equal(result.policies, 48);
   assert.equal(result.directPolicySlices, 34);
   assert.equal(result.columnPrivilegeCells, 78);
   assert.ok(inputs.policies.rows.filter((policy) => !policy.internalHelperOnly && policy.actors.includes("platform-admin")).every((policy) => policy.assurance === "mfa-verified"));
-  const platformOrganization = inputs.policies.rows.find((policy) => policy.table === "Organization" && policy.actors.includes("platform-admin"));
+  const platformOrganization = inputs.policies.rows.find((policy) => policy.table === "Organization" && !policy.internalHelperOnly && policy.actors.includes("platform-admin"));
   const platformPolicyRule = inputs.policies.rows.find((policy) => policy.table === "PolicyRule" && policy.actors.includes("platform-admin"));
   const internalOrganization = inputs.policies.rows.find((policy) => policy.policyName === "full_rls_internal_manufacturer_org");
   assert.match(platformOrganization.scopePredicate, /scope_licensee\."orgId"="Organization"\."id"/);
@@ -95,6 +95,17 @@ test("package validation rejects an actor outside the exact certification profil
   const policy = candidate.policies.rows.find((entry) => !entry.internalHelperOnly);
   policy.actors = ["worker"];
   assert.throws(() => validateGeneratedPackage(candidate), /compatible direct certification profile|source profile/i);
+});
+
+test("package validation rejects dashboard named-function profile drift", () => {
+  for (const mutate of [
+    (candidate) => { candidate.commandSemantics.sqlCertificationProfiles.find((profile) => profile.id === "sql-profile-dashboard-snapshot-scope-manufacturer").minimumAssurance = "password-verified"; },
+    (candidate) => { candidate.commandSemantics.sqlCertificationProfiles.find((profile) => profile.id === "sql-profile-dashboard-snapshot-data-platform-admin").routes.pop(); },
+  ]) {
+    const candidate = clone(packageInputs());
+    mutate(candidate);
+    assert.throws(() => validateGeneratedPackage(candidate), /assurance|route/i);
+  }
 });
 
 test("generated role lifecycle is clean-room-only and leaves no legacy restoration path", () => {
@@ -220,6 +231,7 @@ test("reduced surface has no prematurely enabled protected workflow", () => {
   const shutdown = readJson("unsupported-workflow-shutdown.json");
   assert.equal(allowlist.launchBlocked, true);
   assert.equal(allowlist.certification.enabledWorkflowCount, 0);
+  assert.equal(allowlist.certification.essentialWorkflowCount, allowlist.workflows.length);
   assert.deepEqual(allowlist.protectedRouteGate.enabledRoutes, []);
   assert.deepEqual(shutdown.enabledProtectedRoutes, []);
   assert.equal(shutdown.overrides.production, "startup failure");

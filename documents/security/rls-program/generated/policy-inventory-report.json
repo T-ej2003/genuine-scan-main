@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 39,
+  "count": 48,
   "rows": [
     {
       "tableId": "table-audit-log",
@@ -264,6 +264,78 @@
     {
       "tableId": "table-audit-log",
       "table": "AuditLog",
+      "policyName": "full_rls_internal_dashboard_audit_insert",
+      "name": "full_rls_internal_dashboard_audit_insert",
+      "command": "INSERT",
+      "columns": [],
+      "predicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND \"userId\"=app_rls.current_user_id() AND \"action\"='DASHBOARD_SNAPSHOT_READ' AND \"entityType\"='DashboardSnapshot' AND \"details\"->>'requestId'=app_rls.current_request_id() AND \"details\"->>'purposeCode'='dashboard-snapshot-read' AND \"details\"->>'route' IN ('GET /api/dashboard/stats','GET /api/events/dashboard')",
+      "projectedColumns": [
+        "id",
+        "userId",
+        "orgId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "details"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-e3ba477495b1",
+        "command-audit-log-insert-f64d10600903"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-revalidated-dashboard-aggregate",
+      "scopePredicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND \"userId\"=app_rls.current_user_id() AND \"action\"='DASHBOARD_SNAPSHOT_READ' AND \"entityType\"='DashboardSnapshot' AND \"details\"->>'requestId'=app_rls.current_request_id() AND \"details\"->>'purposeCode'='dashboard-snapshot-read' AND \"details\"->>'route' IN ('GET /api/dashboard/stats','GET /api/events/dashboard')",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "full_rls_internal_dashboard_audit_select",
+      "name": "full_rls_internal_dashboard_audit_select",
+      "command": "SELECT",
+      "columns": [],
+      "predicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND \"userId\"=app_rls.current_user_id() AND \"action\"='DASHBOARD_SNAPSHOT_READ' AND \"entityType\"='DashboardSnapshot' AND \"details\"->>'requestId'=app_rls.current_request_id() AND \"details\"->>'purposeCode'='dashboard-snapshot-read' AND \"details\"->>'route' IN ('GET /api/dashboard/stats','GET /api/events/dashboard')",
+      "projectedColumns": [
+        "id",
+        "userId",
+        "orgId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "details"
+      ],
+      "sourceCommandRuleIds": [
+        "command-audit-log-select-e3ba477495b1",
+        "command-audit-log-select-f64d10600903"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-revalidated-dashboard-aggregate",
+      "scopePredicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND \"userId\"=app_rls.current_user_id() AND \"action\"='DASHBOARD_SNAPSHOT_READ' AND \"entityType\"='DashboardSnapshot' AND \"details\"->>'requestId'=app_rls.current_request_id() AND \"details\"->>'purposeCode'='dashboard-snapshot-read' AND \"details\"->>'route' IN ('GET /api/dashboard/stats','GET /api/events/dashboard')",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
       "policyName": "full_rls_internal_platform_audit_details",
       "name": "full_rls_internal_platform_audit_details",
       "predicate": "app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose()='platform-audit-log-read' AND \"licenseeId\"=app_rls.current_licensee_id()",
@@ -285,6 +357,7 @@
         "platform-audit-log-read",
         "trace-timeline-read"
       ],
+      "scopeType": "internal-manufacturer-validation",
       "scopePredicate": "app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose()='platform-audit-log-read' AND \"licenseeId\"=app_rls.current_licensee_id()",
       "command": "SELECT",
       "columns": [],
@@ -348,6 +421,36 @@
       "internalHelperOnly": false
     },
     {
+      "tableId": "table-batch",
+      "table": "Batch",
+      "policyName": "full_rls_internal_dashboard_batch",
+      "name": "full_rls_internal_dashboard_batch",
+      "command": "SELECT",
+      "columns": [],
+      "predicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"manufacturerId\"=app_rls.current_user_id() AND EXISTS (SELECT 1 FROM public.\"ManufacturerLicenseeLink\" ml JOIN public.\"Licensee\" l ON l.\"id\"=ml.\"licenseeId\" JOIN public.\"Organization\" o ON o.\"id\"=l.\"orgId\" WHERE ml.\"manufacturerId\"=app_rls.current_user_id() AND ml.\"licenseeId\"=\"Batch\".\"licenseeId\" AND l.\"isActive\"=TRUE AND l.\"suspendedAt\" IS NULL AND o.\"isActive\"=TRUE) AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=app_rls.current_licensee_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n      )",
+      "projectedColumns": [
+        "id",
+        "licenseeId",
+        "manufacturerId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-batch-select-f64d10600903"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-revalidated-dashboard-aggregate",
+      "scopePredicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"manufacturerId\"=app_rls.current_user_id() AND EXISTS (SELECT 1 FROM public.\"ManufacturerLicenseeLink\" ml JOIN public.\"Licensee\" l ON l.\"id\"=ml.\"licenseeId\" JOIN public.\"Organization\" o ON o.\"id\"=l.\"orgId\" WHERE ml.\"manufacturerId\"=app_rls.current_user_id() AND ml.\"licenseeId\"=\"Batch\".\"licenseeId\" AND l.\"isActive\"=TRUE AND l.\"suspendedAt\" IS NULL AND o.\"isActive\"=TRUE) AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=app_rls.current_licensee_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n      )",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-incident",
       "table": "Incident",
       "policyName": "full_rls_incident_select_sql_profile_risk_analytics__5b7afba446",
@@ -400,6 +503,76 @@
       "internalHelperOnly": false
     },
     {
+      "tableId": "table-inventory-status-rollup",
+      "table": "InventoryStatusRollup",
+      "policyName": "full_rls_internal_dashboard_rollup",
+      "name": "full_rls_internal_dashboard_rollup",
+      "command": "SELECT",
+      "columns": [],
+      "predicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"manufacturerId\"=app_rls.current_user_id() AND EXISTS (SELECT 1 FROM public.\"ManufacturerLicenseeLink\" ml JOIN public.\"Licensee\" l ON l.\"id\"=ml.\"licenseeId\" JOIN public.\"Organization\" o ON o.\"id\"=l.\"orgId\" WHERE ml.\"manufacturerId\"=app_rls.current_user_id() AND ml.\"licenseeId\"=\"InventoryStatusRollup\".\"licenseeId\" AND l.\"isActive\"=TRUE AND l.\"suspendedAt\" IS NULL AND o.\"isActive\"=TRUE) AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=app_rls.current_licensee_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n      )",
+      "projectedColumns": [
+        "licenseeId",
+        "manufacturerId",
+        "totalCodes",
+        "dormant",
+        "active",
+        "activated",
+        "allocated",
+        "printed",
+        "redeemed",
+        "blocked",
+        "scanned"
+      ],
+      "sourceCommandRuleIds": [
+        "command-inventory-status-rollup-select-f64d10600903"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-revalidated-dashboard-aggregate",
+      "scopePredicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"manufacturerId\"=app_rls.current_user_id() AND EXISTS (SELECT 1 FROM public.\"ManufacturerLicenseeLink\" ml JOIN public.\"Licensee\" l ON l.\"id\"=ml.\"licenseeId\" JOIN public.\"Organization\" o ON o.\"id\"=l.\"orgId\" WHERE ml.\"manufacturerId\"=app_rls.current_user_id() AND ml.\"licenseeId\"=\"InventoryStatusRollup\".\"licenseeId\" AND l.\"isActive\"=TRUE AND l.\"suspendedAt\" IS NULL AND o.\"isActive\"=TRUE) AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=app_rls.current_licensee_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n      )",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "policyName": "full_rls_internal_dashboard_licensee",
+      "name": "full_rls_internal_dashboard_licensee",
+      "command": "SELECT",
+      "columns": [],
+      "predicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"isActive\"=TRUE AND \"suspendedAt\" IS NULL AND EXISTS (SELECT 1 FROM public.\"ManufacturerLicenseeLink\" ml WHERE ml.\"manufacturerId\"=app_rls.current_user_id() AND ml.\"licenseeId\"=\"Licensee\".\"id\"))\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"id\"=app_rls.current_licensee_id() AND \"orgId\"=app_rls.current_organization_id() AND \"isActive\"=TRUE AND \"suspendedAt\" IS NULL)\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND ((app_rls.current_licensee_id() IS NULL AND \"isActive\"=TRUE) OR (\"id\"=app_rls.current_licensee_id() AND \"isActive\"=TRUE AND \"suspendedAt\" IS NULL)))\n      )",
+      "projectedColumns": [
+        "id",
+        "orgId",
+        "isActive",
+        "suspendedAt"
+      ],
+      "sourceCommandRuleIds": [
+        "command-licensee-select-e3ba477495b1",
+        "command-licensee-select-f64d10600903"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-revalidated-dashboard-aggregate",
+      "scopePredicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"isActive\"=TRUE AND \"suspendedAt\" IS NULL AND EXISTS (SELECT 1 FROM public.\"ManufacturerLicenseeLink\" ml WHERE ml.\"manufacturerId\"=app_rls.current_user_id() AND ml.\"licenseeId\"=\"Licensee\".\"id\"))\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"id\"=app_rls.current_licensee_id() AND \"orgId\"=app_rls.current_organization_id() AND \"isActive\"=TRUE AND \"suspendedAt\" IS NULL)\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND ((app_rls.current_licensee_id() IS NULL AND \"isActive\"=TRUE) OR (\"id\"=app_rls.current_licensee_id() AND \"isActive\"=TRUE AND \"suspendedAt\" IS NULL)))\n      )",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-licensee",
       "table": "Licensee",
       "policyName": "full_rls_internal_manufacturer_licensee",
@@ -423,6 +596,7 @@
         "platform-audit-log-read",
         "trace-timeline-read"
       ],
+      "scopeType": "internal-manufacturer-validation",
       "scopePredicate": "\"id\"=app_rls.current_licensee_id() AND (app_rls.current_organization_id() IS NULL OR \"orgId\"=app_rls.current_organization_id()) AND \"isActive\"=TRUE AND \"suspendedAt\" IS NULL",
       "command": "SELECT",
       "columns": [],
@@ -488,6 +662,38 @@
     {
       "tableId": "table-manufacturer-licensee-link",
       "table": "ManufacturerLicenseeLink",
+      "policyName": "full_rls_internal_dashboard_manufacturer_link",
+      "name": "full_rls_internal_dashboard_manufacturer_link",
+      "command": "SELECT",
+      "columns": [],
+      "predicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"manufacturerId\"=app_rls.current_user_id())\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=app_rls.current_licensee_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n      )",
+      "projectedColumns": [
+        "manufacturerId",
+        "licenseeId",
+        "isPrimary",
+        "updatedAt"
+      ],
+      "sourceCommandRuleIds": [
+        "command-manufacturer-licensee-link-select-e3ba477495b1",
+        "command-manufacturer-licensee-link-select-f64d10600903"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-revalidated-dashboard-aggregate",
+      "scopePredicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"manufacturerId\"=app_rls.current_user_id())\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=app_rls.current_licensee_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n      )",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-manufacturer-licensee-link",
+      "table": "ManufacturerLicenseeLink",
       "policyName": "full_rls_internal_manufacturer_link",
       "name": "full_rls_internal_manufacturer_link",
       "predicate": "\"licenseeId\"=app_rls.current_licensee_id() AND ((app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"manufacturerId\"=app_rls.current_user_id()) OR ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_purpose()='tenant-risk-analytics'))",
@@ -509,6 +715,7 @@
         "platform-audit-log-read",
         "trace-timeline-read"
       ],
+      "scopeType": "internal-manufacturer-validation",
       "scopePredicate": "\"licenseeId\"=app_rls.current_licensee_id() AND ((app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"manufacturerId\"=app_rls.current_user_id()) OR ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_purpose()='tenant-risk-analytics'))",
       "command": "SELECT",
       "columns": [],
@@ -570,6 +777,36 @@
     {
       "tableId": "table-organization",
       "table": "Organization",
+      "policyName": "full_rls_internal_dashboard_organization",
+      "name": "full_rls_internal_dashboard_organization",
+      "command": "SELECT",
+      "columns": [],
+      "predicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND \"isActive\"=TRUE AND (\n        (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"id\"=app_rls.current_organization_id())\n        OR (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND EXISTS (\n          SELECT 1 FROM public.\"Licensee\" l JOIN public.\"ManufacturerLicenseeLink\" ml ON ml.\"licenseeId\"=l.\"id\"\n          WHERE l.\"orgId\"=\"Organization\".\"id\" AND ml.\"manufacturerId\"=app_rls.current_user_id()\n            AND l.\"isActive\"=TRUE AND l.\"suspendedAt\" IS NULL\n        ))\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR EXISTS (\n          SELECT 1 FROM public.\"Licensee\" l WHERE l.\"id\"=app_rls.current_licensee_id() AND l.\"orgId\"=\"Organization\".\"id\"\n        )))\n      )",
+      "projectedColumns": [
+        "id",
+        "isActive"
+      ],
+      "sourceCommandRuleIds": [
+        "command-organization-select-e3ba477495b1",
+        "command-organization-select-f64d10600903"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-revalidated-dashboard-aggregate",
+      "scopePredicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND \"isActive\"=TRUE AND (\n        (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"id\"=app_rls.current_organization_id())\n        OR (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND EXISTS (\n          SELECT 1 FROM public.\"Licensee\" l JOIN public.\"ManufacturerLicenseeLink\" ml ON ml.\"licenseeId\"=l.\"id\"\n          WHERE l.\"orgId\"=\"Organization\".\"id\" AND ml.\"manufacturerId\"=app_rls.current_user_id()\n            AND l.\"isActive\"=TRUE AND l.\"suspendedAt\" IS NULL\n        ))\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR EXISTS (\n          SELECT 1 FROM public.\"Licensee\" l WHERE l.\"id\"=app_rls.current_licensee_id() AND l.\"orgId\"=\"Organization\".\"id\"\n        )))\n      )",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
       "policyName": "full_rls_internal_manufacturer_org",
       "name": "full_rls_internal_manufacturer_org",
       "predicate": "((\"id\"=app_rls.current_organization_id()) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose() IN ('tenant-risk-analytics','platform-audit-log-read') AND EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"Organization\".\"id\"))) AND \"isActive\"=TRUE",
@@ -591,6 +828,7 @@
         "platform-audit-log-read",
         "trace-timeline-read"
       ],
+      "scopeType": "internal-manufacturer-validation",
       "scopePredicate": "((\"id\"=app_rls.current_organization_id()) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose() IN ('tenant-risk-analytics','platform-audit-log-read') AND EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"Organization\".\"id\"))) AND \"isActive\"=TRUE",
       "command": "SELECT",
       "columns": [],
@@ -770,6 +1008,36 @@
       "route": "GET /api/analytics/risk-scores",
       "certificationStatus": "pending",
       "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-qrcode",
+      "table": "QRCode",
+      "policyName": "full_rls_internal_dashboard_qrcode",
+      "name": "full_rls_internal_dashboard_qrcode",
+      "command": "SELECT",
+      "columns": [],
+      "predicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND EXISTS (SELECT 1 FROM public.\"Batch\" b WHERE b.\"id\"=\"QRCode\".\"batchId\" AND b.\"manufacturerId\"=app_rls.current_user_id()) AND EXISTS (SELECT 1 FROM public.\"ManufacturerLicenseeLink\" ml JOIN public.\"Licensee\" l ON l.\"id\"=ml.\"licenseeId\" JOIN public.\"Organization\" o ON o.\"id\"=l.\"orgId\" WHERE ml.\"manufacturerId\"=app_rls.current_user_id() AND ml.\"licenseeId\"=\"QRCode\".\"licenseeId\" AND l.\"isActive\"=TRUE AND l.\"suspendedAt\" IS NULL AND o.\"isActive\"=TRUE) AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=app_rls.current_licensee_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n      )",
+      "projectedColumns": [
+        "batchId",
+        "licenseeId",
+        "status"
+      ],
+      "sourceCommandRuleIds": [
+        "command-qrcode-select-f64d10600903"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-revalidated-dashboard-aggregate",
+      "scopePredicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND EXISTS (SELECT 1 FROM public.\"Batch\" b WHERE b.\"id\"=\"QRCode\".\"batchId\" AND b.\"manufacturerId\"=app_rls.current_user_id()) AND EXISTS (SELECT 1 FROM public.\"ManufacturerLicenseeLink\" ml JOIN public.\"Licensee\" l ON l.\"id\"=ml.\"licenseeId\" JOIN public.\"Organization\" o ON o.\"id\"=l.\"orgId\" WHERE ml.\"manufacturerId\"=app_rls.current_user_id() AND ml.\"licenseeId\"=\"QRCode\".\"licenseeId\" AND l.\"isActive\"=TRUE AND l.\"suspendedAt\" IS NULL AND o.\"isActive\"=TRUE) AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=app_rls.current_licensee_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n      )",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-qrcode",
@@ -1037,9 +1305,46 @@
         "platform-audit-log-read",
         "trace-timeline-read"
       ],
+      "scopeType": "internal-manufacturer-validation",
       "scopePredicate": "(((\"id\"=app_rls.current_user_id() AND \"role\"::text=app_rls.current_role()) OR (((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_purpose()='tenant-risk-analytics') AND \"role\" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_purpose()='platform-audit-log-read' AND \"licenseeId\"=app_rls.current_licensee_id())) AND \"isActive\"=TRUE AND \"status\"='ACTIVE' AND \"deletedAt\" IS NULL AND \"disabledAt\" IS NULL)",
       "command": "SELECT",
       "columns": [],
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "full_rls_internal_dashboard_manufacturer_user",
+      "name": "full_rls_internal_dashboard_manufacturer_user",
+      "command": "SELECT",
+      "columns": [],
+      "predicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND \"role\" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"isActive\"=TRUE AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"id\"=app_rls.current_user_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_licensee_id() IS NULL)\n        OR ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_licensee_id() IS NOT NULL AND (\"licenseeId\"=app_rls.current_licensee_id() OR EXISTS (\n          SELECT 1 FROM public.\"ManufacturerLicenseeLink\" ml WHERE ml.\"manufacturerId\"=\"User\".\"id\" AND ml.\"licenseeId\"=app_rls.current_licensee_id()\n        )))\n      )",
+      "projectedColumns": [
+        "id",
+        "role",
+        "isActive",
+        "status",
+        "deletedAt",
+        "disabledAt",
+        "licenseeId",
+        "orgId"
+      ],
+      "sourceCommandRuleIds": [
+        "command-user-select-e3ba477495b1",
+        "command-user-select-f64d10600903"
+      ],
+      "actors": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "dashboard-snapshot-read"
+      ],
+      "scopeType": "database-revalidated-dashboard-aggregate",
+      "scopePredicate": "(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  ((app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND \"role\" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"isActive\"=TRUE AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"id\"=app_rls.current_user_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_licensee_id() IS NULL)\n        OR ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND app_rls.current_licensee_id() IS NOT NULL AND (\"licenseeId\"=app_rls.current_licensee_id() OR EXISTS (\n          SELECT 1 FROM public.\"ManufacturerLicenseeLink\" ml WHERE ml.\"manufacturerId\"=\"User\".\"id\" AND ml.\"licenseeId\"=app_rls.current_licensee_id()\n        )))\n      )",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },

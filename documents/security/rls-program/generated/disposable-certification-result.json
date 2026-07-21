@@ -3,20 +3,30 @@
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "31314331260d1ce2f31399e33eb04cb87fcad6450368f99e3c7ea303efd74e3f",
+  "sourceContractSha256": "87c127f611e6ec3914521158958d4bf5ad7388590d0eca08c6c67c045e3298a3",
   "tablesExpected": 77,
   "forceRlsTargetsExpected": 75,
   "tablesCertified": 75,
-  "generatedPoliciesCertified": 39,
+  "generatedPoliciesCertified": 48,
   "columnPrivilegeCellsCertified": 78,
   "workflowCertificationStatus": "pending-application-path-certification",
-  "workflowsApplicationPathCertified": 1,
+  "workflowsApplicationPathCertified": 3,
   "applicationPathCertifiedWorkflowIds": [
-    "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"
+    "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+    "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+    "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
   ],
   "applicationPathResults": [
     {
       "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "status": "application-path-certified",
+      "postgresqlMajor": 18
+    },
+    {
+      "workflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
       "status": "application-path-certified",
       "postgresqlMajor": 18
     }
@@ -298,7 +308,7 @@
   "columnPrivilegeCertification": true,
   "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "0831f0ebe0ff0d5cfc884d3c0947d9737204eeae6b0d0b8f6d1d66bfe771abeb",
+  "packageChecksumsSha256": "e41c2722d7da33719f1f6f962ab685edfe9ccd778d840b3626264a88a3dceb09",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
   "disposableCertificationFixtureRows": 36
 }
