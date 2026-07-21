@@ -35,10 +35,21 @@ const fakeRunner = () => {
   const calls = { auditFind: [], auditCreate: [], userFind: [], contextValues: [] };
   const tx = {
     $executeRaw: async (strings, ...values) => {
-      events.push("context");
-      calls.contextValues.push(values);
-      assert.match(strings.join("?"), /set_config\('app\.purpose'/);
+      const sql = strings.join("?");
+      if (/set_config\('app\.purpose'/.test(sql)) {
+        events.push("context");
+        calls.contextValues.push(values);
+      } else if (/INSERT INTO public\."AuditLog"/.test(sql)) {
+        events.push("audit-attribution");
+        calls.auditCreate.push({ values });
+      } else {
+        events.push("audit-outbox");
+      }
       return 1;
+    },
+    $queryRaw: async () => {
+      events.push("audit-clock");
+      return [{ createdAt: new Date("2026-07-16T10:00:01.000Z") }];
     },
     user: {
       findMany: async (args) => {
@@ -64,11 +75,6 @@ const fakeRunner = () => {
             licenseeId: "licensee-a",
           },
         ];
-      },
-      create: async (args) => {
-        events.push("audit-attribution");
-        calls.auditCreate.push(args);
-        return { id: "audit-export-event" };
       },
     },
   };
@@ -110,13 +116,15 @@ const expectDenied = async (user, filters, message) => {
     "user-read",
     "audit-read",
     "user-read",
+    "audit-clock",
     "audit-attribution",
+    "audit-outbox",
     "transaction-end",
   ]);
   assert.strictEqual(tenant.calls.auditFind[0].where.OR[1].licenseeId, "licensee-a");
   assert.strictEqual(tenant.calls.contextValues[0][3], "licensee-a");
-  assert.strictEqual(tenant.calls.auditCreate[0].data.userId, "user-a");
-  assert.strictEqual(tenant.calls.auditCreate[0].data.details.requestId, "request-tenant");
+  assert.strictEqual(tenant.calls.auditCreate[0].values[1], "user-a");
+  assert.strictEqual(JSON.parse(tenant.calls.auditCreate[0].values[7]).requestId, "request-tenant");
   assert.strictEqual(tenantResult.userMap.get("user-a").email, "", "User email is not selected for audit CSV export");
 
   const platform = fakeRunner();
@@ -143,7 +151,9 @@ const expectDenied = async (user, filters, message) => {
   assert(!("details" in platformQuery.select), "Audit details must not be selected for CSV export");
   assert(!("ipAddress" in platformQuery.select), "Audit IP addresses must not be selected for CSV export");
   assert.strictEqual(platform.calls.contextValues[0][5], "mfa-verified");
-  assert.strictEqual(platform.calls.contextValues[0][7], "incident IR-204 export");
+  assert.strictEqual(platform.calls.contextValues[0][7], "platform-audit-csv-export");
+  assert.strictEqual(JSON.parse(platform.calls.auditCreate[0].values[7]).purpose, "incident IR-204 export");
+  assert.strictEqual(JSON.parse(platform.calls.auditCreate[0].values[7]).purposeCode, "platform-audit-csv-export");
 
   await expectDenied(tenantActor(), { licenseeId: "licensee-b" }, "Access denied");
   await expectDenied(tenantActor({ licenseeId: null }), {}, "tenant scope");

@@ -39,10 +39,25 @@ const fakeRunner = () => {
   const calls = { count: [], find: [], create: [], contextValues: [] };
   const tx = {
     $executeRaw: async (strings, ...values) => {
-      events.push("context");
-      calls.contextValues.push(values);
-      assert.match(strings.join("?"), /set_config\('app\.licensee_id'/);
+      const sql = strings.join("?");
+      if (/set_config\('app\.licensee_id'/.test(sql)) {
+        events.push("context");
+        calls.contextValues.push(values);
+      } else if (/INSERT INTO public\."AuditLog"/.test(sql)) {
+        events.push("audit-attribution");
+        calls.create.push({ values });
+      } else {
+        events.push("audit-outbox");
+      }
       return 1;
+    },
+    $queryRaw: async (strings) => {
+      if (/transaction_timestamp/.test(strings.join("?"))) {
+        events.push("audit-clock");
+        return [{ createdAt: new Date("2026-07-16T11:00:01.000Z") }];
+      }
+      events.push("network-details");
+      return [{ id: "report-a", ipAddress: "192.0.2.1" }];
     },
     auditLog: {
       count: async (args) => {
@@ -74,11 +89,6 @@ const fakeRunner = () => {
             delivery: { provider: "mail", accessToken: "must-not-escape", nested: { passwordHash: "also-secret" } },
           },
         }];
-      },
-      create: async (args) => {
-        events.push("audit-attribution");
-        calls.create.push(args);
-        return { id: "audit-read-a" };
       },
     },
   };
@@ -120,13 +130,16 @@ const expectBoundaryDenied = (actor, input, requestId, message) => {
     "context",
     "count",
     "report-list",
+    "network-details",
     "response-list",
+    "audit-clock",
     "audit-attribution",
+    "audit-outbox",
     "transaction-end",
   ]);
   assert.strictEqual(fake.calls.contextValues[0][3], "11111111-1111-4111-8111-111111111111");
   assert.strictEqual(fake.calls.contextValues[0][5], "mfa-verified");
-  assert.strictEqual(fake.calls.contextValues[0][7], "investigate ticket IR-42");
+  assert.strictEqual(fake.calls.contextValues[0][7], "platform-fraud-report-read");
   assert.strictEqual(fake.calls.count[0].where.licenseeId, "11111111-1111-4111-8111-111111111111");
   assert.strictEqual(fake.calls.find[0].where.licenseeId, "11111111-1111-4111-8111-111111111111");
   assert.strictEqual(fake.calls.find[1].where.licenseeId, "11111111-1111-4111-8111-111111111111");
@@ -134,8 +147,10 @@ const expectBoundaryDenied = (actor, input, requestId, message) => {
   assert.strictEqual(fake.calls.find[0].take, 25);
   assert(!("ipHash" in fake.calls.find[0].select));
   assert(!("userAgent" in fake.calls.find[0].select));
-  assert.strictEqual(fake.calls.create[0].data.details.requestId, "request-a");
-  assert.strictEqual(fake.calls.create[0].data.details.purpose, "investigate ticket IR-42");
+  const auditDetails = JSON.parse(fake.calls.create[0].values[7]);
+  assert.strictEqual(auditDetails.requestId, "request-a");
+  assert.strictEqual(auditDetails.purpose, "investigate ticket IR-42");
+  assert.strictEqual(auditDetails.purposeCode, "platform-fraud-report-read");
   assert.strictEqual(data.total, 1);
   assert.strictEqual(data.reports[0].licenseeId, "11111111-1111-4111-8111-111111111111");
   assert.deepStrictEqual(data.reports[0].response.delivery, {

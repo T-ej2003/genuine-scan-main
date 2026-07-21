@@ -83,7 +83,11 @@ export const buildTraceTimelineBoundary = (
       manufacturerId: isManufacturer ? userId : null,
       authAssurance: user.authAssurance === "ADMIN_MFA" ? "mfa-verified" : "password-verified",
       requestId: normalizedRequestId,
-      purpose,
+      purpose: isPlatform
+        ? "platform-trace-timeline-read"
+        : isManufacturer
+          ? "manufacturer-trace-timeline-read"
+          : "tenant-trace-timeline-read",
     },
     query: { ...query, licenseeId, manufacturerId },
   };

@@ -145,7 +145,8 @@ const denied = (user, input, message, requestId = "request-denied") => {
   }), query({ licenseeId: ids.tenant, purpose: "review trace incident IR-42" }));
   assert.strictEqual(platform.boundary.context.licenseeId, ids.tenant);
   assert.strictEqual(platform.boundary.context.authAssurance, "mfa-verified");
-  assert.strictEqual(platform.fake.calls.contextValues[0][7], "review trace incident IR-42");
+  assert.strictEqual(platform.fake.calls.contextValues[0][7], "platform-trace-timeline-read");
+  assert.strictEqual(platform.boundary.query.purpose, "review trace incident IR-42");
 
   denied(actor(), query({ licenseeId: ids.foreignTenant }), "licensee");
   denied(actor({ licenseeId: null }), query(), "tenant scope");

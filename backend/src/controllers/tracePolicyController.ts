@@ -11,7 +11,7 @@ import {
   RiskAnalyticsAccessError,
 } from "../services/analyticsService";
 import { getOrCreateSecurityPolicy } from "../services/policyEngineService";
-import { createAuditLog } from "../services/auditService";
+import { createAuditLog, createAuditLogInTransaction } from "../services/auditService";
 import { buildImmutableBatchAuditPackage } from "../services/immutableAuditExportService";
 import { createRoleNotifications } from "../services/notificationService";
 import { withCanonicalDbContext } from "../lib/canonicalDbContext";
@@ -153,7 +153,23 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
     const result = await withCanonicalDbContext(
       prisma,
       boundary.context,
-      (tx) => getTraceTimeline(tx, boundary.query, boundary.context),
+      async (tx) => {
+        const timeline = await getTraceTimeline(tx, boundary.query, boundary.context);
+        await createAuditLogInTransaction(tx, boundary.context, {
+          action: "TRACE_TIMELINE_READ",
+          entityType: "TraceEvent",
+          entityId: boundary.context.licenseeId || undefined,
+          details: {
+            requestId: boundary.context.requestId,
+            purposeCode: boundary.context.purpose,
+            requestedPurpose: boundary.query.purpose || null,
+            returnedRows: timeline.events.length,
+          },
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+        });
+        return timeline;
+      },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
     );
 

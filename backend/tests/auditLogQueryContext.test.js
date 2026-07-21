@@ -45,14 +45,25 @@ const fakeRunner = () => {
   const requireContext = () => assert(contextInstalled, "protected query attempted before canonical context installation");
   const tx = {
     $executeRaw: async (strings, ...values) => {
-      events.push("context");
-      calls.contextValues.push(values);
-      contextInstalled = true;
-      assert.match(strings.join("?"), /set_config\('app\.purpose'/);
+      const sql = strings.join("?");
+      if (/set_config\('app\.purpose'/.test(sql)) {
+        events.push("context");
+        calls.contextValues.push(values);
+        contextInstalled = true;
+      } else if (/INSERT INTO public\."AuditLog"/.test(sql)) {
+        events.push("audit-attribution");
+        calls.create.push({ values });
+      } else {
+        events.push("audit-outbox");
+      }
       return 1;
     },
     $queryRaw: async (strings, ...values) => {
       requireContext();
+      if (/transaction_timestamp/.test(strings.join("?"))) {
+        events.push("audit-clock");
+        return [{ createdAt: new Date("2026-07-16T10:00:01.000Z") }];
+      }
       events.push("platform-details");
       calls.details.push({ strings, values });
       return [{ id: "audit-a", ipAddress: "192.0.2.1", userAgent: "Test Browser", userId: ids.tenantAdmin, userName: "Tenant Admin" }];
@@ -85,12 +96,6 @@ const fakeRunner = () => {
         events.push("audit-count");
         calls.count.push(args);
         return 1;
-      },
-      create: async (args) => {
-        requireContext();
-        events.push("audit-attribution");
-        calls.create.push(args);
-        return { id: "attribution-a" };
       },
     },
     user: {
@@ -152,7 +157,9 @@ const denied = (user, input, message, requestId = "request-denied") => {
     "audit-list",
     "audit-count",
     "user-enrichment",
+    "audit-clock",
     "audit-attribution",
+    "audit-outbox",
     "transaction-end",
   ]);
   assert.strictEqual(tenant.fake.calls.find[0].where, tenant.fake.calls.count[0].where, "count and list must share one scope object");
@@ -168,7 +175,7 @@ const denied = (user, input, message, requestId = "request-denied") => {
   assert.deepStrictEqual(tenant.fake.calls.users[0].select, { id: true, name: true });
   assert.doesNotMatch(JSON.stringify(tenant.result), /token-secret|cookie-secret|signing-secret/);
   assert.match(JSON.stringify(tenant.result), /retained/);
-  assert.strictEqual(tenant.fake.calls.create[0].data.details.requestId, "request-a");
+  assert.strictEqual(JSON.parse(tenant.fake.calls.create[0].values[7]).requestId, "request-a");
 
   const manufacturer = await read(
     actor({ userId: ids.manufacturer, role: UserRole.MANUFACTURER, linkedLicenseeIds: [ids.tenant] }),
@@ -192,7 +199,7 @@ const denied = (user, input, message, requestId = "request-denied") => {
   );
   assert.strictEqual(platform.fake.calls.contextValues[0][7], "platform-audit-log-read");
   assert.strictEqual(platform.result.logs[0].ipAddress, "192.0.2.1");
-  assert.strictEqual(platform.fake.calls.create[0].data.details.purpose, "review incident IR-42");
+  assert.strictEqual(JSON.parse(platform.fake.calls.create[0].values[7]).purpose, "review incident IR-42");
   assert.strictEqual(platform.fake.calls.details.length, 1);
   assert.strictEqual(platform.fake.calls.users.length, 0, "platform name/network projection must stay behind the exact function");
   assert.strictEqual(platform.fake.calls.find[0].select.ipAddress, undefined);
