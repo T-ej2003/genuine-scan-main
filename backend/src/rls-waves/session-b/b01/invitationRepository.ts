@@ -8,9 +8,16 @@ const roles = new Set<string>(Object.values(UserRole));
 const statuses = new Set<string>(Object.values(UserStatus));
 const platformRoles = new Set<string>([UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN]);
 const licenseeAdminRoles = new Set<string>([UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN]);
+const manufacturerRoles = new Set<string>([UserRole.MANUFACTURER, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER]);
 const invitePurposes = new Set(["auth-invite-create", "licensee-admin-invite-resend"]);
 const HASH_PATTERN = /^(?:[a-f0-9]{12}:)?[a-f0-9]{64}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const canonicalRoleFamily = (role: UserRole) => {
+  if (licenseeAdminRoles.has(role)) return UserRole.LICENSEE_ADMIN;
+  if (manufacturerRoles.has(role)) return UserRole.MANUFACTURER;
+  return role;
+};
 
 const required = (value: unknown, field: string, maximum = 320) => {
   const normalized = typeof value === "string" ? value.trim() : "";
@@ -135,6 +142,9 @@ export const prepareInvitation = async (
     tokenHash: string;
     createdAt: Date;
     expiresAt: Date;
+    actorSessionId: string;
+    ipHash: string | null;
+    userAgent: string | null;
   }
 ): Promise<PreparedInvitation> => {
   validateAuthority(context, input);
@@ -144,14 +154,33 @@ export const prepareInvitation = async (
   if (!roles.has(input.requestedRole)) throw new Error("INVITE_ROLE_INVALID");
   const requestedLicenseeId = optional(input.requestedLicenseeId, "requested licensee ID", 64);
   const requestedManufacturerId = optional(input.requestedManufacturerId, "requested manufacturer ID", 64);
+  if (platformRoles.has(input.requestedRole)) {
+    if (requestedLicenseeId || requestedManufacturerId) throw new Error("INVITE_SCOPE_INVALID");
+  } else if (!requestedLicenseeId) {
+    throw new Error("INVITE_LICENSEE_REQUIRED");
+  }
+  if (requestedManufacturerId && (!manufacturerRoles.has(input.requestedRole) || !input.allowExistingInvitedUser)) {
+    throw new Error("INVITE_MANUFACTURER_INVALID");
+  }
   if (!HASH_PATTERN.test(input.tokenHash)) throw new Error("INVITE_TOKEN_HASH_INVALID");
   const createdAt = timestamp(input.createdAt, "created-at timestamp")!;
   const expiresAt = timestamp(input.expiresAt, "expiry timestamp")!;
   const lifetime = expiresAt.getTime() - createdAt.getTime();
   if (lifetime <= 0 || lifetime > 24 * 60 * 60 * 1000) throw new Error("INVITE_EXPIRY_INVALID");
+  const actorSessionId = required(input.actorSessionId, "actor session ID", 191);
+  const ipHash = input.ipHash == null ? null : String(input.ipHash).trim().toLowerCase();
+  if (ipHash && !HASH_PATTERN.test(ipHash)) throw new Error("INVITE_IP_HASH_INVALID");
+  const userAgent = input.userAgent == null ? null : String(input.userAgent).trim();
+  if (userAgent && (userAgent.length > 512 || /[\u0000-\u001f\u007f]/.test(userAgent))) {
+    throw new Error("INVITE_USER_AGENT_INVALID");
+  }
 
   const rows = await db.$queryRaw<PreparedInvitation[]>`
     SELECT * FROM app_rls.prepare_invitation(
+      ${context.userId},
+      ${actorSessionId},
+      ${context.requestId},
+      ${context.purpose},
       ${requestedEmail},
       ${requestedName},
       ${input.requestedRole}::text,
@@ -161,7 +190,9 @@ export const prepareInvitation = async (
       ${input.requireExistingUser},
       ${input.tokenHash},
       ${createdAt}::timestamp without time zone,
-      ${expiresAt}::timestamp without time zone
+      ${expiresAt}::timestamp without time zone,
+      ${ipHash},
+      ${userAgent}
     )
   `;
   if (rows.length !== 1) throw new Error("app_rls.prepare_invitation returned an invalid row count");
@@ -193,9 +224,24 @@ export const prepareInvitation = async (
   if (!roles.has(row.inviteRole) || !roles.has(row.userRole) || !statuses.has(row.userStatus)) {
     throw new Error("app_rls.prepare_invitation returned an unsupported account state");
   }
+  if (row.inviteRole !== input.requestedRole || (requestedEmail && row.inviteEmail !== requestedEmail)) {
+    throw new Error("app_rls.prepare_invitation returned a foreign invitation");
+  }
+  if (canonicalRoleFamily(row.userRole) !== canonicalRoleFamily(input.requestedRole)) {
+    throw new Error("app_rls.prepare_invitation returned a foreign role family");
+  }
+  if (requestedManufacturerId && row.userId !== requestedManufacturerId) {
+    throw new Error("app_rls.prepare_invitation returned a foreign manufacturer");
+  }
   if (row.inviteEmail !== row.userEmail) throw new Error("app_rls.prepare_invitation returned a foreign user");
   if (row.inviteId ? !row.inviteExpiresAt : row.inviteExpiresAt || !row.linkAction) {
     throw new Error("app_rls.prepare_invitation returned an inconsistent invitation state");
+  }
+  if (row.inviteId && (row.inviteExpiresAt!.getTime() !== expiresAt.getTime() || row.userStatus !== UserStatus.INVITED)) {
+    throw new Error("app_rls.prepare_invitation returned an inconsistent invitation lifecycle");
+  }
+  if (row.linkAction && row.userStatus !== UserStatus.ACTIVE) {
+    throw new Error("app_rls.prepare_invitation returned an inactive linked account");
   }
   if (row.linkAction && row.linkAction !== "LINKED_EXISTING" && row.linkAction !== "ALREADY_LINKED") {
     throw new Error("app_rls.prepare_invitation returned an unsupported link action");

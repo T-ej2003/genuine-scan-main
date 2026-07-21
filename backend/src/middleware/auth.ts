@@ -18,9 +18,17 @@ import {
   getSensitiveActionStepUpMethod,
   isAdminMfaRequiredRole,
 } from "../services/auth/authService";
-import { getAdminMfaStatus } from "../services/auth/mfaService";
-import { withCanonicalAuthClaims } from "../rls-waves/session-b/b01/canonicalAuthContext";
-import { loadAuthenticatedActor } from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
+import { clearAuthCookies } from "../controllers/authControllerShared";
+import {
+  isCanonicalAuthDenial,
+  withCanonicalAuthClaims,
+} from "../rls-waves/session-b/b01/canonicalAuthContext";
+import {
+  loadAuthenticatedActor,
+  isRecentMfaDenial,
+  RecentMfaDenial,
+  requireRecentMfaSession,
+} from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
 
 export interface AuthRequest extends Request {
   user?: AuthenticatedSessionClaims;
@@ -47,7 +55,7 @@ export async function hydrateTenantIfNeeded(
 ): Promise<AuthenticatedSessionClaims> {
   if (!payload?.userId || !payload?.role) return payload;
 
-  const { user: u, manufacturerScope, currentMfaEnabled, canonicalAssurance } = await withCanonicalAuthClaims(
+  const { user: u, manufacturerScope, canonicalAssurance } = await withCanonicalAuthClaims(
     payload,
     { requestId, purpose: "auth-session-hydration" },
     async (tx, context) => {
@@ -63,13 +71,9 @@ export async function hydrateTenantIfNeeded(
             requestedScopeVersion: payload.scopeVersion,
           }, tx)
         : null;
-      const mfaStatus = user && context.authAssurance === "mfa-verified" && isAdminMfaRequiredRole(user.role)
-        ? await getAdminMfaStatus(user.id, tx)
-        : null;
       return {
         user,
         manufacturerScope: scope,
-        currentMfaEnabled: mfaStatus ? Boolean(mfaStatus.enabled) : null,
         canonicalAssurance: context.authAssurance,
       };
     }
@@ -78,10 +82,6 @@ export async function hydrateTenantIfNeeded(
   if (!u || isDisabledUserRecord(u)) {
     throw new Error("Account is disabled");
   }
-  if (canonicalAssurance === "mfa-verified" && isAdminMfaRequiredRole(u.role) && !currentMfaEnabled) {
-    throw new Error("Account MFA state changed");
-  }
-
   const hydratedPayload: AuthenticatedSessionClaims = {
     ...payload,
     sessionStage: canonicalAssurance === "mfa-bootstrap" ? "MFA_BOOTSTRAP" : "ACTIVE",
@@ -254,7 +254,7 @@ const stepUpRequired = (
     },
   });
 
-export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: NextFunction) => {
+export const requireRecentAdminMfa = async (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) {
     return res.status(401).json({ success: false, error: "Authentication required" });
   }
@@ -270,20 +270,34 @@ export const requireRecentAdminMfa = (req: AuthRequest, res: Response, next: Nex
     });
   }
 
-  const verifiedAt = req.user.mfaVerifiedAt ? new Date(req.user.mfaVerifiedAt) : null;
-  if (!verifiedAt || Number.isNaN(verifiedAt.getTime())) {
-    return stepUpRequired(res, {
-      message: "MFA verification is required before continuing.",
-      method: "ADMIN_MFA",
-    });
-  }
-
-  const maxAgeMs = getAdminStepUpWindowMinutes() * 60_000;
-  if (Date.now() - verifiedAt.getTime() > maxAgeMs) {
-    return stepUpRequired(res, {
-      message: "Your MFA verification is no longer fresh enough for this action. Confirm your authenticator code to continue.",
-      method: "ADMIN_MFA",
-    });
+  const maxAgeMinutes = getAdminStepUpWindowMinutes();
+  try {
+    await withCanonicalAuthClaims(
+      req.user,
+      { requestId: requestIdFor(req), purpose: "auth-recent-admin-mfa" },
+      (tx, context) => {
+        if (context.authAssurance !== "mfa-verified" && context.authAssurance !== "step-up-verified") {
+          throw new RecentMfaDenial();
+        }
+        return requireRecentMfaSession({
+          sessionId: req.user!.sessionId || "",
+          checkedAt: new Date(),
+          maxAgeMinutes,
+        }, tx);
+      }
+    );
+  } catch (error) {
+    if (isCanonicalAuthDenial(error)) {
+      clearAuthCookies(res);
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+    if (isRecentMfaDenial(error)) {
+      return stepUpRequired(res, {
+        message: "Your MFA verification is no longer fresh enough for this action. Confirm your authenticator code to continue.",
+        method: "ADMIN_MFA",
+      });
+    }
+    return next(error);
   }
 
   return next();

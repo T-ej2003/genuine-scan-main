@@ -794,6 +794,10 @@ BEGIN
   FOR SHARE;
   IF NOT FOUND THEN RETURN; END IF;
 
+  IF v_token.mfa_verified_at IS NOT NULL AND NOT v_actor.mfa_enabled THEN
+    RETURN;
+  END IF;
+
   IF v_actor.role IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') THEN
     SELECT membership.* INTO v_membership
     FROM b01_refresh_wave.membership AS membership
@@ -815,6 +819,12 @@ BEGIN
       AND membership.active
     FOR SHARE;
     IF NOT FOUND THEN RETURN; END IF;
+  ELSIF v_actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+    IF p_requested_licensee_id IS NOT NULL
+       OR p_requested_organization_id IS NOT NULL
+       OR v_token.organization_id IS NOT NULL THEN
+      RETURN;
+    END IF;
   ELSIF p_requested_licensee_id IS NOT NULL
      OR p_requested_organization_id IS DISTINCT FROM v_token.organization_id
      OR v_actor.organization_id IS DISTINCT FROM v_token.organization_id THEN
@@ -853,6 +863,93 @@ BEGIN
   END IF;
   SELECT actor.* INTO STRICT v_actor FROM b01_refresh_wave.actor actor WHERE actor.id = p_user_id AND actor.active;
   IF current_setting('app.role', true) <> v_actor.role THEN RAISE EXCEPTION 'B01_AUTHENTICATED_ROLE_STALE'; END IF;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.require_recent_mfa_session(
+  p_session_id text,
+  p_checked_at timestamp without time zone,
+  p_max_age_minutes integer
+)
+RETURNS TABLE("verifiedAt" timestamp without time zone)
+LANGUAGE plpgsql
+SECURITY DEFINER
+VOLATILE
+SET search_path = pg_catalog
+AS $fn$
+DECLARE
+  v_user_id text := current_setting('app.user_id', true);
+  v_actor b01_refresh_wave.actor%ROWTYPE;
+  v_token b01_refresh_wave.refresh_token%ROWTYPE;
+  v_membership b01_refresh_wave.membership%ROWTYPE;
+BEGIN
+  IF session_user <> 'mscqr_dev_app'
+     OR p_session_id IS NULL OR p_session_id !~ '^[A-Za-z0-9._:-]{1,191}$'
+     OR p_checked_at IS NULL
+     OR abs(extract(epoch FROM (p_checked_at - (clock_timestamp() AT TIME ZONE 'UTC')))) > 300
+     OR p_max_age_minutes NOT BETWEEN 1 AND 1440 THEN
+    RAISE EXCEPTION 'B01_RECENT_MFA_DENIED';
+  END IF;
+
+  PERFORM b01_refresh_wave.require_authenticated_context(
+    v_user_id,
+    ARRAY['auth-recent-admin-mfa','admin-mfa-disable'],
+    ARRAY['mfa-verified','step-up-verified']
+  );
+
+  SELECT actor.* INTO v_actor
+  FROM b01_refresh_wave.actor AS actor
+  WHERE actor.id = v_user_id
+    AND actor.active
+    AND actor.mfa_required
+    AND actor.mfa_enabled
+    AND actor.role IN (
+      'SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN',
+      'MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'
+    )
+  FOR SHARE;
+  IF NOT FOUND THEN RETURN; END IF;
+
+  SELECT token.* INTO v_token
+  FROM b01_refresh_wave.refresh_token AS token
+  WHERE token.id = p_session_id
+    AND token.user_id = v_actor.id
+    AND token.revoked_at IS NULL
+    AND token.expires_at > p_checked_at
+    AND token.mfa_verified_at IS NOT NULL
+    AND token.mfa_verified_at >= p_checked_at - (p_max_age_minutes * interval '1 minute')
+    AND token.mfa_verified_at <= p_checked_at + interval '5 minutes'
+  FOR SHARE;
+  IF NOT FOUND THEN RETURN; END IF;
+
+  IF v_actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+    IF v_token.organization_id IS NOT NULL
+       OR current_setting('app.organization_id', true) <> ''
+       OR current_setting('app.licensee_id', true) <> ''
+       OR current_setting('app.manufacturer_id', true) <> '' THEN
+      RETURN;
+    END IF;
+  ELSE
+    SELECT membership.* INTO v_membership
+    FROM b01_refresh_wave.membership AS membership
+    WHERE membership.user_id = v_actor.id
+      AND membership.licensee_id = current_setting('app.licensee_id', true)
+      AND membership.organization_id = current_setting('app.organization_id', true)
+      AND membership.organization_id = v_token.organization_id
+      AND membership.active
+    FOR SHARE;
+    IF NOT FOUND THEN RETURN; END IF;
+    IF v_actor.role IN ('LICENSEE_ADMIN','ORG_ADMIN')
+       AND v_actor.licensee_id IS DISTINCT FROM v_membership.licensee_id THEN
+      RETURN;
+    END IF;
+    IF v_actor.role IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')
+       AND current_setting('app.manufacturer_id', true) IS DISTINCT FROM v_actor.id THEN
+      RETURN;
+    END IF;
+  END IF;
+
+  RETURN QUERY SELECT v_token.mfa_verified_at;
 END
 $fn$;
 
@@ -1164,6 +1261,8 @@ ALTER FUNCTION app_rls.revalidate_authenticated_actor(text,text,text,text,timest
   OWNER TO mscqr_dev_rls_function_owner;
 ALTER FUNCTION b01_refresh_wave.require_authenticated_context(text,text[],text[])
   OWNER TO mscqr_dev_rls_function_owner;
+ALTER FUNCTION app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)
+  OWNER TO mscqr_dev_rls_function_owner;
 ALTER FUNCTION app_rls.load_authenticated_actor()
   OWNER TO mscqr_dev_rls_function_owner;
 ALTER FUNCTION app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text)
@@ -1201,6 +1300,7 @@ REVOKE ALL ON FUNCTION app_rls.revoke_refresh_token_by_id(text,text,text,timesta
 REVOKE ALL ON FUNCTION b01_refresh_wave.require_authenticated_context(text,text[],text[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION b01_refresh_wave.require_refresh_bearer(text,text,text[],timestamp without time zone,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.require_recent_mfa_session(text,timestamp without time zone,integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.load_authenticated_actor() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text) FROM PUBLIC;
 
@@ -1211,6 +1311,7 @@ GRANT EXECUTE ON FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,t
 GRANT EXECUTE ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) TO mscqr_dev_preauth;
 
 GRANT EXECUTE ON FUNCTION app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text) TO mscqr_dev_app;
+GRANT EXECUTE ON FUNCTION app_rls.require_recent_mfa_session(text,timestamp without time zone,integer) TO mscqr_dev_app;
 GRANT EXECUTE ON FUNCTION app_rls.load_authenticated_actor() TO mscqr_dev_app;
 GRANT EXECUTE ON FUNCTION app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text) TO mscqr_dev_app;
 GRANT EXECUTE ON FUNCTION app_rls.create_refresh_token(text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone) TO mscqr_dev_app;

@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const {
+  b01InvitationApplicationPathProof,
   b01RefreshSessionApplicationPathProof,
   b01SessionAIntegrationRequests,
   b01WorkflowProofs,
@@ -30,6 +31,7 @@ assert.deepEqual(
 );
 
 const byId = new Map(expected.map((assignment) => [assignment.workflowId, assignment]));
+const invitationIds = new Set(b01InvitationApplicationPathProof.workflowIds);
 for (const proof of b01WorkflowProofs) {
   const assignment = byId.get(proof.workflowId);
   assert(assignment, `unknown B01 proof ${proof.workflowId}`);
@@ -37,7 +39,7 @@ for (const proof of b01WorkflowProofs) {
   assert.ok(assignment.canonicalSourceFiles.includes(proof.productionRoot));
   assert.equal(
     proof.localStatus,
-    proof.boundary === "session-credential-function"
+    proof.boundary === "session-credential-function" || invitationIds.has(proof.workflowId)
       ? "implemented-local-proof-passed-global-integration-pending"
       : "implementation-in-progress"
   );
@@ -55,6 +57,15 @@ assert.deepEqual(
 assert.equal(b01RefreshSessionApplicationPathProof.workflowIds.length, 9);
 assert.equal(b01RefreshSessionApplicationPathProof.registeredRoots.length, 5);
 assert.equal(b01RefreshSessionApplicationPathProof.postgresScope, "wave-local-exact-function-contract");
+assert.equal(b01InvitationApplicationPathProof.workflowIds.length, 7);
+assert.equal(b01InvitationApplicationPathProof.registeredRoots.length, 4);
+assert.deepEqual(b01InvitationApplicationPathProof.registeredRoots, [
+  "POST /api/auth/invite",
+  "POST /api/licensees/:id/admin-invite/resend",
+  "GET /api/auth/invite-preview",
+  "POST /api/auth/accept-invite",
+]);
+assert.equal(b01InvitationApplicationPathProof.postgresScope, "wave-local-exact-function-contract");
 
 assert.ok(b01SessionAIntegrationRequests.length >= 6);
 for (const request of b01SessionAIntegrationRequests) {

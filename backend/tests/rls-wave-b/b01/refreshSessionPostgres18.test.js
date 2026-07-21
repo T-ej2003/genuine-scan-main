@@ -84,6 +84,7 @@ const main = async () => {
     claimRefreshTokenRotation,
     loadRefreshSessionState,
   } = require("../../../dist/rls-waves/session-b/b01/sessionCredentialRepository");
+  const { requireRecentMfaSession } = require("../../../dist/rls-waves/session-b/b01/authenticatedSecurityRepository");
 
   const now = new Date();
   const later = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -709,6 +710,37 @@ const main = async () => {
     assert.equal(sessions[0].createdIpHash, "c".repeat(64));
     assert.equal(sessions[0].createdUserAgent, "authenticated-proof");
 
+    await seedActor({ id: "recent-mfa-user", role: "LICENSEE_ADMIN", mfaEnabled: true });
+    await seedToken({
+      id: "recent-mfa-token",
+      userId: "recent-mfa-user",
+      rawToken: "recent-mfa-raw",
+      mfaVerifiedAt: now,
+    });
+    const recentMfaContext = {
+      userId: "recent-mfa-user",
+      role: "LICENSEE_ADMIN",
+      organizationId: "recent-mfa-user-org",
+      licenseeId: "recent-mfa-user-licensee",
+      manufacturerId: null,
+      authAssurance: "mfa-verified",
+      requestId: "request-recent-mfa",
+      purpose: "auth-recent-admin-mfa",
+    };
+    const recentMfa = await authenticated.$transaction(async (tx) => {
+      await installCanonicalDbContext(tx, recentMfaContext);
+      return requireRecentMfaSession({ sessionId: "recent-mfa-token", checkedAt: now, maxAgeMinutes: 15 }, tx);
+    });
+    assert.equal(new Date(recentMfa.verifiedAt).getTime(), now.getTime());
+    await admin.$executeRaw`UPDATE b01_refresh_wave.actor SET mfa_enabled=false WHERE id='recent-mfa-user'`;
+    await reject(
+      () => authenticated.$transaction(async (tx) => {
+        await installCanonicalDbContext(tx, recentMfaContext);
+        return requireRecentMfaSession({ sessionId: "recent-mfa-token", checkedAt: now, maxAgeMinutes: 15 }, tx);
+      }),
+      /invalid row count/
+    );
+
     await reject(
       () => authenticated.$transaction(async (tx) => {
         await installCanonicalDbContext(tx, authContext({ role: "SUPER_ADMIN", purpose: "auth-session-list" }));
@@ -848,6 +880,7 @@ const main = async () => {
         'app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone)'::regprocedure,
         'app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone)'::regprocedure,
         'app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text)'::regprocedure,
+        'app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)'::regprocedure,
         'b01_refresh_wave.require_authenticated_context(text,text[],text[])'::regprocedure,
         'app_rls.load_authenticated_actor()'::regprocedure,
         'app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text)'::regprocedure,
@@ -862,7 +895,7 @@ const main = async () => {
       ])
       AND pg_catalog.pg_get_userbyid(proc.proowner)='mscqr_dev_rls_function_owner'
     `;
-    assert.equal(ownedFunctionCount, 18);
+    assert.equal(ownedFunctionCount, 19);
     const [functionOwnerPrivileges] = await admin.$queryRaw`
       SELECT
         has_table_privilege('mscqr_dev_rls_function_owner','b01_refresh_wave.actor','INSERT') AS "actorInsert",
@@ -898,6 +931,9 @@ const main = async () => {
         has_function_privilege('mscqr_dev_preauth','app_rls.list_active_refresh_tokens(text,timestamp without time zone)','EXECUTE') AS "preauthList",
         has_function_privilege('mscqr_dev_app','app_rls.list_active_refresh_tokens(text,timestamp without time zone)','EXECUTE') AS "appList",
         has_function_privilege('mscqr_dev_app','app_rls.revalidate_authenticated_actor(text,text,text,text,timestamp without time zone,text)','EXECUTE') AS "appRevalidate",
+        has_function_privilege('public','app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)','EXECUTE') AS "publicRecentMfa",
+        has_function_privilege('mscqr_dev_preauth','app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)','EXECUTE') AS "preauthRecentMfa",
+        has_function_privilege('mscqr_dev_app','app_rls.require_recent_mfa_session(text,timestamp without time zone,integer)','EXECUTE') AS "appRecentMfa",
         has_function_privilege('mscqr_dev_app','app_rls.load_authenticated_actor()','EXECUTE') AS "appLoadActor",
         has_function_privilege('mscqr_dev_app','app_rls.enqueue_audit_log_outbox(jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text)','EXECUTE') AS "appEnqueue"
     `;
@@ -908,6 +944,9 @@ const main = async () => {
       preauthList: false,
       appList: true,
       appRevalidate: true,
+      publicRecentMfa: false,
+      preauthRecentMfa: false,
+      appRecentMfa: true,
       appLoadActor: true,
       appEnqueue: true,
     }]);

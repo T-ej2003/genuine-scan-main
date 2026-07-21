@@ -119,7 +119,8 @@ export const revokePasswordOnlyRefreshTokensForUser = async (input: {
   });
 };
 
-export const findRefreshTokenByRaw = async (rawToken: string, db: SessionCredentialClient) => {
+export const findRefreshTokenByRaw = async (rawToken: string, db?: SessionCredentialClient) => {
+  if (!db) throw new Error("REFRESH_TOKEN_DATABASE_BOUNDARY_REQUIRED");
   const tokenHashCandidates = buildTokenHashCandidates(rawToken);
   return findRefreshTokenByHashes(db, { tokenHashCandidates });
 };

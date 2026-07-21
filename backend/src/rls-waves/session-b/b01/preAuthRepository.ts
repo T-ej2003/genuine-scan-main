@@ -26,6 +26,14 @@ const tokenHash = (value: string, field = "token hash") => {
 };
 
 const optionalHash = (value: string | null, field: string) => value == null ? null : tokenHash(value, field);
+const optionalText = (value: string | null, field: string, maximum: number) => {
+  if (value == null) return null;
+  const normalized = String(value).trim();
+  if (!normalized || normalized.length > maximum || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error(`Pre-auth boundary requires a bounded ${field}`);
+  }
+  return normalized;
+};
 
 const tokenHashCandidates = (values: string[]) => {
   if (!Array.isArray(values) || values.length < 1 || values.length > 3) {
@@ -41,6 +49,14 @@ const validDate = (value: Date, field: string) => {
     throw new Error(`Pre-auth boundary requires ${field}`);
   }
   return value;
+};
+
+const exactProjection = (row: Record<string, unknown>, expected: string[], boundary: string) => {
+  const actual = Object.keys(row).sort();
+  const wanted = [...expected].sort();
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+    throw new Error(`${boundary} returned an unexpected projection`);
+  }
 };
 
 const approvedPasswordHash = (value: string) => {
@@ -210,7 +226,15 @@ export const lookupInvitationBoundary = async (
       ${checkedAt}::timestamp without time zone
     )
   `;
-  return oneOrNone(rows, "app_auth.lookup_invitation_token");
+  const result = oneOrNone(rows, "app_auth.lookup_invitation_token");
+  if (!result) return null;
+  exactProjection(result, ["email", "role", "expiresAt", "licenseeName", "requiresConnector"], "app_auth.lookup_invitation_token");
+  requireNormalizedEmail(result.email);
+  if (!Object.values(UserRole).includes(result.role)) throw new Error("Invitation preview returned an unsupported role");
+  validDate(result.expiresAt, "invitation expiry");
+  if (result.expiresAt.getTime() <= checkedAt.getTime()) throw new Error("Invitation preview returned an expired invitation");
+  if (typeof result.requiresConnector !== "boolean") throw new Error("Invitation preview returned an invalid connector requirement");
+  return result;
 };
 
 export const consumeInvitationBoundary = async (
@@ -219,14 +243,19 @@ export const consumeInvitationBoundary = async (
     passwordHash: string;
     requestedName: string | null;
     consumedAt: Date;
+    requestId: string;
+    ipHash: string | null;
+    userAgent: string | null;
   },
   db: PreAuthQueryClient = getB01PreAuthPrisma()
 ) => {
   const candidates = tokenHashCandidates(input.tokenHashCandidates);
   const passwordHash = approvedPasswordHash(input.passwordHash);
   const requestedName = input.requestedName == null ? null : String(input.requestedName).trim();
-  if (requestedName && requestedName.length > 80) throw new Error("Pre-auth invite name exceeds the product limit");
+  if (requestedName && requestedName.length > 120) throw new Error("Pre-auth invite name exceeds the product limit");
   const consumedAt = validDate(input.consumedAt, "consumed_at");
+  const requestId = optionalText(input.requestId, "request ID", 128);
+  if (!requestId) throw new Error("Pre-auth boundary requires a request ID");
   const rows = await db.$queryRaw<Array<{
     inviteId: string;
     id: string;
@@ -241,12 +270,21 @@ export const consumeInvitationBoundary = async (
       ${candidates}::text[],
       ${passwordHash},
       ${requestedName},
-      ${consumedAt}::timestamp without time zone
+      ${consumedAt}::timestamp without time zone,
+      ${requestId},
+      ${optionalHash(input.ipHash, "IP hash")},
+      ${optionalText(input.userAgent, "user agent", 512)}
     )
   `;
   const result = oneOrNone(rows, "app_auth.consume_invitation_token");
-  if (result && !String(result.inviteId || "").trim()) {
-    throw new Error("app_auth.consume_invitation_token omitted required inviteId attribution");
+  if (!result) return null;
+  exactProjection(result, ["inviteId", "id", "email", "name", "role", "licenseeId", "orgId", "status"], "app_auth.consume_invitation_token");
+  if (!String(result.inviteId || "").trim()) throw new Error("app_auth.consume_invitation_token omitted required inviteId attribution");
+  if (!String(result.id || "").trim() || !String(result.name || "").trim()) throw new Error("Invitation activation returned an invalid actor");
+  requireNormalizedEmail(result.email);
+  if (!Object.values(UserRole).includes(result.role) || !Object.values(UserStatus).includes(result.status)) {
+    throw new Error("Invitation activation returned an unsupported account state");
   }
+  if (result.status !== UserStatus.ACTIVE) throw new Error("Invitation activation returned an inactive account");
   return result;
 };

@@ -2,6 +2,16 @@ import { Prisma, UserRole, UserStatus } from "@prisma/client";
 
 type AuthQueryClient = Pick<Prisma.TransactionClient, "$queryRaw">;
 
+export class RecentMfaDenial extends Error {
+  constructor() {
+    super("RECENT_MFA_REQUIRED");
+    this.name = "RecentMfaDenial";
+  }
+}
+
+export const isRecentMfaDenial = (error: unknown): error is RecentMfaDenial =>
+  error instanceof RecentMfaDenial;
+
 const one = <T>(rows: T[], boundary: string) => {
   if (rows.length !== 1) throw new Error(`${boundary} returned an invalid row count`);
   return rows[0];
@@ -66,7 +76,12 @@ export const requireRecentMfaSession = async (
       ${input.maxAgeMinutes}::integer
     )
   `;
-  return one(rows, "app_rls.require_recent_mfa_session");
+  if (rows.length === 0) throw new RecentMfaDenial();
+  const result = one(rows, "app_rls.require_recent_mfa_session");
+  if (Object.keys(result).length !== 1 || !(result.verifiedAt instanceof Date) || !Number.isFinite(result.verifiedAt.getTime())) {
+    throw new Error("app_rls.require_recent_mfa_session returned an unexpected projection");
+  }
+  return result;
 };
 
 export const loadRecentAuthSessionRiskInputs = async (db: AuthQueryClient) => {

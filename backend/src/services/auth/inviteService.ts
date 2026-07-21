@@ -3,7 +3,6 @@ import { hashPassword } from "./passwordService";
 import { newCsrfToken } from "./tokenService";
 import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
 import { sendAuthEmail } from "./authEmailService";
-import { createAuditLog } from "../auditService";
 import { maskEmailForLog } from "../mailTransportService";
 import { mscqrBrandHeaderHtml, renderActionEmail } from "../emailTemplateService";
 import { normalizeEmailAddress } from "../../utils/email";
@@ -166,6 +165,7 @@ export const createInvite = async (input: {
   createdByUserId: string;
   ipHash: string | null;
   userAgent: string | null;
+  actorSessionId?: string | null;
   databaseBoundary?: InviteDatabaseBoundary;
 }) => {
   const allowExistingInvitedUser = Boolean(input.allowExistingInvitedUser);
@@ -184,20 +184,30 @@ export const createInvite = async (input: {
   const tokenHash = hashToken(rawToken);
 
   const userName = String(input.name || "").trim() || (email ? defaultNameForEmail(email) : "Invited user");
+  const createdByUserId = String(input.createdByUserId || "").trim();
+  if (!createdByUserId) throw new Error("INVITE_ACTOR_REQUIRED");
 
   if (!input.databaseBoundary) throw new Error("INVITE_DATABASE_BOUNDARY_REQUIRED");
-  const result = await input.databaseBoundary.run((tx, context) => prepareInvitation(tx, context, {
-    requestedEmail: email,
-    requestedName: userName,
-    requestedRole: role,
-    requestedLicenseeId: licenseeId,
-    requestedManufacturerId: manufacturerId,
-    allowExistingInvitedUser,
-    requireExistingUser,
-    tokenHash,
-    createdAt: now,
-    expiresAt,
-  }));
+  const actorSessionId = String(input.actorSessionId || "").trim();
+  if (!actorSessionId) throw new Error("INVITE_ACTOR_SESSION_REQUIRED");
+  const result = await input.databaseBoundary.run((tx, context) => {
+    if (context.userId !== createdByUserId) throw new Error("INVITE_ACTOR_MISMATCH");
+    return prepareInvitation(tx, context, {
+      requestedEmail: email,
+      requestedName: userName,
+      requestedRole: role,
+      requestedLicenseeId: licenseeId,
+      requestedManufacturerId: manufacturerId,
+      allowExistingInvitedUser,
+      requireExistingUser,
+      tokenHash,
+      createdAt: now,
+      expiresAt,
+      actorSessionId,
+      ipHash: input.ipHash,
+      userAgent: input.userAgent,
+    });
+  });
 
   if (result.linkAction && !result.inviteId) {
     return {
@@ -331,6 +341,7 @@ export const acceptInvite = async (input: {
   rawToken: string;
   password: string;
   name?: string | null;
+  requestId: string;
   ipHash: string | null;
   userAgent: string | null;
 }) => {
@@ -342,20 +353,11 @@ export const acceptInvite = async (input: {
     passwordHash,
     requestedName: String(input.name || "").trim() || null,
     consumedAt: now,
+    requestId: input.requestId,
+    ipHash: input.ipHash,
+    userAgent: input.userAgent,
   });
   if (!result) throw new Error("Invalid or expired invite token");
-
-  await createAuditLog({
-    userId: result.id,
-    licenseeId: result.licenseeId || undefined,
-    orgId: result.orgId || undefined,
-    action: "AUTH_INVITE_ACCEPTED",
-    entityType: "Invite",
-    entityId: result.inviteId,
-    details: { acceptedUserId: result.id },
-    ipHash: input.ipHash || undefined,
-    userAgent: input.userAgent || undefined,
-  } as any);
 
   return result;
 };

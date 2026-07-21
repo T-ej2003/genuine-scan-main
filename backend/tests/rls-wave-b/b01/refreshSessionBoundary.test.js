@@ -12,6 +12,7 @@ const sessions = read("backend/src/controllers/authSessionController.ts");
 const controller = read("backend/src/controllers/authController.ts");
 const admin = read("backend/src/controllers/authAdminSecurityController.ts");
 const routes = read("backend/src/routes/modules/authRoutes.ts");
+const sessionProjection = read("backend/src/rls-waves/session-b/b01/authenticatedSessionProjection.ts");
 
 for (const functionName of [
   "app_auth.claim_refresh_token_rotation",
@@ -71,6 +72,11 @@ assert.doesNotMatch(sessions, /revokeRefreshTokenByRaw|getRefreshTokenFromReques
 assert.match(sessions, /withCanonicalAuthClaims/);
 assert.match(sessions, /claims\.sessionId/);
 assert.match(controller, /withCanonicalAuthClaims[\s\S]*logoutSession/);
+assert.match(controller, /authenticatedSessionProjection/);
+assert.match(sessions, /authenticatedSessionProjection/);
+assert.match(sessionProjection, /findRefreshTokenById/);
+assert.doesNotMatch(sessionProjection, /findRefreshTokenByRaw|\bprisma\.|config\/database/);
+assert.match(refresh, /REFRESH_TOKEN_DATABASE_BOUNDARY_REQUIRED/);
 assert.doesNotMatch(admin, /revokeRefreshTokenByRaw/);
 assert.match(auth, /loadRefreshSessionState/);
 assert.match(auth, /getB01AuthenticatedPrisma\(\)/);

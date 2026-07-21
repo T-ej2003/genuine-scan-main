@@ -11,14 +11,16 @@ import {
 } from "../rls-waves/session-b/b01/canonicalAuthContext";
 import { loadAuthenticatedActor } from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
 import {
+  buildAuthState,
+  getCurrentRefreshSession,
+} from "../rls-waves/session-b/b01/authenticatedSessionProjection";
+import {
   acceptInviteSchema,
   authResponseData,
-  buildAuthState,
   clearAuthCookies,
   ensureCsrfCookie,
   forgotPasswordSchema,
   getAuthClaims,
-  getCurrentRefreshSession,
   getRefreshTokenFromRequest,
   getRequestId,
   hashIp,
@@ -304,6 +306,7 @@ export const invite = async (req: Request, res: Response) => {
       manufacturerId: parsed.data.manufacturerId || null,
       allowExistingInvitedUser: parsed.data.allowExistingInvitedUser || false,
       createdByUserId: actorUserId,
+      actorSessionId: claims.sessionId,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
       databaseBoundary: {
@@ -368,6 +371,7 @@ export const acceptInviteController = async (req: Request, res: Response) => {
       rawToken: parsed.data.token,
       password: parsed.data.password,
       name: parsed.data.name || null,
+      requestId: getRequestId(req),
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
     });

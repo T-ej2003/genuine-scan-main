@@ -1,6 +1,11 @@
 import { Prisma, QRStatus } from "@prisma/client";
+import { randomUUID } from "crypto";
 
 import prisma from "../config/database";
+import {
+  b03WorkerBoundariesEnabled,
+  withB03AnalyticsWorkerContext,
+} from "../rls-waves/session-b/b03/systemContext";
 import { logger } from "../utils/logger";
 import { withDistributedLease } from "./distributedLeaseService";
 
@@ -41,8 +46,20 @@ const statusKeyMap: Record<QRStatus, InventoryStatusCountField> = {
   SCANNED: "scanned",
 };
 
-const getCheckpointDate = async (key: string) => {
-  const row = await prisma.systemCheckpoint.findUnique({
+type AnalyticsDb = Pick<
+  Prisma.TransactionClient,
+  "$queryRaw" | "batch" | "inventoryStatusRollup" | "qRCode" | "scanMetricsHourlyRollup" | "systemCheckpoint"
+>;
+
+const checkpointKeys = new Set([INVENTORY_CHECKPOINT_KEY, SCAN_HOURLY_CHECKPOINT_KEY]);
+const checkpointKey = (key: string) => {
+  if (!checkpointKeys.has(key)) throw new Error("B03 analytics boundary rejects checkpoint key");
+  return key;
+};
+
+const getCheckpointDate = async (db: AnalyticsDb, keyInput: string) => {
+  const key = checkpointKey(keyInput);
+  const row = await db.systemCheckpoint.findUnique({
     where: { key },
     select: { value: true },
   });
@@ -51,8 +68,9 @@ const getCheckpointDate = async (key: string) => {
   return parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
 };
 
-const setCheckpointDate = async (key: string, value: Date) => {
-  await prisma.systemCheckpoint.upsert({
+const setCheckpointDate = async (db: AnalyticsDb, keyInput: string, value: Date) => {
+  const key = checkpointKey(keyInput);
+  await db.systemCheckpoint.upsert({
     where: { key },
     create: {
       key,
@@ -64,6 +82,18 @@ const setCheckpointDate = async (key: string, value: Date) => {
   });
 };
 
+const lockCheckpoint = async (db: AnalyticsDb, keyInput: string) => {
+  const key = checkpointKey(keyInput);
+  await db.systemCheckpoint.upsert({
+    where: { key },
+    create: { key, value: {} },
+    update: {},
+  });
+  await db.$queryRaw(Prisma.sql`
+    SELECT "key" FROM "SystemCheckpoint" WHERE "key" = ${key} FOR UPDATE
+  `);
+};
+
 const chunk = <T>(values: T[], size: number) => {
   const batches: T[][] = [];
   for (let index = 0; index < values.length; index += size) {
@@ -72,16 +102,19 @@ const chunk = <T>(values: T[], size: number) => {
   return batches;
 };
 
-const loadChangedBatchIds = async (since: Date | null) => {
+const commitChunk = <T>(writes: Prisma.PrismaPromise<T>[], alreadyInTransaction: boolean) =>
+  alreadyInTransaction ? Promise.all(writes) : prisma.$transaction(writes);
+
+const loadChangedBatchIds = async (db: AnalyticsDb, since: Date | null) => {
   if (!since) {
-    const rows = await prisma.batch.findMany({
+    const rows = await db.batch.findMany({
       select: { id: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
     return rows.map((row) => row.id);
   }
 
-  const rows = await prisma.$queryRaw<Array<{ batchId: string }>>(Prisma.sql`
+  const rows = await db.$queryRaw<Array<{ batchId: string }>>(Prisma.sql`
     SELECT DISTINCT "batchId"
     FROM "QRCode"
     WHERE "batchId" IS NOT NULL
@@ -91,20 +124,21 @@ const loadChangedBatchIds = async (since: Date | null) => {
   return rows.map((row) => row.batchId).filter(Boolean);
 };
 
-export const refreshInventoryStatusRollups = async () => {
+const refreshInventoryStatusRollupsWithDb = async (db: AnalyticsDb, durableLock: boolean) => {
   const now = new Date();
-  const checkpoint = await getCheckpointDate(INVENTORY_CHECKPOINT_KEY);
+  if (durableLock) await lockCheckpoint(db, INVENTORY_CHECKPOINT_KEY);
+  const checkpoint = await getCheckpointDate(db, INVENTORY_CHECKPOINT_KEY);
   const since = checkpoint ? new Date(checkpoint.getTime() - INVENTORY_GRACE_MS) : null;
-  const batchIds = await loadChangedBatchIds(since);
+  const batchIds = await loadChangedBatchIds(db, since);
   if (!batchIds.length) {
-    await setCheckpointDate(INVENTORY_CHECKPOINT_KEY, now);
+    await setCheckpointDate(db, INVENTORY_CHECKPOINT_KEY, now);
     return { updatedBatches: 0 };
   }
 
   let updatedBatches = 0;
   for (const batchIdsChunk of chunk(batchIds, 500)) {
     const [batches, groups] = await Promise.all([
-      prisma.batch.findMany({
+      db.batch.findMany({
         where: { id: { in: batchIdsChunk } },
         select: {
           id: true,
@@ -113,7 +147,7 @@ export const refreshInventoryStatusRollups = async () => {
           totalCodes: true,
         },
       }),
-      prisma.qRCode.groupBy({
+      db.qRCode.groupBy({
         by: ["batchId", "status"],
         where: {
           batchId: { in: batchIdsChunk },
@@ -163,9 +197,9 @@ export const refreshInventoryStatusRollups = async () => {
       current[field] = Number(group._count._all || 0);
     }
 
-    await prisma.$transaction(
+    await commitChunk(
       Array.from(countsMap.entries()).map(([batchId, counts]) =>
-        prisma.inventoryStatusRollup.upsert({
+        db.inventoryStatusRollup.upsert({
           where: { batchId },
           create: {
             batchId,
@@ -197,14 +231,28 @@ export const refreshInventoryStatusRollups = async () => {
             refreshedAt: now,
           },
         })
-      )
+      ),
+      durableLock
     );
 
     updatedBatches += countsMap.size;
   }
 
-  await setCheckpointDate(INVENTORY_CHECKPOINT_KEY, now);
+  await setCheckpointDate(db, INVENTORY_CHECKPOINT_KEY, now);
   return { updatedBatches };
+};
+
+export const refreshInventoryStatusRollups = async () => {
+  if (!b03WorkerBoundariesEnabled()) return refreshInventoryStatusRollupsWithDb(prisma, false);
+  const requestId = randomUUID();
+  return withB03AnalyticsWorkerContext(
+    {
+      jobId: `analytics-inventory:${requestId}`,
+      requestId,
+      jobType: "ANALYTICS_INVENTORY_ROLLUP",
+    },
+    (tx) => refreshInventoryStatusRollupsWithDb(tx, true)
+  );
 };
 
 type ScanMetricsHourlyRow = {
@@ -238,12 +286,13 @@ const buildRollupBucketKey = (row: {
     row.manufacturerId || "__none__",
   ].join("|");
 
-export const refreshScanMetricsHourlyRollups = async () => {
+const refreshScanMetricsHourlyRollupsWithDb = async (db: AnalyticsDb, durableLock: boolean) => {
   const now = new Date();
-  const checkpoint = await getCheckpointDate(SCAN_HOURLY_CHECKPOINT_KEY);
+  if (durableLock) await lockCheckpoint(db, SCAN_HOURLY_CHECKPOINT_KEY);
+  const checkpoint = await getCheckpointDate(db, SCAN_HOURLY_CHECKPOINT_KEY);
   const since = checkpoint ? new Date(checkpoint.getTime() - SCAN_GRACE_MS) : new Date(Date.now() - 7 * 24 * 60 * 60_000);
 
-  const rows = await prisma.$queryRaw<ScanMetricsHourlyRow[]>(Prisma.sql`
+  const rows = await db.$queryRaw<ScanMetricsHourlyRow[]>(Prisma.sql`
     SELECT
       date_trunc('hour', s."scannedAt") AS "hourBucket",
       s."licenseeId" AS "licenseeId",
@@ -268,14 +317,14 @@ export const refreshScanMetricsHourlyRollups = async () => {
   `);
 
   if (!rows.length) {
-    await setCheckpointDate(SCAN_HOURLY_CHECKPOINT_KEY, now);
+    await setCheckpointDate(db, SCAN_HOURLY_CHECKPOINT_KEY, now);
     return { updatedBuckets: 0 };
   }
 
   for (const rowChunk of chunk(rows, 250)) {
-    await prisma.$transaction(
+    await commitChunk(
       rowChunk.map((row) =>
-        prisma.scanMetricsHourlyRollup.upsert({
+        db.scanMetricsHourlyRollup.upsert({
           where: {
             bucketKey: buildRollupBucketKey(row),
           },
@@ -311,12 +360,26 @@ export const refreshScanMetricsHourlyRollups = async () => {
             lastScannedAt: row.lastScannedAt,
           },
         })
-      )
+      ),
+      durableLock
     );
   }
 
-  await setCheckpointDate(SCAN_HOURLY_CHECKPOINT_KEY, now);
+  await setCheckpointDate(db, SCAN_HOURLY_CHECKPOINT_KEY, now);
   return { updatedBuckets: rows.length };
+};
+
+export const refreshScanMetricsHourlyRollups = async () => {
+  if (!b03WorkerBoundariesEnabled()) return refreshScanMetricsHourlyRollupsWithDb(prisma, false);
+  const requestId = randomUUID();
+  return withB03AnalyticsWorkerContext(
+    {
+      jobId: `analytics-scan-hourly:${requestId}`,
+      requestId,
+      jobType: "ANALYTICS_SCAN_HOURLY_ROLLUP",
+    },
+    (tx) => refreshScanMetricsHourlyRollupsWithDb(tx, true)
+  );
 };
 
 export const refreshAnalyticsRollups = async () => {

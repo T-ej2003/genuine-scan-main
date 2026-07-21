@@ -5,8 +5,12 @@ import { AuthRequest } from "../middleware/auth";
 import { createInvite } from "../services/auth/inviteService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 import { hashIp, normalizeUserAgent } from "../utils/security";
-import { withCanonicalAuthClaims } from "../rls-waves/session-b/b01/canonicalAuthContext";
+import {
+  isCanonicalAuthDenial,
+  withCanonicalAuthClaims,
+} from "../rls-waves/session-b/b01/canonicalAuthContext";
 import type { CanonicalDbContext } from "../lib/canonicalDbContext";
+import { clearAuthCookies } from "./authControllerShared";
 
 const licenseeIdParamSchema = z
   .object({
@@ -59,6 +63,7 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
       allowExistingInvitedUser: true,
       requireExistingUser: true,
       createdByUserId: req.user!.userId,
+      actorSessionId: req.user!.sessionId,
       ipHash: hashIp(req.ip),
       userAgent: normalizeUserAgent(req.get("user-agent")),
       databaseBoundary,
@@ -93,6 +98,10 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
       },
     });
   } catch (e: any) {
+    if (isCanonicalAuthDenial(e)) {
+      clearAuthCookies(res);
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
     const msg = String(e?.message || "Failed to resend invite");
     const isConflict = /already active|different|disabled|not required/i.test(msg);
     return res.status(isConflict ? 409 : 500).json({

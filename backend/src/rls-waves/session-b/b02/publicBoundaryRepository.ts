@@ -1,0 +1,535 @@
+import { createHash } from "crypto";
+import { Prisma } from "@prisma/client";
+
+export type B02PublicFunctionClient = Pick<Prisma.TransactionClient, "$queryRaw">;
+
+export type VerifyRawQrRow = {
+  result: string;
+  messageKey: string;
+  nextAction: string;
+  maskedCode: string;
+  brandName: string | null;
+  manufacturerName: string | null;
+  manufacturerWebsite: string | null;
+  printedAt: Date | null;
+  firstVerifiedAt: Date | null;
+  latestVerifiedAt: Date | null;
+  ownershipClaimAvailable: boolean;
+  sessionStartToken: string | null;
+};
+
+export type VerifySignedQrRow = VerifyRawQrRow & { verificationMethod: string };
+export type RecordQrVerificationRow = { decisionKey: string; recorded: boolean };
+export type StartVerificationSessionRow = {
+  sessionId: string;
+  sessionProofToken: string;
+  maskedCode: string;
+  customerFacingState: string;
+  startedAt: Date;
+  expiresAt: Date;
+  brandName: string | null;
+};
+export type ReadVerificationSessionRow = {
+  sessionId: string;
+  maskedCode: string;
+  customerFacingState: string;
+  startedAt: Date;
+  expiresAt: Date;
+  intakeCompleted: boolean;
+  revealed: boolean;
+  brandName: string | null;
+};
+export type TrackSupportStatusRow = {
+  referenceCode: string;
+  customerFacingStatus: string;
+  updatedAt: Date;
+  slaState: string;
+};
+export type AcceptedRow = { accepted: boolean; publicReference: string; message: string };
+
+type FieldType = "string" | "number" | "boolean" | "date";
+type Projection = ReadonlyArray<readonly [string, FieldType, boolean?]>;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const VERSIONED_DIGEST = /^(?:[A-Za-z0-9._-]{1,32}:)?[a-f0-9]{64}$/;
+const CUSTOMER_USER_ID = /^cust_[a-f0-9]{32}$/;
+const RAW_QR = /^[A-Z0-9][A-Z0-9_-]{7,127}$/;
+const REFERENCE = /^[A-Z0-9][A-Z0-9_-]{3,63}$/;
+
+const exactInput = (input: object, keys: readonly string[], label: string) => {
+  const allowed = new Set(keys);
+  const unexpected = Object.keys(input).find((key) => !allowed.has(key));
+  if (unexpected) throw new Error(`${label} received unexpected input ${unexpected}`);
+};
+
+const text = (value: unknown, label: string, minimum: number, maximum: number) => {
+  if (typeof value !== "string") throw new Error(`${label} must be text`);
+  const normalized = value.trim();
+  if (normalized.length < minimum || normalized.length > maximum) {
+    throw new Error(`${label} has invalid length`);
+  }
+  return normalized;
+};
+
+const optionalText = (value: unknown, label: string, maximum: number) => {
+  if (value == null || value === "") return null;
+  return text(value, label, 1, maximum);
+};
+
+const matches = (value: unknown, label: string, pattern: RegExp, maximum = 256) => {
+  const normalized = text(value, label, 1, maximum);
+  if (!pattern.test(normalized)) throw new Error(`${label} is malformed`);
+  return normalized;
+};
+
+const optionalMatches = (value: unknown, label: string, pattern: RegExp, maximum = 256) =>
+  value == null || value === "" ? null : matches(value, label, pattern, maximum);
+
+const uuid = (value: unknown, label: string) => matches(value, label, UUID, 36).toLowerCase();
+const optionalUuid = (value: unknown, label: string) => value == null || value === "" ? null : uuid(value, label);
+const digest = (value: unknown, label: string) => matches(value, label, VERSIONED_DIGEST, 97);
+const optionalDigest = (value: unknown, label: string) => value == null || value === "" ? null : digest(value, label);
+const requestId = (value: unknown) => matches(value, "request ID", /^[\x21-\x7e]{1,128}$/, 128);
+
+const date = (value: unknown, label: string) => {
+  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw new Error(`${label} is invalid`);
+  return value;
+};
+
+const integer = (value: unknown, label: string, minimum: number, maximum: number) => {
+  if (!Number.isInteger(value) || Number(value) < minimum || Number(value) > maximum) {
+    throw new Error(`${label} is invalid`);
+  }
+  return Number(value);
+};
+
+const oneOf = <T extends string>(value: unknown, label: string, allowed: readonly T[]) => {
+  const normalized = text(value, label, 1, 64) as T;
+  if (!allowed.includes(normalized)) throw new Error(`${label} is unsupported`);
+  return normalized;
+};
+
+const email = (value: unknown, label: string) => {
+  const normalized = text(value, label, 3, 160).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error(`${label} is malformed`);
+  return normalized;
+};
+
+const optionalEmail = (value: unknown, label: string) => value == null || value === "" ? null : email(value, label);
+
+const url = (value: unknown, label: string, maximum: number) => {
+  const normalized = text(value, label, 1, maximum);
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error(`${label} is malformed`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error(`${label} is unsupported`);
+  return parsed.toString();
+};
+
+const optionalUrl = (value: unknown, label: string, maximum: number) =>
+  value == null || value === "" ? null : url(value, label, maximum);
+
+const rawQr = (value: unknown) => {
+  const normalized = text(value, "requested QR code", 8, 128).toUpperCase();
+  if (!RAW_QR.test(normalized)) throw new Error("requested QR code is malformed");
+  return normalized;
+};
+
+const customerUserId = (value: unknown) =>
+  value == null || value === "" ? null : matches(value, "customer user ID", CUSTOMER_USER_ID, 37);
+
+const exactOne = <T extends Record<string, unknown>>(
+  rows: T[],
+  functionName: string,
+  projection: Projection
+): T | null => {
+  if (rows.length > 1) throw new Error(`${functionName} returned more than one row`);
+  const row = rows[0];
+  if (!row) return null;
+  const expected = projection.map(([key]) => key).sort();
+  const actual = Object.keys(row).sort();
+  if (expected.length !== actual.length || actual.some((key, index) => key !== expected[index])) {
+    throw new Error(`${functionName} returned an unexpected projection`);
+  }
+  for (const [key, type, nullable] of projection) {
+    const value = row[key];
+    if (nullable && value == null) continue;
+    const valid = type === "date"
+      ? value instanceof Date && Number.isFinite(value.getTime())
+      : typeof value === type;
+    if (!valid) throw new Error(`${functionName} returned an invalid ${key}`);
+  }
+  return row;
+};
+
+const verifyRawProjection: Projection = [
+  ["result", "string"], ["messageKey", "string"], ["nextAction", "string"], ["maskedCode", "string"],
+  ["brandName", "string", true], ["manufacturerName", "string", true], ["manufacturerWebsite", "string", true],
+  ["printedAt", "date", true], ["firstVerifiedAt", "date", true], ["latestVerifiedAt", "date", true],
+  ["ownershipClaimAvailable", "boolean"], ["sessionStartToken", "string", true],
+];
+const acceptedProjection: Projection = [
+  ["accepted", "boolean"], ["publicReference", "string"], ["message", "string"],
+];
+
+const stable = (value: unknown): string => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+  return `{${Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stable((value as Record<string, unknown>)[key])}`)
+    .join(",")}}`;
+};
+
+export const b02IdempotencyDigest = (value: unknown) =>
+  createHash("sha256").update(stable(value)).digest("hex");
+
+export const verifyRawQr = async (
+  db: B02PublicFunctionClient,
+  input: {
+    requestedCode: string;
+    checkedAt: Date;
+    requestId: string;
+    actorIpHash?: string | null;
+    actorDeviceHash?: string | null;
+  }
+) => {
+  exactInput(input, ["requestedCode", "checkedAt", "requestId", "actorIpHash", "actorDeviceHash"], "verify_raw_qr");
+  const requestedCode = rawQr(input.requestedCode);
+  const checkedAt = date(input.checkedAt, "verification time");
+  const validatedRequestId = requestId(input.requestId);
+  const actorIpHash = optionalDigest(input.actorIpHash, "actor IP digest");
+  const actorDeviceHash = optionalDigest(input.actorDeviceHash, "actor device digest");
+  return exactOne(await db.$queryRaw<VerifyRawQrRow[]>`
+    SELECT * FROM app_public.verify_raw_qr(
+      ${requestedCode}, ${checkedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}
+    )
+  `, "app_public.verify_raw_qr", verifyRawProjection);
+};
+
+export const verifySignedQr = async (
+  db: B02PublicFunctionClient,
+  input: {
+    tokenDigest: string;
+    qrId: string;
+    licenseeId: string;
+    batchId?: string | null;
+    manufacturerId?: string | null;
+    nonce: string;
+    replayEpoch: number;
+    keyVersion: string;
+    issuedAt: Date;
+    expiresAt: Date;
+    checkedAt: Date;
+    requestId: string;
+    actorIpHash?: string | null;
+    actorDeviceHash?: string | null;
+  }
+) => {
+  exactInput(input, [
+    "tokenDigest", "qrId", "licenseeId", "batchId", "manufacturerId", "nonce", "replayEpoch",
+    "keyVersion", "issuedAt", "expiresAt", "checkedAt", "requestId", "actorIpHash", "actorDeviceHash",
+  ], "verify_signed_qr");
+  const tokenDigest = digest(input.tokenDigest, "signed QR token digest");
+  const qrId = uuid(input.qrId, "QR ID");
+  const licenseeId = uuid(input.licenseeId, "licensee ID");
+  const batchId = optionalUuid(input.batchId, "batch ID");
+  const manufacturerId = optionalUuid(input.manufacturerId, "manufacturer ID");
+  const nonce = matches(input.nonce, "signed QR nonce", /^[A-Za-z0-9_-]{8,256}$/, 256);
+  const replayEpoch = integer(input.replayEpoch, "signed QR replay epoch", 1, 2_147_483_647);
+  const keyVersion = matches(input.keyVersion, "signing key version", /^[A-Za-z0-9._-]{1,64}$/, 64);
+  const issuedAt = date(input.issuedAt, "signed QR issue time");
+  const expiresAt = date(input.expiresAt, "signed QR expiry time");
+  const checkedAt = date(input.checkedAt, "verification time");
+  if (issuedAt.getTime() > checkedAt.getTime() || checkedAt.getTime() >= expiresAt.getTime()) {
+    throw new Error("signed QR time window is invalid");
+  }
+  const validatedRequestId = requestId(input.requestId);
+  const actorIpHash = optionalDigest(input.actorIpHash, "actor IP digest");
+  const actorDeviceHash = optionalDigest(input.actorDeviceHash, "actor device digest");
+  return exactOne(await db.$queryRaw<VerifySignedQrRow[]>`
+    SELECT * FROM app_public.verify_signed_qr(
+      ${tokenDigest}, ${qrId}, ${licenseeId}, ${batchId}, ${manufacturerId}, ${nonce}, ${replayEpoch},
+      ${keyVersion}, ${issuedAt}, ${expiresAt}, ${checkedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}
+    )
+  `, "app_public.verify_signed_qr", [...verifyRawProjection, ["verificationMethod", "string"]]);
+};
+
+export const recordQrVerification = async (
+  db: B02PublicFunctionClient,
+  input: {
+    qrId: string;
+    proofClass: string;
+    outcomeCode: string;
+    scannedAt: Date;
+    requestId: string;
+    actorIpHash?: string | null;
+    actorDeviceHash?: string | null;
+  }
+) => {
+  exactInput(input, ["qrId", "proofClass", "outcomeCode", "scannedAt", "requestId", "actorIpHash", "actorDeviceHash"], "record_qr_verification");
+  const qrId = uuid(input.qrId, "QR ID");
+  const proofClass = oneOf(input.proofClass, "verification proof class", ["SIGNED_LABEL", "MANUAL_CODE_LOOKUP", "DEGRADED"] as const);
+  const outcomeCode = oneOf(input.outcomeCode, "verification outcome", [
+    "AUTHENTIC", "SUSPICIOUS_DUPLICATE", "BLOCKED", "NOT_READY", "NOT_FOUND", "INVALID_SIGNATURE",
+    "INVALID_PAYLOAD", "EXPIRED", "TOKEN_MISMATCH", "UNAVAILABLE",
+  ] as const);
+  const scannedAt = date(input.scannedAt, "scan time");
+  const validatedRequestId = requestId(input.requestId);
+  const actorIpHash = optionalDigest(input.actorIpHash, "actor IP digest");
+  const actorDeviceHash = optionalDigest(input.actorDeviceHash, "actor device digest");
+  return exactOne(await db.$queryRaw<RecordQrVerificationRow[]>`
+    SELECT * FROM app_public.record_qr_verification(
+      ${qrId}, ${proofClass}, ${outcomeCode}, ${scannedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}
+    )
+  `, "app_public.record_qr_verification", [["decisionKey", "string"], ["recorded", "boolean"]]);
+};
+
+export const startVerificationSession = async (
+  db: B02PublicFunctionClient,
+  input: {
+    sessionStartTokenHash: string;
+    entryMethod: string;
+    checkedAt: Date;
+    requestId: string;
+    customerUserId?: string | null;
+  }
+) => {
+  exactInput(input, ["sessionStartTokenHash", "entryMethod", "checkedAt", "requestId", "customerUserId"], "start_verification_session");
+  const sessionStartTokenHash = digest(input.sessionStartTokenHash, "session-start token digest");
+  const entryMethod = oneOf(input.entryMethod, "verification entry method", ["SIGNED_SCAN", "MANUAL_CODE"] as const);
+  const checkedAt = date(input.checkedAt, "session start time");
+  const validatedRequestId = requestId(input.requestId);
+  const boundCustomerUserId = customerUserId(input.customerUserId);
+  return exactOne(await db.$queryRaw<StartVerificationSessionRow[]>`
+    SELECT * FROM app_public.start_verification_session(
+      ${sessionStartTokenHash}, ${entryMethod}, ${checkedAt}, ${validatedRequestId}, ${boundCustomerUserId}
+    )
+  `, "app_public.start_verification_session", [
+    ["sessionId", "string"], ["sessionProofToken", "string"], ["maskedCode", "string"],
+    ["customerFacingState", "string"], ["startedAt", "date"], ["expiresAt", "date"], ["brandName", "string", true],
+  ]);
+};
+
+export const readVerificationSession = async (
+  db: B02PublicFunctionClient,
+  input: {
+    sessionId: string;
+    sessionProofHash: string;
+    checkedAt: Date;
+    requestId: string;
+    customerUserId?: string | null;
+  }
+) => {
+  exactInput(input, ["sessionId", "sessionProofHash", "checkedAt", "requestId", "customerUserId"], "read_verification_session");
+  const sessionId = uuid(input.sessionId, "verification session ID");
+  const sessionProofHash = digest(input.sessionProofHash, "verification-session proof digest");
+  const checkedAt = date(input.checkedAt, "session read time");
+  const validatedRequestId = requestId(input.requestId);
+  const boundCustomerUserId = customerUserId(input.customerUserId);
+  return exactOne(await db.$queryRaw<ReadVerificationSessionRow[]>`
+    SELECT * FROM app_public.read_verification_session(
+      ${sessionId}, ${sessionProofHash}, ${checkedAt}, ${validatedRequestId}, ${boundCustomerUserId}
+    )
+  `, "app_public.read_verification_session", [
+    ["sessionId", "string"], ["maskedCode", "string"], ["customerFacingState", "string"],
+    ["startedAt", "date"], ["expiresAt", "date"], ["intakeCompleted", "boolean"],
+    ["revealed", "boolean"], ["brandName", "string", true],
+  ]);
+};
+
+export const trackSupportStatus = async (
+  db: B02PublicFunctionClient,
+  input: {
+    referenceCode: string;
+    proofDigest: string;
+    proofVersion: number;
+    checkedAt: Date;
+    requestId: string;
+  }
+) => {
+  exactInput(input, ["referenceCode", "proofDigest", "proofVersion", "checkedAt", "requestId"], "track_support_status");
+  const referenceCode = matches(input.referenceCode, "support reference", REFERENCE, 64).toUpperCase();
+  const proofDigest = digest(input.proofDigest, "support-status proof digest");
+  const proofVersion = integer(input.proofVersion, "support-status proof version", 1, 2_147_483_647);
+  const checkedAt = date(input.checkedAt, "support-status check time");
+  const validatedRequestId = requestId(input.requestId);
+  return exactOne(await db.$queryRaw<TrackSupportStatusRow[]>`
+    SELECT * FROM app_public.track_support_status(
+      ${referenceCode}, ${proofDigest}, ${proofVersion}, ${checkedAt}, ${validatedRequestId}
+    )
+  `, "app_public.track_support_status", [
+    ["referenceCode", "string"], ["customerFacingStatus", "string"], ["updatedAt", "date"], ["slaState", "string"],
+  ]);
+};
+
+export const submitProductFeedback = async (
+  db: B02PublicFunctionClient,
+  input: {
+    requestedCode: string;
+    rating: number;
+    satisfaction: string;
+    notes?: string | null;
+    observedStatus?: string | null;
+    observedOutcome?: string | null;
+    pageUrl?: string | null;
+    submittedAt: Date;
+    requestId: string;
+    actorIpHash?: string | null;
+    idempotencyDigest: string;
+  }
+) => {
+  exactInput(input, [
+    "requestedCode", "rating", "satisfaction", "notes", "observedStatus", "observedOutcome",
+    "pageUrl", "submittedAt", "requestId", "actorIpHash", "idempotencyDigest",
+  ], "submit_product_feedback");
+  const requestedCode = rawQr(input.requestedCode);
+  const rating = integer(input.rating, "feedback rating", 1, 5);
+  const satisfaction = oneOf(input.satisfaction, "feedback satisfaction", [
+    "very_satisfied", "satisfied", "neutral", "disappointed", "very_disappointed",
+  ] as const);
+  const notes = optionalText(input.notes, "feedback notes", 1_000);
+  const observedStatus = optionalText(input.observedStatus, "observed status", 64);
+  const observedOutcome = optionalText(input.observedOutcome, "observed outcome", 64);
+  const pageUrl = optionalUrl(input.pageUrl, "feedback page URL", 1_000);
+  const submittedAt = date(input.submittedAt, "feedback submission time");
+  const validatedRequestId = requestId(input.requestId);
+  const actorIpHash = optionalDigest(input.actorIpHash, "actor IP digest");
+  const idempotencyDigest = digest(input.idempotencyDigest, "feedback idempotency digest");
+  return exactOne(await db.$queryRaw<AcceptedRow[]>`
+    SELECT * FROM app_public.submit_product_feedback(
+      ${requestedCode}, ${rating}, ${satisfaction}, ${notes}, ${observedStatus}, ${observedOutcome},
+      ${pageUrl}, ${submittedAt}, ${validatedRequestId}, ${actorIpHash}, ${idempotencyDigest}
+    )
+  `, "app_public.submit_product_feedback", acceptedProjection);
+};
+
+export const submitPublicIncident = async (
+  db: B02PublicFunctionClient,
+  input: {
+    verifiedQrId?: string | null;
+    incidentType: string;
+    description: string;
+    contactEmail?: string | null;
+    consentToContact: boolean;
+    submittedAt: Date;
+    requestId: string;
+    actorIpHash?: string | null;
+    actorDeviceHash?: string | null;
+    idempotencyDigest: string;
+  }
+) => {
+  exactInput(input, [
+    "verifiedQrId", "incidentType", "description", "contactEmail", "consentToContact", "submittedAt",
+    "requestId", "actorIpHash", "actorDeviceHash", "idempotencyDigest",
+  ], "submit_public_incident");
+  const verifiedQrId = optionalUuid(input.verifiedQrId, "verified QR ID");
+  const incidentType = oneOf(input.incidentType, "public incident type", [
+    "counterfeit_suspected", "duplicate_scan", "tampered_label", "wrong_product", "other",
+  ] as const);
+  const description = text(input.description, "public incident description", 3, 2_000);
+  const contactEmail = optionalEmail(input.contactEmail, "public incident contact email");
+  if (typeof input.consentToContact !== "boolean") throw new Error("public incident consent must be boolean");
+  if (input.consentToContact && !contactEmail) throw new Error("public incident contact consent requires an email");
+  const submittedAt = date(input.submittedAt, "public incident submission time");
+  const validatedRequestId = requestId(input.requestId);
+  const actorIpHash = optionalDigest(input.actorIpHash, "actor IP digest");
+  const actorDeviceHash = optionalDigest(input.actorDeviceHash, "actor device digest");
+  const idempotencyDigest = digest(input.idempotencyDigest, "public incident idempotency digest");
+  return exactOne(await db.$queryRaw<AcceptedRow[]>`
+    SELECT * FROM app_public.submit_public_incident(
+      ${verifiedQrId}, ${incidentType}, ${description}, ${contactEmail}, ${input.consentToContact},
+      ${submittedAt}, ${validatedRequestId}, ${actorIpHash}, ${actorDeviceHash}, ${idempotencyDigest}
+    )
+  `, "app_public.submit_public_incident", acceptedProjection);
+};
+
+export const submitRequestAccess = async (
+  db: B02PublicFunctionClient,
+  input: {
+    fullName: string;
+    workEmail: string;
+    companyName: string;
+    roleTitle: string;
+    country: string;
+    monthlyVolume: string;
+    message: string;
+    sourcePage?: string | null;
+    referrer?: string | null;
+    submittedAt: Date;
+    requestId: string;
+    idempotencyDigest: string;
+  }
+) => {
+  exactInput(input, [
+    "fullName", "workEmail", "companyName", "roleTitle", "country", "monthlyVolume", "message",
+    "sourcePage", "referrer", "submittedAt", "requestId", "idempotencyDigest",
+  ], "submit_request_access");
+  const fullName = text(input.fullName, "request-access name", 2, 120);
+  const workEmail = email(input.workEmail, "request-access email");
+  const companyName = text(input.companyName, "request-access company", 2, 160);
+  const roleTitle = text(input.roleTitle, "request-access role title", 2, 120);
+  const country = text(input.country, "request-access country", 2, 120);
+  const monthlyVolume = text(input.monthlyVolume, "request-access monthly volume", 1, 80);
+  const message = text(input.message, "request-access message", 10, 3_000);
+  const sourcePage = optionalText(input.sourcePage, "request-access source page", 500);
+  const referrer = optionalUrl(input.referrer, "request-access referrer", 1_200);
+  const submittedAt = date(input.submittedAt, "request-access submission time");
+  const validatedRequestId = requestId(input.requestId);
+  const idempotencyDigest = digest(input.idempotencyDigest, "request-access idempotency digest");
+  return exactOne(await db.$queryRaw<AcceptedRow[]>`
+    SELECT * FROM app_public.submit_request_access(
+      ${fullName}, ${workEmail}, ${companyName}, ${roleTitle}, ${country}, ${monthlyVolume}, ${message},
+      ${sourcePage}, ${referrer}, ${submittedAt}, ${validatedRequestId}, ${idempotencyDigest}
+    )
+  `, "app_public.submit_request_access", acceptedProjection);
+};
+
+export const submitPublicSupport = async (
+  db: B02PublicFunctionClient,
+  input: {
+    publicName: string;
+    publicEmail: string;
+    issueType: string;
+    title: string;
+    description: string;
+    verifiedQrId?: string | null;
+    productReference?: string | null;
+    sourcePath?: string | null;
+    pageUrl?: string | null;
+    submittedAt: Date;
+    requestId: string;
+    idempotencyDigest: string;
+  }
+) => {
+  exactInput(input, [
+    "publicName", "publicEmail", "issueType", "title", "description", "verifiedQrId",
+    "productReference", "sourcePath", "pageUrl", "submittedAt", "requestId", "idempotencyDigest",
+  ], "submit_public_support");
+  const publicName = text(input.publicName, "public support name", 2, 120);
+  const publicEmail = email(input.publicEmail, "public support email");
+  const issueType = oneOf(input.issueType, "public support issue type", [
+    "verification_result", "scan_problem", "product_concern", "platform_access", "privacy", "other",
+  ] as const);
+  const title = text(input.title, "public support title", 5, 160);
+  const description = text(input.description, "public support description", 10, 4_000);
+  const verifiedQrId = optionalUuid(input.verifiedQrId, "verified QR ID");
+  const productReference = optionalText(input.productReference, "public support product reference", 160);
+  const sourcePath = optionalText(input.sourcePath, "public support source path", 500);
+  if (sourcePath && (!sourcePath.startsWith("/") || sourcePath.includes(".."))) {
+    throw new Error("public support source path is malformed");
+  }
+  const pageUrl = optionalUrl(input.pageUrl, "public support page URL", 1_200);
+  const submittedAt = date(input.submittedAt, "public support submission time");
+  const validatedRequestId = requestId(input.requestId);
+  const idempotencyDigest = digest(input.idempotencyDigest, "public support idempotency digest");
+  return exactOne(await db.$queryRaw<AcceptedRow[]>`
+    SELECT * FROM app_public.submit_public_support(
+      ${publicName}, ${publicEmail}, ${issueType}, ${title}, ${description}, ${verifiedQrId},
+      ${productReference}, ${sourcePath}, ${pageUrl}, ${submittedAt}, ${validatedRequestId}, ${idempotencyDigest}
+    )
+  `, "app_public.submit_public_support", acceptedProjection);
+};

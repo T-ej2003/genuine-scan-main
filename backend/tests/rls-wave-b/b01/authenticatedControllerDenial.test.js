@@ -69,6 +69,10 @@ mockModule("controllers/authControllerShared.js", {
   setAuthCookies: () => null,
   verifyEmailSchema: validSchema,
 });
+mockModule("rls-waves/session-b/b01/authenticatedSessionProjection.js", {
+  buildAuthState: async () => ({}),
+  getCurrentRefreshSession: async () => null,
+});
 mockModule("services/auth/authService.js", {
   issueSessionForUser: async () => ({}),
   loginWithPassword: async () => ({}),

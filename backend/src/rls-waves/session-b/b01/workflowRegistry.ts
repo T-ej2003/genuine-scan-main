@@ -7,6 +7,15 @@ export type B01WorkflowProof = {
 };
 
 const localStatus = "implementation-in-progress" as const;
+const invitationWorkflowIds = new Set<string>([
+  "workflow-http-backend-src-controllers-licensee-invite-controller-ts-resend-licensee-admin-invite",
+  "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite",
+  "workflow-internal-backend-src-services-auth-invite-service-ts-create-invite",
+  "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview",
+  "workflow-internal-backend-src-services-auth-invite-service-ts-get-or-create-platform-org-id",
+  "workflow-internal-backend-src-services-auth-invite-service-ts-infer-org-id-for-licensee",
+  "workflow-internal-backend-src-services-auth-invite-service-ts-resolve-invite-actor-context",
+]);
 
 const b01WorkflowInventory = [
   { workflowId: "workflow-http-backend-src-controllers-account-controller-ts-change-my-password", entryPoint: "http:changeMyPassword", productionRoot: "backend/src/controllers/accountController.ts", boundary: "authenticated-function", localStatus },
@@ -76,7 +85,7 @@ const b01WorkflowInventory = [
 
 export const b01WorkflowProofs: readonly B01WorkflowProof[] = b01WorkflowInventory.map((proof) => ({
   ...proof,
-  localStatus: proof.boundary === "session-credential-function"
+  localStatus: proof.boundary === "session-credential-function" || invitationWorkflowIds.has(proof.workflowId)
     ? "implemented-local-proof-passed-global-integration-pending"
     : "implementation-in-progress",
 }));
@@ -102,6 +111,29 @@ export const b01RefreshSessionApplicationPathProof = {
   integrationStatus: "session-a-function-and-runtime-grant-integration-pending",
 } as const;
 
+export const b01InvitationApplicationPathProof = {
+  familyId: "b01-invitation-account-activation",
+  registeredRoots: [
+    "POST /api/auth/invite",
+    "POST /api/licensees/:id/admin-invite/resend",
+    "GET /api/auth/invite-preview",
+    "POST /api/auth/accept-invite",
+  ],
+  repositoryRoots: [
+    "backend/src/rls-waves/session-b/b01/invitationRepository.ts",
+    "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+  ],
+  workflowIds: b01WorkflowProofs
+    .filter((proof) => invitationWorkflowIds.has(proof.workflowId))
+    .map((proof) => proof.workflowId),
+  focusedProofs: [
+    "backend/tests/rls-wave-b/b01/invitationBoundary.test.js",
+    "backend/tests/rls-wave-b/b01/invitationPostgres18.test.js",
+  ],
+  postgresScope: "wave-local-exact-function-contract",
+  integrationStatus: "session-a-function-grant-and-accept-login-integration-pending",
+} as const;
+
 export const b01SessionAIntegrationRequests = [
   {
     targetSymbol: "app_auth refresh-token rotation family",
@@ -118,6 +150,62 @@ export const b01SessionAIntegrationRequests = [
     exactResult: "Fixed claim, session-state, challenge, revokedCount, and successor projections enforced by sessionCredentialRepository.ts; zero claim rows means INVALID and unexpected row counts/projections fail closed.",
     denialRules: "Blank/malformed/ambiguous bearer, wrong identity, expired/revoked/disabled/stale actor or membership, foreign/stale scope, wrong role/MFA state, forged follow-on bearer, concurrent loser and later replay all deny deterministically.",
     testEvidence: "GREEN PostgreSQL 18 result: proofScope=b01-local-function-contract, database=mscqr_rls_wave_b_auth_public_workers, postgresMajor=18, registeredHttpRootsExercised=5, nonBypassFunctionOwner=true, exactFunctionOwnerGrants=true, controllerAuditOutboxAtomic=true, forceRlsTables=6.",
+  },
+  {
+    targetSymbol: "app_rls.prepare_invitation",
+    callShape: "Add prepare_invitation(text,text,text,text,text,text,text,text,text,boolean,boolean,text,timestamp without time zone,timestamp without time zone,text,text), matching invitationRepository.ts exactly: actor user/session/request/purpose first, then target and delivery metadata.",
+    ordering: "Revalidate and lock the active actor/session and current membership, lock the target licensee/user/live invites, prepare the account/link/invite and durable audit/outbox in one transaction, then serialize and attempt delivery only after commit.",
+    invariant: "Platform or same-licensee admin, MFA/step-up assurance, exact purpose and role ceiling are database-revalidated; caller-set app.* settings alone never authorize access; concurrent preparation leaves one live invite.",
+    responsePreservation: "Return the exact 17-field projection enforced by invitationRepository.ts and retain current create/resend/link response behavior.",
+    focusedTest: "backend/tests/rls-wave-b/b01/invitationBoundary.test.js and invitationPostgres18.test.js.",
+    workflowIds: b01WorkflowProofs.filter((proof) => invitationWorkflowIds.has(proof.workflowId) && proof.boundary === "authenticated-function").map((proof) => proof.workflowId),
+    tablesCommands: "User, Licensee, Organization, ManufacturerLicenseeLink and Invite SELECT/lock; exact User/Organization/link/invite mutation; durable audit/outbox INSERT.",
+    requiredContext: "identity-authenticated-app, actor user ID, live session ID, request ID, auth-invite-create or licensee-admin-invite-resend purpose, database-derived role/scope/assurance, normalized target and fixed-format token/IP hashes.",
+    exactResult: "Exactly actorDisplayName, actorEmail, actorUserId, inviteEmail, inviteExpiresAt, inviteId, inviteRole, licenseeName, linkAction, userEmail, userId, userLicenseeId, userName, userOrganizationId, userRole, userStatus and workspaceOrganizationId.",
+    denialRules: "Blank/malformed input, stale/disabled actor or session, stale/foreign membership, wrong role/assurance/purpose, inactive/foreign target, role elevation, conflicting account state, invalid TTL/hash and concurrent loser deny without partial mutation.",
+    testEvidence: "Focused PostgreSQL 18 invitation proof; exact result is recorded in invitation-family.md after the gate.",
+  },
+  {
+    targetSymbol: "app_auth invitation lookup and consume functions",
+    callShape: "Add lookup_invitation_token(text[],timestamp without time zone) and consume_invitation_token(text[],text,text,timestamp without time zone,text,text,text); consume returns inviteId,id,email,name,role,licenseeId,orgId,status exactly and accepts request ID, IP hash and bounded user agent.",
+    ordering: "Lookup is read-only; consume locks the unique invite and bound active invited user, validates all bindings, updates password/account/invite state and writes AUTH_INVITE_ACCEPTED audit/outbox atomically before returning.",
+    invariant: "Only 1..3 fixed unique token hashes are authority; exactly one unused/unexpired match is required; token replay, ambiguity or outbox failure cannot produce partial activation.",
+    responsePreservation: "Preview retains its exact five fields; acceptance retains the activated-user projection and automatic login remains the next committed login-family boundary.",
+    focusedTest: "backend/tests/rls-wave-b/b01/invitationBoundary.test.js and invitationPostgres18.test.js.",
+    workflowIds: b01WorkflowProofs.filter((proof) => invitationWorkflowIds.has(proof.workflowId) && proof.boundary === "pre-auth-function").map((proof) => proof.workflowId),
+    tablesCommands: "Invite and Licensee exact SELECT; Invite and bound User SELECT FOR UPDATE; exact User/Invite UPDATE; durable audit/outbox INSERT.",
+    requiredContext: "identity-pre-auth-app, 1..3 validated token hashes, server-checked timestamp, approved Argon2id hash, optional bounded name, request ID, fixed IP hash and bounded user agent.",
+    exactResult: "Preview: email,role,expiresAt,licenseeName,requiresConnector. Consume: inviteId,id,email,name,role,licenseeId,orgId,status.",
+    denialRules: "Blank/malformed/duplicate/ambiguous/expired/used/replayed token, inactive/deleted/mismatched user, foreign role/org/licensee binding, wrong runtime identity and unexpected projection deny generically.",
+    testEvidence: "Focused PostgreSQL 18 invitation proof; exact result is recorded in invitation-family.md after the gate.",
+  },
+  {
+    targetSymbol: "app_rls.require_recent_mfa_session",
+    callShape: "Add require_recent_mfa_session(text,timestamp without time zone,integer), returning exactly verifiedAt.",
+    ordering: "Invoke inside the same canonical authenticated transaction immediately before sensitive invitation or MFA mutation access.",
+    invariant: "Freshness comes from the live unrevoked session row and current enabled MFA actor/membership state, never the JWT mfaVerifiedAt claim.",
+    responsePreservation: "Stale proof retains the existing HTTP 428 step-up response; canonical session denial remains HTTP 401 with cookies cleared.",
+    focusedTest: "refreshSessionPostgres18.test.js and invitationPostgres18.test.js forged-fresh-JWT/stale-database denial.",
+    workflowIds: ["workflow-http-backend-src-controllers-licensee-invite-controller-ts-resend-licensee-admin-invite"],
+    tablesCommands: "Active User/session/current membership SELECT FOR SHARE only.",
+    requiredContext: "identity-authenticated-app, canonical user/role/scope, mfa-verified or step-up-verified assurance, approved purpose, live session ID, server-near checkedAt and 1..1440 minute ceiling.",
+    exactResult: "One verifiedAt timestamp for a current fresh MFA session; zero rows otherwise.",
+    denialRules: "Missing/stale/revoked/foreign session, disabled actor/MFA, stale membership, wrong scope/role/assurance/purpose/identity and forged JWT freshness deny.",
+    testEvidence: "GREEN refresh PostgreSQL 18 proof with non-bypass function owner, exact grant matrix and current-MFA disable denial.",
+  },
+  {
+    targetSymbol: "backend/src/controllers/licenseeController.ts:createLicensee",
+    callShape: "Pass the authenticated session ID and an authenticated canonical transaction boundary into its existing createInvite call after the Session A-owned licensee creation seam establishes the final tenant scope.",
+    ordering: "Commit licensee/admin creation, then call the canonical invitation preparation boundary; report delivery separately after its commit.",
+    invariant: "No fallback to global Prisma for protected invitation access; the initiating platform actor/session and created licensee are revalidated by prepare_invitation.",
+    responsePreservation: "Preserve the existing 201 brand/admin/invite response and warning behavior when post-create invitation preparation or delivery fails.",
+    focusedTest: "Existing create-licensee focused tests plus invitationPostgres18.test.js platform-create proof.",
+    workflowIds: ["workflow-internal-backend-src-services-auth-invite-service-ts-create-invite"],
+    tablesCommands: "No new direct command; invoke app_rls.prepare_invitation through the B01 repository.",
+    requiredContext: "Authenticated platform actor claims including live session ID, request ID and auth-invite-create purpose.",
+    exactResult: "Existing createInvite result without an INVITE_DATABASE_BOUNDARY_REQUIRED warning on the authorized path.",
+    denialRules: "Missing/stale/disabled actor/session, wrong role/assurance/purpose and foreign created-licensee target deny invitation preparation without rolling back the already-committed licensee response contract.",
+    testEvidence: "B01 invitation static and PostgreSQL proofs; Session A must add and rerun the exact shared-file call seam.",
   },
   {
     targetSymbol: "command-refresh-token-select-1e564ffb471c",

@@ -8,6 +8,7 @@ Status: local PostgreSQL 18 proof GREEN; Session A package/grant integration pen
 - Registered roots exercised/mapped: `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/sessions`, `POST /auth/sessions/revoke-all`, `POST /auth/sessions/:id/revoke`
 - Focused checks: backend build; `refreshSessionBoundary.test.js`; `securityBoundary.test.js`; `authenticatedControllerDenial.test.js`; `workflowRegistry.test.js`; `refreshSessionPostgres18.test.js`
 - PostgreSQL result: the five registered Express roots and their authentication, CSRF and limiter chains reach the canonical boundaries; rotation/audit/outbox are atomic; contention has one winner; later replay revokes the family; MFA-bootstrap consumption is atomic; expired/revoked/disabled/stale/foreign paths deny; and the non-login/non-superuser/non-`BYPASSRLS` function owner executes through forced-RLS policies with exact column/command grants.
+- The database-backed current-session/auth-state projection now lives in Session B-owned `authenticatedSessionProjection.ts`; the unowned shared controller helper is unchanged from the foundation, and its legacy no-boundary lookup fails closed rather than falling back to global Prisma.
 
 ## Automatically covered workflow IDs
 

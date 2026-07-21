@@ -18,11 +18,11 @@ import {
   loadAuthenticatedPasswordActor,
   proveAuthenticatedPasswordStepUp,
 } from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
+import { getCurrentRefreshSession } from "../rls-waves/session-b/b01/authenticatedSessionProjection";
 import {
   authResponseData,
   clearAuthCookies,
   getAuthClaims,
-  getCurrentRefreshSession,
   getRequestId,
   hashIp,
   isAdminMfaRequiredRole,
