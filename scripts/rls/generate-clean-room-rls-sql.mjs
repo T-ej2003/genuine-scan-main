@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { calculateCleanRoomSourceContract } from "./lib/clean-room-source-contract.mjs";
+import { buildRegisteredCallPathEvidence } from "./lib/application-path-certifications.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const programRoot = path.join(repoRoot, "documents/security/rls-program");
@@ -31,6 +32,8 @@ const runtimeIdentities = readJson("runtime-identities.json");
 const ownership = readJson("object-ownership-chain.json");
 const allowlist = readJson("essential-workflow-allowlist.json");
 const familiesManifest = readJson("context-boundary-families.json");
+const workflowPartition = readJson("workflow-three-session-partition.json");
+const registeredCallPathEvidence = buildRegisteredCallPathEvidence({ workflowsManifest, partition: workflowPartition, repoRoot });
 const { sourceContractSha256, inputs: sourceContractInputs, prismaMigrations, prismaSchemaSource } = calculateCleanRoomSourceContract(repoRoot);
 const prismaEnumNames = [...new Set([...prismaSchemaSource.matchAll(/^enum\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{/gm)].map((match) => match[1]))].sort();
 const environmentArgIndex = process.argv.indexOf("--environment");
@@ -1392,6 +1395,8 @@ const implementationManifest = {
     columnPrivilegeCells: grants.reduce((sum, grant) => sum + grant.columns.length, 0),
     prismaMigrations: prismaMigrations.length,
     prismaEnums: prismaEnumNames.length,
+    registeredWorkflowCallPaths: registeredCallPathEvidence.workflowCount,
+    applicationPathCertifiedWorkflows: registeredCallPathEvidence.summary.applicationPathCertified,
   },
   roles: roleNames,
   roleMarker,
@@ -1450,6 +1455,7 @@ const generatedReports = new Map([
   ["full-rls-implementation-manifest.json", implementationManifest],
   ["package-execution-report.json", packageExecutionReport],
   ["contract-only-implementation-inventory.json", { schemaVersion: 2, workflowCount: contractOnlyWorkflowRows.length, groups: contractOnlyGroups, families: contractOnlyInventory }],
+  ["workflow-call-path-evidence.json", registeredCallPathEvidence],
   ["expected-catalog-snapshot.json", expectedCatalog],
   ["column-privilege-report.json", { schemaVersion: 1, rows: grants, cells: implementationManifest.counts.columnPrivilegeCells }],
   ["privilege-diff-report.json", { schemaVersion: 2, mode: "clean-room-expected-after-apply", rows: grants, legacyAclRestoration: false }],

@@ -3,11 +3,16 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  applicationPathCertificationFamilies,
+  buildRegisteredCallPathEvidence,
+} from "../rls/lib/application-path-certifications.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const programRoot = path.join(repoRoot, "documents/security/rls-program");
 const read = (name) => JSON.parse(fs.readFileSync(path.join(programRoot, name), "utf8"));
-const workflows = read("workflows.json").workflows;
+const workflowManifest = read("workflows.json");
+const workflows = workflowManifest.workflows;
 const partition = read("workflow-three-session-partition.json");
 const sessionA = read("workflow-ownership-session-a.json");
 const sessionB = read("workflow-ownership-session-b.json");
@@ -29,6 +34,18 @@ test("three-session partition assigns all 428 workflows exactly once without a c
     assert.ok(assignment.contract.trim());
     assert.doesNotMatch(`${assignment.waveId}:${assignment.assignmentRuleId}`, /fallback|catch.?all|remaining|misc/i);
   }
+});
+
+test("registered call paths generate all workflow dispositions from executable family evidence", () => {
+  const evidence = buildRegisteredCallPathEvidence({ workflowsManifest: workflowManifest, partition, repoRoot });
+  assert.equal(evidence.workflowCount, 428);
+  assert.equal(evidence.summary.applicationPathCertified, 3);
+  assert.equal(evidence.workflows.filter((row) => row.productionAccessPath.length === 0).length, 0);
+  assert.equal(evidence.workflows.flatMap((row) => row.productionAccessPath).filter((row) => row.registration === "unregistered").length, 0);
+  assert.deepEqual(
+    evidence.workflows.filter((row) => row.disposition === "application-path-certified").map((row) => row.workflowId).sort(),
+    applicationPathCertificationFamilies.flatMap((family) => family.workflowIds).sort()
+  );
 });
 
 test("session ownership is exhaustive and editable production and test files never overlap", () => {

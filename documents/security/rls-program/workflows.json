@@ -90,6 +90,411 @@
           "source": "backend/src/routes/auditRoutes.ts:227"
         },
         {
+          "method": "GET",
+          "path": "/public/connector/releases",
+          "source": "backend/src/routes/index.ts:1359"
+        },
+        {
+          "method": "GET",
+          "path": "/public/connector/releases/latest",
+          "source": "backend/src/routes/index.ts:1360"
+        },
+        {
+          "method": "GET",
+          "path": "/public/connector/download/:version/:platform",
+          "source": "backend/src/routes/index.ts:1361"
+        },
+        {
+          "method": "POST",
+          "path": "/public/request-access",
+          "source": "backend/src/routes/index.ts:1362"
+        },
+        {
+          "method": "POST",
+          "path": "/public/support",
+          "source": "backend/src/routes/index.ts:1369"
+        },
+        {
+          "method": "GET",
+          "path": "/verify/:code",
+          "source": "backend/src/routes/index.ts:1376"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/session/start",
+          "source": "backend/src/routes/index.ts:1377"
+        },
+        {
+          "method": "GET",
+          "path": "/verify/session/:id",
+          "source": "backend/src/routes/index.ts:1378"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/session/:id/intake",
+          "source": "backend/src/routes/index.ts:1379"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/session/:id/reveal",
+          "source": "backend/src/routes/index.ts:1389"
+        },
+        {
+          "method": "GET",
+          "path": "/verify/auth/providers",
+          "source": "backend/src/routes/index.ts:1399"
+        },
+        {
+          "method": "GET",
+          "path": "/verify/auth/session",
+          "source": "backend/src/routes/index.ts:1400"
+        },
+        {
+          "method": "GET",
+          "path": "/verify/auth/oauth/:provider/start",
+          "source": "backend/src/routes/index.ts:1409"
+        },
+        {
+          "method": "GET",
+          "path": "/verify/auth/oauth/:provider/callback",
+          "source": "backend/src/routes/index.ts:1410"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/auth/oauth/:provider/callback",
+          "source": "backend/src/routes/index.ts:1411"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/auth/oauth/exchange",
+          "source": "backend/src/routes/index.ts:1412"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/auth/email-otp/request",
+          "source": "backend/src/routes/index.ts:1413"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/auth/email-otp/verify",
+          "source": "backend/src/routes/index.ts:1414"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/auth/logout",
+          "source": "backend/src/routes/index.ts:1415"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/auth/passkey/register/begin",
+          "source": "backend/src/routes/index.ts:1424"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/auth/passkey/register/finish",
+          "source": "backend/src/routes/index.ts:1434"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/auth/passkey/assertion/begin",
+          "source": "backend/src/routes/index.ts:1444"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/auth/passkey/assertion/finish",
+          "source": "backend/src/routes/index.ts:1453"
+        },
+        {
+          "method": "GET",
+          "path": "/verify/auth/passkey/credentials",
+          "source": "backend/src/routes/index.ts:1462"
+        },
+        {
+          "method": "DELETE",
+          "path": "/verify/auth/passkey/credentials/:id",
+          "source": "backend/src/routes/index.ts:1463"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/:code/claim",
+          "source": "backend/src/routes/index.ts:1473"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/:code/link-claim",
+          "source": "backend/src/routes/index.ts:1483"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/:code/transfer",
+          "source": "backend/src/routes/index.ts:1493"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/:code/transfer/cancel",
+          "source": "backend/src/routes/index.ts:1503"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/transfer/accept",
+          "source": "backend/src/routes/index.ts:1513"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/report-fraud",
+          "source": "backend/src/routes/index.ts:1523"
+        },
+        {
+          "method": "POST",
+          "path": "/fraud-report",
+          "source": "backend/src/routes/index.ts:1532"
+        },
+        {
+          "method": "POST",
+          "path": "/verify/feedback",
+          "source": "backend/src/routes/index.ts:1541"
+        },
+        {
+          "method": "POST",
+          "path": "/incidents/report",
+          "source": "backend/src/routes/index.ts:1542"
+        },
+        {
+          "method": "GET",
+          "path": "/support/tickets/track/:reference",
+          "source": "backend/src/routes/index.ts:1551"
+        },
+        {
+          "method": "GET",
+          "path": "/scan",
+          "source": "backend/src/routes/index.ts:1552"
+        },
+        {
+          "method": "POST",
+          "path": "/telemetry/route-transition",
+          "source": "backend/src/routes/index.ts:1553"
+        },
+        {
+          "method": "POST",
+          "path": "/telemetry/csp-report",
+          "source": "backend/src/routes/index.ts:1563"
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "source": "backend/src/routes/index.ts:1573"
+        },
+        {
+          "method": "GET",
+          "path": "/healthz",
+          "source": "backend/src/routes/index.ts:1574"
+        },
+        {
+          "method": "GET",
+          "path": "/health/live",
+          "source": "backend/src/routes/index.ts:1575"
+        },
+        {
+          "method": "GET",
+          "path": "/health/ready",
+          "source": "backend/src/routes/index.ts:1576"
+        },
+        {
+          "method": "GET",
+          "path": "/health/latency",
+          "source": "backend/src/routes/index.ts:1577"
+        },
+        {
+          "method": "GET",
+          "path": "/internal/release",
+          "source": "backend/src/routes/index.ts:1578"
+        },
+        {
+          "method": "GET",
+          "path": "/security/abuse/rate-limits",
+          "source": "backend/src/routes/index.ts:1579"
+        },
+        {
+          "method": "GET",
+          "path": "/security/abuse/rate-limits/alerts",
+          "source": "backend/src/routes/index.ts:1589"
+        },
+        {
+          "method": "GET",
+          "path": "/licensees/export",
+          "source": "backend/src/routes/index.ts:1601"
+        },
+        {
+          "method": "POST",
+          "path": "/licensees",
+          "source": "backend/src/routes/index.ts:1613"
+        },
+        {
+          "method": "GET",
+          "path": "/licensees",
+          "source": "backend/src/routes/index.ts:1614"
+        },
+        {
+          "method": "GET",
+          "path": "/licensees/:id",
+          "source": "backend/src/routes/index.ts:1615"
+        },
+        {
+          "method": "PATCH",
+          "path": "/licensees/:id",
+          "source": "backend/src/routes/index.ts:1616"
+        },
+        {
+          "method": "DELETE",
+          "path": "/licensees/:id",
+          "source": "backend/src/routes/index.ts:1617"
+        },
+        {
+          "method": "POST",
+          "path": "/licensees/:id/admin-invite/resend",
+          "source": "backend/src/routes/index.ts:1618"
+        },
+        {
+          "method": "POST",
+          "path": "/users",
+          "source": "backend/src/routes/index.ts:1632"
+        },
+        {
+          "method": "GET",
+          "path": "/users",
+          "source": "backend/src/routes/index.ts:1634"
+        },
+        {
+          "method": "PATCH",
+          "path": "/users/:id",
+          "source": "backend/src/routes/index.ts:1635"
+        },
+        {
+          "method": "DELETE",
+          "path": "/users/:id",
+          "source": "backend/src/routes/index.ts:1636"
+        },
+        {
+          "method": "GET",
+          "path": "/manufacturers",
+          "source": "backend/src/routes/index.ts:1639"
+        },
+        {
+          "method": "PATCH",
+          "path": "/manufacturers/:id/deactivate",
+          "source": "backend/src/routes/index.ts:1641"
+        },
+        {
+          "method": "PATCH",
+          "path": "/manufacturers/:id/restore",
+          "source": "backend/src/routes/index.ts:1654"
+        },
+        {
+          "method": "DELETE",
+          "path": "/manufacturers/:id",
+          "source": "backend/src/routes/index.ts:1667"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/ranges/allocate",
+          "source": "backend/src/routes/index.ts:1681"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/generate",
+          "source": "backend/src/routes/index.ts:1682"
+        },
+        {
+          "method": "POST",
+          "path": "/admin/licensees/:licenseeId/qr-allocate-range",
+          "source": "backend/src/routes/index.ts:1685"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/batches",
+          "source": "backend/src/routes/index.ts:1698"
+        },
+        {
+          "method": "GET",
+          "path": "/qr/batches",
+          "source": "backend/src/routes/index.ts:1699"
+        },
+        {
+          "method": "GET",
+          "path": "/qr/batches/:id/allocation-map",
+          "source": "backend/src/routes/index.ts:1700"
+        },
+        {
+          "method": "GET",
+          "path": "/qr/batches/:id/validation-evidence",
+          "source": "backend/src/routes/index.ts:1701"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/batches/:id/assign-manufacturer",
+          "source": "backend/src/routes/index.ts:1703"
+        },
+        {
+          "method": "PATCH",
+          "path": "/qr/batches/:id/rename",
+          "source": "backend/src/routes/index.ts:1715"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/batches/:id/release",
+          "source": "backend/src/routes/index.ts:1727"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/batches/admin-allocate",
+          "source": "backend/src/routes/index.ts:1741"
+        },
+        {
+          "method": "GET",
+          "path": "/qr/codes/export",
+          "source": "backend/src/routes/index.ts:1745"
+        },
+        {
+          "method": "GET",
+          "path": "/qr/codes",
+          "source": "backend/src/routes/index.ts:1746"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/codes/signed-links",
+          "source": "backend/src/routes/index.ts:1747"
+        },
+        {
+          "method": "GET",
+          "path": "/qr/codes/legacy-report",
+          "source": "backend/src/routes/index.ts:1748"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/codes/legacy-rotate",
+          "source": "backend/src/routes/index.ts:1749"
+        },
+        {
+          "method": "GET",
+          "path": "/qr/stats",
+          "source": "backend/src/routes/index.ts:1752"
+        },
+        {
+          "method": "DELETE",
+          "path": "/qr/batches/:id",
+          "source": "backend/src/routes/index.ts:1755"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/batches/bulk-delete",
+          "source": "backend/src/routes/index.ts:1756"
+        },
+        {
+          "method": "DELETE",
+          "path": "/qr/codes",
+          "source": "backend/src/routes/index.ts:1757"
+        },
+        {
           "method": "POST",
           "path": "/print-gateway/heartbeat",
           "source": "backend/src/routes/index.ts:1760"
@@ -188,6 +593,426 @@
           "method": "POST",
           "path": "/print-gateway/ipp/fail",
           "source": "backend/src/routes/index.ts:1779"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs",
+          "source": "backend/src/routes/index.ts:1781"
+        },
+        {
+          "method": "GET",
+          "path": "/manufacturer/printers",
+          "source": "backend/src/routes/index.ts:1793"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/printers",
+          "source": "backend/src/routes/index.ts:1802"
+        },
+        {
+          "method": "PATCH",
+          "path": "/manufacturer/printers/:id",
+          "source": "backend/src/routes/index.ts:1814"
+        },
+        {
+          "method": "DELETE",
+          "path": "/manufacturer/printers/:id",
+          "source": "backend/src/routes/index.ts:1826"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/printers/:id/relink-local-agent",
+          "source": "backend/src/routes/index.ts:1838"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/printers/:id/test",
+          "source": "backend/src/routes/index.ts:1849"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/printers/:id/test-label",
+          "source": "backend/src/routes/index.ts:1861"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/printers/:id/discover",
+          "source": "backend/src/routes/index.ts:1873"
+        },
+        {
+          "method": "GET",
+          "path": "/manufacturer/print-jobs",
+          "source": "backend/src/routes/index.ts:1885"
+        },
+        {
+          "method": "GET",
+          "path": "/manufacturer/print-jobs/:id/events",
+          "source": "backend/src/routes/index.ts:1894"
+        },
+        {
+          "method": "GET",
+          "path": "/manufacturer/print-jobs/:id",
+          "source": "backend/src/routes/index.ts:1904"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/pause",
+          "source": "backend/src/routes/index.ts:1913"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/resume",
+          "source": "backend/src/routes/index.ts:1924"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/stop",
+          "source": "backend/src/routes/index.ts:1935"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/abandon",
+          "source": "backend/src/routes/index.ts:1946"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/reissue",
+          "source": "backend/src/routes/index.ts:1957"
+        },
+        {
+          "method": "GET",
+          "path": "/manufacturer/print-reissue-requests",
+          "source": "backend/src/routes/index.ts:1969"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/reissue-request",
+          "source": "backend/src/routes/index.ts:1978"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-reissue-requests/:id/approve",
+          "source": "backend/src/routes/index.ts:1989"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-reissue-requests/:id/print",
+          "source": "backend/src/routes/index.ts:2001"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-reissue-requests/:id/reject",
+          "source": "backend/src/routes/index.ts:2013"
+        },
+        {
+          "method": "GET",
+          "path": "/manufacturer/print-jobs/:id/pack",
+          "source": "backend/src/routes/index.ts:2025"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/direct-print/tokens",
+          "source": "backend/src/routes/index.ts:2036"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/direct-print/resolve",
+          "source": "backend/src/routes/index.ts:2048"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/direct-print/confirm-item",
+          "source": "backend/src/routes/index.ts:2059"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/direct-print/fail",
+          "source": "backend/src/routes/index.ts:2070"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/confirm",
+          "source": "backend/src/routes/index.ts:2081"
+        },
+        {
+          "method": "POST",
+          "path": "/manufacturer/print-jobs/:id/sample-scan",
+          "source": "backend/src/routes/index.ts:2093"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/requests",
+          "source": "backend/src/routes/index.ts:2108"
+        },
+        {
+          "method": "GET",
+          "path": "/qr/requests",
+          "source": "backend/src/routes/index.ts:2120"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/requests/:id/approve",
+          "source": "backend/src/routes/index.ts:2121"
+        },
+        {
+          "method": "POST",
+          "path": "/qr/requests/:id/reject",
+          "source": "backend/src/routes/index.ts:2122"
+        },
+        {
+          "method": "USE",
+          "path": "/audit",
+          "source": "backend/src/routes/index.ts:2125"
+        },
+        {
+          "method": "USE",
+          "path": "/audit",
+          "source": "backend/src/routes/index.ts:2126"
+        },
+        {
+          "method": "GET",
+          "path": "/trace/timeline",
+          "source": "backend/src/routes/index.ts:2129"
+        },
+        {
+          "method": "GET",
+          "path": "/analytics/batch-sla",
+          "source": "backend/src/routes/index.ts:2130"
+        },
+        {
+          "method": "GET",
+          "path": "/analytics/risk-scores",
+          "source": "backend/src/routes/index.ts:2131"
+        },
+        {
+          "method": "GET",
+          "path": "/policy/config",
+          "source": "backend/src/routes/index.ts:2132"
+        },
+        {
+          "method": "PATCH",
+          "path": "/policy/config",
+          "source": "backend/src/routes/index.ts:2133"
+        },
+        {
+          "method": "GET",
+          "path": "/policy/alerts",
+          "source": "backend/src/routes/index.ts:2134"
+        },
+        {
+          "method": "POST",
+          "path": "/policy/alerts/:id/ack",
+          "source": "backend/src/routes/index.ts:2135"
+        },
+        {
+          "method": "GET",
+          "path": "/audit/export/batches/:id/package",
+          "source": "backend/src/routes/index.ts:2147"
+        },
+        {
+          "method": "GET",
+          "path": "/telemetry/route-transition/summary",
+          "source": "backend/src/routes/index.ts:2160"
+        },
+        {
+          "method": "GET",
+          "path": "/support/request-access",
+          "source": "backend/src/routes/index.ts:2172"
+        },
+        {
+          "method": "PATCH",
+          "path": "/support/request-access/:id",
+          "source": "backend/src/routes/index.ts:2181"
+        },
+        {
+          "method": "GET",
+          "path": "/support/tickets",
+          "source": "backend/src/routes/index.ts:2192"
+        },
+        {
+          "method": "GET",
+          "path": "/support/tickets/:id",
+          "source": "backend/src/routes/index.ts:2193"
+        },
+        {
+          "method": "PATCH",
+          "path": "/support/tickets/:id",
+          "source": "backend/src/routes/index.ts:2194"
+        },
+        {
+          "method": "POST",
+          "path": "/support/tickets/:id/messages",
+          "source": "backend/src/routes/index.ts:2205"
+        },
+        {
+          "method": "GET",
+          "path": "/support/reports",
+          "source": "backend/src/routes/index.ts:2216"
+        },
+        {
+          "method": "POST",
+          "path": "/support/reports",
+          "source": "backend/src/routes/index.ts:2217"
+        },
+        {
+          "method": "POST",
+          "path": "/support/reports/:id/respond",
+          "source": "backend/src/routes/index.ts:2231"
+        },
+        {
+          "method": "GET",
+          "path": "/support/reports/files/:fileName",
+          "source": "backend/src/routes/index.ts:2242"
+        },
+        {
+          "method": "GET",
+          "path": "/admin/qr/scan-logs",
+          "source": "backend/src/routes/index.ts:2254"
+        },
+        {
+          "method": "GET",
+          "path": "/admin/qr/batch-summary",
+          "source": "backend/src/routes/index.ts:2255"
+        },
+        {
+          "method": "GET",
+          "path": "/admin/qr/analytics",
+          "source": "backend/src/routes/index.ts:2256"
+        },
+        {
+          "method": "GET",
+          "path": "/incidents",
+          "source": "backend/src/routes/index.ts:2259"
+        },
+        {
+          "method": "GET",
+          "path": "/incidents/evidence-files/:fileName",
+          "source": "backend/src/routes/index.ts:2260"
+        },
+        {
+          "method": "GET",
+          "path": "/incidents/:id",
+          "source": "backend/src/routes/index.ts:2270"
+        },
+        {
+          "method": "PATCH",
+          "path": "/incidents/:id",
+          "source": "backend/src/routes/index.ts:2271"
+        },
+        {
+          "method": "POST",
+          "path": "/incidents/:id/events",
+          "source": "backend/src/routes/index.ts:2272"
+        },
+        {
+          "method": "POST",
+          "path": "/incidents/:id/evidence",
+          "source": "backend/src/routes/index.ts:2273"
+        },
+        {
+          "method": "POST",
+          "path": "/incidents/:id/email",
+          "source": "backend/src/routes/index.ts:2287"
+        },
+        {
+          "method": "POST",
+          "path": "/incidents/:id/notify-customer",
+          "source": "backend/src/routes/index.ts:2299"
+        },
+        {
+          "method": "GET",
+          "path": "/incidents/:id/export-pdf",
+          "source": "backend/src/routes/index.ts:2311"
+        },
+        {
+          "method": "GET",
+          "path": "/ir/incidents",
+          "source": "backend/src/routes/index.ts:2323"
+        },
+        {
+          "method": "POST",
+          "path": "/ir/incidents",
+          "source": "backend/src/routes/index.ts:2324"
+        },
+        {
+          "method": "GET",
+          "path": "/ir/incidents/:id",
+          "source": "backend/src/routes/index.ts:2325"
+        },
+        {
+          "method": "PATCH",
+          "path": "/ir/incidents/:id",
+          "source": "backend/src/routes/index.ts:2326"
+        },
+        {
+          "method": "POST",
+          "path": "/ir/incidents/:id/events",
+          "source": "backend/src/routes/index.ts:2327"
+        },
+        {
+          "method": "POST",
+          "path": "/ir/incidents/:id/customer-trust/review",
+          "source": "backend/src/routes/index.ts:2328"
+        },
+        {
+          "method": "POST",
+          "path": "/ir/incidents/:id/actions",
+          "source": "backend/src/routes/index.ts:2329"
+        },
+        {
+          "method": "POST",
+          "path": "/ir/incidents/:id/communications",
+          "source": "backend/src/routes/index.ts:2330"
+        },
+        {
+          "method": "POST",
+          "path": "/ir/incidents/:id/attachments",
+          "source": "backend/src/routes/index.ts:2341"
+        },
+        {
+          "method": "GET",
+          "path": "/ir/policies",
+          "source": "backend/src/routes/index.ts:2355"
+        },
+        {
+          "method": "POST",
+          "path": "/ir/policies",
+          "source": "backend/src/routes/index.ts:2356"
+        },
+        {
+          "method": "PATCH",
+          "path": "/ir/policies/:id",
+          "source": "backend/src/routes/index.ts:2357"
+        },
+        {
+          "method": "GET",
+          "path": "/ir/alerts",
+          "source": "backend/src/routes/index.ts:2359"
+        },
+        {
+          "method": "PATCH",
+          "path": "/ir/alerts/:id",
+          "source": "backend/src/routes/index.ts:2360"
+        },
+        {
+          "method": "POST",
+          "path": "/admin/qrs/:id/block",
+          "source": "backend/src/routes/index.ts:2363"
+        },
+        {
+          "method": "POST",
+          "path": "/admin/batches/:id/block",
+          "source": "backend/src/routes/index.ts:2364"
+        },
+        {
+          "method": "PATCH",
+          "path": "/account/profile",
+          "source": "backend/src/routes/index.ts:2367"
+        },
+        {
+          "method": "PATCH",
+          "path": "/account/password",
+          "source": "backend/src/routes/index.ts:2368"
         },
         {
           "method": "POST",
@@ -1235,6 +2060,11 @@
           "packageFile": "package.json",
           "name": "rls:session-b-ownership-check",
           "command": "node scripts/rls/check-session-b-file-ownership.mjs"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "rls:workflow-evidence",
+          "command": "node scripts/rls/generate-workflow-call-path-evidence.mjs"
         },
         {
           "packageFile": "package.json",

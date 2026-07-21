@@ -3,7 +3,7 @@
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "bfc91c7c78ef005a6ec19556942f636fd3822cf857d828163ee4c0f5bbacac4f",
+  "sourceContractSha256": "7f08aedd7b99948d07c0c927b1a6a4bb55a1ee59ac7c705e50e487b1ac21b31b",
   "tablesExpected": 77,
   "forceRlsTargetsExpected": 75,
   "tablesCertified": 75,
@@ -18,20 +18,33 @@
   ],
   "applicationPathResults": [
     {
-      "workflowId": "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+      "familyId": "risk-analytics",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"
+      ],
+      "registeredRoots": [
+        "GET /api/analytics/risk-scores"
+      ],
       "status": "application-path-certified",
-      "postgresqlMajor": 18
+      "postgresqlMajor": 18,
+      "testFile": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js"
     },
     {
+      "familyId": "dashboard-snapshot",
       "workflowIds": [
         "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
         "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
       ],
+      "registeredRoots": [
+        "GET /api/dashboard/stats",
+        "GET /api/events/dashboard"
+      ],
       "status": "application-path-certified",
-      "postgresqlMajor": 18
+      "postgresqlMajor": 18,
+      "testFile": "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js"
     }
   ],
-  "workflowsProductProhibited": 0,
+  "workflowsProductProhibited": 16,
   "cleanRoomPreflightCertified": true,
   "migrationsFromZeroCertified": true,
   "managedRolesCreatedByPackage": true,
@@ -308,7 +321,7 @@
   "columnPrivilegeCertification": true,
   "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "50fb66843c1598b51011fb3d309e85490bdddf71453abc10c23c5314bc6d883e",
+  "packageChecksumsSha256": "a1bbc4365dc79e3331c8fcd6768d603b4aa32182f007929b1e2eb9da1d259922",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
   "disposableCertificationFixtureRows": 36
 }

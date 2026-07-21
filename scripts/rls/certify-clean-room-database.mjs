@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { verifyFullRlsPackage } from "./verify-full-rls-package.mjs";
+import { applicationPathCertificationFamilies } from "./lib/application-path-certifications.mjs";
 
 export const CONFIRM_ENV = "MSCQR_FULL_RLS_CERTIFICATION_CONFIRM";
 export const CONFIRM_VALUE = "MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION";
@@ -20,6 +21,7 @@ const policyPath = path.join(generatedRoot, "policy-inventory-report.json");
 const privilegePath = path.join(generatedRoot, "column-privilege-report.json");
 const checksumsPath = path.join(generatedRoot, "checksums.json");
 const executionPath = path.join(generatedRoot, "package-execution-report.json");
+const workflowEvidencePath = path.join(generatedRoot, "workflow-call-path-evidence.json");
 const certificationAdministrator = "certification-administrator";
 const ids = {
   orgA: "00000000-0000-4000-8000-000000000101", orgB: "00000000-0000-4000-8000-000000000102",
@@ -41,11 +43,6 @@ const ids = {
 };
 const riskAnalyticsUserColumns = ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"];
 const prohibitedRiskAnalyticsUserColumns = ["createdAt", "disabledReason", "email", "emailVerifiedAt", "failedLoginAttempts", "lastLoginAt", "location", "lockedUntil", "metadata", "passwordHash", "pendingEmail", "pendingEmailRequestedAt", "updatedAt", "website"];
-const riskAnalyticsWorkflowId = "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics";
-const dashboardSnapshotWorkflowIds = [
-  "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
-  "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
-];
 let runCounter = 0;
 const activeDatabases = new Set();
 
@@ -123,41 +120,26 @@ const runBackendBuild = (env) => {
   });
   if (result.status !== 0) throw new Error(`Backend build failed before application-path certification: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
 };
-const runRiskAnalyticsApplicationPath = (appUrl, env) => {
-  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js")], {
+const runApplicationPathCertifications = (connections, env) => applicationPathCertificationFamilies.map((family) => {
+  const familyEnv = { ...env, NODE_ENV: "test", [family.enable[0]]: family.enable[1], [family.confirm[0]]: family.confirm[1] };
+  for (const [name, connection] of Object.entries(family.connections)) familyEnv[name] = connections[connection];
+  const result = spawnSync(process.execPath, [path.join(root, family.testFile)], {
     cwd: root,
-    env: {
-      ...env,
-      NODE_ENV: "test",
-      DATABASE_URL: appUrl,
-      MSCQR_RISK_ANALYTICS_POSTGRES18_TEST: "true",
-      MSCQR_RISK_ANALYTICS_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_RISK_ANALYTICS_POSTGRES18_TEST",
-    },
+    env: familyEnv,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (result.status !== 0) throw new Error(`Risk analytics application-path certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
-  if (!/application-path proof passed/.test(result.stdout || "")) throw new Error("Risk analytics application-path certification did not emit its success marker");
-  return { workflowId: riskAnalyticsWorkflowId, status: "application-path-certified", postgresqlMajor: 18 };
-};
-const runDashboardSnapshotApplicationPath = (appUrl, bootstrapUrl, env) => {
-  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js")], {
-    cwd: root,
-    env: {
-      ...env,
-      NODE_ENV: "test",
-      DATABASE_URL: appUrl,
-      MSCQR_DASHBOARD_BOOTSTRAP_URL: bootstrapUrl,
-      MSCQR_DASHBOARD_POSTGRES18_TEST: "true",
-      MSCQR_DASHBOARD_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_DASHBOARD_POSTGRES18_TEST",
-    },
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (result.status !== 0) throw new Error(`Dashboard snapshot application-path certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
-  if (!/application-path proof passed/.test(result.stdout || "")) throw new Error("Dashboard snapshot application-path certification did not emit its success marker");
-  return { workflowIds: dashboardSnapshotWorkflowIds, status: "application-path-certified", postgresqlMajor: 18 };
-};
+  if (result.status !== 0) throw new Error(`${family.id} application-path certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/application-path proof passed/.test(result.stdout || "")) throw new Error(`${family.id} application-path certification did not emit its success marker`);
+  return {
+    familyId: family.id,
+    workflowIds: family.workflowIds,
+    registeredRoots: family.registeredRoots,
+    status: "application-path-certified",
+    postgresqlMajor: 18,
+    testFile: family.testFile,
+  };
+});
 const injectBeforeCommit = (file, label) => {
   const source = fs.readFileSync(path.join(sqlRoot, file), "utf8");
   const index = source.lastIndexOf("\nCOMMIT;");
@@ -641,10 +623,7 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     certifySemantics(urls.bootstrap, urls.app);
     const fixtureRows = Number(scalar(urls.bootstrap, "SELECT sum(row_count) FROM (SELECT (xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM public.%I',c.relname),false,true,'')))[1]::text::bigint AS row_count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_prisma_migrations') counts", "count disposable certification fixture rows"));
     if (!fixtureRows) throw new Error("Final semantic certification did not load its declared disposable fixtures");
-    const applicationPathResults = [
-      runRiskAnalyticsApplicationPath(urls.app, env),
-      runDashboardSnapshotApplicationPath(urls.app, urls.bootstrap, env),
-    ];
+    const applicationPathResults = runApplicationPathCertifications({ app: urls.app, bootstrap: urls.bootstrap }, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
     return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
@@ -669,6 +648,7 @@ export const runCertification = (adminUrl, env = process.env) => {
   const execution = JSON.parse(fs.readFileSync(executionPath, "utf8"));
   const policies = JSON.parse(fs.readFileSync(policyPath, "utf8"));
   const privileges = JSON.parse(fs.readFileSync(privilegePath, "utf8"));
+  const workflowEvidence = JSON.parse(fs.readFileSync(workflowEvidencePath, "utf8"));
   if (manifest.deploymentModel !== "clean-room-blue-green" || execution.deploymentModel !== "clean-room-blue-green") throw new FullRlsCertificationSafetyError("Generated package is not the clean-room blue/green contract");
   if (JSON.stringify(execution.phases.map((phase) => phase.id)) !== JSON.stringify(expectedPhaseIds)) throw new FullRlsCertificationSafetyError("Generated authority phase order is not the reviewed clean-room contract");
   const coveredPhases = new Set([...installationSteps.map((step) => step.phase), "clean-room-destroy"]);
@@ -693,7 +673,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     workflowsApplicationPathCertified: 0,
     applicationPathCertifiedWorkflowIds: [],
     applicationPathResults: [],
-    workflowsProductProhibited: 0,
+    workflowsProductProhibited: workflowEvidence.summary.frozenProductProhibited,
     cleanRoomPreflightCertified: false,
     migrationsFromZeroCertified: false,
     managedRolesCreatedByPackage: false,
@@ -744,8 +724,11 @@ export const runCertification = (adminUrl, env = process.env) => {
     const finalRun = runSuccessfulCertification({ adminUrl, maintenanceDatabase, manifest, execution, policies, privileges, env, blueUrl, expectedBlueFingerprint });
     result.tablesCertified = finalRun.tablesCertified;
     result.applicationPathResults = finalRun.applicationPathResults;
-    result.applicationPathCertifiedWorkflowIds = finalRun.applicationPathResults.flatMap((entry) => entry.workflowIds || [entry.workflowId]);
+    result.applicationPathCertifiedWorkflowIds = finalRun.applicationPathResults.flatMap((entry) => entry.workflowIds);
     result.workflowsApplicationPathCertified = result.applicationPathCertifiedWorkflowIds.length;
+    result.workflowCertificationStatus = result.workflowsApplicationPathCertified + result.workflowsProductProhibited === workflowEvidence.workflowCount
+      ? "complete"
+      : "pending-application-path-certification";
     result.catalogTamperResults = finalRun.catalogTamperResults;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
     result.generatedPoliciesCertified = policies.count;

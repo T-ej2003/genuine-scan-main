@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { calculateCleanRoomSourceContract } from "./lib/clean-room-source-contract.mjs";
+import { buildRegisteredCallPathEvidence } from "./lib/application-path-certifications.mjs";
 
 const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const generatedRoot = path.join(root, "documents/security/rls-program/generated");
@@ -128,7 +129,16 @@ export const verifyFullRlsPackage = () => {
   const privileges = JSON.parse(readGenerated("column-privilege-report.json"));
   const roleLifecycle = JSON.parse(readGenerated("role-lifecycle-report.json"));
   const execution = JSON.parse(readGenerated("package-execution-report.json"));
+  const workflowCallPaths = JSON.parse(readGenerated("workflow-call-path-evidence.json"));
+  const expectedWorkflowCallPaths = buildRegisteredCallPathEvidence({
+    workflowsManifest: readJson("workflows.json"),
+    partition: readJson("workflow-three-session-partition.json"),
+    repoRoot: root,
+  });
+  ensure(JSON.stringify(workflowCallPaths) === JSON.stringify(expectedWorkflowCallPaths), "Generated workflow call-path evidence is stale or manually edited");
+  ensure(workflowCallPaths.workflowCount === 428 && workflowCallPaths.workflows.length === 428, "Workflow call-path evidence is not exhaustive");
   const summary = validateGeneratedPackage({ manifest, policies, privileges, commandSemantics: readJson("command-semantics.json") });
+  ensure(manifest.counts.registeredWorkflowCallPaths === 428 && manifest.counts.applicationPathCertifiedWorkflows === workflowCallPaths.summary.applicationPathCertified, "Implementation manifest workflow evidence counts drifted");
 
   const sqlNames = fs.readdirSync(sqlRoot).filter((name) => name.endsWith(".sql")).sort();
   ensure(equal(sqlNames, Object.keys(checksums.files).filter((name) => name.endsWith(".sql"))), "Global checksums do not cover every SQL artifact exactly once");
@@ -185,7 +195,7 @@ export const verifyFullRlsPackage = () => {
   const contracts = JSON.parse(readGenerated("contract-only-implementation-inventory.json"));
   const grouped = Object.values(contracts.groups || {}).flat();
   ensure(contracts.workflowCount === 59 && grouped.length === 59 && new Set(grouped.map((entry) => entry.workflowId)).size === 59, "Contract-only workflow inventory lost or duplicated workflows");
-  return { valid: true, ...summary, deploymentModel: "clean-room-blue-green", contractOnlyWorkflows: 59, executionPhases: execution.phases.length, checksums: Object.keys(checksums.files).length };
+  return { valid: true, ...summary, deploymentModel: "clean-room-blue-green", registeredWorkflowCallPaths: 428, applicationPathCertifiedWorkflows: workflowCallPaths.summary.applicationPathCertified, contractOnlyWorkflows: 59, executionPhases: execution.phases.length, checksums: Object.keys(checksums.files).length };
 };
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

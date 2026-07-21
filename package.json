@@ -61,6 +61,7 @@
     "rls:full-certify": "node scripts/rls/certify-full-database.mjs",
     "rls:partition-generate": "node scripts/rls/generate-workflow-session-partition.mjs",
     "rls:partition-check": "node scripts/rls/validate-workflow-session-partition.mjs && node --test scripts/tests/workflow-session-partition.test.mjs",
+    "rls:workflow-evidence": "node scripts/rls/generate-workflow-call-path-evidence.mjs",
     "rls:session-b-ownership-check": "node scripts/rls/check-session-b-file-ownership.mjs",
     "check:rls:disposable-sql-harness": "node --test scripts/tests/disposable-rls-sql-harness.test.mjs",
     "check:role-separation-harness": "node --test scripts/tests/disposable-role-separation-harness.test.mjs",

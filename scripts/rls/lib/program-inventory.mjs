@@ -3,6 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
+import {
+  applyApplicationPathCertificationEvidence,
+  DASHBOARD_SNAPSHOT_WORKFLOW_IDS,
+  RISK_ANALYTICS_WORKFLOW_ID,
+} from "./application-path-certifications.mjs";
 
 export const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
 export const programDir = path.join(repoRoot, "documents/security/rls-program");
@@ -370,7 +375,7 @@ const detectRegistrations = () => {
   const routes = [];
   for (const file of [...walk(path.join(repoRoot, "backend/src/routes")), path.join(repoRoot, "backend/src/app.ts")]) {
     const source = fs.readFileSync(file, "utf8");
-    for (const match of source.matchAll(/\b(?:router|app)\.(get|post|put|patch|delete|use)\s*\(\s*(["'`])([^"'`]+)\2/g)) {
+    for (const match of source.matchAll(/\b(?:app|router|[A-Za-z_$][\w$]*Router)\.(get|post|put|patch|delete|use)\s*\(\s*(["'`])([^"'`]+)\2/g)) {
       routes.push({ method: match[1].toUpperCase(), path: match[3], source: `${rel(file)}:${source.slice(0, match.index).split("\n").length}` });
     }
   }
@@ -763,11 +768,6 @@ const routeEvidenceFor = (functionName, source = routeSource()) => {
 };
 
 const TRACE_TIMELINE_WORKFLOW_ID = "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline";
-const RISK_ANALYTICS_WORKFLOW_ID = "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics";
-const DASHBOARD_SNAPSHOT_WORKFLOW_IDS = [
-  "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
-  "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
-];
 const DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET = new Set(DASHBOARD_SNAPSHOT_WORKFLOW_IDS);
 const DASHBOARD_SNAPSHOT_COLUMNS = {
   "table-audit-log": {
@@ -2260,18 +2260,7 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
     consistentReadScopeGuarantee: true,
     routeRootVerified: true,
     aggregateScopeStatus: "tenant-bounded",
-    postgresqlCertificationStatus: "certified",
-    applicationPathCertificationEvidence: {
-      status: "application-path-certified",
-      postgresqlMajor: 18,
-      testFile: "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
-      harnessFile: "scripts/rls/certify-clean-room-database.mjs",
-      runtimeRole: "identity-authenticated-app",
-      positiveActors: ["licensee-admin", "platform-admin"],
-      deniedCases: ["blank-context", "foreign-scope", "forged-role", "stale-membership"],
-      atomicAttributionVerified: true,
-      exactColumnPrivilegesVerified: true,
-    },
+    postgresqlCertificationStatus: "pending",
     contextBoundaryPlanningEvidence: {
       reviewedAt: "2026-07-16",
       registeredRootCallChainVerified: true,
@@ -2389,18 +2378,7 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
       consistentReadScopeGuarantee: true,
       routeRootVerified: true,
       aggregateScopeStatus: "database-revalidated-tenant-manufacturer-or-platform",
-      postgresqlCertificationStatus: "certified",
-      applicationPathCertificationEvidence: {
-        status: "application-path-certified",
-        postgresqlMajor: 18,
-        testFile: "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js",
-        harnessFile: "scripts/rls/certify-clean-room-database.mjs",
-        runtimeRole: "identity-authenticated-app",
-        positiveActors: ["licensee-admin", "manufacturer", "platform-admin"],
-        deniedCases: ["blank-context", "foreign-scope", "forged-role", "stale-membership", "wrong-assurance", "wrong-purpose"],
-        atomicAttributionVerified: true,
-        exactColumnPrivilegesVerified: true,
-      },
+      postgresqlCertificationStatus: "pending",
       dashboardSnapshotFunction: scopeWorkflow
         ? "app_rls.dashboard_snapshot_scope(text,text,text)"
         : "app_rls.dashboard_snapshot_data(text,text,text,text)",
@@ -2555,6 +2533,7 @@ export const buildWorkflowManifest = () => {
   const policyAlertActorCeiling = applyPolicyAlertActorCeilingAuthority(result);
   const publicReadContract = applyPublicReadContractAuthority(result);
   applyRuntimeImplementationAuthority(result);
+  applyApplicationPathCertificationEvidence(result);
   for (const workflow of result.workflows.filter((item) => item.contextBoundaryStatus === "implemented" && item.sameTransactionGuarantee === true)) {
     workflow.protectedQueryClient = "transaction-client-only";
   }
