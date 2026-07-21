@@ -1,16 +1,13 @@
 import fs from "fs";
 import path from "path";
 import { Request, Response } from "express";
-import { IncidentActorType, IncidentEventType, IncidentSeverity, IncidentStatus, IncidentType, Prisma, UserRole } from "@prisma/client";
+import { IncidentActorType, IncidentEventType, IncidentSeverity, IncidentStatus, IncidentType, UserRole } from "@prisma/client";
 import { z } from "zod";
 
-import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { verifyCaptchaToken } from "../services/captchaService";
 import { enforceIncidentRateLimit } from "../services/incidentRateLimitService";
 import {
-  buildIncidentAdminUrl,
-  computeSlaDueAt,
   createIncidentFromReport,
   isIncidentAdminRole,
   getIncidentByIdScoped,
@@ -18,20 +15,25 @@ import {
   recordIncidentEvent,
   sanitizeIncidentSeverity,
   sanitizeIncidentStatus,
-  sanitizeResolutionOutcome,
-  toHumanIncidentSeverity,
   toHumanIncidentStatus,
-  toHumanIncidentType,
 } from "../services/incidentService";
-import { runTamperEvidenceChecks, summarizeTamperFindings } from "../services/tamperEvidenceService";
-import { ensureIncidentWorkflowArtifacts } from "../services/supportWorkflowService";
-import { getSuperadminAlertEmails, sendIncidentEmail } from "../services/incidentEmailService";
-import { createAuditLog } from "../services/auditService";
+import { sendIncidentEmail } from "../services/incidentEmailService";
+import { createAuditLogInTransaction } from "../services/auditService";
 import { incidentEvidenceUpload, incidentReportUpload, resolveUploadPath } from "../middleware/incidentUpload";
 import { buildIncidentPdfBuffer } from "../services/incidentPdfService";
-import { runIncidentAutoContainment } from "../services/soarService";
 import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
 import { buildPublicIncidentReportResponse } from "./incidents/publicIncidentResponse";
+import {
+  C03AccessError,
+  c03RequestId,
+  withC03ActorTransaction,
+  withC03ResourceTransaction,
+} from "../rls-waves/session-c/c03/c03ActorBoundary";
+import {
+  addIncidentEvidenceInTransaction,
+  loadIncidentEvidenceFileInTransaction,
+  patchIncidentInTransaction,
+} from "../rls-waves/session-c/c03/c03IncidentRepository";
 
 const publicIncidentRawSchema = z.object({
   qrCodeValue: z.string().trim().max(128).optional(),
@@ -163,34 +165,6 @@ const mapFileToStorageRecord = (file: Express.Multer.File) => {
   };
 };
 
-type IncidentSummary = {
-  id: string;
-  qrCodeValue: string | null;
-  incidentType: IncidentType;
-  severity: IncidentSeverity;
-  status: IncidentStatus;
-  description: string | null;
-  locationName?: string | null;
-  customerEmail?: string | null;
-  customerPhone?: string | null;
-};
-
-const incidentSummaryText = (incident: IncidentSummary) =>
-  [
-    `Incident ID: ${incident.id}`,
-    `QR Code: ${incident.qrCodeValue}`,
-    `Type: ${toHumanIncidentType(incident.incidentType)}`,
-    `Severity: ${toHumanIncidentSeverity(incident.severity)}`,
-    `Status: ${toHumanIncidentStatus(incident.status)}`,
-    `Description: ${incident.description}`,
-    incident.locationName ? `Location: ${incident.locationName}` : null,
-    incident.customerEmail ? `Customer Email: ${incident.customerEmail}` : null,
-    incident.customerPhone ? `Customer Phone: ${incident.customerPhone}` : null,
-    `Open in admin: ${buildIncidentAdminUrl(incident.id)}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
 const asIncidentPayload = (input: z.infer<typeof publicIncidentRawSchema>) => {
   return {
     qrCodeValue: String(input.qrCodeValue || input.code || "").trim(),
@@ -280,87 +254,18 @@ export const reportIncident = async (req: Request, res: Response) => {
         userAgent: req.get("user-agent"),
         deviceFingerprint: String(req.headers["x-device-fp"] || ""),
       },
-      uploadedRecords
+      uploadedRecords,
+      {
+        requestId: c03RequestId(req),
+        idempotencyKey: String(req.get("idempotency-key") || "").trim(),
+      }
     );
-
-    const evidenceRows = await prisma.incidentEvidence.findMany({
-      where: { incidentId: incident.id },
-      select: {
-        id: true,
-        incidentId: true,
-        storageKey: true,
-        fileType: true,
-      },
-    });
-    const tamperFindings = await runTamperEvidenceChecks(evidenceRows);
-    const tamperSummary = summarizeTamperFindings(tamperFindings);
-
-    if (tamperSummary.hasWarnings) {
-      const nextTags = Array.from(new Set([...(incident.tags || []), "tamper_check_warning"]));
-      await prisma.incident.update({
-        where: { id: incident.id },
-        data: { tags: nextTags },
-      });
-    }
-
-    const supportTicket = await prisma.supportTicket.findUnique({
-      where: { incidentId: incident.id },
-      select: {
-        id: true,
-        referenceCode: true,
-        status: true,
-        slaDueAt: true,
-      },
-    });
-
-    const superadminEmails = await getSuperadminAlertEmails();
-    const alertSubject = `MSCQR incident report: ${incident.severity.toLowerCase()} severity`;
-    const alertBody = incidentSummaryText(incident);
-
-    for (const email of superadminEmails) {
-      await sendIncidentEmail({
-        incidentId: incident.id,
-        licenseeId: incident.licenseeId || null,
-        toAddress: email,
-        subject: alertSubject,
-        text: alertBody,
-        senderMode: "system",
-        template: "superadmin_alert",
-      });
-    }
-
-    if (incident.consentToContact && incident.customerEmail) {
-      const subject = "MSCQR support received your report";
-      const body =
-        `Thanks for contacting MSCQR support.\n\n` +
-        `Reference ID: ${incident.id}\n` +
-        `Support Ticket: ${supportTicket?.referenceCode || "Pending assignment"}\n` +
-        `Current status: ${toHumanIncidentStatus(incident.status)}\n` +
-        `Workflow: intake -> review -> containment -> documentation -> resolution.\n` +
-        `What next: Our team will review your report and update you if needed.\n\n` +
-        `For your privacy, we only use your contact details for this incident workflow.`;
-
-      await sendIncidentEmail({
-        incidentId: incident.id,
-        licenseeId: incident.licenseeId || null,
-        toAddress: incident.customerEmail,
-        subject,
-        text: body,
-        senderMode: "system",
-        template: "customer_acknowledgement",
-      });
-    }
-
-    try {
-      await runIncidentAutoContainment({
-        incidentId: incident.id,
-        trigger: "PUBLIC_REPORT",
-        actorUserId: null,
-        ipAddress: req.ip,
-      });
-    } catch (autoContainmentError) {
-      console.error("runIncidentAutoContainment(public) error:", autoContainmentError);
-    }
+    const supportTicket = incident.supportTicket || null;
+    const tamperSummary = incident.tamperSummary || {
+      highestRisk: 0,
+      hasWarnings: false,
+      summary: "Evidence analysis is queued.",
+    };
 
     return res.status(201).json({
       success: true,
@@ -368,6 +273,9 @@ export const reportIncident = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("reportIncident error:", error);
+    if (error instanceof C03AccessError) {
+      return res.status(error.statusCode).json({ success: false, error: error.message });
+    }
     return res.status(500).json({
       success: false,
       error: "Could not create incident report",
@@ -395,29 +303,50 @@ export const listIncidents = async (req: AuthRequest, res: Response) => {
     const licenseeId =
       req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
         ? parsed.data.licenseeId || undefined
-        : undefined;
+        : req.user.licenseeId || undefined;
+    if (!licenseeId) return res.status(400).json({ success: false, error: "licenseeId is required" });
 
     const dateFrom = dateFromRaw ? new Date(dateFromRaw) : undefined;
     const dateTo = dateToRaw ? new Date(dateToRaw) : undefined;
 
-    const result = await listIncidentsScoped({
-      role: req.user.role,
-      actorUserId: req.user.userId,
-      actorLicenseeId: req.user.licenseeId,
-      linkedLicenseeIds: req.user.linkedLicenseeIds,
-      filters: {
-        status: status || undefined,
-        severity: severity || undefined,
-        qr,
-        search,
-        dateFrom: dateFrom && Number.isFinite(dateFrom.getTime()) ? dateFrom : undefined,
-        dateTo: dateTo && Number.isFinite(dateTo.getTime()) ? dateTo : undefined,
-        assignedTo,
+    const result = await withC03ActorTransaction(
+      {
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-list",
         licenseeId,
-        limit,
-        offset,
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
+        requiredAssurance: "password-verified",
       },
-    });
+      async (tx, context) => {
+        const rows = await listIncidentsScoped({
+          role: req.user!.role,
+          actorUserId: req.user!.userId,
+          actorLicenseeId: req.user!.licenseeId,
+          linkedLicenseeIds: req.user!.linkedLicenseeIds,
+          filters: {
+            status: status || undefined,
+            severity: severity || undefined,
+            qr,
+            search,
+            dateFrom: dateFrom && Number.isFinite(dateFrom.getTime()) ? dateFrom : undefined,
+            dateTo: dateTo && Number.isFinite(dateTo.getTime()) ? dateTo : undefined,
+            assignedTo,
+            licenseeId,
+            limit,
+            offset,
+          },
+        }, tx);
+        await createAuditLogInTransaction(tx, context, {
+          action: "INCIDENTS_LISTED",
+          entityType: "Incident",
+          entityId: licenseeId,
+          details: { count: rows.rows.length },
+          ipAddress: req.ip,
+        });
+        return rows;
+      }
+    );
 
     return res.json({
       success: true,
@@ -430,6 +359,7 @@ export const listIncidents = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error("listIncidents error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to list incidents" });
   }
 };
@@ -440,17 +370,38 @@ export const getIncident = async (req: AuthRequest, res: Response) => {
     const incidentId = String(req.params.id || "").trim();
     if (!incidentId) return res.status(400).json({ success: false, error: "Missing incident id" });
 
-    const incident = await getIncidentByIdScoped(incidentId, {
-      role: req.user.role,
-      userId: req.user.userId,
-      licenseeId: req.user.licenseeId,
-      linkedLicenseeIds: req.user.linkedLicenseeIds,
-    });
+    const incident = await withC03ResourceTransaction(
+      {
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-detail",
+        resourceId: incidentId,
+        resourceType: "incident",
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
+        requiredAssurance: "password-verified",
+      },
+      async (tx, context) => {
+        const row = await getIncidentByIdScoped(incidentId, {
+          role: req.user!.role,
+          userId: req.user!.userId,
+          licenseeId: req.user!.licenseeId,
+          linkedLicenseeIds: req.user!.linkedLicenseeIds,
+        }, tx);
+        await createAuditLogInTransaction(tx, context, {
+          action: "INCIDENT_DETAIL_READ",
+          entityType: "Incident",
+          entityId: incidentId,
+          ipAddress: req.ip,
+        });
+        return row;
+      }
+    );
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
     return res.json({ success: true, data: incident });
   } catch (error) {
     console.error("getIncident error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to load incident" });
   }
 };
@@ -469,125 +420,32 @@ export const patchIncident = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const incident = await getIncidentByIdScoped(incidentId, {
-      role: req.user.role,
-      userId: req.user.userId,
-      licenseeId: req.user.licenseeId,
-      linkedLicenseeIds: req.user.linkedLicenseeIds,
-    });
-    if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
-
-    const payload = parsed.data;
-    const updateData: Prisma.IncidentUncheckedUpdateInput = {};
-    const changedFields: string[] = [];
-
-    if (payload.status && payload.status !== incident.status) {
-      updateData.status = payload.status;
-      changedFields.push("status");
-    }
-    if (payload.assignedToUserId !== undefined && payload.assignedToUserId !== incident.assignedToUserId) {
-      updateData.assignedToUserId = payload.assignedToUserId || null;
-      changedFields.push("assignedToUserId");
-    }
-    if (payload.internalNotes !== undefined && payload.internalNotes !== incident.internalNotes) {
-      updateData.internalNotes = payload.internalNotes || null;
-      changedFields.push("internalNotes");
-    }
-    if (payload.tags && JSON.stringify(payload.tags) !== JSON.stringify(incident.tags || [])) {
-      updateData.tags = payload.tags;
-      changedFields.push("tags");
-    }
-    if (payload.severity && payload.severity !== incident.severity) {
-      updateData.severity = payload.severity;
-      updateData.severityOverridden = true;
-      updateData.slaDueAt = computeSlaDueAt(payload.severity as IncidentSeverity);
-      changedFields.push("severity");
-    }
-    if (payload.resolutionSummary !== undefined && payload.resolutionSummary !== incident.resolutionSummary) {
-      updateData.resolutionSummary = payload.resolutionSummary || null;
-      changedFields.push("resolutionSummary");
-    }
-    const nextResolution = sanitizeResolutionOutcome(payload.resolutionOutcome || "");
-    if (payload.resolutionOutcome !== undefined && nextResolution !== incident.resolutionOutcome) {
-      updateData.resolutionOutcome = nextResolution;
-      changedFields.push("resolutionOutcome");
-    }
-
-    if (changedFields.length === 0) {
-      return res.json({ success: true, data: incident });
-    }
-
-    const updated = await prisma.incident.update({
-      where: { id: incident.id },
-      data: updateData,
-    });
-
-    if (changedFields.includes("status")) {
-      await recordIncidentEvent({
-        incidentId: incident.id,
-        actorType: IncidentActorType.ADMIN,
-        actorUserId: req.user.userId,
-        eventType: IncidentEventType.STATUS_CHANGED,
-        eventPayload: { from: incident.status, to: updated.status },
-      });
-    }
-
-    if (changedFields.includes("assignedToUserId")) {
-      await recordIncidentEvent({
-        incidentId: incident.id,
-        actorType: IncidentActorType.ADMIN,
-        actorUserId: req.user.userId,
-        eventType: IncidentEventType.ASSIGNED,
-        eventPayload: { from: incident.assignedToUserId, to: updated.assignedToUserId },
-      });
-    }
-
-    await recordIncidentEvent({
-      incidentId: incident.id,
-      actorType: IncidentActorType.ADMIN,
-      actorUserId: req.user.userId,
-      eventType: IncidentEventType.UPDATED_FIELDS,
-      eventPayload: { changedFields },
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: updated.licenseeId || undefined,
-      action: "INCIDENT_UPDATED",
-      entityType: "Incident",
-      entityId: updated.id,
-      ipAddress: req.ip,
-      details: {
-        changedFields,
-        status: updated.status,
-        severity: updated.severity,
-        assignedToUserId: updated.assignedToUserId,
+    const result = await withC03ResourceTransaction(
+      {
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-update",
+        resourceId: incidentId,
+        resourceType: "incident",
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
+        requiredAssurance: "mfa-verified",
       },
-    });
-
-    await ensureIncidentWorkflowArtifacts({
-      incidentId: updated.id,
-      actorUserId: req.user.userId,
-      actorType: IncidentActorType.ADMIN,
-      emitEvents: false,
-    });
-
-    if (changedFields.includes("severity") || changedFields.includes("status")) {
-      try {
-        await runIncidentAutoContainment({
-          incidentId: updated.id,
-          trigger: "INCIDENT_UPDATE",
-          actorUserId: req.user.userId,
+      async (tx, context) => {
+        const changed = await patchIncidentInTransaction<any>(tx, incidentId, parsed.data);
+        await createAuditLogInTransaction(tx, context, {
+          action: "INCIDENT_UPDATED",
+          entityType: "Incident",
+          entityId: incidentId,
           ipAddress: req.ip,
+          details: { changedFields: changed.changedFields || [] },
         });
-      } catch (autoContainmentError) {
-        console.error("runIncidentAutoContainment(update) error:", autoContainmentError);
+        return changed;
       }
-    }
-
-    return res.json({ success: true, data: updated });
+    );
+    return res.json({ success: true, data: result.incident });
   } catch (error) {
     console.error("patchIncident error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to update incident" });
   }
 };
@@ -603,35 +461,39 @@ export const addIncidentEventNote = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid note payload" });
     }
 
-    const incident = await getIncidentByIdScoped(incidentId, {
-      role: req.user.role,
-      userId: req.user.userId,
-      licenseeId: req.user.licenseeId,
-      linkedLicenseeIds: req.user.linkedLicenseeIds,
-    });
-    if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
-
-    const evt = await recordIncidentEvent({
-      incidentId: incident.id,
-      actorType: IncidentActorType.ADMIN,
-      actorUserId: req.user.userId,
-      eventType: IncidentEventType.NOTE_ADDED,
-      eventPayload: { note: parsed.data.note },
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: incident.licenseeId || undefined,
-      action: "INCIDENT_NOTE_ADDED",
-      entityType: "Incident",
-      entityId: incident.id,
-      ipAddress: req.ip,
-      details: { noteLength: parsed.data.note.length },
-    });
+    const evt = await withC03ResourceTransaction(
+      {
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-note-add",
+        resourceId: incidentId,
+        resourceType: "incident",
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
+        requiredAssurance: "mfa-verified",
+      },
+      async (tx, context) => {
+        const row = await recordIncidentEvent({
+          incidentId,
+          actorType: IncidentActorType.ADMIN,
+          actorUserId: req.user!.userId,
+          eventType: IncidentEventType.NOTE_ADDED,
+          eventPayload: { note: parsed.data.note },
+        }, tx);
+        await createAuditLogInTransaction(tx, context, {
+          action: "INCIDENT_NOTE_ADDED",
+          entityType: "Incident",
+          entityId: incidentId,
+          ipAddress: req.ip,
+          details: { noteLength: parsed.data.note.length },
+        });
+        return row;
+      }
+    );
 
     return res.status(201).json({ success: true, data: evt });
   } catch (error) {
     console.error("addIncidentEventNote error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to add note" });
   }
 };
@@ -642,16 +504,12 @@ export const addIncidentEvidence = async (req: AuthRequest, res: Response) => {
     const incidentId = String(req.params.id || "").trim();
     if (!incidentId) return res.status(400).json({ success: false, error: "Missing incident id" });
 
-    const incident = await getIncidentByIdScoped(incidentId, {
-      role: req.user.role,
-      userId: req.user.userId,
-      licenseeId: req.user.licenseeId,
-      linkedLicenseeIds: req.user.linkedLicenseeIds,
-    });
-    if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
-
     const file = req.file;
     if (!file) return res.status(400).json({ success: false, error: "Missing evidence file" });
+    const idempotencyKey = String(req.get("idempotency-key") || "").trim();
+    if (idempotencyKey.length < 8 || idempotencyKey.length > 200) {
+      return res.status(400).json({ success: false, error: "A bounded idempotency key is required" });
+    }
 
     if (isObjectStorageConfigured() && file.path && file.filename) {
       await uploadObjectFromFile({
@@ -663,59 +521,39 @@ export const addIncidentEvidence = async (req: AuthRequest, res: Response) => {
     }
 
     const mapped = mapFileToStorageRecord(file);
-    const evidence = await prisma.incidentEvidence.create({
-      data: {
-        incidentId: incident.id,
-        fileUrl: mapped.fileUrl,
-        storageKey: mapped.storageKey,
-        fileType: mapped.fileType,
-        uploadedBy: IncidentActorType.ADMIN,
-        uploadedByUserId: req.user.userId,
-      },
-    });
-
-    const tamperFindings = await runTamperEvidenceChecks([
+    const result = await withC03ResourceTransaction(
       {
-        id: evidence.id,
-        incidentId: incident.id,
-        storageKey: evidence.storageKey,
-        fileType: evidence.fileType,
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-evidence-add",
+        resourceId: incidentId,
+        resourceType: "incident",
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN],
+        requiredAssurance: "mfa-verified",
       },
-    ]);
-
-    await recordIncidentEvent({
-      incidentId: incident.id,
-      actorType: IncidentActorType.ADMIN,
-      actorUserId: req.user.userId,
-      eventType: IncidentEventType.EVIDENCE_ADDED,
-      eventPayload: {
-        evidenceId: evidence.id,
-        fileType: evidence.fileType,
-      },
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: incident.licenseeId || undefined,
-      action: "INCIDENT_EVIDENCE_ADDED",
-      entityType: "Incident",
-      entityId: incident.id,
-      ipAddress: req.ip,
-      details: {
-        evidenceId: evidence.id,
-        fileType: evidence.fileType,
-      },
-    });
+      async (tx, context) => {
+        const row = await addIncidentEvidenceInTransaction<any>(tx, incidentId, mapped, idempotencyKey);
+        await createAuditLogInTransaction(tx, context, {
+          action: "INCIDENT_EVIDENCE_ADDED",
+          entityType: "Incident",
+          entityId: incidentId,
+          ipAddress: req.ip,
+          details: { evidenceId: row.evidence.id, fileType: row.evidence.fileType },
+        });
+        return row;
+      }
+    );
 
     return res.status(201).json({
       success: true,
       data: {
-        ...evidence,
-        tamperChecks: tamperFindings[0] || null,
+        ...result.evidence,
+        tamperChecks: result.tamperChecks || null,
       },
     });
   } catch (error) {
     console.error("addIncidentEvidence error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to upload evidence" });
   }
 };
@@ -738,12 +576,23 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
       });
     }
 
-    const incident = await getIncidentByIdScoped(incidentId, {
-      role: req.user.role,
-      userId: req.user.userId,
-      licenseeId: req.user.licenseeId,
-      linkedLicenseeIds: req.user.linkedLicenseeIds,
-    });
+    const incident = await withC03ResourceTransaction(
+      {
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-customer-notification-read",
+        resourceId: incidentId,
+        resourceType: "incident",
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
+        requiredAssurance: "mfa-verified",
+      },
+      (tx) => getIncidentByIdScoped(incidentId, {
+        role: req.user!.role,
+        userId: req.user!.userId,
+        licenseeId: req.user!.licenseeId,
+        linkedLicenseeIds: req.user!.linkedLicenseeIds,
+      }, tx)
+    );
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
     if (!incident.consentToContact || !incident.customerEmail) {
@@ -804,6 +653,7 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
     });
   } catch (error) {
     console.error("notifyIncidentCustomer error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to notify customer" });
   }
 };
@@ -814,39 +664,51 @@ export const exportIncidentPdfHook = async (req: AuthRequest, res: Response) => 
     const incidentId = String(req.params.id || "").trim();
     if (!incidentId) return res.status(400).json({ success: false, error: "Missing incident id" });
 
-    const incident = await getIncidentByIdScoped(incidentId, {
-      role: req.user.role,
-      userId: req.user.userId,
-      licenseeId: req.user.licenseeId,
-      linkedLicenseeIds: req.user.linkedLicenseeIds,
-    });
+    const incident = await withC03ResourceTransaction(
+      {
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-pdf-export",
+        resourceId: incidentId,
+        resourceType: "incident",
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
+        requiredAssurance: "mfa-verified",
+      },
+      async (tx, context) => {
+        const row = await getIncidentByIdScoped(incidentId, {
+          role: req.user!.role,
+          userId: req.user!.userId,
+          licenseeId: req.user!.licenseeId,
+          linkedLicenseeIds: req.user!.linkedLicenseeIds,
+        }, tx);
+        await recordIncidentEvent({
+          incidentId,
+          actorType: IncidentActorType.ADMIN,
+          actorUserId: req.user!.userId,
+          eventType: IncidentEventType.EXPORTED,
+          eventPayload: { format: "pdf", status: "requested" },
+        }, tx);
+        await createAuditLogInTransaction(tx, context, {
+          action: "INCIDENT_EXPORT_REQUESTED",
+          entityType: "Incident",
+          entityId: incidentId,
+          details: { format: "pdf", status: "requested" },
+          ipAddress: req.ip,
+        });
+        return row;
+      }
+    );
     if (!incident) return res.status(404).json({ success: false, error: "Incident not found" });
 
     const pdfBuffer = await buildIncidentPdfBuffer(incident);
     const fileName = `incident-${incident.id}.pdf`;
-
-    await recordIncidentEvent({
-      incidentId: incident.id,
-      actorType: IncidentActorType.ADMIN,
-      actorUserId: req.user.userId,
-      eventType: IncidentEventType.EXPORTED,
-      eventPayload: { format: "pdf", status: "exported" },
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: incident.licenseeId || undefined,
-      action: "INCIDENT_EXPORT_REQUESTED",
-      entityType: "Incident",
-      entityId: incident.id,
-      details: { format: "pdf", status: "exported", bytes: pdfBuffer.length },
-    });
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.status(200).send(pdfBuffer);
   } catch (error) {
     console.error("exportIncidentPdfHook error:", error);
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to export incident PDF" });
   }
 };
@@ -857,20 +719,30 @@ export const serveIncidentEvidenceFile = async (req: AuthRequest, res: Response)
     const fileName = String(req.params.fileName || "").trim();
     if (!fileName) return res.status(404).json({ success: false, error: "File not found" });
 
-    const evidence = await prisma.incidentEvidence.findFirst({
-      where: {
-        storageKey: fileName,
-        incident:
-          req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.PLATFORM_SUPER_ADMIN
-            ? undefined
-            : { licenseeId: req.user.licenseeId || "__none__" },
+    const evidence = await withC03ResourceTransaction(
+      {
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-evidence-file-read",
+        resourceId: fileName,
+        resourceType: "incidentEvidenceStorage",
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN],
+        requiredAssurance: "mfa-verified",
       },
-      select: { id: true, fileType: true },
-    });
-    if (!evidence) return res.status(404).json({ success: false, error: "File not found" });
+      async (tx, context) => {
+        const row = await loadIncidentEvidenceFileInTransaction<any>(tx, fileName);
+        await createAuditLogInTransaction(tx, context, {
+          action: "INCIDENT_EVIDENCE_FILE_READ",
+          entityType: "IncidentEvidence",
+          entityId: row.id,
+          ipAddress: req.ip,
+        });
+        return row;
+      }
+    );
 
     if (isObjectStorageConfigured()) {
-      const buffer = await downloadObjectBuffer(fileName);
+      const buffer = await downloadObjectBuffer(evidence.storageKey);
       if (buffer) {
         if (evidence.fileType) {
           res.setHeader("Content-Type", evidence.fileType);
@@ -879,13 +751,15 @@ export const serveIncidentEvidenceFile = async (req: AuthRequest, res: Response)
       }
     }
 
-    const resolved = resolveUploadPath(fileName);
-    if (!resolved.startsWith(path.resolve(__dirname, "../../uploads/incidents"))) {
+    const resolved = resolveUploadPath(evidence.storageKey);
+    const incidentRoot = path.resolve(__dirname, "../../uploads/incidents");
+    if (!resolved.startsWith(`${incidentRoot}${path.sep}`)) {
       return res.status(400).json({ success: false, error: "Invalid file path" });
     }
     if (!fs.existsSync(resolved)) return res.status(404).json({ success: false, error: "File not found" });
     return res.sendFile(resolved);
   } catch (error) {
+    if (error instanceof C03AccessError) return res.status(error.statusCode).json({ success: false, error: error.message });
     return res.status(500).json({ success: false, error: "Failed to read file" });
   }
 };

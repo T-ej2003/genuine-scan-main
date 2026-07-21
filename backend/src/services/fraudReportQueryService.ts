@@ -4,6 +4,7 @@ import { CanonicalDbContext, CanonicalTransactionClient } from "../lib/canonical
 import { AuthenticatedSessionClaims } from "../types";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { coerceAuditDetails, redactAuditDetails } from "./auditExportRedactionService";
+import { createAuditLogInTransaction } from "./auditService";
 
 export type FraudReportStatus = "ALL" | "OPEN" | "REVIEWED" | "RESOLVED" | "DISMISSED";
 
@@ -58,7 +59,7 @@ export const buildFraudReportBoundary = (
     manufacturerId: null,
     authAssurance: "mfa-verified",
     requestId: normalizedRequestId,
-    purpose,
+    purpose: "platform-fraud-report-read",
   };
 };
 
@@ -76,13 +77,23 @@ export const queryFraudReports = async (
     tx.auditLog.count({ where }),
     tx.auditLog.findMany({
       where,
-      select: { id: true, createdAt: true, licenseeId: true, details: true, ipAddress: true },
+      select: { id: true, createdAt: true, licenseeId: true, details: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: query.limit,
       skip: query.offset,
     }),
   ]);
   const reportIds = reportLogs.map((log) => log.id);
+  const networkDetails = reportIds.length
+    ? await tx.$queryRaw<Array<{ id: string; ipAddress: string | null }>>`
+        SELECT id, ip_address AS "ipAddress"
+          FROM app_rls.c02_fraud_report_network_details(${reportIds}::text[])
+      `
+    : [];
+  const networkByReportId = new Map(networkDetails.map((row) => [row.id, row.ipAddress]));
+  if (networkByReportId.size !== reportIds.length) {
+    throw new Error("Fraud report network projection did not match the bounded report page");
+  }
   const responseLogs = reportIds.length
     ? await tx.auditLog.findMany({
         where: {
@@ -119,7 +130,7 @@ export const queryFraudReports = async (
           observedOutcome: reportDetails.observedOutcome || null,
           pageUrl: reportDetails.pageUrl || null,
           userAgent: reportDetails.userAgent || null,
-          ipAddress: reportLog.ipAddress || null,
+          ipAddress: networkByReportId.get(reportLog.id) || null,
         },
         status,
         response: responseLog
@@ -137,25 +148,20 @@ export const queryFraudReports = async (
     })
     .filter((report) => query.status === "ALL" || report.status === query.status);
 
-  await tx.auditLog.create({
-    data: {
-      userId: context.userId,
-      orgId: context.organizationId,
-      licenseeId: context.licenseeId,
-      action: "AUDIT_FRAUD_REPORTS_READ",
-      entityType: "AuditLog",
-      entityId: context.licenseeId,
-      details: {
-        purpose: context.purpose,
-        requestId: context.requestId,
-        status: query.status,
-        limit: query.limit,
-        offset: query.offset,
-        matchingRows: total,
-        returnedRows: reports.length,
-      },
+  await createAuditLogInTransaction(tx, context, {
+    action: "AUDIT_FRAUD_REPORTS_READ",
+    entityType: "AuditLog",
+    entityId: context.licenseeId,
+    details: {
+      purpose: query.purpose,
+      purposeCode: context.purpose,
+      requestId: context.requestId,
+      status: query.status,
+      limit: query.limit,
+      offset: query.offset,
+      matchingRows: total,
+      returnedRows: reports.length,
     },
-    select: { id: true },
   });
 
   return { reports, total: reports.length, limit: query.limit, offset: query.offset };

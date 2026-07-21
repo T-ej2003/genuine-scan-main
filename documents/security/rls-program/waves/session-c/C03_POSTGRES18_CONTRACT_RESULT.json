@@ -1,0 +1,215 @@
+{
+  "database": "mscqr_rls_wave_c_admin_governance_operator",
+  "expectedMajor": 18,
+  "requiredFunctionCount": 25,
+  "status": "failed",
+  "checks": {
+    "identity": {
+      "major": 18,
+      "version": "PostgreSQL 18.4 (Debian 18.4-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+      "database": "mscqr_rls_wave_c_admin_governance_operator",
+      "user": "mscqr_rls_cert_admin"
+    },
+    "forceRls": {
+      "expectedTargets": 75,
+      "enabledAndForced": 11,
+      "missingForce": [
+        "AdminMfaCredential",
+        "AdminWebAuthnCredential",
+        "AllocationEvent",
+        "AuditLogOutbox",
+        "AuthMfaChallenge",
+        "AuthSessionRiskSignal",
+        "AuthWebAuthnChallenge",
+        "CompliancePackJob",
+        "CustomerTrustCredential",
+        "CustomerTrustIntake",
+        "CustomerVerificationSession",
+        "CustomerWebAuthnChallenge",
+        "CustomerWebAuthnCredential",
+        "DegradationEvent",
+        "EmailVerificationToken",
+        "EvidenceRetentionJob",
+        "EvidenceRetentionPolicy",
+        "ForensicEventChain",
+        "Incident",
+        "IncidentCommunication",
+        "IncidentEvent",
+        "IncidentEvidence",
+        "IncidentEvidenceFingerprint",
+        "IncidentHandoff",
+        "InventoryStatusRollup",
+        "Invite",
+        "MfaLoginChallenge",
+        "Notification",
+        "Ownership",
+        "OwnershipTransfer",
+        "PasswordReset",
+        "PolicyAlert",
+        "PolicyRule",
+        "PrintAuditEvent",
+        "PrintItem",
+        "PrintItemEvent",
+        "PrintJob",
+        "PrintJobChunk",
+        "PrintReissueRequest",
+        "PrintSession",
+        "Printer",
+        "PrinterAgentSession",
+        "PrinterAttestation",
+        "PrinterProfile",
+        "PrinterProfileSnapshot",
+        "PrinterRegistration",
+        "QrAllocationRequest",
+        "QrScanLog",
+        "ReplacementChain",
+        "RequestAccess",
+        "RouteTransitionMetric",
+        "ScanMetricsHourlyRollup",
+        "SecurityPolicy",
+        "SensitiveActionApproval",
+        "SupportIssueReport",
+        "SupportTicket",
+        "SupportTicketMessage",
+        "SystemCheckpoint",
+        "TenantFeatureFlag",
+        "TraceEvent",
+        "UserBackupCode",
+        "UserMfaFactor",
+        "VerificationDecision",
+        "VerificationEvidenceSnapshot"
+      ]
+    },
+    "functions": {
+      "present": 0,
+      "missingFunctions": [
+        {
+          "name": "c03_revalidate_actor_scope",
+          "expectedArguments": "target_licensee_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_revalidate_incident_actor_scope",
+          "expectedArguments": "incident_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_revalidate_policy_rule_actor_scope",
+          "expectedArguments": "policy_rule_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_revalidate_compliance_pack_job_actor_scope",
+          "expectedArguments": "compliance_pack_job_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_revalidate_incident_evidence_actor_scope",
+          "expectedArguments": "incident_evidence_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_revalidate_sensitive_approval_actor_scope",
+          "expectedArguments": "approval_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_create_policy_rule",
+          "expectedArguments": "input jsonb",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_update_policy_rule",
+          "expectedArguments": "policy_rule_id text, patch jsonb",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_list_ir_alerts",
+          "expectedArguments": "incident_authorization_id text, incident_id text, licensee_id text, filters jsonb, row_limit integer, row_offset integer",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_link_ir_alert_incident",
+          "expectedArguments": "incident_authorization_id text, alert_id text, incident_id text, reason text, idempotency_key text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_upsert_tenant_feature_flag",
+          "expectedArguments": "key text, enabled boolean, config jsonb",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_get_or_create_retention_policy",
+          "expectedArguments": "",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_update_retention_policy",
+          "expectedArguments": "patch jsonb",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_run_retention_lifecycle",
+          "expectedArguments": "mode text, approval_id text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_build_incident_evidence_audit_snapshot",
+          "expectedArguments": "incident_id text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_generate_compliance_report",
+          "expectedArguments": "from_at timestamp with time zone, to_at timestamp with time zone",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_start_compliance_pack_job",
+          "expectedArguments": "trigger_type text, from_at timestamp with time zone, to_at timestamp with time zone",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_complete_compliance_pack_job",
+          "expectedArguments": "job_id text, result jsonb",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_fail_compliance_pack_job",
+          "expectedArguments": "job_id text, error_code text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_get_compliance_pack_job",
+          "expectedArguments": "job_id text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_complete_compliance_pack_rebuild",
+          "expectedArguments": "job_id text, result jsonb",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_create_sensitive_action_approval",
+          "expectedArguments": "input jsonb",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_list_sensitive_action_approvals",
+          "expectedArguments": "status text, row_limit integer, row_offset integer",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_approve_sensitive_action_approval",
+          "expectedArguments": "approval_id text, review_note text",
+          "actualArguments": null
+        },
+        {
+          "name": "c03_reject_sensitive_action_approval",
+          "expectedArguments": "approval_id text, review_note text",
+          "actualArguments": null
+        }
+      ]
+    }
+  },
+  "error": "64 canonical tables are not RLS enabled and forced; 25 converted C03 function contracts are absent or drifted"
+}

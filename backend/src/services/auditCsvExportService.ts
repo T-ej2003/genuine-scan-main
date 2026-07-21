@@ -5,6 +5,7 @@ import { CanonicalDbContext, withCanonicalDbContext } from "../lib/canonicalDbCo
 import { AuthenticatedSessionClaims } from "../types";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { hiddenActionsForNonSuper, isAuditManufacturerUser, isAuditSuperUser } from "./auditExportRedactionService";
+import { createAuditLogInTransaction } from "./auditService";
 
 type AuditExportFilters = {
   entityType?: string;
@@ -29,7 +30,7 @@ const buildBoundary = (
   user: AuthenticatedSessionClaims,
   filters: AuditExportFilters,
   requestId: string
-): { context: CanonicalDbContext; licenseeId?: string; userIds?: string[]; isSuper: boolean } => {
+): { context: CanonicalDbContext; licenseeId?: string; userIds?: string[]; isSuper: boolean; requestedPurpose: string } => {
   const userId = String(user.userId || "").trim();
   const normalizedRequestId = String(requestId || "").trim();
   if (!userId || !normalizedRequestId || user.sessionStage !== "ACTIVE") {
@@ -42,10 +43,11 @@ const buildBoundary = (
   const actorLicenseeId = String(user.licenseeId || "").trim() || undefined;
   let licenseeId: string | undefined;
   let userIds: string[] | undefined;
+  let requestedPurpose = "tenant audit export";
   let purpose = "tenant-audit-csv-export";
 
   if (isSuper) {
-    purpose = String(filters.purpose || "").trim();
+    requestedPurpose = String(filters.purpose || "").trim();
     if (user.authAssurance !== "ADMIN_MFA") {
       throw new AuditCsvExportAccessError("Fresh administrator MFA is required");
     }
@@ -53,10 +55,11 @@ const buildBoundary = (
     if (!Number.isFinite(mfaVerifiedAt) || Date.now() - mfaVerifiedAt > getAdminStepUpWindowMinutes() * 60_000) {
       throw new AuditCsvExportAccessError("Fresh administrator MFA is required");
     }
-    if (!purpose) throw new AuditCsvExportAccessError("An explicit audit export purpose is required");
-    if (purpose.length > 240) throw new AuditCsvExportAccessError("Audit export purpose is too long", 400);
+    if (!requestedPurpose) throw new AuditCsvExportAccessError("An explicit audit export purpose is required");
+    if (requestedPurpose.length > 240) throw new AuditCsvExportAccessError("Audit export purpose is too long", 400);
     if (!requestedLicenseeId) throw new AuditCsvExportAccessError("A bounded licensee scope is required");
     licenseeId = requestedLicenseeId;
+    purpose = "platform-audit-csv-export";
   } else if (tenantAdminRoles.has(user.role)) {
     if (!actorLicenseeId) throw new AuditCsvExportAccessError("A tenant scope is required");
     if (requestedLicenseeId && requestedLicenseeId !== actorLicenseeId) {
@@ -70,6 +73,7 @@ const buildBoundary = (
     }
     licenseeId = requestedLicenseeId || actorLicenseeId;
     userIds = [userId];
+    purpose = "manufacturer-audit-csv-export";
   } else {
     throw new AuditCsvExportAccessError("Insufficient permissions");
   }
@@ -88,6 +92,7 @@ const buildBoundary = (
     licenseeId: isManufacturer ? undefined : licenseeId,
     userIds,
     isSuper,
+    requestedPurpose,
   };
 };
 
@@ -163,26 +168,21 @@ export const readAuditCsvExport = async (
           select: { id: true, name: true },
         })
       : [];
-    await tx.auditLog.create({
-      data: {
-        userId: boundary.context.userId,
-        orgId: boundary.context.organizationId,
-        licenseeId: boundary.context.licenseeId,
-        action: "AUDIT_CSV_EXPORT",
-        entityType: "AuditLog",
-        entityId: boundary.context.licenseeId,
-        details: {
-          purpose: boundary.context.purpose,
-          requestId: boundary.context.requestId,
-          rowCount: logs.length,
-          filters: {
-            entityType: input.filters.entityType || null,
-            entityId: input.filters.entityId || null,
-            action: input.filters.action || null,
-          },
+    await createAuditLogInTransaction(tx, boundary.context, {
+      action: "AUDIT_CSV_EXPORT",
+      entityType: "AuditLog",
+      entityId: boundary.context.licenseeId || undefined,
+      details: {
+        purpose: boundary.requestedPurpose,
+        purposeCode: boundary.context.purpose,
+        requestId: boundary.context.requestId,
+        rowCount: logs.length,
+        filters: {
+          entityType: input.filters.entityType || null,
+          entityId: input.filters.entityId || null,
+          action: input.filters.action || null,
         },
       },
-      select: { id: true },
     });
     return {
       logs,

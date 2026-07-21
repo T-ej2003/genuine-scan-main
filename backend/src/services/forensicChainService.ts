@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { ForensicEventType } from "@prisma/client";
+import { ForensicEventType, Prisma } from "@prisma/client";
 
 import prisma from "../config/database";
 
@@ -53,7 +53,7 @@ const chainScopeFor = (licenseeId?: string | null) => {
   return normalized ? `LICENSEE:${normalized}` : "GLOBAL";
 };
 
-export const appendForensicChainFromAuditLog = async (auditLog: {
+export type ForensicAuditLogInput = {
   id: string;
   action: string;
   entityType: string;
@@ -63,7 +63,11 @@ export const appendForensicChainFromAuditLog = async (auditLog: {
   licenseeId?: string | null;
   details?: any;
   createdAt: Date;
-}) => {
+};
+
+type ForensicChainDb = Pick<Prisma.TransactionClient, "$executeRaw" | "forensicEventChain">;
+
+const appendInTransaction = async (auditLog: ForensicAuditLogInput, db: ForensicChainDb) => {
   const eventType = mapAuditToForensicType({
     action: auditLog.action,
     entityType: auditLog.entityType,
@@ -87,16 +91,9 @@ export const appendForensicChainFromAuditLog = async (auditLog: {
 
   const payloadHash = sha256Hex(stableStringify(payload));
 
-  const previous = await prisma.forensicEventChain.findFirst({
-    where: { chainScope },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { eventHash: true },
-  });
+  await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${chainScope}, 0))`;
 
-  const previousHash = previous?.eventHash || sha256Hex(`GENESIS:${chainScope}`);
-  const eventHash = sha256Hex(`${previousHash}|${eventType}|${payloadHash}`);
-
-  const existing = await prisma.forensicEventChain.findFirst({
+  const existing = await db.forensicEventChain.findFirst({
     where: {
       auditLogId: auditLog.id,
       eventType,
@@ -106,7 +103,16 @@ export const appendForensicChainFromAuditLog = async (auditLog: {
   });
   if (existing) return null;
 
-  return prisma.forensicEventChain.create({
+  const previous = await db.forensicEventChain.findFirst({
+    where: { chainScope },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { eventHash: true },
+  });
+
+  const previousHash = previous?.eventHash || sha256Hex(`GENESIS:${chainScope}`);
+  const eventHash = sha256Hex(`${previousHash}|${eventType}|${payloadHash}`);
+
+  return db.forensicEventChain.create({
     data: {
       eventType,
       chainScope,
@@ -118,5 +124,15 @@ export const appendForensicChainFromAuditLog = async (auditLog: {
       licenseeId: auditLog.licenseeId || null,
       createdAt: auditLog.createdAt,
     },
+  });
+};
+
+export const appendForensicChainFromAuditLog = async (
+  auditLog: ForensicAuditLogInput,
+  db?: ForensicChainDb
+) => {
+  if (db) return appendInTransaction(auditLog, db);
+  return prisma.$transaction((tx) => appendInTransaction(auditLog, tx), {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });
 };

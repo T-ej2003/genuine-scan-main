@@ -1,5 +1,6 @@
 import prisma from "../config/database";
 import { Prisma } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { createTraceEventFromAuditLog } from "./traceEventService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import { queueSecurityEvent } from "./siemOutboxService";
@@ -8,6 +9,7 @@ import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redi
 import { bumpCacheNamespaceVersion } from "./versionedCacheService";
 import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
 import { queueAuditLogOutbox } from "./auditLogOutboxService";
+import { CanonicalDbContext, validateCanonicalDbContext } from "../lib/canonicalDbContext";
 
 export interface AuditLogInput {
   userId?: string;
@@ -21,6 +23,10 @@ export interface AuditLogInput {
   ipHash?: string;
   userAgent?: string;
 }
+
+export type TransactionalAuditLogInput = Omit<AuditLogInput, "userId" | "orgId" | "licenseeId">;
+
+type TransactionalAuditDb = Pick<Prisma.TransactionClient, "$executeRaw" | "$queryRaw" | "forensicEventChain">;
 
 type Listener = (log: any) => void;
 
@@ -72,6 +78,63 @@ const resolveAuditPayload = async (data: AuditLogInput) => {
     userAgent: resolvedUserAgent || undefined,
     ipAddress: storeRawIp ? data.ipAddress : undefined,
   } as any;
+};
+
+export const createAuditLogInTransaction = async (
+  tx: TransactionalAuditDb,
+  inputContext: CanonicalDbContext,
+  data: TransactionalAuditLogInput
+) => {
+  const context = validateCanonicalDbContext(inputContext);
+  const action = String(data.action || "").trim();
+  const entityType = String(data.entityType || "").trim();
+  if (!action || !entityType) throw new Error("Transactional audit log requires action and entityType");
+
+  const storeRawIp = ["1", "true", "yes", "on"].includes(
+    String(process.env.AUDIT_LOG_STORE_RAW_IP || "").trim().toLowerCase()
+  );
+  const id = randomUUID();
+  const [{ createdAt }] = await tx.$queryRaw<Array<{ createdAt: Date }>>`
+    SELECT transaction_timestamp() AS "createdAt"
+  `;
+  const log = {
+    id,
+    userId: context.userId,
+    orgId: context.organizationId || null,
+    licenseeId: context.licenseeId || null,
+    action,
+    entityType,
+    entityId: data.entityId || null,
+    details: data.details ?? null,
+    ipAddress: storeRawIp ? data.ipAddress || null : null,
+    ipHash: (data.ipHash ?? hashIp(data.ipAddress)) || null,
+    userAgent: normalizeUserAgent(data.userAgent) || null,
+    createdAt,
+  };
+  await tx.$executeRaw`
+    INSERT INTO public."AuditLog"
+      ("id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details", "ipAddress", "ipHash", "userAgent")
+    VALUES
+      (${log.id}, ${log.userId}, ${log.orgId}, ${log.licenseeId}, ${log.action}, ${log.entityType},
+       ${log.entityId}, ${JSON.stringify(log.details)}::jsonb, ${log.ipAddress}, ${log.ipHash}, ${log.userAgent})
+  `;
+  await appendForensicChainFromAuditLog(log, tx);
+  await tx.$executeRaw`
+    INSERT INTO public."SecurityEventOutbox" ("id", "eventType", "payload", "updatedAt")
+    VALUES (${randomUUID()}, 'AUDIT_LOG', ${JSON.stringify({
+      id: log.id,
+      action: log.action,
+      entityType: log.entityType,
+      entityId: log.entityId,
+      userId: log.userId,
+      orgId: log.orgId,
+      licenseeId: log.licenseeId,
+      details: log.details,
+      createdAt: log.createdAt.toISOString(),
+    })}::jsonb, transaction_timestamp())
+  `;
+
+  return log;
 };
 
 export const createAuditLog = async (data: AuditLogInput) => {

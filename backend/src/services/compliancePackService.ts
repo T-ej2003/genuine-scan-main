@@ -6,11 +6,23 @@ import JSZip from "jszip";
 import { UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
-import { createAuditLog } from "./auditService";
-import { generateComplianceReport } from "./governanceService";
 import { logger } from "../utils/logger";
 import { getQrSigningHmacSecret } from "../utils/secretConfig";
 import { downloadObjectBuffer, isObjectStorageConfigured, uploadObjectBuffer } from "./objectStorageService";
+import { AuthenticatedSessionClaims } from "../types";
+import {
+  C03AccessError,
+  withC03ActorTransaction,
+  withC03ResourceTransaction,
+} from "../rls-waves/session-c/c03/c03ActorBoundary";
+import {
+  completeCompliancePackJobInTransaction,
+  completeCompliancePackRebuildInTransaction,
+  failCompliancePackJobInTransaction,
+  listCompliancePackJobsInTransaction,
+  loadCompliancePackJobInTransaction,
+  startCompliancePackJobInTransaction,
+} from "../rls-waves/session-c/c03/c03CompliancePackRepository";
 
 const ensureDir = (dir: string) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -45,6 +57,44 @@ const parseBool = (value: unknown, fallback = false) => {
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
   if (["0", "false", "no", "off"].includes(normalized)) return false;
   return fallback;
+};
+
+type ComplianceSecurityContext = {
+  user: AuthenticatedSessionClaims;
+  requestId: string;
+};
+
+const complianceRoles = Object.values(UserRole);
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const requireComplianceActorSecurity = (
+  actor: { userId: string; role: UserRole; licenseeId?: string | null },
+  security?: ComplianceSecurityContext
+) => {
+  if (!security?.user || !String(security.requestId || "").trim()) {
+    throw new C03AccessError("Canonical compliance actor context is required", 401);
+  }
+  if (
+    security.user.userId !== actor.userId ||
+    security.user.role !== actor.role ||
+    String(security.user.licenseeId || "") !== String(actor.licenseeId || "")
+  ) {
+    throw new C03AccessError("Compliance actor context is inconsistent");
+  }
+  return security;
+};
+
+const requireComplianceSecurity = (
+  actor: { userId: string; role: UserRole; licenseeId?: string | null },
+  licenseeId: string | null | undefined,
+  security?: ComplianceSecurityContext
+) => {
+  const verified = requireComplianceActorSecurity(actor, security);
+  const boundedLicenseeId = String(licenseeId || actor.licenseeId || "").trim();
+  if (!uuidPattern.test(boundedLicenseeId)) {
+    throw new C03AccessError("A bounded compliance licensee scope is required", 400);
+  }
+  return { ...verified, licenseeId: boundedLicenseeId };
 };
 
 const signPayload = (payload: string) => {
@@ -87,8 +137,10 @@ export const buildSignedComplianceEvidencePack = async (params: {
   licenseeId?: string | null;
   from?: Date | null;
   to?: Date | null;
+  report?: Record<string, any>;
 }) => {
-  const report = await generateComplianceReport(params);
+  if (!params.report) throw new C03AccessError("Canonical compliance report snapshot is required", 500);
+  const report = params.report;
   const generatedAt = new Date().toISOString();
 
   const controls = Array.isArray((report as any)?.controls) ? (report as any).controls : [];
@@ -173,74 +225,78 @@ export const runCompliancePackJob = async (params: {
   licenseeId?: string | null;
   from?: Date | null;
   to?: Date | null;
+  securityContext?: ComplianceSecurityContext;
 }) => {
-  const job = await prisma.compliancePackJob.create({
-    data: {
-      triggerType: params.triggerType,
-      status: "RUNNING",
-      licenseeId: params.licenseeId || null,
-      periodFrom: params.from || null,
-      periodTo: params.to || null,
-      startedByUserId: params.actor.userId,
-      startedAt: new Date(),
+  if (params.triggerType === "SCHEDULED") {
+    throw new C03AccessError("Restricted scheduled compliance worker boundary is required");
+  }
+  const security = requireComplianceSecurity(params.actor, params.licenseeId, params.securityContext);
+  const started = await withC03ActorTransaction(
+    {
+      user: security.user,
+      requestId: security.requestId,
+      purpose: "compliance-pack-start",
+      licenseeId: security.licenseeId,
+      allowedRoles: complianceRoles,
+      requiredAssurance: "mfa-verified",
     },
-  });
+    (tx) => startCompliancePackJobInTransaction(tx, {
+      triggerType: params.triggerType,
+      from: params.from,
+      to: params.to,
+    })
+  );
 
   try {
     const pack = await buildSignedComplianceEvidencePack({
       actor: params.actor,
-      licenseeId: params.licenseeId,
+      licenseeId: security.licenseeId,
       from: params.from,
       to: params.to,
+      report: started.report,
     });
 
-    const storageKey = `${job.id}-${pack.fileName}`;
+    const storageKey = `${started.job.id}-${pack.fileName}`;
     const persisted = await persistCompliancePackBuffer(storageKey, pack.buffer);
-
-    const updated = await prisma.compliancePackJob.update({
-      where: { id: job.id },
-      data: {
-        status: "COMPLETED",
+    const updated = await withC03ResourceTransaction(
+      {
+        user: security.user,
+        requestId: security.requestId,
+        purpose: "compliance-pack-complete",
+        resourceId: started.job.id,
+        resourceType: "compliancePackJob",
+        allowedRoles: complianceRoles,
+        requiredAssurance: "mfa-verified",
+      },
+      (tx) => completeCompliancePackJobInTransaction<any>(tx, started.job.id, {
         fileName: pack.fileName,
         storageKey: persisted.storageKey,
         integrityHash: pack.metadata.integrityHash,
         signatureAlgorithm: pack.metadata.signatureAlgorithm,
-        summary: {
-          controls: pack.metadata.controls,
-          generatedAt: pack.metadata.generatedAt,
-          storageMode: persisted.storageMode,
-        },
-        finishedAt: new Date(),
-      },
-    });
-
-    await createAuditLog({
-      userId: params.actor.userId,
-      licenseeId: params.licenseeId || undefined,
-      action: "COMPLIANCE_PACK_GENERATED",
-      entityType: "CompliancePackJob",
-      entityId: updated.id,
-      details: {
-        triggerType: params.triggerType,
-        fileName: updated.fileName,
-        integrityHash: updated.integrityHash,
-      },
-    });
+        controls: pack.metadata.controls,
+        generatedAt: pack.metadata.generatedAt,
+        storageMode: persisted.storageMode,
+      })
+    );
 
     return {
       job: updated,
       filePath: persisted.filePath,
     };
   } catch (error) {
-    const updated = await prisma.compliancePackJob.update({
-      where: { id: job.id },
-      data: {
-        status: "FAILED",
-        errorMessage: error instanceof Error ? error.message : String(error),
-        finishedAt: new Date(),
+    await withC03ResourceTransaction(
+      {
+        user: security.user,
+        requestId: security.requestId,
+        purpose: "compliance-pack-fail",
+        resourceId: started.job.id,
+        resourceType: "compliancePackJob",
+        allowedRoles: complianceRoles,
+        requiredAssurance: "mfa-verified",
       },
-    });
-    throw new Error(updated.errorMessage || "Compliance pack generation failed");
+      (tx) => failCompliancePackJobInTransaction(tx, started.job.id, "COMPLIANCE_PACK_BUILD_FAILED")
+    ).catch(() => undefined);
+    throw error;
   }
 };
 
@@ -248,21 +304,26 @@ export const listCompliancePackJobs = async (params: {
   licenseeId?: string | null;
   limit: number;
   offset: number;
+  actor?: { userId: string; role: UserRole; licenseeId?: string | null };
+  securityContext?: ComplianceSecurityContext;
 }) => {
-  const where: any = {};
-  if (params.licenseeId) where.licenseeId = params.licenseeId;
-
-  const [jobs, total] = await Promise.all([
-    prisma.compliancePackJob.findMany({
-      where,
-      orderBy: { startedAt: "desc" },
-      take: params.limit,
-      skip: params.offset,
-    }),
-    prisma.compliancePackJob.count({ where }),
-  ]);
-
-  return { jobs, total };
+  if (!params.actor) throw new C03AccessError("Canonical compliance actor context is required", 401);
+  const security = requireComplianceSecurity(params.actor, params.licenseeId, params.securityContext);
+  return withC03ActorTransaction(
+    {
+      user: security.user,
+      requestId: security.requestId,
+      purpose: "compliance-pack-list",
+      licenseeId: security.licenseeId,
+      allowedRoles: complianceRoles,
+      requiredAssurance: "mfa-verified",
+    },
+    (tx) => listCompliancePackJobsInTransaction(tx, {
+      licenseeId: security.licenseeId,
+      limit: params.limit,
+      offset: params.offset,
+    })
+  );
 };
 
 export const loadCompliancePackJobBuffer = async (storageKey: string) => {
@@ -277,60 +338,54 @@ export const loadCompliancePackJobBuffer = async (storageKey: string) => {
 export const rebuildCompliancePackArtifactForJob = async (params: {
   jobId: string;
   actor: { userId: string; role: UserRole; licenseeId?: string | null };
+  securityContext?: ComplianceSecurityContext;
 }) => {
-  const job = await prisma.compliancePackJob.findUnique({
-    where: { id: params.jobId },
-    select: {
-      id: true,
-      licenseeId: true,
-      periodFrom: true,
-      periodTo: true,
+  const security = requireComplianceActorSecurity(params.actor, params.securityContext);
+  const snapshot = await withC03ResourceTransaction(
+    {
+      user: security.user,
+      requestId: security.requestId,
+      purpose: "compliance-pack-rebuild-read",
+      resourceId: params.jobId,
+      resourceType: "compliancePackJob",
+      allowedRoles: complianceRoles,
+      requiredAssurance: "mfa-verified",
     },
-  });
-  if (!job) {
-    throw new Error("COMPLIANCE_PACK_JOB_NOT_FOUND");
-  }
+    (tx) => loadCompliancePackJobInTransaction<any>(tx, params.jobId)
+  );
+  const job = snapshot.job;
 
   const pack = await buildSignedComplianceEvidencePack({
     actor: params.actor,
     licenseeId: job.licenseeId || null,
-    from: job.periodFrom || null,
-    to: job.periodTo || null,
+    from: job.periodFrom ? new Date(job.periodFrom) : null,
+    to: job.periodTo ? new Date(job.periodTo) : null,
+    report: snapshot.report,
   });
 
   const storageKey = `${job.id}-rebuild-${Date.now()}-${pack.fileName}`;
   const persisted = await persistCompliancePackBuffer(storageKey, pack.buffer);
 
-  const updated = await prisma.compliancePackJob.update({
-    where: { id: job.id },
-    data: {
-      status: "COMPLETED",
+  const updated = await withC03ResourceTransaction(
+    {
+      user: security.user,
+      requestId: security.requestId,
+      purpose: "compliance-pack-rebuild-complete",
+      resourceId: job.id,
+      resourceType: "compliancePackJob",
+      allowedRoles: complianceRoles,
+      requiredAssurance: "mfa-verified",
+    },
+    (tx) => completeCompliancePackRebuildInTransaction<any>(tx, job.id, {
       fileName: pack.fileName,
       storageKey: persisted.storageKey,
       integrityHash: pack.metadata.integrityHash,
       signatureAlgorithm: pack.metadata.signatureAlgorithm,
-      summary: {
-        controls: pack.metadata.controls,
-        generatedAt: pack.metadata.generatedAt,
-        rebuiltFromMissingArtifact: true,
-        storageMode: persisted.storageMode,
-      },
-      errorMessage: null,
-      finishedAt: new Date(),
-    },
-  });
-
-  await createAuditLog({
-    userId: params.actor.userId,
-    licenseeId: job.licenseeId || undefined,
-    action: "COMPLIANCE_PACK_ARTIFACT_REBUILT",
-    entityType: "CompliancePackJob",
-    entityId: updated.id,
-    details: {
-      fileName: updated.fileName,
-      integrityHash: updated.integrityHash,
-    },
-  });
+      controls: pack.metadata.controls,
+      generatedAt: pack.metadata.generatedAt,
+      storageMode: persisted.storageMode,
+    })
+  );
 
   return {
     job: updated,

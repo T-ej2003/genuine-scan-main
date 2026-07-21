@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLog, onAuditLog } from "../services/auditService";
+import { onAuditLog } from "../services/auditService";
 import prisma from "../config/database";
 import { Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
@@ -26,6 +26,11 @@ import {
   buildAuditLogBoundary,
   queryAuditLogs,
 } from "../services/auditLogQueryService";
+import {
+  AuditTraceAccessError,
+  buildFraudResponseBoundary,
+  respondToFraudReportInTransaction,
+} from "../rls-waves/session-c/c02/auditTraceRepository";
 
 const fraudResponseSchema = z.object({
   status: z.enum(["REVIEWED", "RESOLVED", "DISMISSED"]).default("REVIEWED"),
@@ -69,16 +74,6 @@ const fraudReportQuerySchema = z.object({
   purpose: z.string().trim().min(1).max(240),
   status: z.string().trim().max(32).optional(),
 }).strict();
-
-const defaultFraudReply = (status: "REVIEWED" | "RESOLVED" | "DISMISSED", code: string) => {
-  if (status === "RESOLVED") {
-    return `Thanks for reporting code ${code}. Our security team reviewed it and completed corrective action.`;
-  }
-  if (status === "DISMISSED") {
-    return `Thanks for reporting code ${code}. We reviewed the case and found no actionable fraud signal from current evidence.`;
-  }
-  return `Thanks for reporting code ${code}. Our security team has started investigating your report.`;
-};
 
 export const getLogs = async (req: AuthRequest, res: Response) => {
   try {
@@ -272,69 +267,32 @@ export const respondToFraudReport = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const reportLog = await prisma.auditLog.findFirst({
-      where: { id: reportId, action: "CUSTOMER_FRAUD_REPORT" },
-    });
-    if (!reportLog) {
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+    const context = buildFraudResponseBoundary(req.user, requestId);
+    const result = await withCanonicalDbContext(
+      prisma,
+      context,
+      (tx) => respondToFraudReportInTransaction(tx, {
+        reportId,
+        status: parsed.data.status,
+        message: parsed.data.message?.trim() || null,
+        notifyCustomer: parsed.data.notifyCustomer !== false,
+      }),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
+
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    if (err instanceof AuditTraceAccessError) {
+      return res.status(err.statusCode).json({ success: false, error: err.message });
+    }
+    const databaseMessage = String((err as any)?.meta?.message || (err as any)?.message || "");
+    if (/SESSION_C_FRAUD_REPORT_NOT_FOUND/.test(databaseMessage)) {
       return res.status(404).json({ success: false, error: "Fraud report not found" });
     }
-
-    const reportDetails = coerceAuditDetails(reportLog.details);
-    const normalizedCode = String(reportDetails.code || reportLog.entityId || "UNKNOWN");
-    const recipientEmail =
-      reportDetails.contactEmail && typeof reportDetails.contactEmail === "string"
-        ? String(reportDetails.contactEmail).trim()
-        : "";
-
-    const status = parsed.data.status;
-    const message = parsed.data.message?.trim() || defaultFraudReply(status, normalizedCode);
-    const notifyCustomer = parsed.data.notifyCustomer !== false;
-
-    // Automated reply dispatch is simulated by default for local/dev.
-    // This keeps the workflow operational even without SMTP credentials.
-    const delivery = {
-      attempted: notifyCustomer,
-      delivered: notifyCustomer && Boolean(recipientEmail),
-      transport: notifyCustomer ? "simulated" : "none",
-      recipientEmail: notifyCustomer ? recipientEmail || null : null,
-      reason:
-        notifyCustomer && !recipientEmail
-          ? "Customer did not provide a contact email in the report."
-          : null,
-      deliveredAt: notifyCustomer && recipientEmail ? new Date().toISOString() : null,
-    };
-
-    const responseLog = await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: reportLog.licenseeId || undefined,
-      action: "CUSTOMER_FRAUD_REPORT_RESPONSE",
-      entityType: "FraudReport",
-      entityId: reportLog.id,
-      ipAddress: req.ip,
-      details: {
-        reportId: reportLog.id,
-        status,
-        message,
-        notifyCustomer,
-        recipientEmail: recipientEmail || null,
-        delivery,
-        sourceCode: normalizedCode,
-        respondedAt: new Date().toISOString(),
-      },
-    });
-
-    return res.json({
-      success: true,
-      data: {
-        responseId: responseLog.id,
-        reportId: reportLog.id,
-        status,
-        message,
-        notifyCustomer,
-        delivery,
-      },
-    });
-  } catch (err) {
+    if (/SESSION_C_(DISABLED_OR_STALE_ACTOR|INVALID_CONTEXT|WRONG_ROLE)/.test(databaseMessage)) {
+      return res.status(403).json({ success: false, error: "Fraud-response authority is stale or invalid" });
+    }
     console.error("respondToFraudReport error:", err);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }

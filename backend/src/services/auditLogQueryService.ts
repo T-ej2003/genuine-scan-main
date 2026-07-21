@@ -5,6 +5,7 @@ import { AuthenticatedSessionClaims } from "../types";
 import { decodeDateCursor, encodeDateCursor } from "../utils/cursorPagination";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { hiddenActionsForNonSuper, isAuditManufacturerUser, isAuditSuperUser, redactAuditDetails } from "./auditExportRedactionService";
+import { createAuditLogInTransaction } from "./auditService";
 
 export type AuditLogQueryFilters = {
   limit: number;
@@ -189,29 +190,23 @@ export const queryAuditLogs = async (
         : log.userId ? userMap.get(log.userId) || null : null,
     };
   });
-  await tx.auditLog.create({
-    data: {
-      userId: context.userId,
-      orgId: context.organizationId,
-      licenseeId: context.licenseeId,
-      action: "AUDIT_LOGS_READ",
-      entityType: "AuditLog",
-      entityId: context.licenseeId,
-      details: {
-        purpose: boundary.requestedPurpose,
-        requestId: context.requestId,
-        returnedRows: responseLogs.length,
-        filters: {
-          action: filters.action || null,
-          entityType: filters.entityType || null,
-          entityId: filters.entityId || null,
-          userId: filters.userId || null,
-          from: filters.from || null,
-          to: filters.to || null,
-        },
+  await createAuditLogInTransaction(tx, context, {
+    action: "AUDIT_LOGS_READ",
+    entityType: "AuditLog",
+    entityId: context.licenseeId,
+    details: {
+      purpose: boundary.requestedPurpose,
+      requestId: context.requestId,
+      returnedRows: responseLogs.length,
+      filters: {
+        action: filters.action || null,
+        entityType: filters.entityType || null,
+        entityId: filters.entityId || null,
+        userId: filters.userId || null,
+        from: filters.from || null,
+        to: filters.to || null,
       },
     },
-    select: { id: true },
   });
   return {
     logs: responseLogs,
