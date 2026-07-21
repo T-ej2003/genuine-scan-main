@@ -1,10 +1,20 @@
 import { Response } from "express";
 import { z } from "zod";
-import { AlertSeverity, PolicyRuleType } from "@prisma/client";
+import { AlertSeverity, PolicyRuleType, Prisma, UserRole } from "@prisma/client";
 
-import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { createAuditLog } from "../services/auditService";
+import { createAuditLogInTransaction } from "../services/auditService";
+import {
+  C03AccessError,
+  c03RequestId,
+  withC03ActorTransaction,
+  withC03ResourceTransaction,
+} from "../rls-waves/session-c/c03/c03ActorBoundary";
+import {
+  createPolicyRuleInTransaction,
+  listPolicyRulesInTransaction,
+  updatePolicyRuleInTransaction,
+} from "../rls-waves/session-c/c03/c03PolicyRepository";
 
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).catch(50),
@@ -23,11 +33,11 @@ const createPolicyRuleSchema = z.object({
   incidentSeverity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
   incidentPriority: z.enum(["P1", "P2", "P3", "P4"]).optional(),
   licenseeId: z.string().uuid().optional(),
-  manufacturerId: z.string().uuid().optional(),
   actionConfig: z.unknown().optional(),
 }).strict();
 
 const updatePolicyRuleSchema = createPolicyRuleSchema
+  .omit({ licenseeId: true })
   .partial()
   .extend({
     name: z.string().trim().min(3).max(120).optional(),
@@ -48,33 +58,45 @@ export const listIrPolicies = async (req: AuthRequest, res: Response) => {
     const paged = paginationSchema.safeParse(req.query || {});
     if (!paged.success) return res.status(400).json({ success: false, error: "Invalid pagination" });
 
-    const licenseeId = String(req.query.licenseeId || "").trim() || undefined;
+    const licenseeId = String(req.query.licenseeId || "").trim();
+    if (!z.string().uuid().safeParse(licenseeId).success) {
+      return res.status(400).json({ success: false, error: "A valid licenseeId is required" });
+    }
     const ruleTypeRaw = String(req.query.ruleType || "").trim().toUpperCase();
     const isActiveRaw = String(req.query.isActive || "").trim().toLowerCase();
 
-    const where: any = {};
-    if (licenseeId) where.licenseeId = licenseeId;
-    if (ruleTypeRaw && (ruleTypeRaw in PolicyRuleType)) where.ruleType = ruleTypeRaw as PolicyRuleType;
-    if (isActiveRaw === "true" || isActiveRaw === "false") where.isActive = isActiveRaw === "true";
+    const result = await withC03ActorTransaction(
+      {
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-response-policy-list",
+        licenseeId,
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN],
+        requiredAssurance: "mfa-verified",
+      },
+      async (tx, context) => {
+        const data = await listPolicyRulesInTransaction<{ rules: any[]; total: number }>(tx, {
+          ruleType: ruleTypeRaw && ruleTypeRaw in PolicyRuleType ? (ruleTypeRaw as PolicyRuleType) : undefined,
+          isActive: isActiveRaw === "true" || isActiveRaw === "false" ? isActiveRaw === "true" : undefined,
+          limit: paged.data.limit,
+          offset: paged.data.offset,
+        });
+        await createAuditLogInTransaction(tx, context, {
+          action: "IR_POLICY_RULES_LISTED",
+          entityType: "PolicyRule",
+          entityId: licenseeId,
+          details: { ruleType: ruleTypeRaw || null, isActive: isActiveRaw || null, count: data.rules.length },
+          ipAddress: req.ip,
+        });
+        return data;
+      },
+      Prisma.TransactionIsolationLevel.ReadCommitted
+    );
 
-    const [rules, total] = await Promise.all([
-      prisma.policyRule.findMany({
-        where,
-        orderBy: [{ updatedAt: "desc" }],
-        take: paged.data.limit,
-        skip: paged.data.offset,
-        include: {
-          organization: { select: { id: true, name: true } },
-          licensee: { select: { id: true, name: true, prefix: true } },
-          createdByUser: { select: { id: true, email: true, name: true } },
-        },
-      }),
-      prisma.policyRule.count({ where }),
-    ]);
-
-    return res.json({ success: true, data: { rules, total, limit: paged.data.limit, offset: paged.data.offset } });
+    return res.json({ success: true, data: { ...result, limit: paged.data.limit, offset: paged.data.offset } });
   } catch (e) {
     console.error("listIrPolicies error:", e);
+    if (e instanceof C03AccessError) return res.status(e.statusCode).json({ success: false, error: e.message });
     return res.status(500).json({ success: false, error: "Failed to list policies" });
   }
 };
@@ -88,55 +110,50 @@ export const createIrPolicy = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
     }
 
-    let orgId: string | null = null;
-    const licenseeId = parsed.data.licenseeId || null;
-    if (licenseeId) {
-      const licensee = await prisma.licensee.findUnique({ where: { id: licenseeId }, select: { orgId: true } });
-      if (!licensee) return res.status(404).json({ success: false, error: "Licensee not found" });
-      orgId = licensee.orgId || null;
-    }
-
-    const created = await prisma.policyRule.create({
-      data: {
-        name: parsed.data.name,
-        description: parsed.data.description || null,
-        ruleType: parsed.data.ruleType,
-        isActive: parsed.data.isActive ?? true,
-        threshold: parsed.data.threshold,
-        windowMinutes: parsed.data.windowMinutes,
-        severity: parsed.data.severity || AlertSeverity.MEDIUM,
-        autoCreateIncident: parsed.data.autoCreateIncident ?? false,
-        incidentSeverity: parsed.data.incidentSeverity || null,
-        incidentPriority: parsed.data.incidentPriority || null,
+    const licenseeId = parsed.data.licenseeId || "";
+    if (!licenseeId) return res.status(400).json({ success: false, error: "licenseeId is required" });
+    const created = await withC03ActorTransaction(
+      {
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-response-policy-create",
         licenseeId,
-        orgId,
-        manufacturerId: parsed.data.manufacturerId || null,
-        createdByUserId: req.user.userId,
-        actionConfig: parsed.data.actionConfig ?? null,
-      } as any,
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: licenseeId || undefined,
-      action: "POLICY_RULE_CREATED",
-      entityType: "PolicyRule",
-      entityId: created.id,
-      details: {
-        name: created.name,
-        ruleType: created.ruleType,
-        threshold: created.threshold,
-        windowMinutes: created.windowMinutes,
-        severity: created.severity,
-        autoCreateIncident: created.autoCreateIncident,
-        manufacturerId: created.manufacturerId,
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN],
+        requiredAssurance: "mfa-verified",
       },
-      ipAddress: req.ip,
-    });
+      async (tx, context) => {
+        const raw = await createPolicyRuleInTransaction<any>(tx, {
+          name: parsed.data.name,
+          description: parsed.data.description || null,
+          ruleType: parsed.data.ruleType,
+          isActive: parsed.data.isActive ?? true,
+          threshold: parsed.data.threshold,
+          windowMinutes: parsed.data.windowMinutes,
+          severity: parsed.data.severity || AlertSeverity.MEDIUM,
+          autoCreateIncident: parsed.data.autoCreateIncident ?? false,
+          incidentSeverity: parsed.data.incidentSeverity || null,
+          incidentPriority: parsed.data.incidentPriority || null,
+          actionConfig: parsed.data.actionConfig ?? null,
+        });
+        const { __c03Replay, ...result } = raw;
+        if (!__c03Replay) {
+          await createAuditLogInTransaction(tx, context, {
+            action: "POLICY_RULE_CREATED",
+            entityType: "PolicyRule",
+            entityId: result.id,
+            details: { name: result.name, ruleType: result.ruleType },
+            ipAddress: req.ip,
+          });
+        }
+        return result;
+      },
+      Prisma.TransactionIsolationLevel.ReadCommitted
+    );
 
     return res.status(201).json({ success: true, data: created });
   } catch (e: any) {
     console.error("createIrPolicy error:", e);
+    if (e instanceof C03AccessError) return res.status(e.statusCode).json({ success: false, error: e.message });
     return res.status(500).json({ success: false, error: "Failed to create policy" });
   }
 };
@@ -155,33 +172,37 @@ export const patchIrPolicy = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
     }
 
-    const existing = await prisma.policyRule.findUnique({ where: { id }, select: { id: true, licenseeId: true } });
-    if (!existing) return res.status(404).json({ success: false, error: "Policy not found" });
-
-    const updated = await prisma.policyRule.update({
-      where: { id },
-      data: {
-        ...parsed.data,
-        description: parsed.data.description === undefined ? undefined : parsed.data.description || null,
-        actionConfig: parsed.data.actionConfig === undefined ? undefined : parsed.data.actionConfig ?? null,
-        manufacturerId: parsed.data.manufacturerId === undefined ? undefined : parsed.data.manufacturerId || null,
-        licenseeId: parsed.data.licenseeId === undefined ? undefined : parsed.data.licenseeId || null,
-      } as any,
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: updated.licenseeId || existing.licenseeId || undefined,
-      action: "POLICY_RULE_UPDATED",
-      entityType: "PolicyRule",
-      entityId: updated.id,
-      details: { changedFields: Object.keys(parsed.data) },
-      ipAddress: req.ip,
-    });
+    const updated = await withC03ResourceTransaction(
+      {
+        user: req.user,
+        requestId: c03RequestId(req),
+        purpose: "incident-response-policy-update",
+        resourceId: id,
+        resourceType: "policyRule",
+        allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN],
+        requiredAssurance: "mfa-verified",
+      },
+      async (tx, context) => {
+        const raw = await updatePolicyRuleInTransaction<any>(tx, id, parsed.data);
+        const { __c03Replay, ...result } = raw;
+        if (!__c03Replay) {
+          await createAuditLogInTransaction(tx, context, {
+            action: "POLICY_RULE_UPDATED",
+            entityType: "PolicyRule",
+            entityId: id,
+            details: { changedFields: Object.keys(parsed.data) },
+            ipAddress: req.ip,
+          });
+        }
+        return result;
+      },
+      Prisma.TransactionIsolationLevel.ReadCommitted
+    );
 
     return res.json({ success: true, data: updated });
   } catch (e) {
     console.error("patchIrPolicy error:", e);
+    if (e instanceof C03AccessError) return res.status(e.statusCode).json({ success: false, error: e.message });
     return res.status(500).json({ success: false, error: "Failed to update policy" });
   }
 };
