@@ -1,6 +1,19 @@
 import { AuditLogOutboxStatus, Prisma } from "@prisma/client";
+import { createHash, randomUUID } from "crypto";
 
 import prisma from "../config/database";
+import {
+  B03AuditEnqueueInput,
+  b03PayloadDigest,
+  claimAuditLogOutboxSlice,
+  consumeAuditLogOutbox,
+  enqueueAuditLogOutbox,
+  failAuditLogOutbox,
+} from "../rls-waves/session-b/b03/repositoryFunctions";
+import {
+  b03WorkerBoundariesEnabled,
+  withB03AuditWorkerContext,
+} from "../rls-waves/session-b/b03/systemContext";
 import { withDistributedLease } from "./distributedLeaseService";
 
 const getStore = () => (prisma as any).auditLogOutbox;
@@ -27,8 +40,28 @@ const parseIntEnv = (key: string, fallback: number, min: number, max: number) =>
 export const queueAuditLogOutbox = async (
   payload: Record<string, unknown>,
   error?: unknown,
-  db?: Pick<Prisma.TransactionClient, "auditLogOutbox">
+  db?: Pick<Prisma.TransactionClient, "auditLogOutbox"> & Partial<Pick<Prisma.TransactionClient, "$queryRaw">>,
+  authority?: Omit<B03AuditEnqueueInput, "payload" | "payloadDigest" | "idempotencyKey" | "expiresAt" | "initialErrorCode">
 ) => {
+  if (b03WorkerBoundariesEnabled()) {
+    if (!db?.$queryRaw || !authority) {
+      throw new Error("B03 audit enqueue requires an attributed transaction and durable authority");
+    }
+    const payloadDigest = b03PayloadDigest(payload);
+    const idempotencyKey = createHash("sha256")
+      .update(`AUDIT_LOG_RECOVERY:${authority.requestId}:${payloadDigest}`)
+      .digest("hex");
+    const row = await enqueueAuditLogOutbox(db as any, {
+      ...authority,
+      payload,
+      payloadDigest,
+      idempotencyKey,
+      expiresAt: new Date(Date.now() + 86_400_000),
+      initialErrorCode: error ? "AUDIT_PERSISTENCE_FAILED" : null,
+    });
+    return row.id;
+  }
+
   const store = db?.auditLogOutbox || getStore();
   if (!store?.create) return null;
 
@@ -48,8 +81,52 @@ export const queueAuditLogOutbox = async (
   }
 };
 
+const flushAuditLogOutboxThroughB03Boundary = async () => {
+  const batchSize = parseIntEnv("AUDIT_OUTBOX_BATCH_SIZE", 25, 1, 250);
+  const claimRequestId = randomUUID();
+  const claims = await withB03AuditWorkerContext(
+    { jobId: `audit-outbox-claim:${claimRequestId}`, requestId: claimRequestId },
+    (tx) => claimAuditLogOutboxSlice(tx, { attemptedAt: new Date(), batchSize })
+  );
+
+  for (const claim of claims) {
+    if (isShutdownStarted()) return;
+    const attemptedAt = new Date();
+    const context = {
+      jobId: claim.id,
+      requestId: claim.requestId,
+      organizationId: claim.organizationId,
+      licenseeId: claim.licenseeId,
+      manufacturerId: claim.manufacturerId,
+      initiatingUserId: claim.initiatingUserId,
+    };
+    try {
+      if (claim.expiresAt.getTime() <= attemptedAt.getTime()) {
+        throw new Error("AUDIT_OUTBOX_EXPIRED");
+      }
+      await withB03AuditWorkerContext(context, (tx) => consumeAuditLogOutbox(tx, {
+        jobId: claim.id,
+        payloadDigest: claim.payloadDigest,
+        attemptedAt,
+      }));
+    } catch (error) {
+      const errorCode = error instanceof Error && /^[A-Z0-9_]{1,128}$/.test(error.message)
+        ? error.message
+        : "AUDIT_OUTBOX_DELIVERY_FAILED";
+      await withB03AuditWorkerContext(context, (tx) => failAuditLogOutbox(tx, {
+        jobId: claim.id,
+        payloadDigest: claim.payloadDigest,
+        attemptedAt,
+        attempt: claim.attempt,
+        errorCode,
+      }));
+    }
+  }
+};
+
 export const flushAuditLogOutbox = async () => {
   if (isShutdownStarted()) return;
+  if (b03WorkerBoundariesEnabled()) return flushAuditLogOutboxThroughB03Boundary();
   const store = getStore();
   if (!store?.findMany || !store?.update) return;
 

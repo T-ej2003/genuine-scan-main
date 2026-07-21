@@ -3,6 +3,7 @@ const path = require("path");
 const { UserRole } = require("@prisma/client");
 
 const distRoot = path.resolve(__dirname, "../dist");
+process.env.NODE_ENV = "test";
 
 const mockModule = (relativePath, exportsValue) => {
   const resolved = require.resolve(path.join(distRoot, relativePath));
@@ -74,6 +75,13 @@ mockModule("services/auditService.js", {
   },
 });
 
+mockModule("services/auditLogOutboxService.js", {
+  queueAuditLogOutbox: async (entry) => {
+    auditEvents.push(entry);
+    return "audit-outbox-1";
+  },
+});
+
 mockModule("services/auth/sessionRiskService.js", {
   assessAuthSessionRisk: async () => ({
     score: 10,
@@ -81,6 +89,7 @@ mockModule("services/auth/sessionRiskService.js", {
     reasons: ["Known device"],
     shouldBlock: false,
   }),
+  persistAuthSessionRisk: async () => null,
 });
 
 mockModule("services/manufacturerScopeService.js", {
@@ -136,6 +145,7 @@ const run = async () => {
     password: "correct-password",
     ipHash: "ip-hash",
     userAgent: "agent",
+    requestId: "recent-admin-mfa-login",
   });
 
   assert.strictEqual(recentMfaSession.sessionStage, "ACTIVE", "recent MFA should skip bootstrap challenge");
@@ -160,6 +170,7 @@ const run = async () => {
     password: "correct-password",
     ipHash: "ip-hash",
     userAgent: "agent",
+    requestId: "stale-admin-mfa-login",
   });
 
   assert.strictEqual(staleMfaSession.sessionStage, "MFA_BOOTSTRAP", "stale MFA should require a fresh challenge");
@@ -182,6 +193,7 @@ const run = async () => {
       password: "correct-password",
       ipHash: "ip-hash",
       userAgent: "agent",
+      requestId: "failed-admin-mfa-status-read",
     }),
     /MFA_STATUS_UNAVAILABLE/,
     "MFA status failures must not be converted into an unenrolled bootstrap session"

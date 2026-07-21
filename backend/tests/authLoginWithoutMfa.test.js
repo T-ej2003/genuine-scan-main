@@ -4,6 +4,9 @@ const { UserRole } = require("@prisma/client");
 
 const distRoot = path.resolve(__dirname, "../dist");
 
+process.env.NODE_ENV = "test";
+process.env.TOKEN_HASH_SECRET_CURRENT = "test-refresh-mfa-token-hash-secret";
+
 const mockModule = (relativePath, exportsValue) => {
   const resolved = require.resolve(path.join(distRoot, relativePath));
   require.cache[resolved] = {
@@ -93,6 +96,7 @@ mockModule("services/auth/sessionRiskService.js", {
     reasons: ["Known device"],
     shouldBlock: false,
   }),
+  persistAuthSessionRisk: async () => null,
 });
 
 mockModule("services/manufacturerScopeService.js", {
@@ -104,6 +108,33 @@ mockModule("services/auth/emailVerificationService.js", {
 });
 
 let mockedMfaStatus = { enabled: false, enrolled: false, methods: [], preferredMethod: null, lastUsedAt: null };
+mockModule("rls-waves/session-b/b01/sessionCredentialRepository.js", {
+  loadRefreshSessionState: async () => ({
+    userId: prismaUser.id,
+    email: prismaUser.email,
+    name: prismaUser.name,
+    role: prismaUser.role,
+    legacyLicenseeId: prismaUser.licenseeId,
+    legacyOrganizationId: prismaUser.orgId,
+    emailVerifiedAt: prismaUser.emailVerifiedAt,
+    sessionLicenseeId: null,
+    sessionOrganizationId: null,
+    scopeVersion: null,
+    selectedLicenseeId: null,
+    selectedLicenseeName: null,
+    selectedLicenseePrefix: null,
+    selectedLicenseeBrandName: null,
+    selectedLicenseeOrganizationId: null,
+    linkedLicensees: [],
+    mfaRequired: true,
+    mfaEnabled: mockedMfaStatus.enabled,
+    mfaEnrolled: mockedMfaStatus.enrolled,
+    mfaLastUsedAt: mockedMfaStatus.lastUsedAt,
+    mfaMethods: mockedMfaStatus.methods,
+    mfaPreferredMethod: mockedMfaStatus.preferredMethod,
+  }),
+  createRefreshMfaChallengeRecord: async () => ({ challengeId: "challenge-1", created: true }),
+});
 mockModule("services/auth/mfaService.js", {
   getAdminMfaStatus: async () => mockedMfaStatus,
   createAdminMfaChallenge: async () => null,

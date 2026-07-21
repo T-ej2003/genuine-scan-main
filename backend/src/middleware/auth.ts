@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
-import prisma from "../config/database";
-import { AuthenticatedSessionClaims, JWTPayload } from "../types";
+import { randomUUID } from "crypto";
+import { AuthenticatedSessionClaims } from "../types";
 import { UserRole } from "@prisma/client";
 import { ACCESS_TOKEN_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
 import { openCookieToken } from "../services/auth/cookieTokenProtectionService";
@@ -12,8 +12,6 @@ import {
 } from "../services/manufacturerScopeService";
 import { isDisabledUserRecord } from "../services/accessControlService";
 import { readCookie } from "../utils/cookies";
-// rls-prototype-approved-import: verified signed claims establish hydration context.
-import { withRlsPrototypeTransaction } from "../lib/rlsTransactionContextPrototype";
 import {
   getAdminStepUpWindowMinutes,
   getPasswordReauthWindowMinutes,
@@ -21,6 +19,8 @@ import {
   isAdminMfaRequiredRole,
 } from "../services/auth/authService";
 import { getAdminMfaStatus } from "../services/auth/mfaService";
+import { withCanonicalAuthClaims } from "../rls-waves/session-b/b01/canonicalAuthContext";
+import { loadAuthenticatedActor } from "../rls-waves/session-b/b01/authenticatedSecurityRepository";
 
 export interface AuthRequest extends Request {
   user?: AuthenticatedSessionClaims;
@@ -38,61 +38,55 @@ const getCookieAccessToken = (req: Request) => {
   return token ? openCookieToken(token, "auth.access") : null;
 };
 
-export async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims): Promise<AuthenticatedSessionClaims> {
+const requestIdFor = (req: Request) =>
+  String((req as Request & { requestId?: string }).requestId || req.get("x-request-id") || randomUUID());
+
+export async function hydrateTenantIfNeeded(
+  payload: AuthenticatedSessionClaims,
+  requestId: string = randomUUID()
+): Promise<AuthenticatedSessionClaims> {
   if (!payload?.userId || !payload?.role) return payload;
 
-  const { user: u, manufacturerScope, currentMfaEnabled } = await withRlsPrototypeTransaction(
-    prisma,
-    {
-      userId: payload.userId,
-      role: payload.role,
-      licenseeId: isManufacturerRole(payload.role) ? null : payload.licenseeId,
-      manufacturerId: isManufacturerRole(payload.role) ? payload.userId : null,
-      organizationId: isManufacturerRole(payload.role) ? null : payload.orgId,
-      // Hydration only needs actor-self visibility. Never elevate from a stale claim.
-      isPlatformAdmin: false,
-    },
-    async (tx) => {
-      const user = await tx.user.findUnique({
-        where: { id: payload.userId },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          licenseeId: true,
-          orgId: true,
-          isActive: true,
-          status: true,
-          deletedAt: true,
-          disabledAt: true,
-        },
-      });
-      if (user && user.role !== payload.role) {
-        throw new Error("Account role changed");
-      }
+  const { user: u, manufacturerScope, currentMfaEnabled, canonicalAssurance } = await withCanonicalAuthClaims(
+    payload,
+    { requestId, purpose: "auth-session-hydration" },
+    async (tx, context) => {
+      const user = await loadAuthenticatedActor(tx);
+      if (user.id !== context.userId || user.role !== context.role) throw new Error("Authenticated actor changed");
       const scope = user && isManufacturerRole(user.role)
         ? await resolveManufacturerSessionScope({
             manufacturerId: user.id,
             legacyLicenseeId: user.licenseeId,
             legacyOrgId: user.orgId,
-            requestedLicenseeId: payload.licenseeId,
-            requestedOrgId: payload.orgId,
+            requestedLicenseeId: context.licenseeId,
+            requestedOrgId: context.organizationId,
             requestedScopeVersion: payload.scopeVersion,
           }, tx)
         : null;
-      const mfaStatus = user && payload.sessionStage === "ACTIVE" && payload.authAssurance === "ADMIN_MFA" && isAdminMfaRequiredRole(user.role)
+      const mfaStatus = user && context.authAssurance === "mfa-verified" && isAdminMfaRequiredRole(user.role)
         ? await getAdminMfaStatus(user.id, tx)
         : null;
-      return { user, manufacturerScope: scope, currentMfaEnabled: mfaStatus ? Boolean(mfaStatus.enabled) : null };
+      return {
+        user,
+        manufacturerScope: scope,
+        currentMfaEnabled: mfaStatus ? Boolean(mfaStatus.enabled) : null,
+        canonicalAssurance: context.authAssurance,
+      };
     }
   );
 
   if (!u || isDisabledUserRecord(u)) {
     throw new Error("Account is disabled");
   }
-  if (payload.sessionStage === "ACTIVE" && payload.authAssurance === "ADMIN_MFA" && isAdminMfaRequiredRole(u.role) && !currentMfaEnabled) {
+  if (canonicalAssurance === "mfa-verified" && isAdminMfaRequiredRole(u.role) && !currentMfaEnabled) {
     throw new Error("Account MFA state changed");
   }
+
+  const hydratedPayload: AuthenticatedSessionClaims = {
+    ...payload,
+    sessionStage: canonicalAssurance === "mfa-bootstrap" ? "MFA_BOOTSTRAP" : "ACTIVE",
+    authAssurance: canonicalAssurance === "mfa-verified" ? "ADMIN_MFA" : "PASSWORD",
+  };
 
   const effectiveRole = u.role;
   const databaseLicenseeId = String(u.licenseeId || "").trim() || null;
@@ -101,7 +95,7 @@ export async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims)
   const tokenOrgId = String(payload.orgId || "").trim() || null;
 
   if (isPlatformRole(effectiveRole)) {
-    return { ...payload, email: u.email || payload.email, role: effectiveRole, licenseeId: null, orgId: null, scopeVersion: null, linkedLicenseeIds: [] };
+    return { ...hydratedPayload, email: u.email || payload.email, role: effectiveRole, licenseeId: null, orgId: null, scopeVersion: null, linkedLicenseeIds: [] };
   }
 
   if (isLicenseeAdminRole(effectiveRole)) {
@@ -110,7 +104,7 @@ export async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims)
       throw new Error("Account tenant scope changed");
     }
     return {
-      ...payload,
+      ...hydratedPayload,
       email: u.email || payload.email,
       role: effectiveRole,
       licenseeId: databaseLicenseeId,
@@ -123,7 +117,7 @@ export async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims)
   if (isManufacturerRole(effectiveRole)) {
     const selected = manufacturerScope?.selectedLicensee || null;
     return {
-      ...payload,
+      ...hydratedPayload,
       email: u.email || payload.email,
       role: effectiveRole,
       licenseeId: selected?.id || null,
@@ -134,7 +128,7 @@ export async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims)
   }
 
   return {
-    ...payload,
+    ...hydratedPayload,
     email: u.email || payload.email,
     role: effectiveRole,
     licenseeId: databaseLicenseeId,
@@ -144,10 +138,10 @@ export async function hydrateTenantIfNeeded(payload: AuthenticatedSessionClaims)
   };
 }
 
-const parseAnySessionToken = async (token: string): Promise<AuthenticatedSessionClaims> => {
+const parseAnySessionToken = async (token: string, requestId: string): Promise<AuthenticatedSessionClaims> => {
   try {
     const decoded = verifyAccessToken(token);
-    return hydrateTenantIfNeeded(decoded);
+    return hydrateTenantIfNeeded(decoded, requestId);
   } catch {
     const decoded = verifyMfaBootstrapToken(token);
     return hydrateTenantIfNeeded({
@@ -163,7 +157,7 @@ const parseAnySessionToken = async (token: string): Promise<AuthenticatedSession
       authenticatedAt: null,
       mfaVerifiedAt: null,
       sessionId: decoded.sessionId,
-    });
+    }, requestId);
   }
 };
 
@@ -180,7 +174,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
 
   try {
     const decoded = verifyAccessToken(token);
-    req.user = await hydrateTenantIfNeeded(decoded);
+    req.user = await hydrateTenantIfNeeded(decoded, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
     return next();
   } catch {
@@ -195,7 +189,7 @@ export const authenticateAnySession = async (req: AuthRequest, res: Response, ne
   if (!token) return res.status(401).json({ success: false, error: "No token provided" });
 
   try {
-    req.user = await parseAnySessionToken(token);
+    req.user = await parseAnySessionToken(token, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
     return next();
   } catch {
@@ -211,7 +205,7 @@ export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextF
 
   try {
     const decoded = verifyAccessToken(token);
-    req.user = await hydrateTenantIfNeeded(decoded);
+    req.user = await hydrateTenantIfNeeded(decoded, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
   } catch {
     // ignore
@@ -235,7 +229,7 @@ export const authenticateSSE = async (req: AuthRequest, res: Response, next: Nex
 
   try {
     const decoded = verifyAccessToken(token);
-    req.user = await hydrateTenantIfNeeded(decoded);
+    req.user = await hydrateTenantIfNeeded(decoded, requestIdFor(req));
     req.authMode = queryToken ? "bearer" : headerToken ? "bearer" : "cookie";
     return next();
   } catch {

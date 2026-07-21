@@ -1,5 +1,4 @@
-import prisma from "../../config/database";
-import { UserRole, UserStatus } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 import { hashPassword } from "./passwordService";
 import { newCsrfToken } from "./tokenService";
 import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
@@ -8,33 +7,20 @@ import { createAuditLog } from "../auditService";
 import { maskEmailForLog } from "../mailTransportService";
 import { mscqrBrandHeaderHtml, renderActionEmail } from "../emailTemplateService";
 import { normalizeEmailAddress } from "../../utils/email";
-import { isManufacturerRole, listManufacturerLicenseeLinks, upsertManufacturerLicenseeLink } from "../manufacturerScopeService";
+import { isManufacturerRole } from "../manufacturerScopeService";
 import { buildConnectorDownloadUrls } from "../connectorReleaseService";
+import type { CanonicalDbContext } from "../../lib/canonicalDbContext";
+import { prepareInvitation } from "../../rls-waves/session-b/b01/invitationRepository";
+import {
+  consumeInvitationBoundary,
+  lookupInvitationBoundary,
+} from "../../rls-waves/session-b/b01/preAuthRepository";
 
 const addHours = (d: Date, hours: number) => new Date(d.getTime() + hours * 60 * 60 * 1000);
 
-const inferOrgIdForLicensee = async (licenseeId: string) => {
-  const licensee = await prisma.licensee.findUnique({
-    where: { id: licenseeId },
-    select: { id: true, orgId: true, name: true, isActive: true },
-  });
-  if (!licensee) throw new Error("Licensee not found");
-  if (!licensee.orgId) throw new Error("Licensee has no organization configured");
-  if (!licensee.isActive) throw new Error("Licensee is inactive");
-  return { orgId: licensee.orgId, licenseeName: licensee.name };
-};
-
-const canonicalizeRole = (role: UserRole): UserRole => {
-  if (role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN) return UserRole.SUPER_ADMIN;
-  if (role === UserRole.LICENSEE_ADMIN || role === UserRole.ORG_ADMIN) return UserRole.LICENSEE_ADMIN;
-  if (
-    role === UserRole.MANUFACTURER ||
-    role === UserRole.MANUFACTURER_ADMIN ||
-    role === UserRole.MANUFACTURER_USER
-  ) {
-    return UserRole.MANUFACTURER;
-  }
-  return role;
+type InviteDb = Prisma.TransactionClient;
+type InviteDatabaseBoundary = {
+  run: <T>(callback: (db: InviteDb, context: CanonicalDbContext) => Promise<T>) => Promise<T>;
 };
 
 const normalizeRole = (role: string): UserRole => {
@@ -77,25 +63,6 @@ const displayActor = (actor: InviteActorContext | null) => {
   return actor.displayName || actor.email || null;
 };
 
-const resolveInviteActorContext = async (userId: string): Promise<InviteActorContext> => {
-  const actorUserId = String(userId || "").trim();
-  if (!actorUserId) return { userId: null, email: null, displayName: null };
-
-  const actor = await prisma.user.findUnique({
-    where: { id: actorUserId },
-    select: { id: true, email: true, name: true, isActive: true, deletedAt: true },
-  });
-
-  if (!actor || actor.deletedAt || actor.isActive === false) {
-    return { userId: actorUserId, email: null, displayName: null };
-  }
-
-  return {
-    userId: actor.id,
-    email: normalizeEmailAddress(actor.email),
-    displayName: String(actor.name || "").trim() || normalizeEmailAddress(actor.email),
-  };
-};
 
 const buildInviteIntro = (params: {
   isManufacturerInvite: boolean;
@@ -188,24 +155,8 @@ const inviteHtmlTemplate = (params: {
   `;
 };
 
-const PLATFORM_ORG_ID = "00000000-0000-0000-0000-000000000000";
-
-const getOrCreatePlatformOrgId = async () => {
-  const existing = await prisma.organization.findUnique({ where: { id: PLATFORM_ORG_ID }, select: { id: true } });
-  if (existing) return existing.id;
-  const created = await prisma.organization.create({
-    data: {
-      id: PLATFORM_ORG_ID,
-      name: "Platform",
-      isActive: true,
-    },
-    select: { id: true },
-  });
-  return created.id;
-};
-
 export const createInvite = async (input: {
-  email: string;
+  email?: string | null;
   role: string;
   name?: string | null;
   licenseeId?: string | null;
@@ -215,198 +166,44 @@ export const createInvite = async (input: {
   createdByUserId: string;
   ipHash: string | null;
   userAgent: string | null;
+  databaseBoundary?: InviteDatabaseBoundary;
 }) => {
-  const email = normalizeEmailAddress(input.email);
-  if (!email) throw new Error("Invalid email address");
+  const allowExistingInvitedUser = Boolean(input.allowExistingInvitedUser);
+  const requireExistingUser = Boolean(input.requireExistingUser);
+  const email = input.email == null ? null : normalizeEmailAddress(input.email);
+  if (!email && !requireExistingUser) throw new Error("Invalid email address");
 
   const role = normalizeRole(input.role);
-
-  const isPlatformRole = role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
 
   const licenseeId = input.licenseeId ? String(input.licenseeId).trim() : null;
   const manufacturerId = input.manufacturerId ? String(input.manufacturerId).trim() : null;
 
-  const org = isPlatformRole
-    ? { orgId: null as string | null, licenseeName: null as string | null }
-    : licenseeId
-      ? await inferOrgIdForLicensee(licenseeId)
-      : (() => {
-          throw new Error("licenseeId is required for org-scoped roles");
-        })();
-
-  const inviteOrgId = isPlatformRole ? await getOrCreatePlatformOrgId() : (org.orgId as string);
-
   const now = new Date();
   const expiresAt = addHours(now, 24);
-  const allowExistingInvitedUser = Boolean(input.allowExistingInvitedUser);
-  const requireExistingUser = Boolean(input.requireExistingUser);
-
   const rawToken = randomOpaqueToken(32);
   const tokenHash = hashToken(rawToken);
 
-  const userName = String(input.name || "").trim() || defaultNameForEmail(email);
+  const userName = String(input.name || "").trim() || (email ? defaultNameForEmail(email) : "Invited user");
 
-  const result = await prisma.$transaction(async (tx) => {
-    const existing = await tx.user.findUnique({
-      where: { email },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        licenseeId: true,
-        orgId: true,
-        status: true,
-        isActive: true,
-        deletedAt: true,
-        passwordHash: true,
-      },
-    });
+  if (!input.databaseBoundary) throw new Error("INVITE_DATABASE_BOUNDARY_REQUIRED");
+  const result = await input.databaseBoundary.run((tx, context) => prepareInvitation(tx, context, {
+    requestedEmail: email,
+    requestedName: userName,
+    requestedRole: role,
+    requestedLicenseeId: licenseeId,
+    requestedManufacturerId: manufacturerId,
+    allowExistingInvitedUser,
+    requireExistingUser,
+    tokenHash,
+    createdAt: now,
+    expiresAt,
+  }));
 
-    let linkAction: "LINKED_EXISTING" | "ALREADY_LINKED" | null = null;
-
-    let createdUser:
-      | {
-          id: string;
-          email: string;
-          name: string;
-          role: UserRole;
-          licenseeId: string | null;
-          orgId: string | null;
-          status: UserStatus;
-        }
-      | undefined;
-
-    if (existing) {
-      if (!allowExistingInvitedUser) throw new Error("User with this email already exists");
-      if (existing.deletedAt || !existing.isActive) throw new Error("User account is disabled");
-      const existingCanonicalRole = canonicalizeRole(existing.role);
-      if (existingCanonicalRole !== canonicalizeRole(role)) throw new Error("Existing user role does not match invite role");
-      const existingStatus = String(existing.status || "").toUpperCase();
-
-      if (isManufacturerRole(role) && licenseeId) {
-        const existingLinks = await listManufacturerLicenseeLinks(existing.id, tx);
-        const alreadyLinked = existingLinks.some((row) => row.licenseeId === licenseeId);
-
-        if (alreadyLinked) {
-          linkAction = "ALREADY_LINKED";
-        } else {
-          await upsertManufacturerLicenseeLink(tx, {
-            manufacturerId: existing.id,
-            licenseeId,
-            makePrimary: !existing.licenseeId,
-          });
-          linkAction = "LINKED_EXISTING";
-        }
-
-        if (existingStatus !== UserStatus.INVITED || existing.passwordHash) {
-          createdUser = {
-            id: existing.id,
-            email: existing.email,
-            name: existing.name,
-            role: existing.role,
-            licenseeId: existing.licenseeId || licenseeId,
-            orgId: existing.orgId,
-            status: existing.status as UserStatus,
-          };
-          return { createdUser: createdUser!, invite: null, linkAction };
-        }
-      } else {
-        if ((existing.licenseeId || null) !== (isPlatformRole ? null : licenseeId || null)) {
-          throw new Error("Existing user belongs to a different licensee");
-        }
-        if ((existing.orgId || null) !== (org.orgId || null)) {
-          throw new Error("Existing user belongs to a different organization");
-        }
-      }
-
-      if (existingStatus !== UserStatus.INVITED || existing.passwordHash) {
-        throw new Error("User is already active. Invite is not required.");
-      }
-
-      createdUser = {
-        id: existing.id,
-        email: existing.email,
-        name: existing.name,
-        role: existing.role,
-        licenseeId: existing.licenseeId,
-        orgId: existing.orgId,
-        status: existing.status as UserStatus,
-      };
-    } else {
-      if (requireExistingUser) throw new Error("Existing user is required for invite resend");
-      createdUser = await tx.user.create({
-        data: {
-          email,
-          name: userName,
-          role,
-          orgId: org.orgId,
-          licenseeId: isPlatformRole ? null : licenseeId,
-          status: UserStatus.INVITED,
-          isActive: true,
-          passwordHash: null,
-        },
-        select: { id: true, email: true, name: true, role: true, licenseeId: true, orgId: true, status: true },
-      });
-
-      if (isManufacturerRole(role) && licenseeId) {
-        await upsertManufacturerLicenseeLink(tx, {
-          manufacturerId: createdUser.id,
-          licenseeId,
-          makePrimary: true,
-        });
-      }
-    }
-
-    await tx.invite.updateMany({
-      where: {
-        email,
-        role,
-        licenseeId: isPlatformRole ? null : licenseeId,
-        usedAt: null,
-        expiresAt: { gt: now },
-      },
-      data: { usedAt: now },
-    });
-
-    const invite = await tx.invite.create({
-      data: {
-        orgId: inviteOrgId,
-        licenseeId: isPlatformRole ? null : licenseeId,
-        email,
-        role,
-        manufacturerId,
-        tokenHash,
-        expiresAt,
-        createdByUserId: input.createdByUserId,
-      },
-      select: { id: true, email: true, role: true, expiresAt: true },
-    });
-
-    return { createdUser: createdUser!, invite, linkAction };
-  });
-
-  if (result.linkAction && !result.invite) {
-    await createAuditLog({
-      userId: input.createdByUserId,
-      licenseeId: licenseeId || undefined,
-      orgId: org.orgId || undefined,
-      action: "MANUFACTURER_LICENSEE_LINKED",
-      entityType: "User",
-      entityId: result.createdUser.id,
-      details: {
-        email,
-        licenseeId,
-        linkAction: result.linkAction,
-      },
-      ipHash: input.ipHash || undefined,
-      userAgent: input.userAgent || undefined,
-    } as any);
-
+  if (result.linkAction && !result.inviteId) {
     return {
       inviteId: null,
       expiresAt: null,
-      email: maskEmailForLog(email),
+      email: maskEmailForLog(result.inviteEmail),
       role,
       inviteLink: null,
       emailSent: false,
@@ -423,16 +220,20 @@ export const createInvite = async (input: {
       pendingRecipients: [],
       linkAction: result.linkAction,
       user: {
-        id: result.createdUser.id,
-        email: result.createdUser.email,
-        name: result.createdUser.name,
-        role: result.createdUser.role,
-        licenseeId: result.createdUser.licenseeId,
-        orgId: result.createdUser.orgId,
-        status: result.createdUser.status,
+        id: result.userId,
+        email: result.userEmail,
+        name: result.userName,
+        role: result.userRole,
+        licenseeId: result.userLicenseeId,
+        orgId: result.userOrganizationId,
+        status: result.userStatus,
       },
       csrfToken: newCsrfToken(),
     };
+  }
+
+  if (!result.inviteId || !result.inviteExpiresAt) {
+    throw new Error("app_rls.prepare_invitation returned an incomplete invitation");
   }
 
   // Send email outside the transaction (delivery should not block DB state).
@@ -444,19 +245,23 @@ export const createInvite = async (input: {
   const connectorDistribution = isManufacturerRole(role) ? buildConnectorDownloadUrls(baseUrl) : null;
 
   const isManufacturerInvite = isManufacturerRole(role);
-  const inviteActor = await resolveInviteActorContext(input.createdByUserId);
+  const inviteActor: InviteActorContext = {
+    userId: result.actorUserId,
+    email: result.actorEmail,
+    displayName: result.actorDisplayName,
+  };
   const subject = isManufacturerInvite ? "Set up your MSCQR manufacturer account" : "Activate your MSCQR account";
   const emailBody = renderActionEmail({
     heading: subject,
     intro: buildInviteIntro({
       isManufacturerInvite,
       actor: inviteActor,
-      workspaceName: org.licenseeName,
+      workspaceName: result.licenseeName,
     }),
     actionLabel: "Activate account",
     actionUrl: acceptUrl,
     expiryText: "in 24 hours",
-    workspaceName: org.licenseeName,
+    workspaceName: result.licenseeName,
     invitedByDisplay: inviteActor.displayName,
     invitedByEmail: inviteActor.email,
     replyToNotice: Boolean(inviteActor.email),
@@ -469,14 +274,14 @@ export const createInvite = async (input: {
   });
 
   const delivery = await sendAuthEmail({
-    toAddress: email,
+    toAddress: result.inviteEmail,
     subject,
     text: emailBody.text,
     html: emailBody.html,
     template: "invite",
-    orgId: result.createdUser.orgId,
-    licenseeId: result.createdUser.licenseeId,
-    actorUserId: input.createdByUserId,
+    orgId: result.userOrganizationId,
+    licenseeId: result.userLicenseeId,
+    actorUserId: result.actorUserId,
     actorEmail: inviteActor.email,
     actorDisplayName: inviteActor.displayName,
     replyToMode: "actor",
@@ -484,44 +289,11 @@ export const createInvite = async (input: {
     userAgent: input.userAgent,
   });
 
-  await createAuditLog({
-    userId: input.createdByUserId,
-    licenseeId: result.createdUser.licenseeId || undefined,
-    orgId: result.createdUser.orgId || undefined,
-    action: "AUTH_INVITE_CREATED",
-    entityType: "Invite",
-    entityId: result.invite.id,
-    details: {
-      email: maskEmailForLog(email),
-      role: result.invite.role,
-      expiresAt: result.invite.expiresAt,
-      manufacturerId,
-      linkAction: result.linkAction,
-      actorUserId: inviteActor.userId || input.createdByUserId,
-      actorEmail: maskEmailForLog(inviteActor.email),
-      effectiveSmtpFrom: maskEmailForLog(delivery.usedFrom),
-      replyTo: maskEmailForLog(delivery.replyTo),
-      recipient: maskEmailForLog(email),
-      template: "invite",
-      emailDelivered: delivery.delivered,
-      emailAttempted: delivery.attempted,
-      emailErrorCode: delivery.errorCode || delivery.error || null,
-      emailDiagnostic: delivery.diagnostic || null,
-      emailProviderMessageId: delivery.providerMessageId || null,
-      emailProviderResponseCode: delivery.providerResponseCode || null,
-      emailAcceptedRecipients: (delivery.acceptedRecipients || []).map(maskEmailForLog).filter(Boolean),
-      emailRejectedRecipients: (delivery.rejectedRecipients || []).map(maskEmailForLog).filter(Boolean),
-      emailPendingRecipients: (delivery.pendingRecipients || []).map(maskEmailForLog).filter(Boolean),
-    },
-    ipHash: input.ipHash || undefined,
-    userAgent: input.userAgent || undefined,
-  } as any);
-
   return {
-    inviteId: result.invite.id,
-    expiresAt: result.invite.expiresAt,
-    email: result.invite.email,
-    role: result.invite.role,
+    inviteId: result.inviteId,
+    expiresAt: result.inviteExpiresAt,
+    email: result.inviteEmail,
+    role: result.inviteRole,
     inviteLink: acceptUrl,
     connectorDownloadUrl: connectorLandingUrl,
     connectorDownloads: connectorDistribution?.downloads || null,
@@ -537,19 +309,19 @@ export const createInvite = async (input: {
     usedFrom: delivery.usedFrom || null,
     replyTo: delivery.replyTo || null,
     actorEmail: inviteActor.email,
-    actorUserId: inviteActor.userId || input.createdByUserId,
+    actorUserId: inviteActor.userId,
     acceptedRecipients: delivery.acceptedRecipients || [],
     rejectedRecipients: delivery.rejectedRecipients || [],
     pendingRecipients: delivery.pendingRecipients || [],
     linkAction: result.linkAction,
     user: {
-      id: result.createdUser.id,
-      email: result.createdUser.email,
-      name: result.createdUser.name,
-      role: result.createdUser.role,
-      licenseeId: result.createdUser.licenseeId,
-      orgId: result.createdUser.orgId,
-      status: result.createdUser.status,
+      id: result.userId,
+      email: result.userEmail,
+      name: result.userName,
+      role: result.userRole,
+      licenseeId: result.userLicenseeId,
+      orgId: result.userOrganizationId,
+      status: result.userStatus,
     },
     csrfToken: newCsrfToken(),
   };
@@ -564,104 +336,42 @@ export const acceptInvite = async (input: {
 }) => {
   const now = new Date();
   const tokenHashCandidates = buildTokenHashCandidates(input.rawToken);
-
-  const result = await prisma.$transaction(async (tx) => {
-    const invite = await tx.invite.findFirst({
-      where: { tokenHash: { in: tokenHashCandidates } },
-      select: {
-        id: true,
-        orgId: true,
-        licenseeId: true,
-        email: true,
-        role: true,
-        manufacturerId: true,
-        expiresAt: true,
-        usedAt: true,
-      },
-    });
-    if (!invite) throw new Error("Invalid or expired invite token");
-    if (invite.usedAt) throw new Error("Invite already used");
-    if (invite.expiresAt.getTime() <= now.getTime()) throw new Error("Invite expired");
-
-    const user = await tx.user.findUnique({
-      where: { email: invite.email },
-      select: { id: true, status: true, isActive: true, deletedAt: true },
-    });
-    if (!user) throw new Error("Invited user record not found");
-    if (user.deletedAt || user.isActive === false) throw new Error("Account is disabled");
-
-    const passwordHash = await hashPassword(input.password);
-    const userName = String(input.name || "").trim();
-
-    const updatedUser = await tx.user.update({
-      where: { id: user.id },
-      data: {
-        passwordHash,
-        status: UserStatus.ACTIVE,
-        emailVerifiedAt: now,
-        name: userName ? userName : undefined,
-        failedLoginAttempts: 0,
-        lockedUntil: null,
-      },
-      select: { id: true, email: true, name: true, role: true, licenseeId: true, orgId: true, status: true },
-    });
-
-    await tx.invite.update({
-      where: { id: invite.id },
-      data: { usedAt: now, acceptedByUserId: user.id },
-    });
-
-    return { user: updatedUser, inviteId: invite.id };
+  const passwordHash = await hashPassword(input.password);
+  const result = await consumeInvitationBoundary({
+    tokenHashCandidates,
+    passwordHash,
+    requestedName: String(input.name || "").trim() || null,
+    consumedAt: now,
   });
+  if (!result) throw new Error("Invalid or expired invite token");
 
   await createAuditLog({
-    userId: result.user.id,
-    licenseeId: result.user.licenseeId || undefined,
-    orgId: result.user.orgId || undefined,
+    userId: result.id,
+    licenseeId: result.licenseeId || undefined,
+    orgId: result.orgId || undefined,
     action: "AUTH_INVITE_ACCEPTED",
     entityType: "Invite",
     entityId: result.inviteId,
-    details: {},
+    details: { acceptedUserId: result.id },
     ipHash: input.ipHash || undefined,
     userAgent: input.userAgent || undefined,
   } as any);
 
-  return result.user;
+  return result;
 };
 
 export const getInvitePreview = async (rawToken: string) => {
   const now = new Date();
   const tokenHashCandidates = buildTokenHashCandidates(rawToken);
 
-  const invite = await prisma.invite.findFirst({
-    where: { tokenHash: { in: tokenHashCandidates } },
-    select: {
-      id: true,
-      email: true,
-      role: true,
-      expiresAt: true,
-      usedAt: true,
-      licenseeId: true,
-    },
-  });
-
+  const invite = await lookupInvitationBoundary({ tokenHashCandidates, checkedAt: now });
   if (!invite) throw new Error("Invalid or expired invite token");
-  if (invite.usedAt) throw new Error("Invite already used");
-  if (invite.expiresAt.getTime() <= now.getTime()) throw new Error("Invite expired");
-
-  const licensee =
-    invite.licenseeId
-      ? await prisma.licensee.findUnique({
-          where: { id: invite.licenseeId },
-          select: { id: true, name: true },
-        })
-      : null;
 
   return {
     email: invite.email,
     role: invite.role,
     expiresAt: invite.expiresAt,
-    licenseeName: licensee?.name || null,
-    requiresConnector: isManufacturerRole(invite.role),
+    licenseeName: invite.licenseeName,
+    requiresConnector: invite.requiresConnector,
   };
 };

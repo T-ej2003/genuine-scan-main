@@ -1,0 +1,186 @@
+export type B01WorkflowProof = {
+  workflowId: string;
+  entryPoint: string;
+  productionRoot: string;
+  boundary: "pre-auth-function" | "session-credential-function" | "authenticated-function";
+  localStatus: "implementation-in-progress" | "implemented-local-proof-passed-global-integration-pending";
+};
+
+const localStatus = "implementation-in-progress" as const;
+
+const b01WorkflowInventory = [
+  { workflowId: "workflow-http-backend-src-controllers-account-controller-ts-change-my-password", entryPoint: "http:changeMyPassword", productionRoot: "backend/src/controllers/accountController.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-http-backend-src-controllers-account-controller-ts-update-my-profile", entryPoint: "http:updateMyProfile", productionRoot: "backend/src/controllers/accountController.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-begin-admin-web-authn-setup-controller", entryPoint: "http:beginAdminWebAuthnSetupController", productionRoot: "backend/src/controllers/authAdminSecurityController.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-complete-admin-mfa-challenge-controller", entryPoint: "http:completeAdminMfaChallengeController", productionRoot: "backend/src/controllers/authAdminSecurityController.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-http-backend-src-controllers-auth-admin-security-controller-ts-disable-admin-mfa-controller", entryPoint: "http:disableAdminMfaController", productionRoot: "backend/src/controllers/authAdminSecurityController.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-http-backend-src-controllers-auth-controller-ts-me", entryPoint: "http:me", productionRoot: "backend/src/controllers/authController.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-http-backend-src-controllers-auth-session-controller-ts-password-step-up-controller", entryPoint: "http:passwordStepUpController", productionRoot: "backend/src/controllers/authSessionController.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-http-backend-src-controllers-licensee-invite-controller-ts-resend-licensee-admin-invite", entryPoint: "http:resendLicenseeAdminInvite", productionRoot: "backend/src/controllers/licenseeInviteController.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-http-backend-src-middleware-auth-ts-hydrate-tenant-if-needed", entryPoint: "http:hydrateTenantIfNeeded", productionRoot: "backend/src/middleware/auth.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-auth-email-service-ts-get-primary-superadmin-email", entryPoint: "internal:getPrimarySuperadminEmail", productionRoot: "backend/src/services/auth/authEmailService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-auth-service-ts-load-active-session-state", entryPoint: "internal:loadActiveSessionState", productionRoot: "backend/src/services/auth/authService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-auth-service-ts-login-with-password", entryPoint: "internal:loginWithPassword", productionRoot: "backend/src/services/auth/authService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session", entryPoint: "internal:refreshSession", productionRoot: "backend/src/services/auth/authService.ts", boundary: "session-credential-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-consume-legacy-backup-code", entryPoint: "internal:consumeLegacyBackupCode", productionRoot: "backend/src/services/auth/backupCodeMfaProvider.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-consume-user-backup-code", entryPoint: "internal:consumeUserBackupCode", productionRoot: "backend/src/services/auth/backupCodeMfaProvider.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-replace-user-backup-codes-with-client", entryPoint: "internal:replaceUserBackupCodesWithClient", productionRoot: "backend/src/services/auth/backupCodeMfaProvider.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification", entryPoint: "internal:confirmEmailVerification", productionRoot: "backend/src/services/auth/emailVerificationService.ts", boundary: "pre-auth-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-email-verification-service-ts-request-email-change-verification", entryPoint: "internal:requestEmailChangeVerification", productionRoot: "backend/src/services/auth/emailVerificationService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite", entryPoint: "internal:acceptInvite", productionRoot: "backend/src/services/auth/inviteService.ts", boundary: "pre-auth-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-invite-service-ts-create-invite", entryPoint: "internal:createInvite", productionRoot: "backend/src/services/auth/inviteService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview", entryPoint: "internal:getInvitePreview", productionRoot: "backend/src/services/auth/inviteService.ts", boundary: "pre-auth-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-invite-service-ts-get-or-create-platform-org-id", entryPoint: "internal:getOrCreatePlatformOrgId", productionRoot: "backend/src/services/auth/inviteService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-invite-service-ts-infer-org-id-for-licensee", entryPoint: "internal:inferOrgIdForLicensee", productionRoot: "backend/src/services/auth/inviteService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-invite-service-ts-resolve-invite-actor-context", entryPoint: "internal:resolveInviteActorContext", productionRoot: "backend/src/services/auth/inviteService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-adapter-ts-begin-totp-mfa-enrollment", entryPoint: "internal:beginTotpMfaEnrollment", productionRoot: "backend/src/services/auth/mfaAdapter.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge", entryPoint: "internal:completeStableMfaLoginChallenge", productionRoot: "backend/src/services/auth/mfaAdapter.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-adapter-ts-confirm-totp-mfa-enrollment", entryPoint: "internal:confirmTotpMfaEnrollment", productionRoot: "backend/src/services/auth/mfaAdapter.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-adapter-ts-create-stable-mfa-login-challenge", entryPoint: "internal:createStableMfaLoginChallenge", productionRoot: "backend/src/services/auth/mfaAdapter.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-adapter-ts-get-admin-mfa-adapter-status", entryPoint: "internal:getAdminMfaAdapterStatus", productionRoot: "backend/src/services/auth/mfaAdapter.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-adapter-ts-rotate-mfa-backup-codes-with-adapter", entryPoint: "internal:rotateMfaBackupCodesWithAdapter", productionRoot: "backend/src/services/auth/mfaAdapter.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-mfa-code-with-client", entryPoint: "internal:verifyMfaCodeWithClient", productionRoot: "backend/src/services/auth/mfaAdapter.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-totp-against-legacy-credential", entryPoint: "internal:verifyTotpAgainstLegacyCredential", productionRoot: "backend/src/services/auth/mfaAdapter.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-adapter-ts-verify-totp-against-new-factor", entryPoint: "internal:verifyTotpAgainstNewFactor", productionRoot: "backend/src/services/auth/mfaAdapter.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-service-ts-complete-admin-mfa-challenge", entryPoint: "internal:completeAdminMfaChallenge", productionRoot: "backend/src/services/auth/mfaService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-service-ts-consume-backup-code", entryPoint: "internal:consumeBackupCode", productionRoot: "backend/src/services/auth/mfaService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-service-ts-create-admin-mfa-challenge", entryPoint: "internal:createAdminMfaChallenge", productionRoot: "backend/src/services/auth/mfaService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa", entryPoint: "internal:disableAdminMfa", productionRoot: "backend/src/services/auth/mfaService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset", entryPoint: "internal:requestPasswordReset", productionRoot: "backend/src/services/auth/passwordResetService.ts", boundary: "pre-auth-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token", entryPoint: "internal:resetPasswordWithToken", productionRoot: "backend/src/services/auth/passwordResetService.ts", boundary: "pre-auth-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-refresh-token-service-ts-create-refresh-token", entryPoint: "internal:createRefreshToken", productionRoot: "backend/src/services/auth/refreshTokenService.ts", boundary: "session-credential-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-refresh-token-service-ts-find-refresh-token-by-raw", entryPoint: "internal:findRefreshTokenByRaw", productionRoot: "backend/src/services/auth/refreshTokenService.ts", boundary: "session-credential-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-refresh-token-service-ts-list-active-refresh-tokens-for-user", entryPoint: "internal:listActiveRefreshTokensForUser", productionRoot: "backend/src/services/auth/refreshTokenService.ts", boundary: "session-credential-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-refresh-token-service-ts-revoke-all-user-refresh-tokens", entryPoint: "internal:revokeAllUserRefreshTokens", productionRoot: "backend/src/services/auth/refreshTokenService.ts", boundary: "session-credential-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-refresh-token-service-ts-revoke-password-only-refresh-tokens-for-user", entryPoint: "internal:revokePasswordOnlyRefreshTokensForUser", productionRoot: "backend/src/services/auth/refreshTokenService.ts", boundary: "session-credential-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-refresh-token-service-ts-revoke-refresh-token-by-id", entryPoint: "internal:revokeRefreshTokenById", productionRoot: "backend/src/services/auth/refreshTokenService.ts", boundary: "session-credential-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-refresh-token-service-ts-revoke-refresh-token-by-raw", entryPoint: "internal:revokeRefreshTokenByRaw", productionRoot: "backend/src/services/auth/refreshTokenService.ts", boundary: "session-credential-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-refresh-token-service-ts-rotate-refresh-token", entryPoint: "internal:rotateRefreshToken", productionRoot: "backend/src/services/auth/refreshTokenService.ts", boundary: "session-credential-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-session-risk-service-ts-assess-auth-session-risk", entryPoint: "internal:assessAuthSessionRisk", productionRoot: "backend/src/services/auth/sessionRiskService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-begin-web-authn-factor-authentication", entryPoint: "internal:beginWebAuthnFactorAuthentication", productionRoot: "backend/src/services/auth/webauthnMfaProvider.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-begin-web-authn-factor-registration", entryPoint: "internal:beginWebAuthnFactorRegistration", productionRoot: "backend/src/services/auth/webauthnMfaProvider.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-complete-web-authn-factor-authentication", entryPoint: "internal:completeWebAuthnFactorAuthentication", productionRoot: "backend/src/services/auth/webauthnMfaProvider.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-complete-web-authn-factor-registration", entryPoint: "internal:completeWebAuthnFactorRegistration", productionRoot: "backend/src/services/auth/webauthnMfaProvider.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-consume-challenge", entryPoint: "internal:consumeChallenge", productionRoot: "backend/src/services/auth/webauthnMfaProvider.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-mfa-provider-ts-load-challenge-by-ticket", entryPoint: "internal:loadChallengeByTicket", productionRoot: "backend/src/services/auth/webauthnMfaProvider.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-service-ts-begin-admin-web-authn-challenge", entryPoint: "internal:beginAdminWebAuthnChallenge", productionRoot: "backend/src/services/auth/webauthnService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-service-ts-complete-admin-web-authn-challenge", entryPoint: "internal:completeAdminWebAuthnChallenge", productionRoot: "backend/src/services/auth/webauthnService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-service-ts-complete-admin-web-authn-registration", entryPoint: "internal:completeAdminWebAuthnRegistration", productionRoot: "backend/src/services/auth/webauthnService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-service-ts-consume-challenge", entryPoint: "internal:consumeChallenge", productionRoot: "backend/src/services/auth/webauthnService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-service-ts-delete-admin-web-authn-credential", entryPoint: "internal:deleteAdminWebAuthnCredential", productionRoot: "backend/src/services/auth/webauthnService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-service-ts-list-admin-web-authn-credentials", entryPoint: "internal:listAdminWebAuthnCredentials", productionRoot: "backend/src/services/auth/webauthnService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-internal-backend-src-services-auth-webauthn-service-ts-load-challenge-by-ticket", entryPoint: "internal:loadChallengeByTicket", productionRoot: "backend/src/services/auth/webauthnService.ts", boundary: "authenticated-function", localStatus },
+  { workflowId: "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user", entryPoint: "startup:findPreCandidatePasswordUser", productionRoot: "backend/src/services/auth/authBootstrapRepository.ts", boundary: "pre-auth-function", localStatus },
+  { workflowId: "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure", entryPoint: "startup:recordPasswordLoginFailure", productionRoot: "backend/src/services/auth/authBootstrapRepository.ts", boundary: "pre-auth-function", localStatus },
+] as const;
+
+export const b01WorkflowProofs: readonly B01WorkflowProof[] = b01WorkflowInventory.map((proof) => ({
+  ...proof,
+  localStatus: proof.boundary === "session-credential-function"
+    ? "implemented-local-proof-passed-global-integration-pending"
+    : "implementation-in-progress",
+}));
+
+export const b01RefreshSessionApplicationPathProof = {
+  familyId: "b01-refresh-session-credential",
+  registeredRoots: [
+    "POST /auth/refresh",
+    "POST /auth/logout",
+    "GET /auth/sessions",
+    "POST /auth/sessions/revoke-all",
+    "POST /auth/sessions/:id/revoke",
+  ],
+  repositoryRoot: "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+  workflowIds: b01WorkflowProofs
+    .filter((proof) => proof.boundary === "session-credential-function")
+    .map((proof) => proof.workflowId),
+  focusedProofs: [
+    "backend/tests/rls-wave-b/b01/refreshSessionBoundary.test.js",
+    "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.test.js",
+  ],
+  postgresScope: "wave-local-exact-function-contract",
+  integrationStatus: "session-a-function-and-runtime-grant-integration-pending",
+} as const;
+
+export const b01SessionAIntegrationRequests = [
+  {
+    targetSymbol: "app_auth refresh-token rotation family",
+    callShape: "Add claim_refresh_token_rotation(text[],timestamp,text), load_refresh_session_state(text,text[],text,text,timestamp,text), create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp,timestamp,text), revoke_refresh_token_scope(text,text[],text,text,text,timestamp), and complete_refresh_token_rotation(text,text[],text,text,text,timestamp,text,text,timestamp,timestamp,timestamp), matching sessionCredentialRepository.ts exactly.",
+    ordering: "Install owner/search_path hardening and pre-auth-only EXECUTE grants before PREAUTH_DATABASE_URL activation; every follow-on executes in the same transaction as claim and before response serialization.",
+    invariant: "Each follow-on rebinds token ID and user ID to the original presented hash candidates, revalidates active actor/current membership/role/scope/MFA state, locks the predecessor, and never treats caller-set app.* settings as authority.",
+    responsePreservation: "Return the fixed repository projections; one concurrent rotation wins, an overlapping loser returns REVOKED without revoking the successor, and a later predecessor replay returns REUSE_DETECTED and revokes the family.",
+    focusedTest: "backend/tests/rls-wave-b/b01/refreshSessionBoundary.test.js and refreshSessionPostgres18.test.js; PostgreSQL 18 local exact-function proof includes all five registered HTTP roots, contention, late replay, expired/revoked/disabled/stale/foreign denial, atomic audit/outbox, wrong identity and forced RLS through a non-bypass function owner.",
+    workflowIds: b01WorkflowProofs
+      .filter((proof) => proof.boundary === "session-credential-function")
+      .map((proof) => proof.workflowId),
+    tablesCommands: "RefreshToken SELECT/INSERT/UPDATE; active User and tenant/manufacturer membership SELECT FOR SHARE; MFA challenge INSERT; durable audit/outbox INSERT, all function-owned and same-transaction.",
+    requiredContext: "identity-pre-auth-app plus 1..3 validated token hashes, request ID, checked-at time, claimed predecessor ID/user ID on follow-ons, requested scope where applicable, and action-specific fixed inputs.",
+    exactResult: "Fixed claim, session-state, challenge, revokedCount, and successor projections enforced by sessionCredentialRepository.ts; zero claim rows means INVALID and unexpected row counts/projections fail closed.",
+    denialRules: "Blank/malformed/ambiguous bearer, wrong identity, expired/revoked/disabled/stale actor or membership, foreign/stale scope, wrong role/MFA state, forged follow-on bearer, concurrent loser and later replay all deny deterministically.",
+    testEvidence: "GREEN PostgreSQL 18 result: proofScope=b01-local-function-contract, database=mscqr_rls_wave_b_auth_public_workers, postgresMajor=18, registeredHttpRootsExercised=5, nonBypassFunctionOwner=true, exactFunctionOwnerGrants=true, controllerAuditOutboxAtomic=true, forceRlsTables=6.",
+  },
+  {
+    targetSymbol: "command-refresh-token-select-1e564ffb471c",
+    callShape: "For app_rls.list_active_refresh_tokens(text,timestamp without time zone), add createdIpHash and createdUserAgent to the allowed same-actor SELECT projection used by the existing session-security overview; retain every other protected column denial.",
+    ordering: "Update the Session A-owned command manifest and generated canonical package before enabling AUTHENTICATED_APP_DATABASE_URL for session listing.",
+    invariant: "Only the database-revalidated active actor can list its own live sessions; tokenHash and replacedByTokenHash never leave the function, and caller-supplied actor/scope/role/assurance/purpose never authorize the projection.",
+    responsePreservation: "Preserve the existing session-security response and risk scoring based on the already-hashed IP and bounded user-agent.",
+    focusedTest: "backend/tests/authSessionMetadata.test.js plus the GET /auth/sessions path in backend/tests/rls-wave-b/b01/refreshSessionPostgres18.test.js.",
+    workflowIds: [
+      "workflow-internal-backend-src-services-auth-refresh-token-service-ts-list-active-refresh-tokens-for-user",
+    ],
+    tablesCommands: "RefreshToken SELECT through command-refresh-token-select-1e564ffb471c; exact additional columns createdIpHash and createdUserAgent only.",
+    requiredContext: "identity-authenticated-app, database-revalidated active user/session, current organization/licensee/manufacturer scope, password-verified or stronger assurance, and auth-session-list purpose.",
+    exactResult: "Fixed active-session projection including createdIpHash and createdUserAgent for the same actor; no raw IP, bearer hash, replacement hash, password material or foreign session row.",
+    denialRules: "Blank or malformed context, disabled actor, stale membership, expired/revoked session, foreign scope/actor, wrong role, lower assurance, wrong purpose, and unexpected projection deny.",
+    testEvidence: "GREEN focused metadata test and PostgreSQL 18 five-root proof with stale, disabled and expired authenticated-session denial.",
+  },
+  {
+    targetSymbol: "app_auth B01 pre-authentication security-definer functions",
+    callShape: "Create the seven exact static functions referenced by preAuthRepository.ts; consume_invitation_token must return inviteId in addition to its frozen projection.",
+    ordering: "Install functions, owner/search_path hardening and identity-pre-auth-app-only EXECUTE grants before switching the pre-auth runtime identity.",
+    invariant: "Frozen token hashes and normalized inputs are the only authority; zero rows are non-enumerable and multiple rows fail closed.",
+    responsePreservation: "Password reset and verification requests retain constant public responses; invitation acceptance retains the existing response projection.",
+    focusedTest: "PostgreSQL 18 allow, expired/replayed/ambiguous token, wrong identity and no direct table grant tests.",
+  },
+  {
+    targetSymbol: "app_rls.revalidate_authenticated_actor",
+    callShape: "Create revalidate_authenticated_actor(user_id, session_id, requested_licensee_id, requested_organization_id, checked_at, request_id) with the exact fixed row projection enforced by actorRevalidationRepository.ts.",
+    ordering: "Grant only to identity-authenticated-app; call it before installing protected actor context or invoking any protected delegate.",
+    invariant: "JWT role, scope and assurance never authorize database access; active user/session and current tenant bindings are database-derived.",
+    responsePreservation: "Existing authenticated claims and response bodies remain unchanged except stale or scope-forged sessions now fail closed.",
+    focusedTest: "Blank, stale, revoked, foreign-tenant and claimed-role forgery denial plus transaction-local context clearing.",
+  },
+  {
+    targetSymbol: "app_rls B01 authenticated security repository functions",
+    callShape: "Create every exact static app_rls function referenced by authenticatedSecurityRepository.ts and the B01 MFA, WebAuthn, invitation and refresh repositories, with fixed scalar arguments and result projections.",
+    ordering: "Functions revalidate canonical context, lock target rows where required, enforce lifecycle/CAS, perform the mutation and durable audit/outbox write atomically.",
+    invariant: "No dynamic SQL, table fallback, broad table grant, JWT-derived authority or protected global Prisma access.",
+    responsePreservation: "Keep current controller status codes, payloads, lockout/replay semantics, challenge attempt limits and credential rotation behavior.",
+    focusedTest: "Allowed same-actor paths and blank/foreign/stale/lower-assurance/replay/concurrent-loser denials for all command families.",
+  },
+  {
+    targetSymbol: "B01 password and profile step-up contracts",
+    callShape: "request_authenticated_email_change prepares pending email plus token atomically; prove_authenticated_password_step_up binds the verified hash to the live session; change_authenticated_password performs expected-hash CAS, session revocation and audit atomically.",
+    ordering: "Plain transaction, actor revalidation, canonical base context, frozen step-up proof, reinstall step-up-verified context, then one protected function.",
+    invariant: "Claim overrides cannot create assurance; null pendingEmail cannot mean clear; current-password proof and credential CAS are one transition.",
+    responsePreservation: "Email verification is delivered only after commit and account response fields remain explicitly projected.",
+    focusedTest: "Concurrent password change, stale proof, same-email, collision, delivery failure after commit and rollback-before-delivery tests.",
+  },
+  {
+    targetSymbol: "B01 runtime identities and grants",
+    callShape: "identity-pre-auth-app gets EXECUTE only on app_auth pre-auth functions; identity-authenticated-app gets EXECUTE only on exact app_rls B01 functions; neither receives protected table grants.",
+    ordering: "Functions and negative grant tests land before runtime activation; active access tokens must carry sessionId before enforcing revalidation.",
+    invariant: "No owner, superuser, BYPASSRLS, SET ROLE, human runtime role or cross-identity credential reuse.",
+    responsePreservation: "Use an explicit access-token sessionId cutover window so already-issued legacy tokens fail predictably rather than gaining fallback authority.",
+    focusedTest: "Wrong identity, PUBLIC execute, direct table access, missing sessionId and legacy-token cutover tests.",
+  },
+  {
+    targetSymbol: "B03 durable email and audit authority seam",
+    callShape: "Route post-commit account verification delivery and risk/audit persistence through B03 durable function-owned outboxes before secure-mode activation.",
+    ordering: "Add immutable authority columns and B03 functions first, then enable delivery enforcement after B01 functions and grants are active.",
+    invariant: "JSON payload and best-effort delivery cannot become authorization or completion authority.",
+    responsePreservation: "Email remains asynchronous from the committed account change and request response shape is unchanged.",
+    focusedTest: "Durable enqueue replay, digest mismatch, delivery retry and audit single-winner tests.",
+  },
+] as const;

@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import prisma from "../config/database";
@@ -19,7 +20,7 @@ import {
   isAdminMfaRequiredRole,
 } from "../services/auth/authService";
 import { getAdminMfaStatus } from "../services/auth/mfaService";
-import { findRefreshTokenByRaw } from "../services/auth/refreshTokenService";
+import { findRefreshTokenById } from "../services/auth/refreshTokenService";
 import { isValidEmailAddress, normalizeEmailAddress } from "../utils/email";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import type { AuthenticatedSessionClaims } from "../types";
@@ -280,10 +281,11 @@ export const buildAuthState = async (
   claims: AuthenticatedSessionClaims,
   userRole: string,
   userId: string,
-  currentSession?: { id: string; expiresAt: Date } | null
+  currentSession: { id: string; expiresAt: Date } | null,
+  db: Prisma.TransactionClient
 ) => {
   const mfaRequired = isAdminMfaRequiredRole(userRole as any);
-  const mfaStatus = mfaRequired ? await getAdminMfaStatus(userId) : null;
+  const mfaStatus = mfaRequired ? await getAdminMfaStatus(userId, db as any) : null;
   const stepUpMethod = getSensitiveActionStepUpMethod(userRole as any);
   const adminFreshEnough = (() => {
     if (!mfaRequired || claims.sessionStage !== "ACTIVE") return false;
@@ -314,9 +316,10 @@ export const buildAuthState = async (
   };
 };
 
-export const getCurrentRefreshSession = async (req: Request) => {
-  const currentRefresh = getRefreshTokenFromRequest(req);
-  return currentRefresh ? await findRefreshTokenByRaw(currentRefresh).catch(() => null) : null;
+export const getCurrentRefreshSession = async (req: Request, db: Prisma.TransactionClient) => {
+  const claims = getAuthClaims(req);
+  if (!claims?.userId || !claims.sessionId) return null;
+  return findRefreshTokenById({ sessionId: claims.sessionId, userId: claims.userId }, db);
 };
 
 export const ensureCsrfCookie = (req: Request, res: Response) => {

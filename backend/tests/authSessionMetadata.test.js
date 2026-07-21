@@ -3,6 +3,7 @@ const path = require("path");
 const { UserRole } = require("@prisma/client");
 
 const distRoot = path.resolve(__dirname, "../dist");
+process.env.NODE_ENV = "test";
 
 const mockModule = (relativePath, exportsValue) => {
   const resolved = require.resolve(path.join(distRoot, relativePath));
@@ -15,14 +16,15 @@ const mockModule = (relativePath, exportsValue) => {
 };
 
 let prismaUser = null;
+const prismaMock = {
+  user: {
+    findUnique: async () => prismaUser,
+  },
+};
 
 mockModule("config/database.js", {
   __esModule: true,
-  default: {
-    user: {
-      findUnique: async () => prismaUser,
-    },
-  },
+  default: prismaMock,
 });
 
 mockModule("services/auth/passwordService.js", {
@@ -116,7 +118,7 @@ const run = async () => {
     authAssurance: "PASSWORD",
     authenticatedAt: new Date("2026-03-28T10:00:00.000Z"),
     now: new Date("2026-03-28T10:00:00.000Z"),
-  });
+  }, prismaMock);
 
   assert.strictEqual(session.sessionId, "session-1");
   assert.strictEqual(session.auth.sessionId, "session-1");
@@ -142,7 +144,7 @@ const run = async () => {
     authenticatedAt: new Date("2026-03-28T10:00:00.000Z"),
     mfaVerifiedAt: new Date("2026-03-28T10:00:00.000Z"),
     now: new Date("2026-03-28T10:00:00.000Z"),
-  });
+  }, prismaMock);
 
   assert.strictEqual(adminSession.auth.stepUpMethod, "ADMIN_MFA");
 
