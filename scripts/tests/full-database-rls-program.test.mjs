@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manufacturerBootstrapBoundaryPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, operatorAdministrationReviewPath, operatorBoundariesPath, parseSchema, platformReadScopeBoundaryPath, policyAlertActorCeilingPath, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, publicReadContractPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, systemBoundariesPath, tableManifestPath, tableOwnershipReviewPath, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validatePublicReadContract, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manufacturerBootstrapBoundaryPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, operatorAdministrationReviewPath, operatorBoundariesPath, parseSchema, platformReadScopeBoundaryPath, policyAlertActorCeilingPath, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, publicReadContractPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, systemBoundariesPath, tableManifestPath, tableOwnershipReviewPath, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validateProtectedTransactionClients, validatePublicReadContract, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 import { buildContextBoundaryPlan, contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, contextBoundaryReportPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch, validateSystemBoundaryContracts } from "../rls/context-boundary-plan.mjs";
 import { validateGeneratedPackage } from "../rls/verify-full-rls-package.mjs";
 
@@ -57,6 +57,19 @@ test("named dashboard functions preserve both canonical workflows and exact prot
     "User:SELECT",
   ]);
   assert(rows.every((entry) => entry.method.startsWith("$function:app_rls.dashboard_snapshot_")));
+});
+
+test("implemented protected workflows use only typed transaction clients", () => {
+  const workflows = manifests().workflows;
+  const scan = scanProductionAccess();
+  const result = validateProtectedTransactionClients(workflows, scan);
+  assert.equal(result.workflows, 7);
+  assert(result.accesses > 0);
+  for (const clientKind of ["global-prisma", "transaction-client", "unknown"]) {
+    const candidate = structuredClone(scan);
+    candidate.accesses.find((access) => access.sourceFile === "backend/src/services/dashboardSnapshotService.ts").clientKind = clientKind;
+    assert.throws(() => validateProtectedTransactionClients(workflows, candidate), new RegExp(`${clientKind}.*CanonicalTransactionClient`));
+  }
 });
 
 test("stable IDs and references are unique and valid", () => {

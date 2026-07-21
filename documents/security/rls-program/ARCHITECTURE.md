@@ -190,7 +190,7 @@ Production break-glass is broker-issued only after an incident, ticket, strong M
 
 ## Direct Prisma migration strategy
 
-Inventory direct calls first, then move each canonical workflow—not each technical call site—behind the approved transaction repository, pre-auth function, or restricted system boundary. Keep existing behavior while RLS remains off; characterize allowed/denied scenarios before changing callers. A static scanner prevents new unmapped access. Retire a direct path only with import, registration, replacement and test evidence. Do not add a parallel repository abstraction where the existing transaction primitive is sufficient.
+Inventory direct calls first, then move each canonical workflow—not each technical call site—behind the approved transaction repository, pre-auth function, or restricted system boundary. Keep existing behavior while RLS remains off; characterize allowed/denied scenarios before changing callers. The static scanner rejects every implemented transaction-only workflow whose registered access originates from global Prisma or any receiver that is not the branded `CanonicalTransactionClient` created after context installation. Retire a direct path only with import, registration, replacement and test evidence. Do not add a parallel repository abstraction where the existing transaction primitive is sufficient.
 
 ### Deterministic context-boundary family programme
 

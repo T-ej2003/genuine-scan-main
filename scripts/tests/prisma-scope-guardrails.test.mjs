@@ -8,6 +8,12 @@ import test from "node:test";
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const scanner = path.join(repoRoot, "scripts/check-prisma-scope-guardrails.mjs");
 
+test("Prisma scope scanner validates registered canonical transaction paths", () => {
+  const result = spawnSync(process.execPath, [scanner], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Prisma scope guardrails passed/);
+});
+
 test("Prisma scope scanner catches unsafe protected model access", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "scope-guardrail-"));
   const sample = path.join(tmp, "unsafe.ts");

@@ -24,6 +24,11 @@ export type CanonicalDbContext = {
   purpose: string;
 };
 
+declare const canonicalTransactionClientBrand: unique symbol;
+export type CanonicalTransactionClient = Prisma.TransactionClient & {
+  readonly [canonicalTransactionClientBrand]: true;
+};
+
 type TransactionRunner = Pick<PrismaClient, "$transaction">;
 const allowedKeys = new Set([
   "userId",
@@ -92,10 +97,10 @@ export const installCanonicalDbContext = async (
 export const withCanonicalDbContext = async <T>(
   runner: TransactionRunner,
   context: CanonicalDbContext,
-  callback: (tx: Prisma.TransactionClient, installedContext: CanonicalDbContext) => Promise<T>,
+  callback: (tx: CanonicalTransactionClient, installedContext: CanonicalDbContext) => Promise<T>,
   options?: { isolationLevel?: Prisma.TransactionIsolationLevel; maxWait?: number; timeout?: number }
 ) =>
   runner.$transaction(async (tx) => {
     const installedContext = await installCanonicalDbContext(tx, context);
-    return callback(tx, installedContext);
+    return callback(tx as CanonicalTransactionClient, installedContext);
   }, options);

@@ -14,16 +14,6 @@
     },
     {
       "path": "backend/src/controllers/auditController.ts",
-      "model": "user",
-      "methods": [
-        "findMany"
-      ],
-      "reason": "Audit viewer user enrichment is constrained by scoped audit result userIds.",
-      "cannotWidenAccess": "Audit viewer user enrichment is constrained by scoped audit result userIds. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
-      "path": "backend/src/controllers/auditController.ts",
       "model": "auditLog",
       "methods": [
         "findFirst",
@@ -459,16 +449,6 @@
       "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
     },
     {
-      "path": "backend/src/services/analyticsService.ts",
-      "model": "qRCode",
-      "methods": [
-        "findMany"
-      ],
-      "reason": "Analytics service callers pass scoped filters before aggregation.",
-      "cannotWidenAccess": "Analytics service callers pass scoped filters before aggregation. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
       "path": "backend/src/services/attentionQueueService.ts",
       "model": "incident",
       "methods": [
@@ -639,47 +619,6 @@
       ],
       "reason": "Compliance pack generation is platform-admin scoped.",
       "cannotWidenAccess": "Compliance pack generation is platform-admin scoped. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
-      "path": "backend/src/services/dashboardSnapshotService.ts",
-      "model": "licensee",
-      "methods": [
-        "count"
-      ],
-      "reason": "Dashboard service builds scoped predicates from accessControlService before counting.",
-      "cannotWidenAccess": "Dashboard service builds scoped predicates from accessControlService before counting. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
-      "path": "backend/src/services/dashboardSnapshotService.ts",
-      "model": "user",
-      "methods": [
-        "count"
-      ],
-      "reason": "Dashboard service builds scoped predicates from accessControlService before counting.",
-      "cannotWidenAccess": "Dashboard service builds scoped predicates from accessControlService before counting. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
-      "path": "backend/src/services/dashboardSnapshotService.ts",
-      "model": "batch",
-      "methods": [
-        "count"
-      ],
-      "reason": "Dashboard service builds scoped predicates from accessControlService before counting.",
-      "cannotWidenAccess": "Dashboard service builds scoped predicates from accessControlService before counting. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
-      "path": "backend/src/services/dashboardSnapshotService.ts",
-      "model": "qRCode",
-      "methods": [
-        "count",
-        "groupBy"
-      ],
-      "reason": "Dashboard service builds scoped predicates from accessControlService before aggregation.",
-      "cannotWidenAccess": "Dashboard service builds scoped predicates from accessControlService before aggregation. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
       "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
     },
     {

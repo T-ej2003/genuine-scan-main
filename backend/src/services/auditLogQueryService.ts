@@ -1,6 +1,6 @@
 import { Prisma, UserRole } from "@prisma/client";
 
-import { CanonicalDbContext } from "../lib/canonicalDbContext";
+import { CanonicalDbContext, CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import { AuthenticatedSessionClaims } from "../types";
 import { decodeDateCursor, encodeDateCursor } from "../utils/cursorPagination";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
@@ -114,7 +114,7 @@ export const buildAuditLogBoundary = (
 };
 
 export const queryAuditLogs = async (
-  tx: Prisma.TransactionClient,
+  tx: CanonicalTransactionClient,
   filters: AuditLogQueryFilters,
   boundary: AuditLogBoundary
 ) => {

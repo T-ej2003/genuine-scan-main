@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma, UserRole } from "@prisma/client";
 
 import prisma from "../config/database";
-import { CanonicalDbContext, withCanonicalDbContext } from "../lib/canonicalDbContext";
+import { CanonicalDbContext, CanonicalTransactionClient, withCanonicalDbContext } from "../lib/canonicalDbContext";
 import { AuthRequest } from "../middleware/auth";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { summarizeQrStatusCounts } from "./qrStatusMetrics";
@@ -146,7 +146,7 @@ const count = (value: bigint | number | string, field: string) => {
 };
 
 export const loadInventoryAggregate = async (
-  tx: Prisma.TransactionClient,
+  tx: CanonicalTransactionClient,
   boundary: DashboardBoundary,
   expectedScopeFingerprint: string
 ): Promise<DashboardSnapshot> => {
@@ -186,7 +186,7 @@ export const loadInventoryAggregate = async (
 };
 
 export const computeDashboardSnapshot = async (
-  tx: Prisma.TransactionClient,
+  tx: CanonicalTransactionClient,
   boundary: DashboardBoundary,
   options: { scopeOnly?: boolean } = {}
 ): Promise<DashboardSnapshot | null> => {

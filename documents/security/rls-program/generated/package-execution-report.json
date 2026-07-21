@@ -4,7 +4,7 @@
   "targetEnvironment": "certification",
   "deploymentId": "cert",
   "greenDatabasePattern": "^mscqr_full_rls_cert_[a-z0-9_]+$",
-  "sourceContractSha256": "87c127f611e6ec3914521158958d4bf5ad7388590d0eca08c6c67c045e3298a3",
+  "sourceContractSha256": "bfc91c7c78ef005a6ec19556942f636fd3822cf857d828163ee4c0f5bbacac4f",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -12,7 +12,7 @@
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "b9248c5c9ceb7894e9a4ee18e8ae114e252b95e5b871b4d3854068ddb2bb88ac"
+      "sha256": "729b97eb64be0d1b3227b7f1ee75fd8b19c744b5925231a5da807e5949a2388d"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
@@ -245,7 +245,7 @@
       "sha256": "e3edc922568f6efa47676136e8a182684aba8558f33cab3479a21573d9f30eaf"
     }
   ],
-  "roleMarker": "mscqr-full-rls-clean-room:certification:87c127f611e6ec3914521158958d4bf5ad7388590d0eca08c6c67c045e3298a3",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:bfc91c7c78ef005a6ec19556942f636fd3822cf857d828163ee4c0f5bbacac4f",
   "blueDatabaseMutationAllowed": false,
   "greenInfrastructureBoundary": "separate encrypted RDS instance or cluster; never the current blue database",
   "certificationOnlyFiles": [
@@ -275,7 +275,7 @@
       "fileChecksums": {
         "admin-bootstrap.sql": "5b4c0bcaa258038280d31bf4a85379d504809a04ec9205634ed4fc91494e46fb",
         "00-preflight.sql": "9f418ce1cfae06c46587935d5c5e1adb40a3a50d4bb6dba26945440b2e3bd625",
-        "10-roles.sql": "b5b61454ad302a9839835125ab95494d30fea129b9bbcdcdaf6bbf34bd48019a"
+        "10-roles.sql": "1f9c2bd8071a64cda3f99eb0e107241dfe1e4074ba3e0c65e73b1b8394059d20"
       }
     },
     {
@@ -299,7 +299,7 @@
       "failureDisposition": "drop-green-database-then-clean-marked-roles",
       "fileChecksums": {
         "migration.sql": "ea5e0babccc4b268943d4e9ea7b28d0f6b7f1f9136edc7acb1b866082baf9e4a",
-        "15-migration-preflight.sql": "5ddc1f475e68e55d06380cfe6fd417398296108610f8e73d00de4133c184c6db"
+        "15-migration-preflight.sql": "3b77a8c9d49e7493639ce668948f2ca57faa9ed23bfc187490337c06f8622a5b"
       }
     },
     {
@@ -321,7 +321,7 @@
       "failureDisposition": "drop-green-database-then-clean-marked-roles",
       "fileChecksums": {
         "admin-ownership.sql": "a10897614902c090d720464868cdc616d36c4c367cc032de0bdf8007cfcae6be",
-        "11-ownership-grants.sql": "daa6bb52812a2cc9bc2d59e26f8fcecca996a2f770020cf0b2be7aa23a8d3f03"
+        "11-ownership-grants.sql": "dc8b4dc8c2e4e2ba0e5119a059d9f0775c3a579b31120ba33cf0b59530140257"
       }
     },
     {
@@ -345,9 +345,9 @@
       "failureDisposition": "drop-green-database-then-clean-marked-roles",
       "fileChecksums": {
         "runtime-policy.sql": "1e67b2ff32e6ef897fd1e5be408da1c6cdb0a481a84a7698c823cd37a244a531",
-        "20-context-helpers.sql": "6ada01cb6b4091c4bac4429b8898acaf7e073ad5264bd8076a2f7c2176824efe",
-        "21-runtime-grants.sql": "1a05d6aa87bf4047c028c455fe5e9eee0a2f322fc278b564a8df18d364aa8482",
-        "30-policies.sql": "07b6b1817b3407cbf20235f1b666d6eed97c0349807082af475391aacb017684"
+        "20-context-helpers.sql": "06fc04f19b900ea03125800788f5b43071d503e1a32089aa72468f00c9a6b8e8",
+        "21-runtime-grants.sql": "f5f9dd7b32c321a56e1251d010457e1b8c75bc0e199db364bc841fa184d94cd8",
+        "30-policies.sql": "1947336981e95738b40f312fe04b06d3b3fe9992b4a1e7f5470f33165b872c9b"
       }
     },
     {
@@ -368,7 +368,7 @@
       "failureDisposition": "drop-green-database-then-clean-marked-roles",
       "fileChecksums": {
         "verification.sql": "aa4791230fb7e1b8f9bd8d26358e462fbc7c59d8dd91993a6bcd848310b7f0f5",
-        "40-post-apply-verification.sql": "b222208c6e5d77ab2cf8700744733e8576af80dd4e594a031fa3b9bfee6d60c4"
+        "40-post-apply-verification.sql": "8b7164aa8ae1b08d6338603f14329d6d50aed4cdb3decad0b50c1f770dc67e21"
       }
     },
     {
@@ -396,7 +396,7 @@
       "failureDisposition": "retry-transactional-role-cleanup-after-green-database-absence-proof",
       "fileChecksums": {
         "clean-room-cleanup.sql": "6e34330ad5addc0cb5918614f98933dd74daa517f5297a460a59c6de16a7c721",
-        "90-clean-room-role-cleanup.sql": "1bb838fec301f8b5481d66a81a4628df6a63c088be2a3afb854d95282cc0c090"
+        "90-clean-room-role-cleanup.sql": "a4c9dedfaa0980eb57b035bd8ba876a60b9040e6a9e61e3dbf11313df46c0248"
       }
     }
   ]

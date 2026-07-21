@@ -1,6 +1,6 @@
 import { Prisma, TraceEventType, UserRole } from "@prisma/client";
 import prisma from "../config/database";
-import { CanonicalDbContext } from "../lib/canonicalDbContext";
+import { CanonicalDbContext, CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import { AuthenticatedSessionClaims } from "../types";
 import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
@@ -290,7 +290,7 @@ export const backfillTraceEventsFromAuditLogs = async (opts?: {
 };
 
 export const getTraceTimeline = async (
-  tx: Prisma.TransactionClient,
+  tx: CanonicalTransactionClient,
   opts: TraceTimelineQuery,
   context: CanonicalDbContext
 ) => {

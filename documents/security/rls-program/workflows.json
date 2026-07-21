@@ -5304,7 +5304,8 @@
       "sameTransactionGuarantee": true,
       "postgresqlCertificationStatus": "pending",
       "platformAdminRequiredAssurance": "mfa-verified",
-      "remainingCertification": "Disposable PostgreSQL tests must prove exact app-role grants, policy enforcement, cross-tenant denial and empty-context denial before production certification."
+      "remainingCertification": "Disposable PostgreSQL tests must prove exact app-role grants, policy enforcement, cross-tenant denial and empty-context denial before production certification.",
+      "protectedQueryClient": "transaction-client-only"
     },
     {
       "id": "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports",
@@ -5440,7 +5441,8 @@
       "sameTransactionGuarantee": true,
       "postgresqlCertificationStatus": "pending",
       "platformAdminRequiredAssurance": "mfa-verified",
-      "remainingCertification": "Disposable PostgreSQL tests must prove exact app-role grants, AuditLog policy enforcement, cross-tenant denial and empty-context denial before production certification."
+      "remainingCertification": "Disposable PostgreSQL tests must prove exact app-role grants, AuditLog policy enforcement, cross-tenant denial and empty-context denial before production certification.",
+      "protectedQueryClient": "transaction-client-only"
     },
     {
       "id": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
@@ -5591,7 +5593,8 @@
       "sameTransactionGuarantee": true,
       "postgresqlCertificationStatus": "pending",
       "platformAdminRequiredAssurance": "mfa-verified",
-      "remainingCertification": "Disposable PostgreSQL tests must prove exact app-role grants, AuditLog and User policy enforcement, cross-tenant denial and empty-context denial before production certification."
+      "remainingCertification": "Disposable PostgreSQL tests must prove exact app-role grants, AuditLog and User policy enforcement, cross-tenant denial and empty-context denial before production certification.",
+      "protectedQueryClient": "transaction-client-only"
     },
     {
       "id": "workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report",

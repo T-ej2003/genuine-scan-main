@@ -1,6 +1,6 @@
 import { Prisma, UserRole } from "@prisma/client";
 
-import { CanonicalDbContext } from "../lib/canonicalDbContext";
+import { CanonicalDbContext, CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import { AuthenticatedSessionClaims } from "../types";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { coerceAuditDetails, redactAuditDetails } from "./auditExportRedactionService";
@@ -63,7 +63,7 @@ export const buildFraudReportBoundary = (
 };
 
 export const queryFraudReports = async (
-  tx: Prisma.TransactionClient,
+  tx: CanonicalTransactionClient,
   query: FraudReportQuery,
   context: CanonicalDbContext
 ) => {

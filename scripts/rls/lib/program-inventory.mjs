@@ -475,8 +475,13 @@ export const scanProductionAccess = () => {
   const scanFile = (file, production) => {
     const source = fs.readFileSync(file, "utf8");
     const ast = ts.createSourceFile(rel(file), source, ts.ScriptTarget.Latest, true);
+    const globalPrismaNames = new Set(ast.statements
+      .filter((statement) => ts.isImportDeclaration(statement)
+        && /(?:^|\/)config\/database$/.test(String(statement.moduleSpecifier.text || ""))
+        && statement.importClause?.name)
+      .map((statement) => statement.importClause.name.text));
     const recorded = new Set();
-    const record = (node, model, method, command, evidence) => {
+    const record = (node, model, method, command, evidence, clientKind = "unknown") => {
       const line = ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1;
       const fn = functionName(ts, node);
       const surface = surfaceFor(file, fn);
@@ -485,15 +490,15 @@ export const scanProductionAccess = () => {
       recorded.add(locator);
       const semanticLocator = `${rel(file)}:${fn}:${model.name}:${method}`;
       const semanticFunctionAccess = method.startsWith("$function:");
-      accesses.push({ id: ACCESS_ID_OVERRIDES.get(semanticLocator) || hashId("access", semanticFunctionAccess ? `${semanticLocator}:${command}` : locator), sourceFile: rel(file), line, function: fn, tableId: `table-${slug(model.physicalTable)}`, prismaModel: model.name, command, method, executionSurface: surface, production, registrationEvidence: roots.has(file) ? "registered-entrypoint" : reachable.has(file) ? "reachable-from-registered-entrypoint" : "unregistered", evidence: evidence.replace(/\s+/g, " ").slice(0, 350) });
+      accesses.push({ id: ACCESS_ID_OVERRIDES.get(semanticLocator) || hashId("access", semanticFunctionAccess ? `${semanticLocator}:${command}` : locator), sourceFile: rel(file), line, function: fn, tableId: `table-${slug(model.physicalTable)}`, prismaModel: model.name, command, method, clientKind, executionSurface: surface, production, registrationEvidence: roots.has(file) ? "registered-entrypoint" : reachable.has(file) ? "reachable-from-registered-entrypoint" : "unregistered", evidence: evidence.replace(/\s+/g, " ").slice(0, 350) });
     };
-    const recordDatabaseFunctionAccesses = (node, raw) => {
+    const recordDatabaseFunctionAccesses = (node, raw, clientKind) => {
       for (const [functionName, entries] of DATABASE_FUNCTION_ACCESSES) {
         if (!new RegExp(`\\b${functionName.replaceAll(".", "\\.")}\\s*\\(`, "i").test(raw)) continue;
         for (const [modelName, command] of entries) {
           const model = modelsByName.get(modelName);
           assert(model, `${functionName} references unknown Prisma model ${modelName}`);
-          record(node, model, `$function:${functionName}`, command, raw);
+          record(node, model, `$function:${functionName}`, command, raw, clientKind);
         }
       }
     };
@@ -520,7 +525,35 @@ export const scanProductionAccess = () => {
       for (let current = node.parent; current; current = current.parent) if (ts.isFunctionLike(current)) return current;
       return ast;
     };
-    const resolveVariable = (name, position) => variableAliases.filter((alias) => alias.name === name && alias.start < position && alias.scopeStart <= position && alias.scopeEnd >= position).sort((a, b) => b.start - a.start)[0]?.model || null;
+    const resolveVariableAlias = (name, position) => variableAliases.filter((alias) => alias.name === name && alias.start < position && alias.scopeStart <= position && alias.scopeEnd >= position).sort((a, b) => b.start - a.start)[0] || null;
+    const resolveVariable = (name, position) => resolveVariableAlias(name, position)?.model || null;
+    const rootIdentifier = (expression) => {
+      if (ts.isIdentifier(expression)) return expression.text;
+      if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression) || ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isNonNullExpression(expression)) return rootIdentifier(expression.expression);
+      return null;
+    };
+    const clientKindFor = (expression, node) => {
+      if (ts.isIdentifier(expression)) {
+        const alias = resolveVariableAlias(expression.text, node.getStart(ast));
+        if (alias) return alias.clientKind;
+      }
+      const root = rootIdentifier(expression);
+      if (globalPrismaNames.has(root)) return "global-prisma";
+      let genericTransactionClient = false;
+      for (let current = node; current; current = current.parent) {
+        if (!ts.isFunctionLike(current)) continue;
+        const parameter = current.parameters?.find((candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === root);
+        const type = parameter?.type?.getText(ast) || "";
+        if (/\bCanonicalTransactionClient\b/.test(type)) return "canonical-transaction-client";
+        if (/\bTransactionClient\b/.test(type)) genericTransactionClient = true;
+        if (parameter && ts.isCallExpression(current.parent)
+          && current.parent.arguments[2] === current
+          && ts.isIdentifier(current.parent.expression)
+          && current.parent.expression.text === "withCanonicalDbContext") return "canonical-transaction-client";
+      }
+      if (genericTransactionClient) return "transaction-client";
+      return "unknown";
+    };
     const modelForExpression = (expression, position) => {
       if (!expression) return null;
       const candidates = [...delegateCandidates(expression)];
@@ -542,32 +575,34 @@ export const scanProductionAccess = () => {
       const model = modelForExpression(declaration.initializer, declaration.getStart(ast));
       if (!model) continue;
       const scope = containingScope(declaration);
-      variableAliases.push({ name: declaration.name.text, model, start: declaration.getStart(ast), scopeStart: scope.getStart(ast), scopeEnd: scope.getEnd() });
+      variableAliases.push({ name: declaration.name.text, model, clientKind: clientKindFor(declaration.initializer, declaration), start: declaration.getStart(ast), scopeStart: scope.getStart(ast), scopeEnd: scope.getEnd() });
     }
     const visit = (node) => {
       if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
         const method = node.expression.name.text;
         const target = node.expression.expression;
-        if (methodNames.has(method) && ts.isPropertyAccessExpression(target) && delegates.has(target.name.text)) record(node, delegates.get(target.name.text), method, operationFor(method), node.getText(ast));
+        if (methodNames.has(method) && ts.isPropertyAccessExpression(target) && delegates.has(target.name.text)) record(node, delegates.get(target.name.text), method, operationFor(method), node.getText(ast), clientKindFor(target, node));
         else if (methodNames.has(method)) {
           const aliasModel = modelForExpression(target, node.getStart(ast));
-          if (aliasModel) record(node, aliasModel, method, operationFor(method), node.getText(ast));
+          if (aliasModel) record(node, aliasModel, method, operationFor(method), node.getText(ast), clientKindFor(target, node));
         }
         if (rawMethods.has(method)) {
           const raw = node.getText(ast);
-          recordDatabaseFunctionAccesses(node, raw);
+          const clientKind = clientKindFor(node.expression.expression, node);
+          recordDatabaseFunctionAccesses(node, raw, clientKind);
           for (const name of new Set(rawTableNamesFor(raw))) {
             const model = physical.get(name);
-            if (model) for (const command of rawCommandsFor(method, raw)) record(node, model, method, command, raw);
+            if (model) for (const command of rawCommandsFor(method, raw)) record(node, model, method, command, raw, clientKind);
           }
         }
       }
       if (ts.isTaggedTemplateExpression(node) && ts.isPropertyAccessExpression(node.tag) && rawMethods.has(node.tag.name.text)) {
         const raw = node.getText(ast);
-        recordDatabaseFunctionAccesses(node, raw);
+        const clientKind = clientKindFor(node.tag.expression, node);
+        recordDatabaseFunctionAccesses(node, raw, clientKind);
         for (const name of new Set(rawTableNamesFor(raw))) {
           const model = physical.get(name);
-          if (model) for (const command of rawCommandsFor(node.tag.name.text, raw)) record(node, model, node.tag.name.text, command, raw);
+          if (model) for (const command of rawCommandsFor(node.tag.name.text, raw)) record(node, model, node.tag.name.text, command, raw, clientKind);
         }
       }
       ts.forEachChild(node, visit);
@@ -578,6 +613,25 @@ export const scanProductionAccess = () => {
   const unregistered = all.filter((file) => !reachable.has(file));
   unregistered.forEach((file) => scanFile(file, false));
   return { accesses: accesses.filter((item) => item.production).sort((a, b) => a.id.localeCompare(b.id)), unregisteredAccesses: accesses.filter((item) => !item.production).sort((a, b) => a.id.localeCompare(b.id)), activeFiles: active.map(rel), unregisteredFiles: unregistered.map(rel), registrations: detectRegistrations() };
+};
+
+export const validateProtectedTransactionClients = (workflowManifest, scan = scanProductionAccess()) => {
+  const accessById = new Map(scan.accesses.map((access) => [access.id, access]));
+  const protectedWorkflows = workflowManifest.workflows.filter((workflow) =>
+    workflow.contextBoundaryStatus === "implemented" && workflow.sameTransactionGuarantee === true
+  );
+  let protectedAccesses = 0;
+  for (const workflow of protectedWorkflows) {
+    assert.equal(workflow.protectedQueryClient, "transaction-client-only", `${workflow.id} lacks the protected repository client contract`);
+    assert(workflow.supportingEvidence?.length, `${workflow.id} lacks registered protected access evidence`);
+    for (const evidence of workflow.supportingEvidence) {
+      const access = accessById.get(evidence.accessId);
+      assert(access, `${workflow.id} references missing protected access ${evidence.accessId}`);
+      assert.equal(access.clientKind, "canonical-transaction-client", `${workflow.id} uses ${access.clientKind} at ${access.sourceFile}:${access.line}; protected access must use CanonicalTransactionClient`);
+      protectedAccesses += 1;
+    }
+  }
+  return { workflows: protectedWorkflows.length, accesses: protectedAccesses };
 };
 
 const displayName = (fn) => fn === "module" ? "Module database access" : fn.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase());
@@ -2477,7 +2531,8 @@ export const buildWorkflowManifest = () => {
       supportingEvidence: accesses.map((access) => ({ accessId: access.id, source: `${access.sourceFile}:${access.line}`, registration: access.registrationEvidence, method: access.method })),
     };
   }).sort((a, b) => a.id.localeCompare(b.id));
-  const result = { schemaVersion: 1, groupingRule: "One workflow per execution surface, canonical source file, and containing function; repeated table calls within that function remain one functional workflow.", generatedEvidence: { productionAccessSites: scan.accesses.length, testPathsExcluded: ["backend/tests", "scripts/tests"], registrations: scan.registrations, unregisteredPotentiallyDeadAccesses: scan.unregisteredAccesses, unregisteredFiles: scan.unregisteredFiles }, workflows };
+  const unregisteredPotentiallyDeadAccesses = scan.unregisteredAccesses.map(({ clientKind: _clientKind, ...access }) => access);
+  const result = { schemaVersion: 1, groupingRule: "One workflow per execution surface, canonical source file, and containing function; repeated table calls within that function remain one functional workflow.", generatedEvidence: { productionAccessSites: scan.accesses.length, testPathsExcluded: ["backend/tests", "scripts/tests"], registrations: scan.registrations, unregisteredPotentiallyDeadAccesses, unregisteredFiles: scan.unregisteredFiles }, workflows };
   const tableManifest = readJson(tableManifestPath);
   for (const table of tableManifest.tables) {
     const touching = workflows.filter((workflow) => workflow.tablesTouched.includes(table.id));
@@ -2500,6 +2555,10 @@ export const buildWorkflowManifest = () => {
   const policyAlertActorCeiling = applyPolicyAlertActorCeilingAuthority(result);
   const publicReadContract = applyPublicReadContractAuthority(result);
   applyRuntimeImplementationAuthority(result);
+  for (const workflow of result.workflows.filter((item) => item.contextBoundaryStatus === "implemented" && item.sameTransactionGuarantee === true)) {
+    workflow.protectedQueryClient = "transaction-client-only";
+  }
+  validateProtectedTransactionClients(result, scan);
   for (const table of tableManifest.tables) applyRuntimeCommandMatrix(table, result.workflows);
   const commandManifest = buildCommandSemantics(tableManifest, result);
   const preAuthManifest = buildPreAuthBoundary(result, commandManifest, tableManifest);

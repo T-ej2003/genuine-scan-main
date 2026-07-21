@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validatePublicReadContract, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
+import { actorClasses, assuranceLevels, boundaries, categories, commands, manifests, parseSchema, policyCommands, policyDependencyGraphPath, scanProductionAccess, sharedApplyIsBlocked, surfaces, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validateProtectedTransactionClients, validatePublicReadContract, validateRuntimeIdentities, validateWorkerBoundaries } from "./lib/program-inventory.mjs";
 import { contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch, validateSystemBoundaryContracts } from "./context-boundary-plan.mjs";
 import { validateGeneratedPackage } from "./verify-full-rls-package.mjs";
 
@@ -187,7 +187,9 @@ for (const workflow of workflows.workflows) for (const item of workflow.commands
   }), `${workflow.id} ${item.tableId} ${command} lacks an exact command rule`);
 }
 const mappedAccessIds = new Set(workflows.workflows.flatMap((workflow) => workflow.supportingEvidence.map((evidence) => evidence.accessId)));
-for (const access of scanProductionAccess().accesses) assert(mappedAccessIds.has(access.id), `production access ${access.id} is not mapped to a workflow`);
+const accessScan = scanProductionAccess();
+for (const access of accessScan.accesses) assert(mappedAccessIds.has(access.id), `production access ${access.id} is not mapped to a workflow`);
+validateProtectedTransactionClients(workflows, accessScan);
 validateRuntimeIdentities(identities, decisions);
 validatePreAuthFunctions(preAuthFunctions, workflows, commandSemantics, identities, tables);
 validateWorkerBoundaries(workerBoundaries, workflows, commandSemantics, identities, tables);

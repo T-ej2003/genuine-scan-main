@@ -1,7 +1,7 @@
 import { Prisma, SecurityPolicy, UserRole, UserStatus } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import prisma from "../config/database";
-import { CanonicalDbContext } from "../lib/canonicalDbContext";
+import { CanonicalDbContext, CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import { AuthenticatedSessionClaims } from "../types";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { MANUFACTURER_ROLES, isLicenseeAdminRole, isPlatformRole } from "./manufacturerScopeService";
@@ -363,7 +363,7 @@ export const buildRiskAnalyticsBoundary = (
   };
 };
 
-const loadRiskPolicy = async (tx: Prisma.TransactionClient, licenseeId: string) => {
+const loadRiskPolicy = async (tx: CanonicalTransactionClient, licenseeId: string) => {
   const [policy] = await tx.$queryRaw<
     Array<Pick<SecurityPolicy, "multiScanThreshold" | "geoDriftThresholdKm" | "velocitySpikeThresholdPerMin">>
   >`
@@ -376,7 +376,7 @@ const loadRiskPolicy = async (tx: Prisma.TransactionClient, licenseeId: string) 
 };
 
 const recordRiskAnalyticsRead = (
-  tx: Prisma.TransactionClient,
+  tx: CanonicalTransactionClient,
   context: CanonicalDbContext,
   query: RiskAnalyticsQuery,
   result: { analyzedBatches: number; returnedBatches: number; analyzedManufacturers: number },
@@ -410,7 +410,7 @@ const recordRiskAnalyticsRead = (
 };
 
 export const getRiskAnalytics = async (
-  tx: Prisma.TransactionClient,
+  tx: CanonicalTransactionClient,
   query: RiskAnalyticsQuery,
   context: CanonicalDbContext,
   now = new Date()
