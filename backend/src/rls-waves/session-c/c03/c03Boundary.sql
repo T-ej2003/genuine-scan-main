@@ -80,6 +80,40 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_platform_actor_scope(
+  allowed_roles_json jsonb,
+  minimum_assurance text,
+  purpose_code text
+)
+RETURNS TABLE(user_id text, role text)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+  SELECT actor.id::text, actor.role::text
+    FROM public."User" actor
+   WHERE actor.id = current_setting('app.user_id', true)
+     AND actor.role::text = current_setting('app.role', true)
+     AND actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     AND actor."orgId" IS NULL AND actor."licenseeId" IS NULL
+     AND actor."isActive" AND actor.status = 'ACTIVE'::public."UserStatus"
+     AND actor."deletedAt" IS NULL AND actor."disabledAt" IS NULL
+     AND NULLIF(current_setting('app.organization_id', true), '') IS NULL
+     AND NULLIF(current_setting('app.licensee_id', true), '') IS NULL
+     AND NULLIF(current_setting('app.manufacturer_id', true), '') IS NULL
+     AND current_setting('app.request_id', true) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     AND current_setting('app.purpose', true) = purpose_code
+     AND jsonb_typeof(allowed_roles_json) = 'array'
+     AND allowed_roles_json ? actor.role::text
+     AND CASE minimum_assurance
+           WHEN 'password-verified' THEN current_setting('app.auth_assurance', true) IN ('password-verified','mfa-verified','step-up-verified')
+           WHEN 'mfa-verified' THEN current_setting('app.auth_assurance', true) IN ('mfa-verified','step-up-verified')
+           WHEN 'step-up-verified' THEN current_setting('app.auth_assurance', true) = 'step-up-verified'
+           ELSE false
+         END
+$$;
+
 CREATE OR REPLACE FUNCTION app_rls.c03_revalidate_incident_actor_scope(
   incident_id text, allowed_roles_json jsonb, minimum_assurance text, purpose_code text
 )
@@ -149,6 +183,7 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION app_rls.c03_revalidate_actor_scope(text,jsonb,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_revalidate_platform_actor_scope(jsonb,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_revalidate_incident_actor_scope(text,jsonb,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_revalidate_policy_rule_actor_scope(text,jsonb,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_revalidate_compliance_pack_job_actor_scope(text,jsonb,text,text) FROM PUBLIC;

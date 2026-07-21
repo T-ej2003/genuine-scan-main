@@ -29,8 +29,39 @@ BEGIN
      AND current_setting('app.purpose', true) = purpose_code
      AND current_setting('app.request_id', true) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'C03_POLICY_ACTOR_DENIED' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'C03_POLICY_DENIED' USING ERRCODE = '42501';
   END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_require_platform_policy_actor(purpose_code text)
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  actor_id text;
+BEGIN
+  SELECT actor.id INTO actor_id
+    FROM public."User" actor
+   WHERE actor.id = current_setting('app.user_id', true)
+     AND actor.role::text = current_setting('app.role', true)
+     AND actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     AND actor."orgId" IS NULL AND actor."licenseeId" IS NULL
+     AND actor."isActive" AND actor.status = 'ACTIVE'::public."UserStatus"
+     AND actor."deletedAt" IS NULL AND actor."disabledAt" IS NULL
+     AND NULLIF(current_setting('app.organization_id', true), '') IS NULL
+     AND NULLIF(current_setting('app.licensee_id', true), '') IS NULL
+     AND NULLIF(current_setting('app.manufacturer_id', true), '') IS NULL
+     AND current_setting('app.auth_assurance', true) IN ('mfa-verified','step-up-verified')
+     AND current_setting('app.purpose', true) = purpose_code
+     AND current_setting('app.request_id', true) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
+  IF actor_id IS NULL THEN
+    RAISE EXCEPTION 'C03_POLICY_DENIED' USING ERRCODE = '42501';
+  END IF;
+  RETURN actor_id;
 END;
 $$;
 
@@ -42,7 +73,8 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
   SELECT current_setting('app.purpose', true) LIKE 'incident-response-policy-%'
-     AND EXISTS (
+     AND (
+       EXISTS (
        SELECT 1
          FROM public."User" actor
          JOIN public."Licensee" licensee ON licensee.id = current_setting('app.licensee_id', true)
@@ -56,6 +88,20 @@ AS $$
           AND licensee."isActive" AND licensee."suspendedAt" IS NULL AND organization."isActive"
           AND current_setting('app.organization_id', true) = organization.id
           AND current_setting('app.auth_assurance', true) IN ('mfa-verified','step-up-verified')
+       )
+       OR EXISTS (
+         SELECT 1 FROM public."User" actor
+          WHERE actor.id = current_setting('app.user_id', true)
+            AND actor.role::text = current_setting('app.role', true)
+            AND actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+            AND actor."orgId" IS NULL AND actor."licenseeId" IS NULL
+            AND actor."isActive" AND actor.status = 'ACTIVE'::public."UserStatus"
+            AND actor."deletedAt" IS NULL AND actor."disabledAt" IS NULL
+            AND NULLIF(current_setting('app.organization_id', true), '') IS NULL
+            AND NULLIF(current_setting('app.licensee_id', true), '') IS NULL
+            AND NULLIF(current_setting('app.manufacturer_id', true), '') IS NULL
+            AND current_setting('app.auth_assurance', true) IN ('mfa-verified','step-up-verified')
+       )
      )
      AND current_setting('app.request_id', true) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
 $$;
@@ -156,10 +202,73 @@ BEGIN
       SELECT p.id, p."orgId", p."licenseeId", p."manufacturerId", p."createdByUserId",
              p.name, p.description, p."ruleType", p."isActive", p.threshold, p."windowMinutes",
              p.severity, p."autoCreateIncident", p."incidentSeverity", p."incidentPriority",
-             p."actionConfig", p."createdAt", p."updatedAt"
+             p."actionConfig", p."createdAt", p."updatedAt",
+             CASE WHEN organization.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', organization.id, 'name', organization.name) END AS organization,
+             CASE WHEN licensee.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', licensee.id, 'name', licensee.name, 'prefix', licensee.prefix) END AS licensee,
+             CASE WHEN creator.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', creator.id, 'email', creator.email, 'name', creator.name) END AS "createdByUser"
         FROM public."PolicyRule" p
+        LEFT JOIN public."Organization" organization ON organization.id = p."orgId"
+        LEFT JOIN public."Licensee" licensee ON licensee.id = p."licenseeId"
+        LEFT JOIN public."User" creator ON creator.id = p."createdByUserId"
        WHERE p."licenseeId" = licensee_id
          AND (rule_type_filter IS NULL OR p."ruleType"::text = rule_type_filter)
+         AND (active_filter IS NULL OR p."isActive" = active_filter)
+       ORDER BY p."updatedAt" DESC, p.id DESC
+       LIMIT row_limit OFFSET row_offset
+    ) selected;
+  RETURN result;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION app_rls.c03_list_platform_policy_rules(
+  rule_type_filter text,
+  active_filter boolean,
+  row_limit integer,
+  row_offset integer
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  result jsonb;
+BEGIN
+  PERFORM app_rls.c03_require_platform_policy_actor('incident-response-policy-list');
+  IF row_limit < 1 OR row_limit > 200 OR row_offset < 0
+     OR (rule_type_filter IS NOT NULL AND rule_type_filter NOT IN (
+       'DISTINCT_DEVICES','MULTI_COUNTRY','BURST_SCANS','TOO_MANY_REPORTS'
+     )) THEN
+    RAISE EXCEPTION 'C03_POLICY_LIST_INVALID' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT jsonb_build_object(
+    'rules', COALESCE(jsonb_agg(to_jsonb(selected) ORDER BY selected."updatedAt" DESC, selected.id DESC), '[]'::jsonb),
+    'total', (SELECT count(*) FROM public."PolicyRule" p
+               WHERE (rule_type_filter IS NULL OR p."ruleType"::text = rule_type_filter)
+                 AND (active_filter IS NULL OR p."isActive" = active_filter))
+  )
+    INTO result
+    FROM (
+      SELECT p.id, p."orgId", p."licenseeId", p."manufacturerId", p."createdByUserId",
+             p.name, p.description, p."ruleType", p."isActive", p.threshold, p."windowMinutes",
+             p.severity, p."autoCreateIncident", p."incidentSeverity", p."incidentPriority",
+             p."actionConfig", p."createdAt", p."updatedAt",
+             CASE WHEN organization.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', organization.id, 'name', organization.name) END AS organization,
+             CASE WHEN licensee.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', licensee.id, 'name', licensee.name, 'prefix', licensee.prefix) END AS licensee,
+             CASE WHEN creator.id IS NULL THEN NULL ELSE jsonb_build_object(
+               'id', creator.id, 'email', creator.email, 'name', creator.name) END AS "createdByUser"
+        FROM public."PolicyRule" p
+        LEFT JOIN public."Organization" organization ON organization.id = p."orgId"
+        LEFT JOIN public."Licensee" licensee ON licensee.id = p."licenseeId"
+        LEFT JOIN public."User" creator ON creator.id = p."createdByUserId"
+       WHERE (rule_type_filter IS NULL OR p."ruleType"::text = rule_type_filter)
          AND (active_filter IS NULL OR p."isActive" = active_filter)
        ORDER BY p."updatedAt" DESC, p.id DESC
        LIMIT row_limit OFFSET row_offset
@@ -251,9 +360,16 @@ BEGIN
     RAISE EXCEPTION 'C03_POLICY_UPDATE_INVALID' USING ERRCODE = '22023';
   END IF;
 
-  SELECT * INTO current_row FROM public."PolicyRule" WHERE id = policy_rule_id FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'C03_POLICY_NOT_FOUND' USING ERRCODE = 'P0002'; END IF;
-  PERFORM 1 FROM app_rls.c03_require_policy_actor(current_row."licenseeId", 'incident-response-policy-update');
+  PERFORM 1 FROM app_rls.c03_require_policy_actor(
+    current_setting('app.licensee_id', true),
+    'incident-response-policy-update'
+  );
+  SELECT * INTO current_row
+    FROM public."PolicyRule"
+   WHERE id = policy_rule_id
+     AND "licenseeId" = current_setting('app.licensee_id', true)
+   FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'C03_POLICY_DENIED' USING ERRCODE = '42501'; END IF;
   SELECT * INTO replay FROM app_rls.c03_policy_replay('update:' || policy_rule_id, patch);
   IF replay.replayed THEN
     RETURN replay.result || '{"__c03Replay":true}'::jsonb;
@@ -285,9 +401,11 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION app_rls.c03_require_policy_actor(text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_require_platform_policy_actor(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_policy_context_valid() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_policy_replay(text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_complete_policy_command(text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_list_policy_rules(text,boolean,integer,integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.c03_list_platform_policy_rules(text,boolean,integer,integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_create_policy_rule(jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.c03_update_policy_rule(text,jsonb) FROM PUBLIC;

@@ -53,16 +53,17 @@ Any required Session A or integration-owner change will be reported to the Sessi
 ## Implementation status
 
 - [x] C03 selector and resource actor boundaries added with active user/parent revalidation seams and canonical context reinstall.
-- [x] PolicyRule list/create/update application paths converted through one canonical actor/resource transaction and named-function repository.
+- [x] PolicyRule tenant list/create/update and platform-global list paths converted through canonical actor/platform/resource transactions and one named-function repository.
 - [x] Policy mutations reject protected ownership input, lock updates, deterministically replay by request ID, and couple audit/outbox writes to the protected transaction.
-- [x] Focused PostgreSQL 18 policy proof covers positive create/list/update, concurrent replay, immutable attribution, inactive parent, disabled actor, wrong role/assurance, protected-column and direct-table denial.
-- [ ] Platform-global and manufacturer-specific policy variants remain blocked on a reviewed Session A scope contract; the product engine consumes both and Session C does not convert that ambiguity into a prohibition.
+- [x] Focused PostgreSQL 18 policy proof exercises registered `/api/ir/policies` GET/POST/PATCH through authentication, RBAC, MFA and CSRF, plus concurrent replay, immutable attribution, inactive parent, disabled actor, wrong role/assurance, protected-column and direct-table denial.
+- [ ] Platform-global and manufacturer-specific policy mutation variants remain blocked on a reviewed Session A scope contract; the platform-global list is proven and the product engine still consumes the unreviewed mutation scopes.
 - [ ] PolicyAlert list/link remains blocked on the durable incident-authorization product state owned by Session A.
 - [x] Exact Session A and integration-owner signatures recorded in `C03_INTEGRATION_SEAMS.md`.
 - [x] Changed TypeScript compiles and focused IR pagination plus C03 actor/resource tests pass.
 - [ ] Recovered sensitive approval, governance, retention, compliance and incident conversions still require their focused SQL packages and PostgreSQL application-path gates before certification.
 - [ ] Session A functions exist in the canonical GREEN package; until then the converted paths deliberately fail closed.
 - [x] PolicyRule local function package and focused PostgreSQL 18 application-path gate green.
+- [x] Independent policy checkpoint P2 findings corrected: platform list, response projection, audit detail, authorization-before-lock, isolated registered first-write/replay proof, scoped cleanup, and replay conflict mapping; focused rereview passed with no unresolved P0-P2.
 - [ ] Governance/retention/compliance function package integrated and PostgreSQL-certified.
 - [ ] Incident detail/mutation/evidence boundary converted and certified.
 - [ ] Containment, policy-worker, approval and tamper-worker boundaries converted and certified.

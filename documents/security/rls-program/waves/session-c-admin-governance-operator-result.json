@@ -12,13 +12,13 @@
   "families": {
     "c-03-governance-policies-incidents-compliance": {
       "status": "policy-administration-local-postgresql-18-green-family-remainder-pending",
-      "sharedBoundary": "irPolicyController -> withC03ActorTransaction/withC03ResourceTransaction -> c03PolicyRepository -> app_rls policy functions",
+      "sharedBoundary": "registered /api/ir/policies routes -> authenticate/RBAC/MFA/CSRF -> irPolicyController -> withC03ActorTransaction/withC03PlatformTransaction/withC03ResourceTransaction -> c03PolicyRepository -> app_rls policy functions",
       "proof": "backend/tests/rls-wave-c/c03/policyPostgres18.test.js",
       "proofResult": "PASS",
       "workflowMappings": [
         {
-          "boundary": "app_rls.c03_list_policy_rules(text,boolean,integer,integer)",
-          "disposition": "tenant-scoped-implemented-local-proof-platform-global-scope-contract-pending",
+          "boundary": "app_rls.c03_list_policy_rules(text,boolean,integer,integer), app_rls.c03_list_platform_policy_rules(text,boolean,integer,integer)",
+          "disposition": "tenant-scoped-and-platform-global-implemented-local-proof",
           "workflowIds": [
             "workflow-http-backend-src-controllers-ir-policy-controller-ts-list-ir-policies"
           ]
@@ -40,7 +40,7 @@
       ],
       "positiveNegativeEvidence": {
         "positive": [
-          "registered create/list/update controller paths",
+          "registered /api/ir/policies GET/POST/PATCH paths through authentication, RBAC, recent MFA and CSRF middleware",
           "database-revalidated active platform actor and target parent scope",
           "immutable database-derived organization, licensee and creator attribution",
           "same-transaction audit and security outbox"
@@ -50,13 +50,95 @@
           "disabled actor",
           "wrong role",
           "wrong assurance",
+          "missing session",
+          "stale route MFA",
+          "missing cookie CSRF",
+          "mismatched replay payload",
           "protected ownership column",
           "direct PolicyRule table access"
         ],
         "concurrentReplay": "PASS",
         "atomicAuditOutbox": "PASS",
-        "forcedRlsTableCount": 7,
+        "forcedRlsTableCount": 11,
         "directBusinessTableGrantCount": 0
+      },
+      "review": {
+        "scope": "independent read-only policy checkpoint review plus focused corrected-boundary rereview",
+        "result": "PASS-no-unresolved-P0-P2",
+        "findings": [
+          {
+            "severity": "P2",
+            "location": "backend/src/controllers/irPolicyController.ts:70",
+            "executablePath": "GET /api/ir/policies without licenseeId regressed from the supported platform-wide list to HTTP 400",
+            "violatedContract": "preserve registered route behavior and legitimate platform capability",
+            "requiredCorrection": "use a database-revalidated null-scope platform transaction and platform list function",
+            "blocks": true,
+            "status": "fixed"
+          },
+          {
+            "severity": "P2",
+            "location": "backend/src/rls-waves/session-c/c03/c03Policy.sql:202",
+            "executablePath": "GET /api/ir/policies omitted organization, licensee and createdByUser objects consumed by existing clients",
+            "violatedContract": "preserve response schema and exact established projection",
+            "requiredCorrection": "restore the three nested objects from the authorized SQL projection",
+            "blocks": true,
+            "status": "fixed"
+          },
+          {
+            "severity": "P2",
+            "location": "backend/src/controllers/irPolicyController.ts:158",
+            "executablePath": "POST /api/ir/policies committed an audit record without threshold, window, severity, auto-incident or manufacturer evidence",
+            "violatedContract": "preserve immutable audit attribution and security-relevant mutation evidence",
+            "requiredCorrection": "populate audit details only from the committed database result",
+            "blocks": true,
+            "status": "fixed"
+          },
+          {
+            "severity": "P2",
+            "location": "backend/src/rls-waves/session-c/c03/c03Policy.sql:362",
+            "executablePath": "PATCH /api/ir/policies/:id could distinguish a foreign existing ID from an absent ID before scope authorization",
+            "violatedContract": "database-revalidate scope before protected access and deny foreign or absent resources uniformly",
+            "requiredCorrection": "authorize the installed licensee scope first, then lock only the ID within that scope and return one denial",
+            "blocks": true,
+            "status": "fixed"
+          },
+          {
+            "severity": "P2",
+            "location": "backend/tests/rls-wave-c/c03/policyPostgres18.test.js:29",
+            "executablePath": "the proof bypassed registered middleware and destructively changed the shared application role and C02 policies",
+            "violatedContract": "prove the actual registered application path and preserve shared-family database state",
+            "requiredCorrection": "use a dedicated no-bypass role with additive self-scoped policies and exercise createBackendApp over HTTP",
+            "blocks": true,
+            "status": "fixed"
+          },
+          {
+            "severity": "P2",
+            "location": "backend/src/controllers/irPolicyController.ts:57",
+            "executablePath": "a reused request ID with a different mutation payload surfaced SQLSTATE 40001 as HTTP 500",
+            "violatedContract": "deterministic replay and idempotency behavior",
+            "requiredCorrection": "map only C03_POLICY_REPLAY_CONFLICT to HTTP 409 and prove the mismatch",
+            "blocks": true,
+            "status": "fixed"
+          },
+          {
+            "severity": "P2",
+            "location": "backend/tests/rls-wave-c/c03/policyPostgres18.test.js:224",
+            "executablePath": "registered POST and PATCH requests initially reused completed request IDs and proved only replay branches, not protected first writes or their atomic audit/outbox",
+            "violatedContract": "application-path proof must execute each protected mutation through the registered route before commit evidence is claimed",
+            "requiredCorrection": "run the concurrent first create and first update through createBackendApp HTTP, then assert the committed audit and outbox counts",
+            "blocks": true,
+            "status": "fixed"
+          },
+          {
+            "severity": "P2",
+            "location": "backend/tests/rls-wave-c/c03/policyPostgres18.test.js:183",
+            "executablePath": "rerunning the focused gate deleted every c03-policy idempotency row in the shared warm database",
+            "violatedContract": "focused family proof must preserve unrelated workflow state and deterministic replay evidence",
+            "requiredCorrection": "delete only the fixed fixture tenant, actor and request-key rows",
+            "blocks": true,
+            "status": "fixed"
+          }
+        ]
       },
       "remainingWorkflowCount": 52
     },
@@ -155,16 +237,20 @@
   },
   "requestedSessionASeams": [
     {
-      "signature": "app_rls.c03_revalidate_actor_scope(text,jsonb,text,text), app_rls.c03_revalidate_policy_rule_actor_scope(text,jsonb,text,text)",
+      "signature": "app_rls.c03_revalidate_actor_scope(text,jsonb,text,text), app_rls.c03_revalidate_platform_actor_scope(jsonb,text,text), app_rls.c03_revalidate_policy_rule_actor_scope(text,jsonb,text,text)",
       "requiredGrant": "EXECUTE to the canonical authenticated application role only"
     },
     {
-      "signature": "app_rls.c03_list_policy_rules(text,boolean,integer,integer), app_rls.c03_create_policy_rule(jsonb), app_rls.c03_update_policy_rule(text,jsonb)",
+      "signature": "app_rls.c03_list_policy_rules(text,boolean,integer,integer), app_rls.c03_list_platform_policy_rules(text,boolean,integer,integer), app_rls.c03_create_policy_rule(jsonb), app_rls.c03_update_policy_rule(text,jsonb)",
       "requiredGrant": "EXECUTE to the canonical authenticated application role only; no direct PolicyRule or ActionIdempotencyKey table grant"
     },
     {
-      "signature": "app_rls.c03_list_policy_rules(scope_type text, scope_id text, rule_type_filter text, active_filter boolean, row_limit integer, row_offset integer), app_rls.c03_create_policy_rule(scope_type text, scope_id text, input jsonb)",
-      "requiredChange": "Session A must resolve and freeze PLATFORM and MANUFACTURER policy scope semantics already consumed by policyRuleEngineService; the current tenant-only proof must not silently prohibit those product paths. The functions must database-derive and validate protected orgId, licenseeId and manufacturerId."
+      "signature": "app_rls.c03_create_policy_rule(scope_type text, scope_id text, input jsonb)",
+      "requiredChange": "Session A must resolve and freeze PLATFORM-global and MANUFACTURER policy mutation scope semantics already consumed by policyRuleEngineService; the current tenant mutation proof must not silently prohibit those product paths. The function must database-derive and validate protected orgId, licenseeId and manufacturerId."
+    },
+    {
+      "signature": "SELECT User(id,email,role,licenseeId,orgId,isActive,status,deletedAt,disabledAt); AdminMfaCredential(id,userId,isEnabled,verifiedAt,lastUsedAt,backupCodesHash,createdAt,updatedAt); AdminWebAuthnCredential(id,userId,label,transports,lastUsedAt,createdAt,updatedAt); UserMfaFactor(id,userId,type,label,legacySource,transports,lastUsedAt,createdAt,updatedAt,disabledAt); UserBackupCode(id,userId,usedAt)",
+      "requiredChange": "Session A must merge the canonical authenticated-role self-only actor/MFA hydration policies and exact column grants before C03 route integration; backend/tests/rls-wave-c/c03/policyPostgres18.test.js proves these projections through createBackendApp without granting encrypted authenticator secrets, password hashes, public keys or protected business tables."
     },
     {
       "signature": "app_ops.print_diagnostic(batch_id uuid)",
@@ -196,7 +282,7 @@
     }
   ],
   "unresolvedBlockers": [
-    "Canonical GREEN SQL/grants do not yet install the exact C03 policy administration function signatures proven locally.",
+    "Canonical GREEN SQL/grants do not yet install the exact C03 tenant/platform policy administration and actor-revalidation function signatures proven locally.",
     "The frozen policy command contract has no reviewed PLATFORM-global or MANUFACTURER scope selector although policyRuleEngineService consumes both; Session A must resolve the exact scoped signatures before those variants can be certified.",
     "Canonical GREEN SQL/grants do not yet install the five exact C04 procedure signatures.",
     "The setup-link outbox delivery consumer is integration-owner work and is not registered in Session C.",

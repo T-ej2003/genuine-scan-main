@@ -11,6 +11,7 @@ import { getAdminStepUpWindowMinutes } from "../../../services/auth/authService"
 import { AuthenticatedSessionClaims } from "../../../types";
 
 export const C03_ACTOR_SCOPE_FUNCTION = "app_rls.c03_revalidate_actor_scope";
+export const C03_PLATFORM_SCOPE_FUNCTION = "app_rls.c03_revalidate_platform_actor_scope";
 
 export const C03_RESOURCE_SCOPE_FUNCTIONS = {
   incident: "app_rls.c03_revalidate_incident_actor_scope",
@@ -42,6 +43,8 @@ export type C03ResourceBoundary = Omit<C03ActorBoundary, "licenseeId"> & {
   resourceId: string;
   resourceType: keyof typeof C03_RESOURCE_SCOPE_FUNCTIONS;
 };
+
+export type C03PlatformBoundary = Omit<C03ActorBoundary, "licenseeId">;
 
 export const c03RequestId = (request: { requestId?: unknown; get?: (name: string) => string | undefined }) =>
   String(request.requestId || request.get?.("x-request-id") || "").trim();
@@ -83,6 +86,9 @@ const buildInitialContext = (
   if (!boundary.allowedRoles.includes(boundary.user.role)) throw new C03AccessError("Access denied");
   const claimedLicenseeId = String(boundary.user.licenseeId || "").trim();
   const platformActor = platformRoles.has(boundary.user.role);
+  if (platformActor && (claimedLicenseeId || boundary.user.orgId)) {
+    throw new C03AccessError("Platform actor context is inconsistent");
+  }
   if (requestedLicenseeId && !UUID_RE.test(requestedLicenseeId)) {
     throw new C03AccessError("A valid bounded licensee scope is required", 400);
   }
@@ -114,6 +120,26 @@ const buildInitialContext = (
     requestId,
     purpose,
   };
+};
+
+const revalidatePlatformActor = async (
+  tx: Prisma.TransactionClient,
+  boundary: C03PlatformBoundary,
+  context: CanonicalDbContext
+) => {
+  const roles = JSON.stringify(boundary.allowedRoles.map(String));
+  const rows = await tx.$queryRaw<Array<{ userId: string; role: string }>>`
+    SELECT actor.user_id AS "userId", actor.role
+      FROM app_rls.c03_revalidate_platform_actor_scope(
+        ${roles}::jsonb,
+        ${boundary.requiredAssurance},
+        ${context.purpose}
+      ) AS actor
+  `;
+  if (rows.length !== 1 || rows[0].userId !== context.userId || rows[0].role !== context.role) {
+    throw new C03AccessError("Platform actor is no longer authorized");
+  }
+  return installCanonicalDbContext(tx, context);
 };
 
 const requireRevalidatedActor = (
@@ -265,6 +291,23 @@ export const withC03ResourceTransaction = async <T>(
     prisma,
     initialContext,
     async (tx) => callback(tx, await revalidateResourceActorAndScope(tx, boundary, initialContext)),
+    { isolationLevel }
+  );
+};
+
+export const withC03PlatformTransaction = async <T>(
+  boundary: C03PlatformBoundary,
+  callback: (tx: Prisma.TransactionClient, context: CanonicalDbContext) => Promise<T>,
+  isolationLevel: Prisma.TransactionIsolationLevel = Prisma.TransactionIsolationLevel.Serializable
+) => {
+  const initialContext = buildInitialContext(boundary);
+  if (initialContext.licenseeId || initialContext.organizationId || initialContext.manufacturerId) {
+    throw new C03AccessError("A global platform boundary cannot install tenant scope");
+  }
+  return withCanonicalDbContext(
+    prisma,
+    initialContext,
+    async (tx) => callback(tx, await revalidatePlatformActor(tx, boundary, initialContext)),
     { isolationLevel }
   );
 };

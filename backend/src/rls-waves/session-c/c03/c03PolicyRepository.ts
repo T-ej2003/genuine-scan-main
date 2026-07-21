@@ -35,6 +35,27 @@ export const listPolicyRulesInTransaction = async <T>(
     "list policy rules"
   );
 
+export const listPlatformPolicyRulesInTransaction = async <T>(
+  tx: PolicyDb,
+  input: {
+    ruleType?: PolicyRuleType;
+    isActive?: boolean;
+    limit: number;
+    offset: number;
+  }
+) =>
+  requiredObject<T>(
+    await tx.$queryRaw<JsonRow[]>`
+      SELECT app_rls.c03_list_platform_policy_rules(
+        ${input.ruleType || null}::text,
+        ${input.isActive ?? null}::boolean,
+        ${input.limit}::integer,
+        ${input.offset}::integer
+      ) AS result
+    `,
+    "list platform policy rules"
+  );
+
 export const createPolicyRuleInTransaction = async <T>(
   tx: PolicyDb,
   input: {
