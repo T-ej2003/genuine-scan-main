@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "status": "session-c-in-progress",
+  "session": "session-c",
+  "coordinationSha": "22bfdb0cfd19d7b435b1390611b452a419923f9f",
+  "branchHeadSha": null,
+  "database": {
+    "name": "mscqr_rls_wave_c_admin_governance_operator",
+    "serverMajor": 18,
+    "localOnly": true
+  },
+  "families": {
+    "c-04-operator-recovery-startup-migration-cli": {
+      "status": "local-postgresql-18-green-production-integration-pending",
+      "sharedBoundary": "backend/src/rls-waves/session-c/operatorProcedureService.ts",
+      "proof": "backend/tests/rls-wave-c/c04/operatorPostgres18.test.js",
+      "proofResult": "PASS",
+      "workflowMappings": [
+        {
+          "boundary": "app_ops.print_diagnostic(uuid)",
+          "disposition": "implemented-local-proof",
+          "workflowIds": [
+            "workflow-cli-backend-scripts-mscqr-print-test-js-main"
+          ]
+        },
+        {
+          "boundary": "app_ops.reissue_account_setup_link(uuid,uuid,text,uuid)",
+          "disposition": "implemented-local-proof-delivery-consumer-seam-pending",
+          "workflowIds": [
+            "workflow-cli-backend-scripts-resend-password-setup-link-js-find-actor",
+            "workflow-cli-backend-scripts-resend-password-setup-link-js-find-target-user"
+          ]
+        },
+        {
+          "boundary": "app_ops.reset_account_mfa(uuid,uuid,text,uuid)",
+          "disposition": "implemented-local-proof",
+          "workflowIds": [
+            "workflow-cli-backend-scripts-break-glass-mfa-reset-ts-run"
+          ]
+        },
+        {
+          "boundary": "app_ops.prepare_rls_validation_fixture(uuid,text,uuid)",
+          "disposition": "implemented-local-proof",
+          "workflowIds": [
+            "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-batch",
+            "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-licensee",
+            "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-manufacturer-link",
+            "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-organization",
+            "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-codes",
+            "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-qr-range",
+            "workflow-cli-backend-scripts-seed-staging-rls-validation-data-js-ensure-user"
+          ]
+        },
+        {
+          "boundary": "app_ops.bootstrap_configured_super_admin(text,text,text,boolean)",
+          "disposition": "migration-only-local-proof-ordinary-startup-fail-closed",
+          "workflowIds": [
+            "workflow-startup-backend-src-services-auth-super-admin-bootstrap-service-ts-bootstrap-configured-super-admin"
+          ]
+        },
+        {
+          "boundary": "prohibited-before-database-access",
+          "disposition": "product-prohibited-by-frozen-operator-contract",
+          "workflowIds": [
+            "workflow-cli-backend-prisma-seed-ts-ensure-licensee",
+            "workflow-cli-backend-prisma-seed-ts-main",
+            "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-administration-super-admin",
+            "workflow-cli-backend-scripts-repair-admin-accounts-js-ensure-victoria-platform-admin-invite",
+            "workflow-cli-backend-scripts-repair-admin-accounts-js-main",
+            "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-reset-codes-for-batch",
+            "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed",
+            "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed-manufacturer-mfa-backup-codes",
+            "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-seed-printer",
+            "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-upsert-fresh-admin-mfa",
+            "workflow-cli-backend-scripts-seed-enterprise-e2e-ts-upsert-user",
+            "workflow-cli-backend-scripts-seed-launch-smoke-users-js-ensure-licensee",
+            "workflow-cli-backend-scripts-seed-launch-smoke-users-js-refresh-admin-mfa-marker",
+            "workflow-cli-backend-scripts-seed-launch-smoke-users-js-seed-launch-smoke-users",
+            "workflow-cli-backend-scripts-seed-launch-smoke-users-js-upsert-launch-user"
+          ]
+        }
+      ],
+      "positiveNegativeEvidence": {
+        "positive": [
+          "operator diagnostic exact projection",
+          "approved setup-link queue",
+          "dual-approved atomic MFA reset",
+          "staging fixture creation",
+          "migration-only bootstrap invocation"
+        ],
+        "negative": [
+          "foreign tenant",
+          "wrong assurance",
+          "stale approval",
+          "wrong runtime identity",
+          "direct table access",
+          "ordinary application bootstrap"
+        ],
+        "replay": "PASS",
+        "atomicAuditOutbox": "PASS",
+        "forcedRlsTableCount": 21,
+        "directTableGrantCount": 0
+      }
+    }
+  },
+  "requestedSessionASeams": [
+    {
+      "signature": "app_ops.print_diagnostic(batch_id uuid)",
+      "requiredGrant": "EXECUTE to mscqr_<environment>_operator only"
+    },
+    {
+      "signature": "app_ops.reissue_account_setup_link(target_user_id uuid, operator_id uuid, reason text, approval_id uuid)",
+      "requiredGrant": "EXECUTE to mscqr_<environment>_operator only"
+    },
+    {
+      "signature": "app_ops.reset_account_mfa(target_user_id uuid, executor_id uuid, reason text, approval_id uuid)",
+      "requiredGrant": "EXECUTE only to broker-issued mscqr_prod_breakglass_<incident>_<nonce>"
+    },
+    {
+      "signature": "app_ops.prepare_rls_validation_fixture(fixture_id uuid, tenant_key text, approval_id uuid)",
+      "requiredGrant": "EXECUTE to mscqr_staging_operator only"
+    },
+    {
+      "signature": "app_ops.bootstrap_configured_super_admin(email text, password_hash text, name text, auto_verify boolean)",
+      "requiredGrant": "EXECUTE to deployment-only mscqr_<environment>_migration; never application"
+    },
+    {
+      "signature": "AUTH_SETUP_LINK_REISSUE_REQUESTED { operationId, targetUserId, operatorId, approvalId, mode }",
+      "requiredChange": "Session A must register the restricted delivery consumer that generates the versioned-HMAC one-time token and persists Invite or PasswordReset delivery state without exposing raw tokens."
+    },
+    {
+      "signature": "bootstrapConfiguredSuperAdmin(migrationDb: Pick<PrismaClient, '$transaction'>): Promise<BootstrapResult>",
+      "requiredChange": "Deployment orchestration must pass the migration client; the running application startup intentionally supplies none and fails closed."
+    }
+  ],
+  "unresolvedBlockers": [
+    "Canonical GREEN SQL/grants do not yet install the five exact C04 procedure signatures.",
+    "The setup-link outbox delivery consumer is integration-owner work and is not registered in Session C.",
+    "Deployment orchestration does not yet invoke bootstrap with the migration-only client."
+  ],
+  "environmentConfirmation": {
+    "stagingOrProductionEndpointTouched": false,
+    "globalArtifactTouched": false
+  }
+}
