@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed'
+    AND source_contract_sha256='493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b'
     AND administrator_role='certification-administrator'
     AND phase='context-helpers-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'runtime grants lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -57,12 +57,31 @@ GRANT SELECT ("deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name",
 GRANT USAGE ON TYPE public."TraceEventType" TO "mscqr_rls_cert_app";
 GRANT USAGE ON TYPE public."UserRole" TO "mscqr_rls_cert_app";
 GRANT USAGE ON TYPE public."UserStatus" TO "mscqr_rls_cert_app";
+GRANT SELECT ("id", "orgId", "userId", "tokenHash", "expiresAt", "createdAt", "createdIpHash", "createdUserAgent", "authenticatedAt", "mfaVerifiedAt", "lastUsedAt", "revokedAt", "revokedReason", "replacedByTokenHash", "rotationRequestId", "rotationClaimedAt", "rotationCompletedAt") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "orgId", "userId", "tokenHash", "expiresAt", "createdAt", "createdIpHash", "createdUserAgent", "authenticatedAt", "mfaVerifiedAt", "lastUsedAt") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("revokedAt", "revokedReason", "lastUsedAt", "replacedByTokenHash", "rotationRequestId", "rotationClaimedAt", "rotationCompletedAt") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "email", "name", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt", "emailVerifiedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("manufacturerId", "licenseeId", "isPrimary", "createdAt", "updatedAt") ON TABLE public."ManufacturerLicenseeLink" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "orgId", "name", "prefix", "brandName", "isActive", "suspendedAt") ON TABLE public."Licensee" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("userId", "isEnabled", "lastUsedAt") ON TABLE public."AdminMfaCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("userId", "lastUsedAt") ON TABLE public."AdminWebAuthnCredential" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("userId", "type", "lastUsedAt", "disabledAt") ON TABLE public."UserMfaFactor" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("userId", "usedAt") ON TABLE public."UserBackupCode" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "userId", "ticketHash", "sessionBindingHash", "purpose", "riskScore", "riskLevel", "reasons", "createdIpHash", "createdUserAgentHash", "maxAttempts", "createdAt", "updatedAt", "expiresAt") ON TABLE public."AuthMfaChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "payload", "updatedAt") ON TABLE public."AuditLogOutbox" TO "mscqr_rls_cert_auth_owner";
+GRANT USAGE ON SCHEMA public TO "mscqr_rls_cert_auth_owner";
 RESET ROLE;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_auth_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_auth_owner'; END IF;
   EXECUTE format('SET LOCAL ROLE %I','mscqr_rls_cert_auth_owner');
 END $$;
 GRANT USAGE ON SCHEMA app_auth TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_auth.claim_refresh_token_rotation(text[],timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_auth.load_refresh_session_state(text,text[],text,text,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
 RESET ROLE;
 UPDATE mscqr_rls_install.state SET phase='runtime-grants-installed' WHERE singleton;
 COMMIT;

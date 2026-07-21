@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed'
+    AND source_contract_sha256='493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b'
     AND administrator_role='certification-administrator'
     AND phase='roles-created'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'ownership package lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -338,6 +338,7 @@ REVOKE ALL ON TYPE public."VerificationRiskBand" FROM PUBLIC;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 REVOKE ALL ON SCHEMA public FROM "mscqr_rls_cert_migration";
 GRANT USAGE ON SCHEMA public TO "mscqr_rls_cert_migration";
+GRANT USAGE ON SCHEMA public TO "mscqr_rls_cert_auth_owner";
 RESET ROLE;
 CREATE SCHEMA app_rls AUTHORIZATION "mscqr_rls_cert_owner";
 CREATE SCHEMA app_auth AUTHORIZATION "mscqr_rls_cert_auth_owner";

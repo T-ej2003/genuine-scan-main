@@ -5,7 +5,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { repoRoot, rel, scanProductionAccess, workflowIdFor } from "./lib/program-inventory.mjs";
 import { namedFunctionContractFor, namedFunctionDefinitionEvidenceFor, validateNamedSqlFunctionContracts } from "./lib/named-sql-function-contracts.mjs";
-import { resolveWorkflowDelegation, validateWorkflowDelegations } from "./lib/workflow-delegation-registry.mjs";
+import { resolveWorkflowDelegation, validateWorkflowDelegations, WORKFLOW_DELEGATIONS } from "./lib/workflow-delegation-registry.mjs";
 
 export const namedSqlFunctionInventoryPath = path.join(repoRoot, "documents/security/rls-program/generated/named-sql-function-inventory.json");
 export const namedSqlFunctionInventoryReviewPath = path.join(repoRoot, "documents/security/rls-program/NAMED_SQL_FUNCTION_INVENTORY.md");
@@ -65,6 +65,7 @@ export const buildNamedSqlFunctionInventory = () => {
   const ts = require(path.join(repoRoot, "backend/node_modules/typescript"));
   const delegations = validateWorkflowDelegations({ repoRoot });
   const scan = scanProductionAccess();
+  const activeFiles = new Set(scan.activeFiles);
   const accessBySource = new Map();
   for (const access of scan.accesses) {
     const key = `${access.sourceFile}:${access.function}`;
@@ -83,7 +84,9 @@ export const buildNamedSqlFunctionInventory = () => {
       .sort((a, b) => `${a.sourceFile}:${a.sourceFunction}:${a.line}`.localeCompare(`${b.sourceFile}:${b.sourceFunction}:${b.line}`));
     const canonicalWorkflowIds = [...new Set(callers.map((caller) => {
       const access = accessBySource.get(`${caller.sourceFile}:${caller.sourceFunction}`);
-      const canonical = access && (resolveWorkflowDelegation(access, delegations)?.canonical || {
+      const delegation = access ? resolveWorkflowDelegation(access, delegations)
+        : WORKFLOW_DELEGATIONS.find((entry) => entry.delegated.sourceFile === caller.sourceFile && entry.delegated.function === caller.sourceFunction);
+      const canonical = delegation?.canonical || (access && {
         executionSurface: access.executionSurface, sourceFile: access.sourceFile, function: access.function,
       });
       return canonical ? workflowIdFor(canonical) : null;
@@ -101,6 +104,7 @@ export const buildNamedSqlFunctionInventory = () => {
       requiredContext: contract?.context || null,
       canonicalWorkflowIds,
       callers,
+      activeCallers: callers.map((caller) => ({ ...caller, sourceFileActive: activeFiles.has(caller.sourceFile), reachability: activeFiles.has(caller.sourceFile) ? "active-source-file" : "unregistered-source-file" })),
     };
   }).sort((a, b) => a.functionName.localeCompare(b.functionName));
   return { schemaVersion: 1, generatedFrom: ["backend/src", "scripts/rls/lib/named-sql-function-contracts.mjs"], calls: calls.sort((a, b) => `${a.sourceFile}:${a.line}:${a.functionName}`.localeCompare(`${b.sourceFile}:${b.line}:${b.functionName}`)), functions };

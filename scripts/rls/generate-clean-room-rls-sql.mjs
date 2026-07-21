@@ -8,6 +8,7 @@ import {
   BATCH_OPERATIONAL_READ_WORKFLOW_IDS,
   buildRegisteredCallPathEvidence,
 } from "./lib/application-path-certifications.mjs";
+import { NAMED_SQL_FUNCTION_CONTRACTS, validateNamedSqlFunctionContracts } from "./lib/named-sql-function-contracts.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const programRoot = path.join(repoRoot, "documents/security/rls-program");
@@ -157,6 +158,59 @@ const candidateDatabasePatterns = {
 };
 const candidateDatabasePattern = candidateDatabasePatterns[targetEnvironment];
 const roleMarker = `mscqr-full-rls-clean-room:${targetEnvironment}:${sourceContractSha256}`;
+const b01Contracts = validateNamedSqlFunctionContracts().filter((contract) => contract.id.startsWith("b01-"));
+const b01FunctionSource = b01Contracts.length
+  ? fs.readFileSync(path.join(repoRoot, b01Contracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
+  : "";
+const b01FunctionSignatures = b01Contracts.map((contract) => `app_auth.${contract.name}(${contract.signature})`);
+const b01FunctionOwnerGrants = [
+  ["RefreshToken", "SELECT", ["id","orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt","revokedAt","revokedReason","replacedByTokenHash","rotationRequestId","rotationClaimedAt","rotationCompletedAt"]],
+  ["RefreshToken", "INSERT", ["id","orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt"]],
+  ["RefreshToken", "UPDATE", ["revokedAt","revokedReason","lastUsedAt","replacedByTokenHash","rotationRequestId","rotationClaimedAt","rotationCompletedAt"]],
+  ["User", "SELECT", ["id","email","name","role","orgId","licenseeId","status","isActive","disabledAt","deletedAt","emailVerifiedAt"]],
+  ["ManufacturerLicenseeLink", "SELECT", ["manufacturerId","licenseeId","isPrimary","createdAt","updatedAt"]],
+  ["Licensee", "SELECT", ["id","orgId","name","prefix","brandName","isActive","suspendedAt"]],
+  ["Organization", "SELECT", ["id","isActive"]],
+  ["AdminMfaCredential", "SELECT", ["userId","isEnabled","lastUsedAt"]],
+  ["AdminWebAuthnCredential", "SELECT", ["userId","lastUsedAt"]],
+  ["UserMfaFactor", "SELECT", ["userId","type","lastUsedAt","disabledAt"]],
+  ["UserBackupCode", "SELECT", ["userId","usedAt"]],
+  ["AuthMfaChallenge", "INSERT", ["id","userId","ticketHash","sessionBindingHash","purpose","riskScore","riskLevel","reasons","createdIpHash","createdUserAgentHash","maxAttempts","createdAt","updatedAt","expiresAt"]],
+  ["AuditLogOutbox", "INSERT", ["id","payload","updatedAt"]],
+];
+const b01OwnerGrantSql = b01FunctionOwnerGrants.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const b01PolicyOwner = `current_user=${lit(roleNames.authOwner)}`;
+const b01User = `current_setting('app.b01_user_id',true)`;
+const b01Predecessor = `current_setting('app.b01_predecessor_id',true)`;
+const b01Successor = `current_setting('app.b01_successor_id',true)`;
+const b01Operation = `current_setting('app.b01_operation',true)`;
+const b01Token = `"tokenHash"=ANY(string_to_array(current_setting('app.b01_token_hashes',true),','))`;
+const b01DerivedToken = `id=${b01Predecessor} AND "userId"=${b01User}`;
+const b01BootstrapToken = `${b01Token} AND ${b01Predecessor}='' AND ${b01User}=''`;
+const b01UserWideOperation = `${b01Operation} IN ('revoke-scope','reuse-revoke','account-unavailable','stale-membership')`;
+const b01BoundContext = `${b01Predecessor}<>''`;
+const b01BoundUser = `${b01BoundContext} AND "userId"=${b01User}`;
+const b01TablePolicies = [
+  ["RefreshToken", "SELECT", `(${b01PolicyOwner} AND (${b01Token} OR ${b01DerivedToken} OR (${b01UserWideOperation} AND "userId"=${b01User})))`],
+  ["RefreshToken", "UPDATE", `(${b01PolicyOwner} AND (${b01BootstrapToken} OR ${b01DerivedToken} OR (${b01UserWideOperation} AND "userId"=${b01User})))`],
+  ["RefreshToken", "INSERT", `(${b01PolicyOwner} AND ${b01Operation}='complete-rotation' AND id=${b01Successor} AND "userId"=${b01User})`],
+  ["User", "SELECT", `(${b01PolicyOwner} AND ${b01Predecessor}<>'' AND id=${b01User})`],
+  ["ManufacturerLicenseeLink", "SELECT", `(${b01PolicyOwner} AND ${b01BoundContext} AND "manufacturerId"=${b01User})`],
+  ["Licensee", "SELECT", `(${b01PolicyOwner} AND ${b01BoundContext} AND ("orgId"=NULLIF(current_setting('app.b01_organization_id',true),'') OR EXISTS (SELECT 1 FROM public."ManufacturerLicenseeLink" ml WHERE ml."manufacturerId"=${b01User} AND ml."licenseeId"=id)))`],
+  ["Organization", "SELECT", `(${b01PolicyOwner} AND ${b01BoundContext} AND id=NULLIF(current_setting('app.b01_organization_id',true),''))`],
+  ["AdminMfaCredential", "SELECT", `(${b01PolicyOwner} AND ${b01BoundUser})`],
+  ["AdminWebAuthnCredential", "SELECT", `(${b01PolicyOwner} AND ${b01BoundUser})`],
+  ["UserMfaFactor", "SELECT", `(${b01PolicyOwner} AND ${b01BoundUser})`],
+  ["UserBackupCode", "SELECT", `(${b01PolicyOwner} AND ${b01BoundUser})`],
+  ["AuthMfaChallenge", "INSERT", `(${b01PolicyOwner} AND ${b01Operation}='create-mfa' AND "userId"=${b01User} AND purpose='admin_login' AND "consumedAt" IS NULL AND "supersededAt" IS NULL)`],
+  ["AuditLogOutbox", "INSERT", `(${b01PolicyOwner} AND ${b01Predecessor}<>'' AND payload->>'userId'=${b01User} AND payload->'details'->>'requestId'=current_setting('app.b01_request_id',true) AND payload->>'action' IN ('AUTH_REFRESH_DISABLED_DENIED','AUTH_REFRESH_REUSE_DETECTED','AUTH_REFRESH_EXPIRED','AUTH_REFRESH_STALE_MEMBERSHIP_DENIED','MANUFACTURER_SCOPE_SWITCH','AUTH_REFRESH_MFA_CHALLENGE_REQUIRED','AUTH_REFRESH_REVOKED','AUTH_REFRESH_ROTATED'))`],
+];
+const b01SourceRuleIds = new Map([
+  ["RefreshToken:SELECT", "command-refresh-token-select-65b85bc0759d"], ["RefreshToken:INSERT", "command-refresh-token-insert-65b85bc0759d"], ["RefreshToken:UPDATE", "command-refresh-token-update-65b85bc0759d"],
+  ["User:SELECT", "command-user-select-65b85bc0759d"], ["ManufacturerLicenseeLink:SELECT", "command-manufacturer-licensee-link-select-65b85bc0759d"], ["Licensee:SELECT", "command-licensee-select-65b85bc0759d"], ["Organization:SELECT", "command-organization-select-65b85bc0759d"],
+  ["AdminMfaCredential:SELECT", "command-admin-mfa-credential-select-65b85bc0759d"], ["AdminWebAuthnCredential:SELECT", "command-admin-web-authn-credential-select-65b85bc0759d"], ["UserMfaFactor:SELECT", "command-user-mfa-factor-select-65b85bc0759d"], ["UserBackupCode:SELECT", "command-user-backup-code-select-65b85bc0759d"],
+  ["AuthMfaChallenge:INSERT", "command-auth-mfa-challenge-insert-65b85bc0759d"], ["AuditLogOutbox:INSERT", "command-audit-log-outbox-insert-65b85bc0759d"],
+]);
 
 const assuranceGuard = (slice) => {
   const allowed = slice.minimumAssurance === "mfa-verified"
@@ -290,7 +344,10 @@ ${stagingExecutorAttributeCheckSql}
   IF database_owner<>current_user THEN RAISE EXCEPTION 'clean-room executor must own the green candidate database'; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=current_user AND (NOT rolcreaterole OR NOT rolcreatedb)) THEN RAISE EXCEPTION 'clean-room executor requires CREATEROLE and CREATEDB without runtime use'; END IF;
   IF current_user IN (${managedRoleList}) THEN RAISE EXCEPTION 'administrative executor may not be a managed identity'; END IF;
-  IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()) THEN RAISE EXCEPTION 'clean-room preflight refuses another green database session'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()) THEN
+    PERFORM pg_sleep(1);
+    IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()) THEN RAISE EXCEPTION 'clean-room preflight refuses another green database session'; END IF;
+  END IF;
 ${cleanRoomRoleRefusalSql}
 ${cleanRoomObjectRefusalSql}
 ${cleanRoomAclRefusalSql}
@@ -463,6 +520,7 @@ ${prismaEnumNames.map((type) => `REVOKE ALL ON TYPE public.${q(type)} FROM PUBLI
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 REVOKE ALL ON SCHEMA public FROM ${q(roleNames.migration)};
 GRANT USAGE ON SCHEMA public TO ${q(roleNames.migration)};
+GRANT USAGE ON SCHEMA public TO ${q(roleNames.authOwner)};
 ${resetRole}
 CREATE SCHEMA app_rls AUTHORIZATION ${q(roleNames.owner)};
 CREATE SCHEMA app_auth AUTHORIZATION ${q(roleNames.authOwner)};
@@ -490,9 +548,12 @@ GRANT USAGE ON SCHEMA public,app_rls TO ${q(roleNames.worker)},${q(roleNames.sch
 GRANT USAGE ON SCHEMA public TO ${q(roleNames.operator)};
 ${columnGrantSql}
 ${appTypeGrantSql}
+${b01OwnerGrantSql}
+GRANT USAGE ON SCHEMA public TO ${q(roleNames.authOwner)};
 ${resetRole}
 ${setRole(roleNames.authOwner)}
 GRANT USAGE ON SCHEMA app_auth TO ${q(roleNames.preauth)};
+${b01FunctionSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
 ${resetRole}
 UPDATE mscqr_rls_install.state SET phase='runtime-grants-installed' WHERE singleton;
 `;
@@ -1135,6 +1196,10 @@ REVOKE EXECUTE ON FUNCTION app_rls.batch_scope_fingerprint(text,text,text) FROM 
 REVOKE EXECUTE ON FUNCTION app_rls.batch_operational_batch_allowed(text,text) FROM ${q(roleNames.app)};
 REVOKE EXECUTE ON FUNCTION app_rls.authorize_batch_operational_read(text,text,text,text) FROM ${q(roleNames.app)};
 ${resetRole}
+${b01FunctionSource ? `${setRole(roleNames.authOwner)}
+${b01FunctionSource}
+${b01FunctionSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
+${resetRole}` : ""}
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
   security_definer,leakproof,strict,parallel_mode,configuration,source_body,acl_rows
@@ -1445,6 +1510,12 @@ for (const policy of internalPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policy.name)} ON public.${q(policy.table)} AS PERMISSIVE FOR ${policy.command} TO ${q(roleNames.owner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policy.name)} ON public.${q(policy.table)} IS ${lit(JSON.stringify({ sourceCommandRuleIds: policy.sourceCommandRuleIds, actors: policy.actors, assurance: policy.assurance, purpose: policy.purpose, scope: policy.scopeType, ...(policy.workflowIds ? { workflowIds: policy.workflowIds } : {}) }))};`);
 }
+for (const [table, command, predicate] of b01TablePolicies) {
+  const policyName = shortName("b01", table, command);
+  const clause = command === "INSERT" ? `WITH CHECK ${predicate}` : command === "UPDATE" ? `USING ${predicate} WITH CHECK ${predicate}` : `USING ${predicate}`;
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b01-refresh-rotation", ownerIdentity: "identity-auth-function-owner", scope: "transaction-local bearer-derived context" }))};`);
+}
 const policiesSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
 ${requirePackagePhaseSql("runtime-grants-installed", "policy package")}
@@ -1482,7 +1553,10 @@ const columnAclColumns = [
   { name: "privilege_type", type: "text" }, { name: "is_grantable", type: "boolean" },
 ];
 const expectedTableAclSelect = expectedRowsSelect(grants.filter((grant) => grant.command === "DELETE").map((grant) => ["public", grant.table, roleNames.app, roleNames.owner, "DELETE", false]), aclColumns);
-const expectedColumnAclSelect = expectedRowsSelect(grants.flatMap((grant) => grant.command === "DELETE" ? [] : grant.columns.map((column) => ["public", grant.table, column, roleNames.app, roleNames.owner, grant.command, false])), columnAclColumns);
+const expectedColumnAclSelect = expectedRowsSelect([
+  ...grants.flatMap((grant) => grant.command === "DELETE" ? [] : grant.columns.map((column) => ["public", grant.table, column, roleNames.app, roleNames.owner, grant.command, false])),
+  ...b01FunctionOwnerGrants.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+], columnAclColumns);
 const expectedTypeAclSelect = expectedRowsSelect(appTypeGrantNames.map((type) => ["public", type, roleNames.app, roleNames.owner, "USAGE", false]), aclColumns);
 const expectedDatabaseAclSelect = expectedRowsSelect([
   ...loginRoleNames.map((role) => ["CURRENT_DATABASE", "database", role, administrativeExecutorRole, "CONNECT", false]),
@@ -1518,6 +1592,10 @@ const expectedRoutineIdentities = [
   ["app_rls", "platform_audit_log_details", "log_ids text[]"],
   ["app_rls", "setting", "setting_name text"],
   ["app_rls", "uuid_setting", "setting_name text"],
+  ["app_auth", "b01_audit", "p_action text, p_token_id text, p_at timestamp without time zone"],
+  ["app_auth", "b01_bind_bearer", "p_hashes text[], p_request_id text"],
+  ["app_auth", "b01_bind_predecessor", "p_token_id text, p_user_id text, p_organization_id text, p_operation text"],
+  ...b01Contracts.map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
@@ -1545,10 +1623,28 @@ const policyInventory = [
     policyName: policy.name,
     ...policy,
   })),
+  ...b01TablePolicies.map(([table, command, predicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("b01", table, command),
+    command,
+    actors: ["pre-auth"],
+    assurance: "source-rule-specific",
+    purpose: ["b01-refresh-rotation"],
+    scopeType: "security-definer-owner-and-bearer-derived-transaction-context",
+    scopePredicate: predicate,
+    columns: [],
+    sourceCommandRuleIds: [b01SourceRuleIds.get(`${table}:${command}`)],
+    workflowId: "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
+    route: "POST /auth/refresh",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
 ].sort((left, right) => `${left.table}:${left.policyName}`.localeCompare(`${right.table}:${right.policyName}`));
 const expectedPolicyValues = policyInventory.map((policy) => `(${lit(policy.table)},${lit(policy.policyName)},${lit(policy.command)})`).join(",");
 const expectedSchemaAclRows = [
   ...[roleNames.app, roleNames.read, roleNames.worker, roleNames.scheduled, roleNames.operator, roleNames.migration].map((grantee) => ["public", grantee, roleNames.owner, "USAGE", false]),
+  ["public", roleNames.authOwner, roleNames.owner, "USAGE", false],
   ...[roleNames.app, roleNames.read, roleNames.worker, roleNames.scheduled].map((grantee) => ["app_rls", grantee, roleNames.owner, "USAGE", false]),
   ["app_auth", roleNames.preauth, roleNames.authOwner, "USAGE", false],
 ];
@@ -1751,12 +1847,14 @@ const ids = {
   policyA: "00000000-0000-4000-8000-000000001001", policyB: "00000000-0000-4000-8000-000000001002",
   auditA: "00000000-0000-4000-8000-000000001101", auditB: "00000000-0000-4000-8000-000000001102", auditAOther: "00000000-0000-4000-8000-000000001103",
   traceA: "00000000-0000-4000-8000-000000001201", traceB: "00000000-0000-4000-8000-000000001202",
+  refreshA: "00000000-0000-4000-8000-000000001301", refreshRollback: "00000000-0000-4000-8000-000000001302",
 };
 const fixtureSql = `\\set ON_ERROR_STOP on
 INSERT INTO public.${q("Organization")} (${q("id")},${q("name")},${q("updatedAt")}) VALUES ('${ids.orgA}','Cert Org A',now()),('${ids.orgB}','Cert Org B',now());
 INSERT INTO public.${q("Licensee")} (${q("id")},${q("orgId")},${q("name")},${q("prefix")},${q("updatedAt")}) VALUES ('${ids.licenseeA}','${ids.orgA}','Cert Licensee A','FRLCA',now()),('${ids.licenseeB}','${ids.orgB}','Cert Licensee B','FRLCB',now());
 INSERT INTO public.${q("User")} (${q("id")},${q("email")},${q("name")},${q("role")},${q("orgId")},${q("licenseeId")},${q("status")},${q("isActive")},${q("updatedAt")}) VALUES ('${ids.adminA}','admin-a@example.invalid','Admin A','LICENSEE_ADMIN','${ids.orgA}','${ids.licenseeA}','ACTIVE',true,now()),('${ids.adminB}','admin-b@example.invalid','Admin B','LICENSEE_ADMIN','${ids.orgB}','${ids.licenseeB}','ACTIVE',true,now()),('${ids.manufacturerA}','manufacturer-a@example.invalid','Manufacturer A','MANUFACTURER','${ids.orgA}','${ids.licenseeA}','ACTIVE',true,now()),('${ids.manufacturerB}','manufacturer-b@example.invalid','Manufacturer B','MANUFACTURER','${ids.orgB}','${ids.licenseeB}','ACTIVE',true,now()),('${ids.manufacturerLegacyALinkB}','manufacturer-linked-b@example.invalid','Manufacturer Linked B','MANUFACTURER','${ids.orgA}','${ids.licenseeA}','ACTIVE',true,now()),('${ids.manufacturerLegacyBUnlinked}','manufacturer-unlinked-b@example.invalid','Manufacturer Unlinked B','MANUFACTURER','${ids.orgB}','${ids.licenseeB}','ACTIVE',true,now()),('${ids.platformA}','platform-a@example.invalid','Platform A','PLATFORM_SUPER_ADMIN',NULL,NULL,'ACTIVE',true,now());
 INSERT INTO public.${q("ManufacturerLicenseeLink")} (${q("manufacturerId")},${q("licenseeId")},${q("isPrimary")},${q("updatedAt")}) VALUES ('${ids.manufacturerA}','${ids.licenseeA}',true,now()),('${ids.manufacturerB}','${ids.licenseeB}',true,now()),('${ids.manufacturerLegacyALinkB}','${ids.licenseeB}',false,now());
+INSERT INTO public.${q("RefreshToken")} (${q("id")},${q("orgId")},${q("userId")},${q("tokenHash")},${q("expiresAt")},${q("createdAt")}) VALUES ('${ids.refreshA}','${ids.orgA}','${ids.adminA}','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',now()+interval '1 day',now()),('${ids.refreshRollback}','${ids.orgA}','${ids.adminA}','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',now()+interval '1 day',now());
 INSERT INTO public.${q("Batch")} (${q("id")},${q("name")},${q("licenseeId")},${q("manufacturerId")},${q("startCode")},${q("endCode")},${q("totalCodes")},${q("updatedAt")}) VALUES ('${ids.batchA}','Batch A','${ids.licenseeA}','${ids.manufacturerA}','A1','A1',1,now()),('${ids.batchB}','Batch B','${ids.licenseeB}','${ids.manufacturerB}','B1','B1',1,now());
 INSERT INTO public.${q("QRCode")} (${q("id")},${q("code")},${q("licenseeId")},${q("batchId")},${q("status")},${q("updatedAt")}) VALUES ('${ids.qrA}','A1','${ids.licenseeA}','${ids.batchA}','ACTIVE',now()),('${ids.qrB}','B1','${ids.licenseeB}','${ids.batchB}','ACTIVE',now());
 INSERT INTO public.${q("QrScanLog")} (${q("id")},${q("code")},${q("qrCodeId")},${q("licenseeId")},${q("batchId")},${q("status")}) VALUES ('${ids.scanA}','A1','${ids.qrA}','${ids.licenseeA}','${ids.batchA}','SCANNED'),('${ids.scanB}','B1','${ids.qrB}','${ids.licenseeB}','${ids.batchB}','SCANNED');
@@ -1930,8 +2028,8 @@ const generatedReports = new Map([
   ["contract-only-implementation-inventory.json", { schemaVersion: 2, workflowCount: contractOnlyWorkflowRows.length, groups: contractOnlyGroups, families: contractOnlyInventory }],
   ["workflow-call-path-evidence.json", registeredCallPathEvidence],
   ["expected-catalog-snapshot.json", expectedCatalog],
-  ["column-privilege-report.json", { schemaVersion: 1, rows: grants, cells: implementationManifest.counts.columnPrivilegeCells }],
-  ["privilege-diff-report.json", { schemaVersion: 2, mode: "clean-room-expected-after-apply", rows: grants, legacyAclRestoration: false }],
+  ["column-privilege-report.json", { schemaVersion: 2, rows: grants, cells: implementationManifest.counts.columnPrivilegeCells, functionOwnerRows: b01FunctionOwnerGrants.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: b01Contracts.map((contract) => contract.id) })) }],
+  ["privilege-diff-report.json", { schemaVersion: 3, mode: "clean-room-expected-after-apply", rows: grants, functionOwnerRows: b01FunctionOwnerGrants.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner" })), legacyAclRestoration: false }],
   ["ownership-diff-report.json", { schemaVersion: 2, mode: "clean-room-expected-after-apply", rows: expectedCatalog.ownership, legacyOwnershipRestoration: false }],
   ["force-rls-report.json", { schemaVersion: 1, count: forceTargets.length, tables: forceTargets.map((table) => table.physicalTable) }],
   ["policy-inventory-report.json", { schemaVersion: 1, count: policyInventory.length, rows: policyInventory }],

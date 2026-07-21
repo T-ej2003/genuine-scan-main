@@ -194,7 +194,7 @@ export const verifyFullRlsPackage = () => {
   ensure(!/^\s*(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|GRANT|REVOKE)\b/im.test(verification), "Verification SQL is not read-only");
   ensure((readGenerated("30-policies.sql").toString().match(/FORCE ROW LEVEL SECURITY/g) || []).length === 75, "Generated SQL does not FORCE exactly 75 tables");
   ensure((readGenerated("30-policies.sql").toString().match(/CREATE POLICY/g) || []).length === policies.rows.length, "Generated SQL policy count differs from inventory");
-  ensure((readGenerated("21-runtime-grants.sql").toString().match(/GRANT\s+(?:SELECT|INSERT|UPDATE)\s*\(/g) || []).length === privileges.rows.length, "Generated SQL column grants differ from inventory");
+  ensure((readGenerated("21-runtime-grants.sql").toString().match(/GRANT\s+(?:SELECT|INSERT|UPDATE)\s*\(/g) || []).length === privileges.rows.length + (privileges.functionOwnerRows || []).length, "Generated SQL column grants differ from inventory");
 
   ensure(roleLifecycle.schemaVersion === 5 && roleLifecycle.deploymentModel === "clean-room-blue-green", "Role lifecycle report is not clean-room blue/green");
   ensure(roleLifecycle.preflight?.mutationAllowed === false && roleLifecycle.legacyRoleRestoration === false && roleLifecycle.legacyAclRestoration === false && roleLifecycle.legacyDefaultAclRestoration === false && roleLifecycle.legacyOwnershipRestoration === false, "Role lifecycle report retains historical restoration");

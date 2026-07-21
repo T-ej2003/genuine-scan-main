@@ -10,7 +10,10 @@ DO $$ DECLARE database_owner text; BEGIN
   IF database_owner<>current_user THEN RAISE EXCEPTION 'clean-room executor must own the green candidate database'; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=current_user AND (NOT rolcreaterole OR NOT rolcreatedb)) THEN RAISE EXCEPTION 'clean-room executor requires CREATEROLE and CREATEDB without runtime use'; END IF;
   IF current_user IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration') THEN RAISE EXCEPTION 'administrative executor may not be a managed identity'; END IF;
-  IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()) THEN RAISE EXCEPTION 'clean-room preflight refuses another green database session'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()) THEN
+    PERFORM pg_sleep(1);
+    IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()) THEN RAISE EXCEPTION 'clean-room preflight refuses another green database session'; END IF;
+  END IF;
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration')) THEN RAISE EXCEPTION 'clean-room preflight refuses a pre-existing managed role'; END IF;
 
@@ -46,23 +49,23 @@ DO $$ DECLARE database_owner text; BEGIN
   EXECUTE 'CREATE ROLE "mscqr_rls_cert_migration" LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS';
 END $$;
 GRANT "mscqr_rls_cert_owner" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_owner" IS 'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed';
+COMMENT ON ROLE "mscqr_rls_cert_owner" IS 'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b';
 GRANT "mscqr_rls_cert_auth_owner" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_auth_owner" IS 'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed';
+COMMENT ON ROLE "mscqr_rls_cert_auth_owner" IS 'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b';
 GRANT "mscqr_rls_cert_app" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_app" IS 'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed';
+COMMENT ON ROLE "mscqr_rls_cert_app" IS 'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b';
 GRANT "mscqr_rls_cert_read" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_read" IS 'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed';
+COMMENT ON ROLE "mscqr_rls_cert_read" IS 'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b';
 GRANT "mscqr_rls_cert_preauth" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_preauth" IS 'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed';
+COMMENT ON ROLE "mscqr_rls_cert_preauth" IS 'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b';
 GRANT "mscqr_rls_cert_worker" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_worker" IS 'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed';
+COMMENT ON ROLE "mscqr_rls_cert_worker" IS 'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b';
 GRANT "mscqr_rls_cert_scheduled" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_scheduled" IS 'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed';
+COMMENT ON ROLE "mscqr_rls_cert_scheduled" IS 'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b';
 GRANT "mscqr_rls_cert_operator" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_operator" IS 'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed';
+COMMENT ON ROLE "mscqr_rls_cert_operator" IS 'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b';
 GRANT "mscqr_rls_cert_migration" TO "certification-administrator" WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-COMMENT ON ROLE "mscqr_rls_cert_migration" IS 'mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed';
+COMMENT ON ROLE "mscqr_rls_cert_migration" IS 'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b';
 CREATE SCHEMA mscqr_rls_install AUTHORIZATION "certification-administrator";
 REVOKE ALL ON SCHEMA mscqr_rls_install FROM PUBLIC;
 CREATE TABLE mscqr_rls_install.state (
@@ -108,7 +111,7 @@ CREATE TABLE mscqr_rls_install.expected_routine (
 );
 REVOKE ALL ON ALL TABLES IN SCHEMA mscqr_rls_install FROM PUBLIC;
 INSERT INTO mscqr_rls_install.state(target_environment,deployment_id,green_database,source_contract_sha256,package_role_marker,administrator_role,phase)
-VALUES ('certification','cert',current_database(),'28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed','mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed',current_user,'roles-created');
+VALUES ('certification','cert',current_database(),'493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b','mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b',current_user,'roles-created');
 DO $$ BEGIN
   EXECUTE format('REVOKE CONNECT,TEMPORARY ON DATABASE %I FROM PUBLIC',current_database());
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I',current_database(),'mscqr_rls_cert_app');

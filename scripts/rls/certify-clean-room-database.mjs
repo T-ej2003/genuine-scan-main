@@ -40,6 +40,7 @@ const ids = {
   policyA: "00000000-0000-4000-8000-000000001001", policyB: "00000000-0000-4000-8000-000000001002",
   auditA: "00000000-0000-4000-8000-000000001101", auditB: "00000000-0000-4000-8000-000000001102", auditAOther: "00000000-0000-4000-8000-000000001103",
   traceA: "00000000-0000-4000-8000-000000001201", traceB: "00000000-0000-4000-8000-000000001202",
+  refreshA: "00000000-0000-4000-8000-000000001301", refreshRollback: "00000000-0000-4000-8000-000000001302",
 };
 const riskAnalyticsUserColumns = ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"];
 const prohibitedRiskAnalyticsUserColumns = ["createdAt", "disabledReason", "email", "emailVerifiedAt", "failedLoginAttempts", "lastLoginAt", "location", "lockedUntil", "metadata", "passwordHash", "pendingEmail", "pendingEmailRequestedAt", "updatedAt", "website"];
@@ -179,11 +180,19 @@ const createGreenDatabase = (executorUrl, database) => {
 const dropGreenDatabase = (executorUrl, database) => {
   if (databaseExists(executorUrl, database)) {
     runPsql(executorUrl, ["-q", "-c", `DO $$ BEGIN
-      FOR attempt IN 1..100 LOOP
-        EXIT WHEN NOT EXISTS (SELECT FROM pg_stat_activity WHERE datname=${lit(database)});
+      -- The target is an exact, per-process disposable database created by
+      -- this runner.  Terminate only residual sessions on that verified name;
+      -- this avoids a flaky race with locally pooled psql/Prisma probes while
+      -- never touching a shared or live database.
+      FOR attempt IN 1..200 LOOP
+        EXIT WHEN NOT EXISTS (SELECT FROM pg_stat_activity WHERE datname=${lit(database)} AND pid<>pg_backend_pid());
         PERFORM pg_sleep(0.05);
       END LOOP;
-      IF EXISTS (SELECT FROM pg_stat_activity WHERE datname=${lit(database)}) THEN
+      IF EXISTS (SELECT FROM pg_stat_activity WHERE datname=${lit(database)} AND pid<>pg_backend_pid()) THEN
+        PERFORM pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=${lit(database)} AND pid<>pg_backend_pid();
+        PERFORM pg_sleep(0.1);
+      END IF;
+      IF EXISTS (SELECT FROM pg_stat_activity WHERE datname=${lit(database)} AND pid<>pg_backend_pid()) THEN
         RAISE EXCEPTION 'disposable green database still has active sessions';
       END IF;
     END $$;`], "wait for disposable green sessions to disconnect");
@@ -240,7 +249,8 @@ const certifyTablesAndColumns = (dbUrl, appUrl, manifest, policies, privileges) 
   if (Number(scalar(dbUrl, `SELECT count(*) FROM pg_auth_members m JOIN pg_roles p ON p.oid=m.roleid JOIN pg_roles u ON u.oid=m.member WHERE u.rolname IN (${roleListSql(manifest.roles)}) OR (p.rolname IN (${roleListSql(manifest.roles)}) AND (u.rolname<>${lit(certificationAdministrator)} OR m.inherit_option))`, "verify bounded role memberships")) !== 0) throw new Error("A managed role has unsafe membership authority");
   if (Number(scalar(dbUrl, `SELECT count(*) FROM pg_roles r WHERE r.rolname IN (${roleListSql(manifest.roles)}) AND NOT pg_has_role(${lit(certificationAdministrator)},r.rolname,'SET')`, "verify administrative SET capability")) !== 0) throw new Error("Certification administrator lacks SET authority for a managed role");
   if (Number(scalar(dbUrl, "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) acl WHERE n.nspname='public' AND c.relkind IN ('r','p') AND acl.grantee=0", "verify PUBLIC grants")) !== 0) throw new Error("PUBLIC table privileges remain");
-  if (Number(scalar(dbUrl, "SELECT count(*) FROM pg_policies WHERE schemaname='public' AND policyname LIKE 'full_rls_%'", "count policies")) !== policies.count) throw new Error("Generated policy inventory differs from catalog");
+  const generatedPolicyCount = Number(scalar(dbUrl, "SELECT count(*) FROM pg_policies WHERE schemaname='public'", "count policies"));
+  if (generatedPolicyCount !== policies.count) throw new Error(`Generated policy inventory differs from catalog: expected ${policies.count}, found ${generatedPolicyCount}`);
 
   for (const grant of privileges.rows) for (const column of grant.columns) {
     const actual = scalar(dbUrl, `SELECT has_column_privilege(${lit(manifest.roles.app)},c.oid,a.attnum,${lit(grant.command)}) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname=${lit(column)} WHERE n.nspname='public' AND c.relname=${lit(grant.table)}`, `${grant.table}.${column} ${grant.command}`);
@@ -317,6 +327,29 @@ const certifyTablesAndColumns = (dbUrl, appUrl, manifest, policies, privileges) 
   return forceCount;
 };
 
+const certifyB01RefreshRotation = ({ bootstrap, preauth }, manifest) => {
+  const oldHash = "a".repeat(64);
+  const rollbackHash = "b".repeat(64);
+  const successorHash = "c".repeat(64);
+  const requestId = "b01-cert-rotation";
+  requireDenial(runPsql(preauth, ["-q", "-c", `SELECT * FROM public."RefreshToken"`], "pre-auth direct RefreshToken SELECT", true), "pre-auth direct RefreshToken SELECT");
+  requireDenial(runPsql(preauth, ["-q", "-c", `SELECT app_auth.b01_audit('X','${ids.refreshA}',transaction_timestamp()::timestamp)`], "pre-auth helper execution", true), "pre-auth helper execution");
+  if (scalar(bootstrap, `SELECT rolcanlogin::text || ':' || rolbypassrls::text FROM pg_roles WHERE rolname=${lit(manifest.roles.authOwner)}`, "B01 function owner attributes") !== "false:false") throw new Error("B01 function owner is login-capable or bypasses RLS");
+  if (scalar(bootstrap, `SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid=c.relowner WHERE c.relname='RefreshToken' AND r.rolname=${lit(manifest.roles.authOwner)}`, "B01 function owner table ownership") !== "0") throw new Error("B01 function owner owns RefreshToken");
+  if (scalar(bootstrap, `SELECT relforcerowsecurity::text FROM pg_class WHERE oid='public."RefreshToken"'::regclass`, "B01 RefreshToken FORCE RLS") !== "true") throw new Error("B01 RefreshToken is not FORCE RLS");
+  const rotationSql = `BEGIN;
+    SELECT disposition FROM app_auth.claim_refresh_token_rotation(ARRAY['${oldHash}']::text[],transaction_timestamp()::timestamp,'${requestId}');
+    SELECT id FROM app_auth.complete_refresh_token_rotation('${ids.refreshA}',ARRAY['${oldHash}']::text[],'${ids.adminA}','${ids.orgA}','${successorHash}',(transaction_timestamp()+interval '1 day')::timestamp,NULL,NULL,transaction_timestamp()::timestamp,NULL,transaction_timestamp()::timestamp,'${requestId}');
+    COMMIT;`;
+  runPsql(preauth, ["-q", "-c", rotationSql], "B01 committed refresh rotation");
+  if (scalar(bootstrap, `SELECT "revokedReason" || ':' || coalesce("replacedByTokenHash",'') || ':' || ("rotationCompletedAt" IS NOT NULL)::text FROM public."RefreshToken" WHERE id='${ids.refreshA}'`, "B01 predecessor lineage") !== `ROTATED:${successorHash}:true`) throw new Error("B01 rotation did not atomically revoke and link its predecessor");
+  if (scalar(bootstrap, `SELECT count(*) FROM public."RefreshToken" WHERE "tokenHash"='${successorHash}'`, "B01 successor count") !== "1") throw new Error("B01 rotation created an invalid successor count");
+  if (scalar(preauth, `SELECT disposition FROM app_auth.claim_refresh_token_rotation(ARRAY['${oldHash}']::text[],transaction_timestamp()::timestamp,'${requestId}')`, "B01 committed predecessor replay") !== "REUSE_DETECTED") throw new Error("B01 committed predecessor replay was not rejected");
+  runPsql(preauth, ["-q", "-c", `BEGIN; SELECT disposition FROM app_auth.claim_refresh_token_rotation(ARRAY['${rollbackHash}']::text[],transaction_timestamp()::timestamp,'b01-cert-rollback'); ROLLBACK;`], "B01 rollback refresh claim");
+  if (scalar(bootstrap, `SELECT coalesce("rotationRequestId",'') FROM public."RefreshToken" WHERE id='${ids.refreshRollback}'`, "B01 rollback claim residue") !== "") throw new Error("B01 rollback left a durable claim");
+  return { predecessorReplayRejected: true, rollbackClaimCleared: true, successorHashPersisted: true };
+};
+
 const certifySemantics = (bootstrapUrl, appUrl) => {
   const tenantRisk = { user: ids.adminA, org: ids.orgA, licensee: ids.licenseeA };
   const manufacturerParentCount = Number(appScalar(appUrl, tenantRisk, `SELECT count("id") FROM public."User" WHERE "id"=${lit(ids.manufacturerA)} AND "role" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND "isActive"=TRUE AND "status"='ACTIVE' AND "deletedAt" IS NULL AND "disabledAt" IS NULL`, "risk analytics manufacturer parent validation"));
@@ -343,9 +376,13 @@ const certifySemantics = (bootstrapUrl, appUrl) => {
   for (const expected of [ids.ruleA, ids.ruleOrgA, ids.ruleManA]) if (!visibleRules.includes(expected)) throw new Error(`Approved PolicyRule scope ${expected} is invisible`);
   for (const deniedId of [ids.ruleB, ids.ruleConflict]) if (visibleRules.includes(deniedId)) throw new Error(`Conflicting/foreign PolicyRule scope ${deniedId} is visible`);
 
+  // Audit inserts are source-purpose-specific.  A generic direct runtime
+  // insert is not a reviewed business command; it must fail closed.  Reviewed
+  // service and SECURITY DEFINER boundaries are exercised in their own path
+  // certification rather than by granting a synthetic table-write capability.
   const manufacturer = { user: ids.manufacturerA, org: ids.orgA, licensee: ids.licenseeA, actorClass: "manufacturer", assurance: "mfa-verified", purpose: "audit-log-read" };
-  const auditInsert = (user, org, licensee, action = "DENY") => `INSERT INTO public."AuditLog" ("id","userId","orgId","licenseeId","action","entityType","entityId","details") VALUES ('00000000-0000-4000-8000-000000009999',${lit(user)},${lit(org)},${lit(licensee)},${lit(action)},'Certification','fixture','{}')`;
-  runPsql(appUrl, ["-q", "-c", `BEGIN; ${contextSql(manufacturer)} ${auditInsert(ids.manufacturerA, ids.orgA, ids.licenseeA, "CERT_MANUFACTURER")}; ROLLBACK;`], "valid manufacturer audit insert");
+  const auditInsert = (user, org, licensee, action = "BATCH_OPERATIONAL_READ") => `INSERT INTO public."AuditLog" ("id","userId","orgId","licenseeId","action","entityType","entityId","details") VALUES ('00000000-0000-4000-8000-000000009999',${lit(user)},${lit(org)},${lit(licensee)},${lit(action)},'BatchOperationalRead','fixture',${lit(JSON.stringify({ requestId: "full-rls-cert-request", purposeCode: "batch-operational-read", route: "GET /api/qr/batches" }))}::jsonb)`;
+  requireDenial(denial(appUrl, manufacturer, auditInsert(ids.manufacturerA, ids.orgA, ids.licenseeA), "unreviewed direct audit insert"), "unreviewed direct audit insert");
   for (const [label, context, user, org, licensee] of [
     ["foreign manufacturer licensee", manufacturer, ids.manufacturerA, ids.orgA, ids.licenseeB],
     ["forged manufacturer organization", manufacturer, ids.manufacturerA, ids.orgB, ids.licenseeA],
@@ -405,6 +442,7 @@ const createUrls = (adminUrl, maintenanceDatabase, database, manifest) => ({
   bootstrap: databaseUrlFor(adminUrl, database, decodeURIComponent(new URL(adminUrl).username)),
   maintenance: databaseUrlFor(adminUrl, maintenanceDatabase, certificationAdministrator),
   app: databaseUrlFor(adminUrl, database, manifest.roles.app),
+  preauth: databaseUrlFor(adminUrl, database, manifest.roles.preauth),
 });
 const assertZeroBeforePrisma = (administratorUrl) => {
   if (scalar(administratorUrl, "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','S','v','m','f')", "prove zero public objects before Prisma") !== "0") throw new Error("Fresh green database contains public application objects before Prisma");
@@ -631,12 +669,13 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     runSqlFile(urls.administrator, "verification.sql", "run exact verification entrypoint");
     const catalogTamperResults = certifyCatalogTamperDetection(urls.administrator, manifest, policies);
     const tablesCertified = certifyTablesAndColumns(urls.administrator, urls.app, manifest, policies, privileges);
+    const b01Certification = certifyB01RefreshRotation(urls, manifest);
     certifySemantics(urls.bootstrap, urls.app);
     const fixtureRows = Number(scalar(urls.bootstrap, "SELECT sum(row_count) FROM (SELECT (xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM public.%I',c.relname),false,true,'')))[1]::text::bigint AS row_count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_prisma_migrations') counts", "count disposable certification fixture rows"));
     if (!fixtureRows) throw new Error("Final semantic certification did not load its declared disposable fixtures");
     const applicationPathResults = runApplicationPathCertifications({ app: urls.app, bootstrap: urls.bootstrap }, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -741,6 +780,7 @@ export const runCertification = (adminUrl, env = process.env) => {
       ? "complete"
       : "pending-application-path-certification";
     result.catalogTamperResults = finalRun.catalogTamperResults;
+    result.b01Certification = finalRun.b01Certification;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
     result.generatedPoliciesCertified = policies.count;
     result.columnPrivilegeCellsCertified = privileges.cells;
@@ -780,7 +820,7 @@ export const runCertification = (adminUrl, env = process.env) => {
   return result;
 };
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 if (isMain) {
   try { console.log(JSON.stringify(runCertification(process.env[DATABASE_ENV] || ""))); }
   catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; }

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "rows": [
     {
       "tableId": "table-audit-log",
@@ -221,5 +221,290 @@
       ]
     }
   ],
-  "cells": 78
+  "cells": 78,
+  "functionOwnerRows": [
+    {
+      "table": "RefreshToken",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "userId",
+        "tokenHash",
+        "expiresAt",
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "lastUsedAt",
+        "revokedAt",
+        "revokedReason",
+        "replacedByTokenHash",
+        "rotationRequestId",
+        "rotationClaimedAt",
+        "rotationCompletedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "RefreshToken",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "orgId",
+        "userId",
+        "tokenHash",
+        "expiresAt",
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "lastUsedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "RefreshToken",
+      "command": "UPDATE",
+      "columns": [
+        "revokedAt",
+        "revokedReason",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "rotationRequestId",
+        "rotationClaimedAt",
+        "rotationCompletedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "email",
+        "name",
+        "role",
+        "orgId",
+        "licenseeId",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt",
+        "emailVerifiedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "command": "SELECT",
+      "columns": [
+        "manufacturerId",
+        "licenseeId",
+        "isPrimary",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "name",
+        "prefix",
+        "brandName",
+        "isActive",
+        "suspendedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "AdminMfaCredential",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "isEnabled",
+        "lastUsedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "AdminWebAuthnCredential",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "lastUsedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "UserMfaFactor",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "type",
+        "lastUsedAt",
+        "disabledAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "UserBackupCode",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "AuthMfaChallenge",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "userId",
+        "ticketHash",
+        "sessionBindingHash",
+        "purpose",
+        "riskScore",
+        "riskLevel",
+        "reasons",
+        "createdIpHash",
+        "createdUserAgentHash",
+        "maxAttempts",
+        "createdAt",
+        "updatedAt",
+        "expiresAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    },
+    {
+      "table": "AuditLogOutbox",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "payload",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b01-claim-refresh-token-rotation",
+        "b01-complete-refresh-token-rotation",
+        "b01-create-refresh-mfa-challenge",
+        "b01-load-refresh-session-state",
+        "b01-revoke-refresh-token-scope"
+      ]
+    }
+  ]
 }

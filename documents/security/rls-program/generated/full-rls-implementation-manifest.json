@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed",
+  "sourceContractSha256": "493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -23,11 +23,11 @@
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "2d9d53add0d82c263bbe3aeef639acf230137247be78c930c2b124d65d5c6780"
+      "sha256": "0078d86fbe6ee35439ee4b4d9c08fdc1b827ff8cc9ac73011c0c47e439a9b593"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "72edcc4a5608075213b4827ce9f77e7fee121d75e2471865520f6529d04fbc97"
+      "sha256": "cf37ca7993b192e400cc38bf1846f7fe0c8b34943df5b8b6858dc8159ff45870"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -51,7 +51,7 @@
     },
     {
       "path": "backend/prisma/schema.prisma",
-      "sha256": "b52f9ed8607b4a07bc7083c726fb208bf8b96d7a15d32c136d628c625bf5e280"
+      "sha256": "1c820b8307263f70084c16a5a8cb060cfcc14c03b7e7f20c329cdb3d86005cdf"
     },
     {
       "path": "scripts/rls/generate-full-rls-sql.mjs",
@@ -59,23 +59,35 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "b8d65b0ad8d6fb868f2f1ea57edb7fc37e5d33121631406757ac7ac837eab9a5"
+      "sha256": "e22f97f6246aecc8e0d0104a0c1599be3f9821bc895c4af1593d906afbb44cdc"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
-      "sha256": "9bd066e9a15938a179d94d764fd48378c28cc5413584e30d65db7dd8b77780e6"
+      "sha256": "c4ecea36bc20b046fa4140a7cdcab73b71bb735f8bb3ff539ff855bdc3300f19"
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
-      "sha256": "6e3a10474df0c59eb3d2eec334c974497ae12472e864467ec25f82f75f024774"
+      "sha256": "96aed5990cd4e6a43fb183fbac2cc59ae7e4eff61bd276fcd0d7cb7588dfffba"
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "2aef686c6a1e409bd05ac4794fc78e350688dada4d7fe8b28e381527b765f34d"
+      "sha256": "339454a835c9747e00f3211302ca127d55c59b81a3fb167a2e138480ebd62448"
     },
     {
       "path": "scripts/rls/lib/application-path-certifications.mjs",
       "sha256": "bc0d4e5a4c6013f1f3e02f7eab050336c79bc074df39b16b25d120a7c0be6b55"
+    },
+    {
+      "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
+      "sha256": "78dc90a0a0d274a8fd418403f274714f24793faee2930dc76a1aa2c57c688eb5"
+    },
+    {
+      "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "sha256": "62d18bebe3e447edb3d927198f252b03d6d35abc908b94ee175e36fd2ee74816"
+    },
+    {
+      "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+      "sha256": "aa56cd6220367bb27b72eabcab9e5f2a93245df1a2cbc9e6bf2bbdb7e7bad1dd"
     },
     {
       "path": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
@@ -97,9 +109,9 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 31,
-    "generatedPolicies": 43,
+    "generatedPolicies": 56,
     "columnPrivilegeCells": 78,
-    "prismaMigrations": 48,
+    "prismaMigrations": 49,
     "prismaEnums": 58,
     "registeredWorkflowCallPaths": 400,
     "applicationPathCertifiedWorkflows": 10
@@ -115,7 +127,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
@@ -332,6 +344,10 @@
     {
       "name": "20260625120000_printer_agent_persistent_sessions",
       "sha256": "e3edc922568f6efa47676136e8a182684aba8558f33cab3479a21573d9f30eaf"
+    },
+    {
+      "name": "20260721140000_add_refresh_rotation_claim",
+      "sha256": "418d6e006649cb17edbe52127d83b60f7b2bbf17e52d6e05b014a4b3adb95759"
     }
   ],
   "prohibitions": [

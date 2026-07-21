@@ -525,6 +525,7 @@ export const revokeRefreshTokenRotationScope = async (
     scope: "token" | "password-only" | "all";
     reason: string;
     revokedAt: Date;
+    requestId: string;
   }
 ) => {
   if (!["token", "password-only", "all"].includes(input.scope)) {
@@ -537,7 +538,8 @@ export const revokeRefreshTokenRotationScope = async (
       ${text(input.userId, "a target user ID")},
       ${input.scope},
       ${reason(input.reason)},
-      ${timestamp(input.revokedAt, "a revocation timestamp")}::timestamp without time zone
+      ${timestamp(input.revokedAt, "a revocation timestamp")}::timestamp without time zone,
+      ${requestId(input.requestId)}
     )
   `, "app_auth.revoke_refresh_token_scope", 1);
 };
@@ -556,6 +558,7 @@ export const completeRefreshTokenRotation = async (
     authenticatedAt: Date;
     mfaVerifiedAt: Date | null;
     rotatedAt: Date;
+    requestId: string;
   }
 ) => {
   const rotatedAt = timestamp(input.rotatedAt, "a rotation timestamp");
@@ -573,7 +576,8 @@ export const completeRefreshTokenRotation = async (
       ${optionalText(input.userAgent, "a user agent", 300)},
       ${timestamp(input.authenticatedAt, "an authentication timestamp")}::timestamp without time zone,
       ${optionalTimestamp(input.mfaVerifiedAt, "an MFA timestamp")}::timestamp without time zone,
-      ${rotatedAt}::timestamp without time zone
+      ${rotatedAt}::timestamp without time zone,
+      ${requestId(input.requestId)}
     )
   `, "app_auth.complete_refresh_token_rotation", [["id", "string"], ["expiresAt", "date"]]);
 };

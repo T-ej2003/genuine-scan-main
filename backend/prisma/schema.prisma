@@ -1852,11 +1852,15 @@ model RefreshToken {
   revokedAt DateTime?
   revokedReason String?
   replacedByTokenHash String?
+  rotationRequestId String?
+  rotationClaimedAt DateTime?
+  rotationCompletedAt DateTime?
 
   @@index([userId])
   @@index([orgId])
   @@index([expiresAt])
   @@index([revokedAt])
+  @@index([rotationRequestId])
 }
 
 model AdminMfaCredential {

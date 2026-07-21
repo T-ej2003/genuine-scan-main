@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "mode": "clean-room-expected-after-apply",
   "rows": [
     {
@@ -220,6 +220,200 @@
         "command-user-select-509547f03abe",
         "command-user-select-97535583a8fe"
       ]
+    }
+  ],
+  "functionOwnerRows": [
+    {
+      "table": "RefreshToken",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "userId",
+        "tokenHash",
+        "expiresAt",
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "lastUsedAt",
+        "revokedAt",
+        "revokedReason",
+        "replacedByTokenHash",
+        "rotationRequestId",
+        "rotationClaimedAt",
+        "rotationCompletedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "RefreshToken",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "orgId",
+        "userId",
+        "tokenHash",
+        "expiresAt",
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "lastUsedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "RefreshToken",
+      "command": "UPDATE",
+      "columns": [
+        "revokedAt",
+        "revokedReason",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "rotationRequestId",
+        "rotationClaimedAt",
+        "rotationCompletedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "email",
+        "name",
+        "role",
+        "orgId",
+        "licenseeId",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt",
+        "emailVerifiedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "ManufacturerLicenseeLink",
+      "command": "SELECT",
+      "columns": [
+        "manufacturerId",
+        "licenseeId",
+        "isPrimary",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "name",
+        "prefix",
+        "brandName",
+        "isActive",
+        "suspendedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "AdminMfaCredential",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "isEnabled",
+        "lastUsedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "AdminWebAuthnCredential",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "lastUsedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "UserMfaFactor",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "type",
+        "lastUsedAt",
+        "disabledAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "UserBackupCode",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "AuthMfaChallenge",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "userId",
+        "ticketHash",
+        "sessionBindingHash",
+        "purpose",
+        "riskScore",
+        "riskLevel",
+        "reasons",
+        "createdIpHash",
+        "createdUserAgentHash",
+        "maxAttempts",
+        "createdAt",
+        "updatedAt",
+        "expiresAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "AuditLogOutbox",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "payload",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
     }
   ],
   "legacyAclRestoration": false

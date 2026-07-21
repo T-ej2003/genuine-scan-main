@@ -239,6 +239,7 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
         scope,
         reason,
         revokedAt: now,
+        requestId: input.requestId,
       });
     };
 
@@ -267,6 +268,7 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
       authenticatedAt: decision.authenticatedAt,
       mfaVerifiedAt: decision.mfaVerifiedAt,
       rotatedAt: now,
+      requestId: input.requestId,
     });
 
     return {

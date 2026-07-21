@@ -21,6 +21,9 @@ export const cleanRoomSourcePaths = [...new Set([
   "scripts/rls/certify-clean-room-database.mjs",
   "scripts/rls/lib/clean-room-source-contract.mjs",
   "scripts/rls/lib/application-path-certifications.mjs",
+  "scripts/rls/lib/named-sql-function-contracts.mjs",
+  "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+  "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
   ...applicationPathCertificationFamilies.map((family) => family.testFile),
 ])];
 

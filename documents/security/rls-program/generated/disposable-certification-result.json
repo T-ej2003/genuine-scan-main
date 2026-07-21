@@ -3,11 +3,11 @@
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6",
+  "sourceContractSha256": "493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b",
   "tablesExpected": 77,
   "forceRlsTargetsExpected": 75,
   "tablesCertified": 75,
-  "generatedPoliciesCertified": 46,
+  "generatedPoliciesCertified": 56,
   "columnPrivilegeCellsCertified": 78,
   "workflowCertificationStatus": "pending-application-path-certification",
   "workflowsApplicationPathCertified": 10,
@@ -70,7 +70,7 @@
       "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
     }
   ],
-  "workflowsProductProhibited": 16,
+  "workflowsProductProhibited": 1,
   "cleanRoomPreflightCertified": true,
   "migrationsFromZeroCertified": true,
   "managedRolesCreatedByPackage": true,
@@ -347,7 +347,12 @@
   "columnPrivilegeCertification": true,
   "exactCatalogTamperCertification": true,
   "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "f38d5d3f9d80410eba0e189ee88bf887af8e4ddaa0811eb39f5939a8bdc09880",
+  "packageChecksumsSha256": "ae09647cd46de0b5189cf50d4d5e6b19d2b7ea986b2a86df15433c9da20bca59",
   "status": "clean-room-full-table-enforcement-certified-workflows-pending",
-  "disposableCertificationFixtureRows": 36
+  "b01Certification": {
+    "predecessorReplayRejected": true,
+    "rollbackClaimCleared": true,
+    "successorHashPersisted": true
+  },
+  "disposableCertificationFixtureRows": 41
 }
