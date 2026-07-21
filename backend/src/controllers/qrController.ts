@@ -1258,19 +1258,10 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
     const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
     const requestedLicenseeId = (req.query.licenseeId as string | undefined) || null;
 
-    const scopeKey = [
-      req.user.role,
-      req.user.userId,
-      req.user.licenseeId || "none",
-      req.user.orgId || "none",
-      String(req.query.licenseeId || "all"),
-      limit,
-      offset,
-    ].join(":");
     const payload = await listScopedBatchReadPayload({
       user: req.user,
       requestedLicenseeId,
-      scopeKey,
+      requestId: (req as AuthRequest & { requestId?: string }).requestId,
       limit,
       offset,
     });
@@ -1296,10 +1287,16 @@ export const getBatchAllocationMap = async (req: AuthRequest, res: Response) => 
     if (!batchId) {
       return res.status(400).json({ success: false, error: "Missing batch id" });
     }
+    const parsed = batchIdParamSchema.safeParse({ id: batchId });
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: "Invalid batch id" });
+    }
 
     const allocationPayload = await getScopedBatchAllocationMapPayload({
       user: req.user,
-      batchId,
+      batchId: parsed.data.id,
+      requestedLicenseeId: (req.query.licenseeId as string | undefined) || null,
+      requestId: (req as AuthRequest & { requestId?: string }).requestId,
     });
     if (allocationPayload.status === "batch_not_found") {
       return res.status(404).json({ success: false, error: "Batch not found" });
@@ -1311,6 +1308,9 @@ export const getBatchAllocationMap = async (req: AuthRequest, res: Response) => 
 
     return res.json({ success: true, data: allocationPayload.allocationMap });
   } catch (error) {
+    if (isScopeError(error)) {
+      return res.status(404).json({ success: false, error: "Batch not found" });
+    }
     console.error("getBatchAllocationMap error:", error);
     return res.status(500).json({ success: false, error: "Internal server error" });
   }

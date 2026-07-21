@@ -10,6 +10,15 @@ export const DASHBOARD_SNAPSHOT_WORKFLOW_IDS = [
   "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
   "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
 ];
+export const BATCH_OPERATIONAL_READ_WORKFLOW_IDS = [
+  "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
+  "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
+  "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
+  "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups",
+  "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
+  "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges",
+  "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries",
+];
 
 export const applicationPathCertificationFamilies = [
   {
@@ -35,6 +44,18 @@ export const applicationPathCertificationFamilies = [
     enable: ["MSCQR_DASHBOARD_POSTGRES18_TEST", "true"],
     confirm: ["MSCQR_DASHBOARD_POSTGRES18_CONFIRM", "MSCQR_RUN_LOCAL_DASHBOARD_POSTGRES18_TEST"],
     connections: { DATABASE_URL: "app", MSCQR_DASHBOARD_BOOTSTRAP_URL: "bootstrap" },
+  },
+  {
+    id: "batch-operational-read",
+    workflowIds: BATCH_OPERATIONAL_READ_WORKFLOW_IDS,
+    registeredRoots: ["GET /api/qr/batches", "GET /api/qr/batches/:id/allocation-map"],
+    testFile: "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+    runtimeRole: "identity-authenticated-app",
+    positiveActors: ["licensee-admin", "manufacturer", "platform-admin"],
+    deniedCases: ["blank-context", "malformed-context", "foreign-scope", "foreign-focus", "forged-role", "stale-membership", "wrong-assurance", "wrong-purpose", "missing-platform-selector"],
+    enable: ["MSCQR_BATCH_OPERATIONAL_POSTGRES18_TEST", "true"],
+    confirm: ["MSCQR_BATCH_OPERATIONAL_POSTGRES18_CONFIRM", "MSCQR_RUN_LOCAL_BATCH_OPERATIONAL_POSTGRES18_TEST"],
+    connections: { DATABASE_URL: "app", MSCQR_BATCH_OPERATIONAL_BOOTSTRAP_URL: "bootstrap" },
   },
 ].map((family) => Object.freeze({
   ...family,

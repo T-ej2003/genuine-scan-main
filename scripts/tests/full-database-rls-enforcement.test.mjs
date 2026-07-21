@@ -32,16 +32,19 @@ test("full RLS generator covers all tables with fail-closed dispositions", () =>
 test("generated direct policies preserve exact actor, assurance, purpose and column semantics", () => {
   const inputs = packageInputs();
   const result = validateGeneratedPackage(inputs);
-  assert.equal(result.policies, 48);
+  assert.equal(result.policies, 46);
   assert.equal(result.directPolicySlices, 34);
   assert.equal(result.columnPrivilegeCells, 78);
   assert.ok(inputs.policies.rows.filter((policy) => !policy.internalHelperOnly && policy.actors.includes("platform-admin")).every((policy) => policy.assurance === "mfa-verified"));
   const platformOrganization = inputs.policies.rows.find((policy) => policy.table === "Organization" && !policy.internalHelperOnly && policy.actors.includes("platform-admin"));
   const platformPolicyRule = inputs.policies.rows.find((policy) => policy.table === "PolicyRule" && policy.actors.includes("platform-admin"));
-  const internalOrganization = inputs.policies.rows.find((policy) => policy.policyName === "full_rls_internal_manufacturer_org");
+  const internalOrganization = inputs.policies.rows.find((policy) => policy.policyName === "full_rls_internal_organization_select");
   assert.match(platformOrganization.scopePredicate, /scope_licensee\."orgId"="Organization"\."id"/);
   assert.match(platformPolicyRule.scopePredicate, /scope_licensee\."orgId"="PolicyRule"\."orgId"/);
   assert.match(internalOrganization.scopePredicate, /scope_licensee\."orgId"="Organization"\."id"/);
+  const internalPolicies = inputs.policies.rows.filter((policy) => policy.internalHelperOnly);
+  assert.equal(new Set(internalPolicies.map((policy) => `${policy.table}:${policy.command}`)).size, internalPolicies.length,
+    "owner policies must stay consolidated by table and command to avoid cross-purpose rewrite amplification");
   const auditInserts = inputs.policies.rows.filter((policy) => policy.table === "AuditLog" && policy.command === "INSERT" && !policy.internalHelperOnly);
   assert.ok(auditInserts.every((policy) => policy.scopePredicate.includes('"userId" = app_rls.current_user_id()') || policy.scopePredicate.includes('"userId"=app_rls.current_user_id()')));
   assert.ok(auditInserts.filter((policy) => policy.actors.includes("platform-admin")).every((policy) => policy.scopePredicate.includes('scope_licensee."orgId"="AuditLog"."orgId"')));

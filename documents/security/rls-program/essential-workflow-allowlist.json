@@ -86,6 +86,83 @@
       "userFacingFallback": "Existing aggregate, sparse fallback and cache behavior remains unchanged until certified."
     },
     {
+      "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
+      "routeOrRoot": "GET /api/qr/batches -> internal:readBatches",
+      "requiredActor": "database-revalidated tenant administrator, MFA-verified manufacturer or fresh-MFA platform administrator",
+      "requiredBoundary": "canonical batch-operational-read transaction and exact batch operational functions",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "app_rls.batch_operational_scope and app_rls.batch_operational_rows",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate; the route remains functional before activation",
+      "userFacingFallback": "Existing batch list behavior remains unchanged until certified."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
+      "routeOrRoot": "GET /api/qr/batches/:id/allocation-map -> internal:getBatchAllocationMap",
+      "requiredActor": "database-revalidated tenant administrator, MFA-verified manufacturer or fresh-MFA platform administrator",
+      "requiredBoundary": "canonical batch-operational-read transaction with focus-bound lineage scope",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "app_rls.batch_operational_scope and focus-bound app_rls.batch_operational_rows",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate; the route remains functional before activation",
+      "userFacingFallback": "Existing allocation-map behavior remains unchanged until certified."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
+      "routeOrRoot": "GET /api/qr/batches -> internal:readTotal",
+      "requiredActor": "same authorized batch operational reader",
+      "requiredBoundary": "scope-fingerprint-bound app_rls.batch_operational_total",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "app_rls.batch_operational_total",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate",
+      "userFacingFallback": "Existing batch pagination totals remain unchanged until certified."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups",
+      "routeOrRoot": "batch list and allocation-map enrichment -> internal:readRollups",
+      "requiredActor": "same authorized batch operational reader",
+      "requiredBoundary": "scope-fingerprint-bound app_rls.batch_inventory_rollups",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "app_rls.batch_inventory_rollups",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate",
+      "userFacingFallback": "Existing inventory counters remain unchanged until certified."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges",
+      "routeOrRoot": "batch list and allocation-map enrichment -> internal:readUnassignedRanges",
+      "requiredActor": "same authorized batch operational reader",
+      "requiredBoundary": "scope-fingerprint-bound app_rls.batch_unassigned_ranges",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "app_rls.batch_unassigned_ranges",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate",
+      "userFacingFallback": "Existing unassigned range semantics remain unchanged until certified."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
+      "routeOrRoot": "batch list and allocation-map enrichment -> internal:buildCountMaps",
+      "requiredActor": "same authorized batch operational reader",
+      "requiredBoundary": "scope-fingerprint-bound rollup and status fallback functions",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "app_rls.batch_inventory_rollups and app_rls.batch_status_fallback",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate",
+      "userFacingFallback": "Existing sparse-rollup fallback behavior remains unchanged until certified."
+    },
+    {
+      "workflowId": "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries",
+      "routeOrRoot": "batch list and allocation-map print readiness -> internal:listReservableQrCodeSummaries",
+      "requiredActor": "same authorized batch operational reader",
+      "requiredBoundary": "scope-fingerprint-bound app_rls.batch_reservable_qr_summaries",
+      "currentRuntimeStatus": "runtime-implemented-postgresql-pending",
+      "sqlFunctionPrerequisite": "app_rls.batch_reservable_qr_summaries",
+      "launchDisposition": "contract-pending",
+      "disableMechanism": "RLS activation gate",
+      "userFacingFallback": "Existing print-readiness counts and ranges remain unchanged until certified."
+    },
+    {
       "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
       "routeOrRoot": "GET /api/audit/logs",
       "requiredActor": "frozen bounded audit viewer",
@@ -220,7 +297,7 @@
   ],
   "certification": {
     "enabledWorkflowCount": 0,
-    "essentialWorkflowCount": 18,
+    "essentialWorkflowCount": 25,
     "disposablePostgresqlStatus": "pending",
     "activationRule": "launchBlocked may become false only after every enabled essential workflow passes real-path disposable PostgreSQL certification"
   }

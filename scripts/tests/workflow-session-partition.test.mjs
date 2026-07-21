@@ -39,7 +39,7 @@ test("three-session partition assigns all 428 workflows exactly once without a c
 test("registered call paths generate all workflow dispositions from executable family evidence", () => {
   const evidence = buildRegisteredCallPathEvidence({ workflowsManifest: workflowManifest, partition, repoRoot });
   assert.equal(evidence.workflowCount, 428);
-  assert.equal(evidence.summary.applicationPathCertified, 3);
+  assert.equal(evidence.summary.applicationPathCertified, applicationPathCertificationFamilies.flatMap((family) => family.workflowIds).length);
   assert.equal(evidence.workflows.filter((row) => row.productionAccessPath.length === 0).length, 0);
   assert.equal(evidence.workflows.flatMap((row) => row.productionAccessPath).filter((row) => row.registration === "unregistered").length, 0);
   assert.deepEqual(

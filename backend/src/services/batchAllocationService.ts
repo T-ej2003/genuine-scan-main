@@ -1,9 +1,8 @@
 import { BatchLifecycleState, Prisma, QRStatus } from "@prisma/client";
 
 import prisma from "../config/database";
-import { RlsReadTransactionClient } from "../config/rlsReadDatabase";
+import { CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import { listReservableQrCodeSummaries } from "./printReservationService";
-import { getOrComputeVersionedCache } from "./versionedCacheService";
 import {
   buildBatchPrintReadinessFromSummary,
   type BatchPrintReadiness,
@@ -11,7 +10,17 @@ import {
 
 const LINEAGE_BACKFILL_COOLDOWN_MS = 5 * 60_000;
 const lineageBackfillState = new Map<string, number>();
-type DbClient = typeof prisma | RlsReadTransactionClient;
+
+export type BatchOperationalRepositoryBoundary = {
+  auditId: string;
+  requestedLicenseeId: string | null;
+  routeSurface: "GET /api/qr/batches" | "GET /api/qr/batches/:id/allocation-map";
+  focusBatchId: string | null;
+};
+
+export type AuthorizedBatchOperationalRepositoryBoundary = BatchOperationalRepositoryBoundary & {
+  scopeFingerprint: string;
+};
 
 const UNASSIGNED_STATUSES = [QRStatus.DORMANT, QRStatus.ACTIVE] as const;
 const PRINTABLE_STATUSES = [QRStatus.ALLOCATED, QRStatus.DORMANT, QRStatus.ACTIVE] as const;
@@ -44,11 +53,127 @@ type BatchWithScope = {
   lifecycleState?: BatchLifecycleState | null;
   releasedAt?: Date | null;
   releasedByUserId?: string | null;
+  sampleScanPolicy?: Prisma.JsonValue | null;
+  metadata?: Prisma.JsonValue | null;
   createdAt: Date;
   updatedAt: Date;
+  suspendedAt?: Date | null;
+  suspendedReason?: string | null;
+  printPackDownloadedAt?: Date | null;
+  printPackDownloadedByUserId?: string | null;
   licensee?: { id: string; name: string; prefix: string } | null;
   manufacturer?: { id: string; name: string; email: string } | null;
+  parentBatch?: { id: string; name: string } | null;
+  rootBatch?: { id: string; name: string } | null;
   _count?: { qrCodes: number };
+};
+
+type JsonRecord = Record<string, Prisma.JsonValue | undefined>;
+
+const jsonRecord = (value: Prisma.JsonValue, field: string): JsonRecord => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Batch operational function returned invalid ${field}`);
+  }
+  return value as JsonRecord;
+};
+
+const fieldValue = (row: JsonRecord, field: string) => {
+  if (!Object.prototype.hasOwnProperty.call(row, field)) {
+    throw new Error(`Batch operational function omitted ${field}`);
+  }
+  return row[field] as Prisma.JsonValue;
+};
+
+const requiredString = (row: JsonRecord, field: string) => {
+  const value = fieldValue(row, field);
+  if (typeof value !== "string" || !value) throw new Error(`Batch operational function returned invalid ${field}`);
+  return value;
+};
+
+const nullableString = (row: JsonRecord, field: string) => {
+  const value = fieldValue(row, field);
+  if (value == null) return null;
+  if (typeof value !== "string") throw new Error(`Batch operational function returned invalid ${field}`);
+  return value;
+};
+
+const safeCount = (value: unknown, field: string) => {
+  const normalized = Number(value);
+  if (!Number.isSafeInteger(normalized) || normalized < 0) {
+    throw new Error(`Batch operational function returned invalid ${field}`);
+  }
+  return normalized;
+};
+
+const dateValue = (row: JsonRecord, field: string, required = false) => {
+  const value = fieldValue(row, field);
+  if (value == null && !required) return null;
+  const date = new Date(String(value || ""));
+  if (!Number.isFinite(date.getTime())) throw new Error(`Batch operational function returned invalid ${field}`);
+  return date;
+};
+
+const namedRelation = (value: Prisma.JsonValue | undefined, field: string, includePrefix = false) => {
+  if (value == null) return null;
+  const row = jsonRecord(value, field);
+  return {
+    id: requiredString(row, "id"),
+    name: requiredString(row, "name"),
+    ...(includePrefix ? { prefix: requiredString(row, "prefix") } : {}),
+  };
+};
+
+const batchFromFunction = (value: Prisma.JsonValue, includeLineageRelations: boolean): BatchWithScope => {
+  const row = jsonRecord(value, "row_data");
+  const manufacturerValue = fieldValue(row, "manufacturer");
+  const manufacturer = manufacturerValue == null ? null : jsonRecord(manufacturerValue, "manufacturer");
+  const countRow = jsonRecord(fieldValue(row, "_count"), "_count");
+  const licensee = namedRelation(fieldValue(row, "licensee"), "licensee", true);
+  if (!licensee || !("prefix" in licensee)) throw new Error("Batch operational function returned invalid licensee");
+  return {
+    id: requiredString(row, "id"),
+    name: requiredString(row, "name"),
+    licenseeId: requiredString(row, "licenseeId"),
+    manufacturerId: nullableString(row, "manufacturerId"),
+    parentBatchId: nullableString(row, "parentBatchId"),
+    rootBatchId: nullableString(row, "rootBatchId"),
+    startCode: requiredString(row, "startCode"),
+    endCode: requiredString(row, "endCode"),
+    totalCodes: safeCount(row.totalCodes, "totalCodes"),
+    lifecycleState: requiredString(row, "lifecycleState") as BatchLifecycleState,
+    sampleScanPolicy: fieldValue(row, "sampleScanPolicy"),
+    metadata: fieldValue(row, "metadata"),
+    releasedAt: dateValue(row, "releasedAt"),
+    releasedByUserId: nullableString(row, "releasedByUserId"),
+    printedAt: dateValue(row, "printedAt"),
+    suspendedAt: dateValue(row, "suspendedAt"),
+    suspendedReason: nullableString(row, "suspendedReason"),
+    printPackDownloadedAt: dateValue(row, "printPackDownloadedAt"),
+    printPackDownloadedByUserId: nullableString(row, "printPackDownloadedByUserId"),
+    createdAt: dateValue(row, "createdAt", true)!,
+    updatedAt: dateValue(row, "updatedAt", true)!,
+    licensee: licensee as BatchWithScope["licensee"],
+    manufacturer: manufacturer
+      ? {
+          id: requiredString(manufacturer, "id"),
+          name: requiredString(manufacturer, "name"),
+          email: requiredString(manufacturer, "email"),
+        }
+      : null,
+    ...(includeLineageRelations ? {
+      parentBatch: namedRelation(fieldValue(row, "parentBatch"), "parentBatch") as BatchWithScope["parentBatch"],
+      rootBatch: namedRelation(fieldValue(row, "rootBatch"), "rootBatch") as BatchWithScope["rootBatch"],
+    } : {}),
+    _count: { qrCodes: safeCount(countRow.qrCodes, "_count.qrCodes") },
+  };
+};
+
+const fingerprint = (value: unknown) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!/^(?:[0-9a-f]{32}|[0-9a-f]{64})$/.test(normalized)) {
+    throw new Error("Batch operational function returned invalid scope fingerprint");
+  }
+  return normalized;
 };
 
 export type BatchOperationalSummary = BatchWithScope & {
@@ -154,7 +279,11 @@ export const backfillBatchLineageFromAuditLogs = async (opts?: {
   }
 };
 
-const buildCountMaps = async (batchIds: string[], db: DbClient = prisma, sequentialReads = false) => {
+const buildCountMaps = async (
+  batchIds: string[],
+  db: CanonicalTransactionClient,
+  boundary: AuthorizedBatchOperationalRepositoryBoundary
+) => {
   if (batchIds.length === 0) {
     return {
       countsMap: new Map<string, BatchInventoryCounts>(),
@@ -164,74 +293,109 @@ const buildCountMaps = async (batchIds: string[], db: DbClient = prisma, sequent
     };
   }
 
-  const readRollups = () =>
-    db.inventoryStatusRollup.findMany({
-      where: { batchId: { in: batchIds } },
-      select: {
-        batchId: true,
-        dormant: true,
-        active: true,
-        activated: true,
-        allocated: true,
-        printed: true,
-        redeemed: true,
-        blocked: true,
-        scanned: true,
-      },
-    });
-  const readUnassignedRanges = () =>
-    db.qRCode.groupBy({
-      by: ["batchId"],
-      where: {
-        batchId: { in: batchIds },
-        status: { in: [...UNASSIGNED_STATUSES] },
-      },
-      _count: { _all: true },
-      _min: { code: true, displayCode: true },
-      _max: { code: true, displayCode: true },
-    });
-  const readReservableSummaries = () => listReservableQrCodeSummaries(db, batchIds);
+  const readRollups = (ids: string[]) =>
+    db.$queryRaw<Array<{
+      batch_id: string;
+      dormant: bigint | number | string;
+      active: bigint | number | string;
+      activated: bigint | number | string;
+      allocated: bigint | number | string;
+      printed: bigint | number | string;
+      redeemed: bigint | number | string;
+      blocked: bigint | number | string;
+      scanned: bigint | number | string;
+    }>>`
+      SELECT batch_id, dormant, active, activated, allocated, printed, redeemed, blocked, scanned
+      FROM app_rls.batch_inventory_rollups(
+        ${boundary.auditId},
+        ${boundary.requestedLicenseeId},
+        ${boundary.routeSurface},
+        ${boundary.focusBatchId},
+        ${boundary.scopeFingerprint},
+        ARRAY[${Prisma.join(ids)}]::text[]
+      )
+    `;
+  const readUnassignedRanges = (ids: string[]) =>
+    db.$queryRaw<Array<{
+      batch_id: string;
+      start_code: string | null;
+      end_code: string | null;
+    }>>`
+      SELECT batch_id, start_code, end_code
+      FROM app_rls.batch_unassigned_ranges(
+        ${boundary.auditId},
+        ${boundary.requestedLicenseeId},
+        ${boundary.routeSurface},
+        ${boundary.focusBatchId},
+        ${boundary.scopeFingerprint},
+        ARRAY[${Prisma.join(ids)}]::text[]
+      )
+    `;
+  const readReservableSummaries = (ids: string[]) =>
+    listReservableQrCodeSummaries(db, ids, boundary);
 
-  const [rollups, unassignedRanges, reservableSummaries] = sequentialReads
-    ? [await readRollups(), await readUnassignedRanges(), await readReservableSummaries()]
-    : await Promise.all([readRollups(), readUnassignedRanges(), readReservableSummaries()]);
+  const chunks = Array.from({ length: Math.ceil(batchIds.length / 500) }, (_, index) =>
+    batchIds.slice(index * 500, (index + 1) * 500)
+  );
+  const rollups = [] as Awaited<ReturnType<typeof readRollups>>;
+  const unassignedRanges = [] as Awaited<ReturnType<typeof readUnassignedRanges>>;
+  const reservableSummaryMap = new Map<string, { count: number; startCode: string | null; endCode: string | null }>();
+  for (const ids of chunks) {
+    rollups.push(...await readRollups(ids));
+    unassignedRanges.push(...await readUnassignedRanges(ids));
+    for (const [batchId, summary] of await readReservableSummaries(ids)) {
+      reservableSummaryMap.set(batchId, summary);
+    }
+  }
 
   const countsMap = new Map<string, BatchInventoryCounts>();
   for (const rollup of rollups) {
-    countsMap.set(rollup.batchId, {
-      dormant: Number(rollup.dormant || 0),
-      active: Number(rollup.active || 0),
-      activated: Number(rollup.activated || 0),
-      allocated: Number(rollup.allocated || 0),
-      printed: Number(rollup.printed || 0),
-      redeemed: Number(rollup.redeemed || 0),
-      blocked: Number(rollup.blocked || 0),
-      scanned: Number(rollup.scanned || 0),
+    countsMap.set(rollup.batch_id, {
+      dormant: safeCount(rollup.dormant, "dormant"),
+      active: safeCount(rollup.active, "active"),
+      activated: safeCount(rollup.activated, "activated"),
+      allocated: safeCount(rollup.allocated, "allocated"),
+      printed: safeCount(rollup.printed, "printed"),
+      redeemed: safeCount(rollup.redeemed, "redeemed"),
+      blocked: safeCount(rollup.blocked, "blocked"),
+      scanned: safeCount(rollup.scanned, "scanned"),
     });
   }
 
   const missingBatchIds = batchIds.filter((batchId) => !countsMap.has(batchId));
   if (missingBatchIds.length > 0) {
-    const countGroups = await db.qRCode.groupBy({
-      by: ["batchId", "status"],
-      where: { batchId: { in: missingBatchIds } },
-      _count: { _all: true },
-    });
+    const countGroups: Array<{ batch_id: string; status: QRStatus; count: bigint | number | string }> = [];
+    for (let offset = 0; offset < missingBatchIds.length; offset += 500) {
+      const ids = missingBatchIds.slice(offset, offset + 500);
+      countGroups.push(...await db.$queryRaw<typeof countGroups>`
+        SELECT batch_id, status, item_count AS count
+        FROM app_rls.batch_status_fallback(
+          ${boundary.auditId},
+          ${boundary.requestedLicenseeId},
+          ${boundary.routeSurface},
+          ${boundary.focusBatchId},
+          ${boundary.scopeFingerprint},
+          ARRAY[${Prisma.join(ids)}]::text[]
+        )
+      `);
+    }
 
     for (const group of countGroups) {
-      if (!group.batchId) continue;
-      const current = countsMap.get(group.batchId) || emptyCounts();
-      current[toCountKey(group.status)] = group._count?._all || 0;
-      countsMap.set(group.batchId, current);
+      if (!group.batch_id || !Object.values(QRStatus).includes(group.status)) {
+        throw new Error("Batch operational function returned invalid status fallback");
+      }
+      const current = countsMap.get(group.batch_id) || emptyCounts();
+      current[toCountKey(group.status)] = safeCount(group.count, "status count");
+      countsMap.set(group.batch_id, current);
     }
   }
 
   const unassignedRangeMap = new Map<string, { start: string | null; end: string | null }>();
   for (const group of unassignedRanges) {
-    if (!group.batchId) continue;
-    unassignedRangeMap.set(group.batchId, {
-      start: group._min?.displayCode || group._min?.code || null,
-      end: group._max?.displayCode || group._max?.code || null,
+    if (!group.batch_id) throw new Error("Batch operational function returned invalid unassigned range");
+    unassignedRangeMap.set(group.batch_id, {
+      start: group.start_code || null,
+      end: group.end_code || null,
     });
   }
 
@@ -239,19 +403,19 @@ const buildCountMaps = async (batchIds: string[], db: DbClient = prisma, sequent
     countsMap,
     unassignedRangeMap,
     printableRangeMap: new Map(
-      [...reservableSummaries.entries()].map(([batchId, summary]) => [
+      [...reservableSummaryMap.entries()].map(([batchId, summary]) => [
         batchId,
         { start: summary.startCode, end: summary.endCode },
       ])
     ),
-    reservableCountMap: new Map([...reservableSummaries.entries()].map(([batchId, summary]) => [batchId, summary.count])),
+    reservableCountMap: new Map([...reservableSummaryMap.entries()].map(([batchId, summary]) => [batchId, summary.count])),
   };
 };
 
 export const enrichBatchSummaries = async (
   batches: BatchWithScope[],
-  db: DbClient = prisma,
-  sequentialReads = false
+  db: CanonicalTransactionClient,
+  boundary: AuthorizedBatchOperationalRepositoryBoundary
 ): Promise<BatchOperationalSummary[]> => {
   if (!batches.length) return [];
 
@@ -259,7 +423,7 @@ export const enrichBatchSummaries = async (
   const { countsMap, unassignedRangeMap, printableRangeMap, reservableCountMap } = await buildCountMaps(
     batchIds,
     db,
-    sequentialReads
+    boundary
   );
 
   return batches.map((batch) => {
@@ -300,87 +464,114 @@ export const enrichBatchSummaries = async (
   });
 };
 
-export const listCachedBatchOperationalSummaries = async (params: {
-  where: Prisma.BatchWhereInput;
-  scopeKey: string;
-  limit: number;
-  offset: number;
-}) =>
-  getOrComputeVersionedCache("qr-batches", params.scopeKey, 20, async () => {
-    return listBatchOperationalSummaries(params);
-  });
-
 export const listBatchOperationalSummaries = async (params: {
-  where: Prisma.BatchWhereInput;
+  boundary: BatchOperationalRepositoryBoundary;
   limit: number;
   offset: number;
-  db?: DbClient;
+  db: CanonicalTransactionClient;
 }) => {
-  const db = params.db || prisma;
-  const useSequentialReads = Boolean(params.db);
-  const readBatches = () =>
-    db.batch.findMany({
-      where: params.where,
-      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-      include: {
-        licensee: { select: { id: true, name: true, prefix: true } },
-        manufacturer: { select: { id: true, name: true, email: true } },
-        parentBatch: { select: { id: true, name: true } },
-        rootBatch: { select: { id: true, name: true } },
-        _count: { select: { qrCodes: true } },
-      },
-      take: params.limit,
-      skip: params.offset,
-    });
-  const readTotal = () => db.batch.count({ where: params.where });
-  const [batches, total] = useSequentialReads
-    ? [await readBatches(), await readTotal()]
-    : await Promise.all([readBatches(), readTotal()]);
+  if (
+    params.boundary.routeSurface !== "GET /api/qr/batches" ||
+    params.boundary.focusBatchId ||
+    !Number.isInteger(params.limit) ||
+    params.limit < 1 ||
+    params.limit > 500 ||
+    !Number.isInteger(params.offset) ||
+    params.offset < 0
+  ) {
+    throw new Error("Invalid batch operational list boundary");
+  }
+
+  let scopeFingerprint = "";
+  const readBatches = async () => {
+    const [scope] = await params.db.$queryRaw<Array<{ scope_fingerprint: string }>>`
+      SELECT scope_fingerprint
+      FROM app_rls.batch_operational_scope(
+        ${params.boundary.auditId},
+        ${params.boundary.requestedLicenseeId},
+        ${params.boundary.routeSurface},
+        ${params.boundary.focusBatchId}
+      )
+    `;
+    scopeFingerprint = fingerprint(scope?.scope_fingerprint);
+    const rows = await params.db.$queryRaw<Array<{ row_data: Prisma.JsonValue }>>`
+      SELECT row_data
+      FROM app_rls.batch_operational_rows(
+        ${params.boundary.auditId},
+        ${params.boundary.requestedLicenseeId},
+        ${params.boundary.routeSurface},
+        ${params.boundary.focusBatchId},
+        ${scopeFingerprint},
+        CAST(${params.limit} AS integer),
+        CAST(${params.offset} AS integer)
+      )
+    `;
+    return rows.map((row) => batchFromFunction(row.row_data, true));
+  };
+  const readTotal = async () => {
+    const [row] = await params.db.$queryRaw<Array<{ total: bigint | number | string }>>`
+      SELECT total
+      FROM app_rls.batch_operational_total(
+        ${params.boundary.auditId},
+        ${params.boundary.requestedLicenseeId},
+        ${params.boundary.routeSurface},
+        ${params.boundary.focusBatchId},
+        ${scopeFingerprint}
+      )
+    `;
+    return safeCount(row?.total, "total");
+  };
+  const batches = await readBatches();
+  const total = await readTotal();
+  const authorizedBoundary = { ...params.boundary, scopeFingerprint };
   return {
-    rows: batches.length ? await enrichBatchSummaries(batches as BatchWithScope[], db, useSequentialReads) : batches,
+    rows: batches.length ? await enrichBatchSummaries(batches, params.db, authorizedBoundary) : batches,
     total,
   };
 };
 
 export const getBatchAllocationMap = async (
   batchId: string,
-  opts?: { licenseeId?: string; db?: DbClient }
+  opts: { boundary: BatchOperationalRepositoryBoundary; db: CanonicalTransactionClient }
 ) => {
-  const db = opts?.db || prisma;
-  const sequentialReads = Boolean(opts?.db);
-  const focusBatch = await db.batch.findFirst({
-    where: {
-      id: batchId,
-      ...(opts?.licenseeId ? { licenseeId: opts.licenseeId } : {}),
-    },
-    include: {
-      licensee: { select: { id: true, name: true, prefix: true } },
-      manufacturer: { select: { id: true, name: true, email: true } },
-      _count: { select: { qrCodes: true } },
-    },
-  });
-
+  if (
+    opts.boundary.routeSurface !== "GET /api/qr/batches/:id/allocation-map" ||
+    opts.boundary.focusBatchId !== batchId
+  ) {
+    throw new Error("Invalid batch allocation-map boundary");
+  }
+  const [scope] = await opts.db.$queryRaw<Array<{ scope_fingerprint: string }>>`
+    SELECT scope_fingerprint
+    FROM app_rls.batch_operational_scope(
+      ${opts.boundary.auditId},
+      ${opts.boundary.requestedLicenseeId},
+      ${opts.boundary.routeSurface},
+      ${batchId}
+    )
+  `;
+  const scopeFingerprint = fingerprint(scope?.scope_fingerprint);
+  const rows = await opts.db.$queryRaw<Array<{ row_data: Prisma.JsonValue }>>`
+    SELECT row_data
+    FROM app_rls.batch_operational_rows(
+      ${opts.boundary.auditId},
+      ${opts.boundary.requestedLicenseeId},
+      ${opts.boundary.routeSurface},
+      ${batchId},
+      ${scopeFingerprint},
+      CAST(${0} AS integer),
+      CAST(${0} AS integer)
+    )
+  `;
+  const relatedBatches = rows.map((row) => batchFromFunction(row.row_data, false));
+  const focusBatch = relatedBatches.find((batch) => batch.id === batchId) || null;
   if (!focusBatch) return null;
 
   const sourceBatchId = focusBatch.rootBatchId || focusBatch.parentBatchId || focusBatch.id;
-  const relatedBatches = await db.batch.findMany({
-    where: {
-      licenseeId: focusBatch.licenseeId,
-      OR: [
-        { id: sourceBatchId },
-        { parentBatchId: sourceBatchId },
-        { rootBatchId: sourceBatchId },
-      ],
-    },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    include: {
-      licensee: { select: { id: true, name: true, prefix: true } },
-      manufacturer: { select: { id: true, name: true, email: true } },
-      _count: { select: { qrCodes: true } },
-    },
-  });
-
-  const enriched = await enrichBatchSummaries(relatedBatches as BatchWithScope[], db, sequentialReads);
+  const enriched = await enrichBatchSummaries(
+    relatedBatches,
+    opts.db,
+    { ...opts.boundary, scopeFingerprint }
+  );
   const sourceBatch = enriched.find((batch) => batch.id === sourceBatchId) || null;
   const selectedBatch = enriched.find((batch) => batch.id === focusBatch.id) || null;
   const allocationBatches = enriched.filter((batch) => batch.id !== sourceBatchId);

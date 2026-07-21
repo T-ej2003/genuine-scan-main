@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import assert from "node:assert/strict";
 import {
   applyApplicationPathCertificationEvidence,
+  BATCH_OPERATIONAL_READ_WORKFLOW_IDS,
   DASHBOARD_SNAPSHOT_WORKFLOW_IDS,
   RISK_ANALYTICS_WORKFLOW_ID,
 } from "./application-path-certifications.mjs";
@@ -403,6 +404,15 @@ const rawCommandsFor = (method, sql) => {
 const rawTableNamesFor = (sql) => [...sql.matchAll(
   /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|FROM|JOIN)\s+(?:ONLY\s+)?(?:(?:"(?:[^"]|"")*"|[a-z_][\w$]*)\s*\.\s*)?(?:"((?:[^"]|"")*)"|([a-z_][\w$]*))/gi
 )].map((match) => (match[1] || match[2]).replaceAll('""', '"').toLowerCase());
+const BATCH_OPERATIONAL_AUTH_ACCESSES = [
+  ["AuditLog", "INSERT"],
+  ["AuditLog", "SELECT"],
+  ["Batch", "SELECT"],
+  ["Licensee", "SELECT"],
+  ["ManufacturerLicenseeLink", "SELECT"],
+  ["Organization", "SELECT"],
+  ["User", "SELECT"],
+];
 const DATABASE_FUNCTION_ACCESSES = new Map([
   ["app_rls.dashboard_snapshot_scope", [
     ["AuditLog", "INSERT"],
@@ -422,6 +432,22 @@ const DATABASE_FUNCTION_ACCESSES = new Map([
     ["Organization", "SELECT"],
     ["QRCode", "SELECT"],
     ["User", "SELECT"],
+  ]],
+  ["app_rls.batch_operational_scope", BATCH_OPERATIONAL_AUTH_ACCESSES],
+  ["app_rls.batch_operational_rows", [
+    ...BATCH_OPERATIONAL_AUTH_ACCESSES,
+    ["QRCode", "SELECT"],
+  ]],
+  ["app_rls.batch_operational_total", BATCH_OPERATIONAL_AUTH_ACCESSES],
+  ["app_rls.batch_inventory_rollups", [...BATCH_OPERATIONAL_AUTH_ACCESSES, ["InventoryStatusRollup", "SELECT"]]],
+  ["app_rls.batch_unassigned_ranges", [...BATCH_OPERATIONAL_AUTH_ACCESSES, ["QRCode", "SELECT"]]],
+  ["app_rls.batch_status_fallback", [...BATCH_OPERATIONAL_AUTH_ACCESSES, ["QRCode", "SELECT"]]],
+  ["app_rls.batch_reservable_qr_summaries", [
+    ...BATCH_OPERATIONAL_AUTH_ACCESSES,
+    ["PrintItem", "SELECT"],
+    ["PrintJob", "SELECT"],
+    ["PrintSession", "SELECT"],
+    ["QRCode", "SELECT"],
   ]],
 ]);
 const WORKFLOW_SURFACE_OVERRIDES = new Map([
@@ -804,6 +830,7 @@ const routeEvidenceFor = (functionName) => {
 
 const TRACE_TIMELINE_WORKFLOW_ID = "workflow-internal-backend-src-services-trace-event-service-ts-get-trace-timeline";
 const DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET = new Set(DASHBOARD_SNAPSHOT_WORKFLOW_IDS);
+const BATCH_OPERATIONAL_READ_WORKFLOW_ID_SET = new Set(BATCH_OPERATIONAL_READ_WORKFLOW_IDS);
 const DASHBOARD_SNAPSHOT_COLUMNS = {
   "table-audit-log": {
     INSERT: ["action", "details", "entityId", "entityType", "id", "licenseeId", "orgId", "userId"],
@@ -817,6 +844,59 @@ const DASHBOARD_SNAPSHOT_COLUMNS = {
   "table-qrcode": { SELECT: ["batchId", "licenseeId", "status"] },
   "table-user": { SELECT: ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "orgId", "role", "status"] },
 };
+const BATCH_OPERATIONAL_SCOPE_COLUMNS = {
+  "table-audit-log": {
+    INSERT: ["action", "details", "entityId", "entityType", "id", "licenseeId", "orgId", "userId"],
+    SELECT: ["action", "details", "entityId", "entityType", "id", "licenseeId", "orgId", "userId"],
+  },
+  "table-batch": { SELECT: ["id", "licenseeId", "manufacturerId", "parentBatchId", "rootBatchId"] },
+  "table-licensee": { SELECT: ["id", "isActive", "orgId", "suspendedAt"] },
+  "table-manufacturer-licensee-link": { SELECT: ["isPrimary", "licenseeId", "manufacturerId", "updatedAt"] },
+  "table-organization": { SELECT: ["id", "isActive"] },
+  "table-user": { SELECT: ["deletedAt", "disabledAt", "id", "isActive", "licenseeId", "orgId", "role", "status"] },
+};
+const BATCH_OPERATIONAL_SCOPE_AND_ROWS_COLUMNS = {
+  ...BATCH_OPERATIONAL_SCOPE_COLUMNS,
+  "table-batch": { SELECT: ["createdAt", "endCode", "id", "lifecycleState", "licenseeId", "manufacturerId", "metadata", "name", "parentBatchId", "printPackDownloadedAt", "printPackDownloadedByUserId", "printedAt", "releasedAt", "releasedByUserId", "rootBatchId", "sampleScanPolicy", "startCode", "suspendedAt", "suspendedReason", "totalCodes", "updatedAt"] },
+  "table-licensee": { SELECT: ["id", "isActive", "name", "orgId", "prefix", "suspendedAt"] },
+  "table-qrcode": { SELECT: ["batchId"] },
+  "table-user": { SELECT: ["deletedAt", "disabledAt", "email", "id", "isActive", "licenseeId", "name", "orgId", "role", "status"] },
+};
+const BATCH_OPERATIONAL_READ_COLUMNS_BY_WORKFLOW = new Map([
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches", BATCH_OPERATIONAL_SCOPE_AND_ROWS_COLUMNS],
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map", BATCH_OPERATIONAL_SCOPE_AND_ROWS_COLUMNS],
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-read-total", {
+    ...BATCH_OPERATIONAL_SCOPE_COLUMNS,
+  }],
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups", {
+    ...BATCH_OPERATIONAL_SCOPE_COLUMNS,
+    "table-inventory-status-rollup": { SELECT: ["active", "activated", "allocated", "batchId", "blocked", "dormant", "licenseeId", "manufacturerId", "printed", "redeemed", "scanned"] },
+  }],
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges", {
+    ...BATCH_OPERATIONAL_SCOPE_COLUMNS,
+    "table-qrcode": { SELECT: ["batchId", "code", "displayCode", "status"] },
+  }],
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps", {
+    ...BATCH_OPERATIONAL_SCOPE_COLUMNS,
+    "table-qrcode": { SELECT: ["batchId", "status"] },
+  }],
+  ["workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries", {
+    ...BATCH_OPERATIONAL_SCOPE_COLUMNS,
+    "table-print-item": { SELECT: ["agentAckedAt", "confirmationEvidence", "deadLetterReason", "deviceJobRef", "dispatchedAt", "failureReason", "id", "printConfirmedAt", "printSessionId", "qrCodeId", "state"] },
+    "table-print-job": { SELECT: ["batchId", "id", "status"] },
+    "table-print-session": { SELECT: ["batchId", "id", "printJobId", "status"] },
+    "table-qrcode": { SELECT: ["batchId", "code", "displayCode", "id", "licenseeId", "printJobId", "status"] },
+  }],
+]);
+const BATCH_OPERATIONAL_FUNCTION_SIGNATURES_BY_WORKFLOW = new Map([
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps", ["app_rls.batch_status_fallback(text,text,text,text,text,text[])"]],
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map", ["app_rls.batch_operational_scope(text,text,text,text)", "app_rls.batch_operational_rows(text,text,text,text,text,integer,integer)"]],
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches", ["app_rls.batch_operational_scope(text,text,text,text)", "app_rls.batch_operational_rows(text,text,text,text,text,integer,integer)"]],
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups", ["app_rls.batch_inventory_rollups(text,text,text,text,text,text[])"]],
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-read-total", ["app_rls.batch_operational_total(text,text,text,text,text)"]],
+  ["workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges", ["app_rls.batch_unassigned_ranges(text,text,text,text,text,text[])"]],
+  ["workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries", ["app_rls.batch_reservable_qr_summaries(text,text,text,text,text,text[])"]],
+]);
 
 const commandActorsFor = (workflow, table, routeEvidence) => {
   const text = `${workflow.id} ${workflow.canonicalSourceFiles.join(" ")}`.toLowerCase();
@@ -826,6 +906,7 @@ const commandActorsFor = (workflow, table, routeEvidence) => {
   if (workflow.id === TRACE_TIMELINE_WORKFLOW_ID) return ["authenticated-user", "manufacturer", "licensee-admin", "platform-admin"];
   if (workflow.id === RISK_ANALYTICS_WORKFLOW_ID) return ["licensee-admin", "platform-admin"];
   if (DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET.has(workflow.id)) return ["licensee-admin", "manufacturer", "platform-admin"];
+  if (BATCH_OPERATIONAL_READ_WORKFLOW_ID_SET.has(workflow.id)) return ["licensee-admin", "manufacturer", "platform-admin"];
   if (workflow.authorizationBoundaryType === "operator-break-glass") return ["break-glass"];
   if (workflow.authorizationBoundaryType === "pre-auth-security-function") return ["anonymous", "pre-auth-runtime"];
   if (workflow.executionSurface === "worker") return ["worker"];
@@ -863,6 +944,7 @@ const runtimeIdentityForCommand = (workflow) => workflow.authorizationBoundaryTy
 const assuranceForCommand = (workflow, actors, command, table, routeEvidence) => {
   if (workflow.id === RISK_ANALYTICS_WORKFLOW_ID) return "password-verified";
   if (DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET.has(workflow.id)) return "password-verified";
+  if (BATCH_OPERATIONAL_READ_WORKFLOW_ID_SET.has(workflow.id)) return "password-verified";
   if (workflow.platformReadRequiredAssurance) return workflow.platformReadRequiredAssurance;
   const guards = new Set(routeEvidence?.guards || []);
   if (workflow.id === AUDIT_CSV_EXPORT_WORKFLOW_ID) return "password-verified";
@@ -959,6 +1041,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   const policyAlertActorCeiling = workflow.policyAlertActorCeilingBoundaryId === POLICY_ALERT_ACTOR_CEILING_ID;
   const publicReadContract = workflow.publicReadContractBoundaryId === PUBLIC_READ_CONTRACT_ID;
   const dashboardSnapshot = DASHBOARD_SNAPSHOT_WORKFLOW_ID_SET.has(workflow.id);
+  const batchOperationalRead = BATCH_OPERATIONAL_READ_WORKFLOW_ID_SET.has(workflow.id);
   const securityFunction = table.primaryCategory === "security-sensitive" && (command !== "SELECT" || table.sensitiveColumns.length > 0) && !auditCsvExport && !auditLogsRead && !fraudReportsRead && workflow.id !== RISK_ANALYTICS_WORKFLOW_ID;
   const preAuthFunction = actors.includes("pre-auth-runtime");
   const workerBoundary = actors.some((actor) => ["worker", "scheduled-job"].includes(actor));
@@ -979,6 +1062,7 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
   if (publicReadContract && workflow.publicReadProjectionProfile) allowedColumns = workflow.publicReadAllowedColumnsByTableAndCommand?.[table.id]?.[command] || [];
   if (workflow.id === RISK_ANALYTICS_WORKFLOW_ID) allowedColumns = workflow.riskAnalyticsAllowedColumnsByTableAndCommand?.[table.id]?.[command] || [];
   if (dashboardSnapshot) allowedColumns = DASHBOARD_SNAPSHOT_COLUMNS[table.id]?.[command] || [];
+  if (batchOperationalRead) allowedColumns = BATCH_OPERATIONAL_READ_COLUMNS_BY_WORKFLOW.get(workflow.id)?.[table.id]?.[command] || [];
   const hardDeleteSemantics = command === "DELETE" ? deleteSemanticsFor(table, workflow) : "not-applicable";
   const approvalClass = actors.includes("break-glass") ? "dual-approved-break-glass"
     : actors.includes("operator-admin") ? "operator-approved"
@@ -987,13 +1071,13 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
           : "none";
   const requiresApproval = approvalClass !== "none";
   const dedicatedPlatformProjection = platformReadScope && ["dedicated-aggregate-projection", "dedicated-directory-projection"].includes(workflow.platformReadExecutionBoundary);
-  const requiresNamedFunction = preAuthFunction || securityFunction || rawEvidence || dedicatedPlatformProjection || dashboardSnapshot;
+  const requiresNamedFunction = preAuthFunction || securityFunction || rawEvidence || dedicatedPlatformProjection || dashboardSnapshot || batchOperationalRead;
   const boundaryMode = platformReadScope && workflow.platformReadScopeClass === "prohibited-platform-read"
     ? "prohibited"
     : workerBoundary ? "restricted-worker" : operatorApproval ? "operator-approval" : requiresNamedFunction ? "named-function" : "ordinary-rls";
   const minimumAssuranceByActorClass = Object.fromEntries(actors.map((actor) => [
     actor,
-    workflow.dashboardSnapshotRequiredAssuranceByActorClass?.[actor] || workflow.platformReadRequiredAssuranceByActorClass?.[actor] || (
+    workflow.runtimeRequiredAssuranceByActorClass?.[actor] || workflow.dashboardSnapshotRequiredAssuranceByActorClass?.[actor] || workflow.platformReadRequiredAssuranceByActorClass?.[actor] || (
       actor === "platform-admin" && ["none", "password-verified", "mfa-bootstrap"].includes(assurance) ? "mfa-verified" : assurance
     ),
   ]));
@@ -1025,6 +1109,8 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
       ? "An ACTIVE database-hydrated LICENSEE_ADMIN or ORG_ADMIN uses its nonblank canonical licensee and organization. A database-hydrated platform administrator requires fresh MFA and one active database-validated licensee and organization selector. Fixed tenant-risk-analytics purpose, request attribution, bounded candidates/dimensions and identical tenant predicates are mandatory; blank or foreign scope is denied."
       : dashboardSnapshot
       ? "The exact dashboard function revalidates the ACTIVE database actor, fixed dashboard-snapshot-read purpose and actor-specific assurance. Tenant administrators use their canonical licensee and organization; manufacturers use only their current active linked-licensee set or one linked selector; platform administrators use fresh MFA and either the reviewed global aggregate or one active selected licensee."
+      : batchOperationalRead
+      ? "The exact batch operational-read functions revalidate the ACTIVE database actor, fixed batch-operational-read purpose and actor-specific assurance. Tenant administrators use their canonical active licensee and organization; manufacturers use only current active linked batches assigned to their actor and may narrow to one linked licensee; platform administrators require fresh MFA and one explicit active licensee selector."
       : scopeRuleFor(table, actors),
     allowedColumns,
     protectedColumns,
@@ -1037,7 +1123,8 @@ const buildCommandRule = ({ table, workflow, command, actors, identityId, assura
         ? "New row preserves trusted actor, tenant, request and purpose context. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary."
         : `New row preserves ${scopeRuleFor(table, actors)} Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.`,
     requiresNamedFunction,
-    namedFunctionClass: requiresNamedFunction ? (dashboardSnapshot ? "exact-dashboard-snapshot-function" : dedicatedPlatformProjection ? `exact-${workflow.platformReadExecutionBoundary}` : preAuthFunction ? "narrow-pre-auth-security-definer" : rawEvidence ? "exact-reviewed-query-function" : "authenticated-security-repository-function") : "none",
+    namedFunctionClass: requiresNamedFunction ? (dashboardSnapshot ? "exact-dashboard-snapshot-function" : batchOperationalRead ? "exact-batch-operational-read-function" : dedicatedPlatformProjection ? `exact-${workflow.platformReadExecutionBoundary}` : preAuthFunction ? "narrow-pre-auth-security-definer" : rawEvidence ? "exact-reviewed-query-function" : "authenticated-security-repository-function") : "none",
+    ...(batchOperationalRead ? { namedFunctionSignatures: BATCH_OPERATIONAL_FUNCTION_SIGNATURES_BY_WORKFLOW.get(workflow.id) } : {}),
     requiresRestrictedWorkerBoundary: workerBoundary,
     requiresAuditEvent: publicReadContract || manufacturerBootstrap || policyAlertActorCeiling || workflow.approvedReadAttribution === true || command !== "SELECT" || actors.some((actor) => ["platform-admin", "operator", "operator-admin", "break-glass"].includes(actor)),
     requiresApproval,
@@ -1095,7 +1182,7 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
         rules.push(rule);
         workflow.commandRuleIds.push(rule.id);
         workflow.commandActorClasses.push(...actors);
-        workflow.requiredAssurance.push(assurance);
+        workflow.requiredAssurance.push(...Object.values(rule.minimumAssuranceByActorClass));
         workflow.runtimeIdentities.push(identityId);
       }
     }
@@ -1219,6 +1306,24 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
         commandRuleIds: ruleIdsFor(workflowId),
       },
     ]),
+    ...BATCH_OPERATIONAL_READ_WORKFLOW_IDS.flatMap((workflowId) => [
+      ["licensee-admin", ["LICENSEE_ADMIN", "ORG_ADMIN"], "password-verified", "canonical-licensee-organization"],
+      ["manufacturer", ["MANUFACTURER", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"], "mfa-verified", "canonical-manufacturer-active-licensee-set"],
+      ["platform-admin", ["SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"], "mfa-verified", "database-validated-selected-licensee-organization"],
+    ].map(([actorClass, roleValues, minimumAssurance, scopeType]) => ({
+      id: `sql-profile-batch-operational-${workflowId.split("-").slice(-5).join("-")}-${actorClass}`,
+      workflowId,
+      route: "GET /api/qr/batches",
+      routes: ["GET /api/qr/batches", "GET /api/qr/batches/:id/allocation-map"],
+      functionSignatures: BATCH_OPERATIONAL_FUNCTION_SIGNATURES_BY_WORKFLOW.get(workflowId),
+      actorClass,
+      roleValues,
+      minimumAssurance,
+      purposeCodes: ["batch-operational-read"],
+      scopeType,
+      status: "named-function-candidate",
+      commandRuleIds: ruleIdsFor(workflowId),
+    }))),
     {
       id: "sql-profile-blocked-platform-and-incompatible-projections",
       workflowIds: [AUDIT_CSV_EXPORT_WORKFLOW_ID, FRAUD_REPORTS_WORKFLOW_ID, TRACE_TIMELINE_WORKFLOW_ID],
@@ -2452,6 +2557,111 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
       responseProjection: [
         "REST preserves success.data totalQRCodes, activeLicensees, manufacturers and totalBatches.",
         "SSE preserves the existing summary plus QR status aggregate; no protected predicate or secret column is serialized.",
+      ],
+    });
+  }
+
+  for (const workflowId of BATCH_OPERATIONAL_READ_WORKFLOW_IDS) {
+    const batchWorkflow = workflowManifest.workflows.find((item) => item.id === workflowId);
+    assert(batchWorkflow, `${workflowId} runtime workflow missing`);
+    Object.assign(batchWorkflow, {
+      authenticationStage: "authenticated",
+      actorClasses: ["licensee-admin", "manufacturer", "platform-admin"],
+      runtimeImplementedActorClasses: ["licensee-admin", "manufacturer", "platform-admin"],
+      runtimeBlockedActorClasses: [],
+      platformRuntimeStatus: "application-path-certified",
+      platformRuntimeBlockers: [],
+      canonicalSourceFiles: [
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts",
+      ],
+      tenantScopeRule: "An ACTIVE database-revalidated tenant administrator uses its canonical active licensee and organization; an ACTIVE fresh-MFA manufacturer reads only batches assigned to that actor across current active linked licensees or one linked selector; an ACTIVE fresh-MFA platform administrator supplies one explicit active licensee selector. Both list and allocation-map roots use fixed purpose batch-operational-read and immutable request attribution.",
+      contextRequirements: [
+        "transaction-local canonical actor context",
+        "database-revalidated ACTIVE actor, role and scope",
+        "actor-specific password or fresh-MFA assurance",
+        "fixed allowlisted batch-operational-read purpose",
+        "one REPEATABLE READ transaction with immutable per-request attribution",
+        "exact named-function execution with no direct wide Batch, QR, User or print-table privilege",
+      ],
+      contextRequirementsSource: "human-reviewed",
+      authorizationBoundaryType: "authenticated-context",
+      expectedAllowedScenarios: [
+        "An ACTIVE LICENSEE_ADMIN or ORG_ADMIN lists and paginates its tenant batches and reads an in-scope allocation map.",
+        "An ACTIVE fresh-MFA manufacturer reads assigned batches across current active links or narrows to one linked licensee.",
+        "An ACTIVE fresh-MFA platform administrator reads one explicitly selected active licensee.",
+        "Batch ordering, totals, lineage ordering, inventory fallback, reservable print counts and response projections remain unchanged.",
+        "One immutable BATCH_OPERATIONAL_READ attribution commits in the same transaction before serialization.",
+      ],
+      expectedDeniedScenarios: [
+        "Blank or malformed context, wrong purpose, wrong role, inactive session and weak manufacturer/platform assurance are denied.",
+        "Foreign, inactive, suspended or revoked tenant/manufacturer scope and a blank platform selector are denied.",
+        "Direct protected table access, internal helper execution and prohibited User or print-security columns are denied.",
+        "A protected query before canonical context or use of global Prisma in either route root is denied.",
+      ],
+      currentCompatibilityStatus: "compatible",
+      implementationStatus: "complete",
+      contextBoundaryBlockers: [],
+      requiredUnitTests: ["backend/tests/batchOperationalReadContext.test.js"],
+      requiredDisposablePostgresqlTests: ["backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"],
+      unresolvedDecisions: [],
+      contextBoundaryStatus: "implemented",
+      implementationFamilyId: "family-batch-operational-read-4a19e4013f",
+      contextBoundaryCategory: "simple tenant-scoped reads",
+      approvedReadAttribution: true,
+      implementationFiles: [
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts",
+        "backend/src/lib/canonicalDbContext.ts",
+      ],
+      testFiles: [
+        "backend/tests/batchOperationalReadContext.test.js",
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+      ],
+      canonicalContextKeys: ["app.user_id", "app.role", "app.organization_id", "app.licensee_id", "app.manufacturer_id", "app.auth_assurance", "app.request_id", "app.purpose"],
+      sameTransactionGuarantee: true,
+      protectedQueryClient: "transaction-client-only",
+      consistentReadScopeGuarantee: true,
+      routeRootVerified: true,
+      aggregateScopeStatus: "database-revalidated-tenant-manufacturer-or-selected-platform-licensee",
+      postgresqlCertificationStatus: "pending",
+      runtimeAllowedColumnsByTableAndCommand: BATCH_OPERATIONAL_READ_COLUMNS_BY_WORKFLOW.get(workflowId),
+      runtimeRequiredAssuranceByActorClass: {
+        "licensee-admin": "password-verified",
+        manufacturer: "mfa-verified",
+        "platform-admin": "mfa-verified",
+      },
+      contextBoundaryPlanningEvidence: {
+        reviewedAt: "2026-07-21",
+        registeredRootCallChainVerified: true,
+        protectedQueryTraceComplete: true,
+        sameTransactionFeasible: true,
+        focusedTestsDeterministic: true,
+        databaseConcurrencyVerified: true,
+      },
+      resolvedContextBlockerIds: [],
+      rootCallChainEvidence: [
+        "routes/index.ts registers GET /qr/batches and GET /qr/batches/:id/allocation-map behind authentication and tenant isolation.",
+        "qrController delegates both roots to one batch-operational-read family; every protected query uses the same canonical REPEATABLE READ transaction client.",
+        "The repository uses exact audit-bound functions for scope, rows, totals, rollups, QR ranges and reservable print summaries; no feature flag or global Prisma fallback remains.",
+      ],
+      scopeEvidence: [
+        "Tenant actor licensee and organization claims are matched to ACTIVE User, Licensee and Organization rows in PostgreSQL.",
+        "Manufacturer scope is derived from current active ManufacturerLicenseeLink rows and the Batch.manufacturerId actor assignment; stale links fail closed.",
+        "Platform access requires fresh MFA and one explicit active Licensee whose Organization is active.",
+      ],
+      responseProjection: [
+        "Batch list pagination, updatedAt/createdAt ordering, total count, relation projection, inventory fallback and print-readiness fields are preserved.",
+        "Allocation maps preserve source/selected/child lineage, createdAt/id ordering and all existing aggregate totals.",
       ],
     });
   }

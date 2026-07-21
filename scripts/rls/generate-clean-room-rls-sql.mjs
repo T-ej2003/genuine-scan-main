@@ -3,7 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { calculateCleanRoomSourceContract } from "./lib/clean-room-source-contract.mjs";
-import { buildRegisteredCallPathEvidence } from "./lib/application-path-certifications.mjs";
+import {
+  BATCH_OPERATIONAL_READ_WORKFLOW_IDS,
+  buildRegisteredCallPathEvidence,
+} from "./lib/application-path-certifications.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const programRoot = path.join(repoRoot, "documents/security/rls-program");
@@ -768,6 +771,303 @@ BEGIN
 END
 $function$;`;
 
+const batchOperationalAssurance = `((${tenantAdminRoles} AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR ((${manufacturerRoles} OR ${platformRoles}) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass')))`;
+const batchOperationalBase = `(app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND ${batchOperationalAssurance})`;
+const batchOperationalLinkedLicensee = (licenseeExpression) => `EXISTS (
+  SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} scope_ml
+  JOIN public.${q("Licensee")} scope_l ON scope_l.${q("id")}=scope_ml.${q("licenseeId")}
+  JOIN public.${q("Organization")} scope_o ON scope_o.${q("id")}=scope_l.${q("orgId")}
+  WHERE scope_ml.${q("manufacturerId")}=app_rls.current_user_id()
+    AND scope_ml.${q("licenseeId")}=${licenseeExpression}
+    AND scope_l.${q("isActive")}=TRUE AND scope_l.${q("suspendedAt")} IS NULL AND scope_o.${q("isActive")}=TRUE
+    AND (app_rls.current_licensee_id() IS NULL OR scope_ml.${q("licenseeId")}=app_rls.current_licensee_id())
+)`;
+const batchOperationalListBatchScope = (alias) => `(((${tenantAdminRoles} OR ${platformRoles}) AND ${alias}.${q("licenseeId")}=app_rls.current_licensee_id()) OR (${manufacturerRoles} AND ${alias}.${q("manufacturerId")}=app_rls.current_user_id() AND ${batchOperationalLinkedLicensee(`${alias}.${q("licenseeId")}`)}))`;
+const batchOperationalWorkflowIdsSql = BATCH_OPERATIONAL_READ_WORKFLOW_IDS.map(lit).join(",");
+
+const batchOperationalAuthorizationFunctionsSql = `
+CREATE FUNCTION app_rls.batch_scope_fingerprint(requested_licensee_id text,route_surface text,focus_batch_id text) RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE
+  selector text := NULLIF(btrim(requested_licensee_id),'');
+  focus_id text := NULLIF(btrim(focus_batch_id),'');
+  actor_licensee_id text;
+  actor_organization_id text;
+  membership_count bigint;
+  primary_count bigint;
+  membership_fingerprint text;
+BEGIN
+  IF NOT ${batchOperationalBase}
+     OR app_rls.current_user_id() IS NULL OR app_rls.current_role() IS NULL
+     OR route_surface IS NULL
+     OR (requested_licensee_id IS NOT NULL AND btrim(requested_licensee_id)='')
+     OR (focus_batch_id IS NOT NULL AND btrim(focus_batch_id)='')
+     OR route_surface NOT IN ('GET /api/qr/batches','GET /api/qr/batches/:id/allocation-map')
+     OR (route_surface='GET /api/qr/batches' AND focus_id IS NOT NULL)
+     OR (route_surface='GET /api/qr/batches/:id/allocation-map' AND focus_id IS NULL)
+  THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  IF (selector IS NOT NULL AND selector !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
+     OR (focus_id IS NOT NULL AND focus_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
+  THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+
+  SELECT u.${q("licenseeId")},u.${q("orgId")} INTO actor_licensee_id,actor_organization_id
+  FROM public.${q("User")} u
+  WHERE u.${q("id")}=app_rls.current_user_id() AND u.${q("role")}::text=app_rls.current_role()
+    AND u.${q("isActive")}=TRUE AND u.${q("status")}='ACTIVE'
+    AND u.${q("deletedAt")} IS NULL AND u.${q("disabledAt")} IS NULL;
+  IF NOT FOUND THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+
+  IF ${tenantAdminRoles} THEN
+    IF app_rls.current_licensee_id() IS NULL OR app_rls.current_organization_id() IS NULL
+       OR app_rls.current_manufacturer_id() IS NOT NULL
+       OR actor_licensee_id IS DISTINCT FROM app_rls.current_licensee_id()
+       OR actor_organization_id IS DISTINCT FROM app_rls.current_organization_id()
+       OR (selector IS NOT NULL AND selector IS DISTINCT FROM app_rls.current_licensee_id())
+       OR NOT EXISTS (
+         SELECT 1 FROM public.${q("Licensee")} l JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+         WHERE l.${q("id")}=app_rls.current_licensee_id() AND l.${q("orgId")}=app_rls.current_organization_id()
+           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+       )
+    THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+    RETURN md5(concat_ws('|','tenant',app_rls.current_user_id(),app_rls.current_role(),app_rls.current_licensee_id(),app_rls.current_organization_id(),route_surface,coalesce(focus_id,'list')));
+  END IF;
+
+  IF ${manufacturerRoles} THEN
+    IF app_rls.current_manufacturer_id() IS DISTINCT FROM app_rls.current_user_id()
+       OR app_rls.current_organization_id() IS NOT NULL
+       OR app_rls.current_licensee_id() IS DISTINCT FROM selector
+    THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+    SELECT count(*),count(*) FILTER (WHERE ml.${q("isPrimary")}),string_agg(ml.${q("licenseeId")}||':'||ml.${q("isPrimary")}::text||':'||extract(epoch FROM ml.${q("updatedAt")})::text,',' ORDER BY ml.${q("licenseeId")})
+      INTO membership_count,primary_count,membership_fingerprint
+    FROM public.${q("ManufacturerLicenseeLink")} ml
+    JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+    JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+    WHERE ml.${q("manufacturerId")}=app_rls.current_user_id()
+      AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE;
+    IF membership_count NOT BETWEEN 1 AND 100 OR primary_count>1
+       OR (actor_licensee_id IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
+         JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+         JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+         WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=actor_licensee_id
+           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+       ))
+       OR (actor_organization_id IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
+         JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+         JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+         WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND l.${q("orgId")}=actor_organization_id
+           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+       ))
+       OR (selector IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
+         JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
+         JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+         WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=selector
+           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+       ))
+    THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+    RETURN md5(concat_ws('|','manufacturer',app_rls.current_user_id(),app_rls.current_role(),coalesce(selector,'all'),membership_fingerprint,route_surface,coalesce(focus_id,'list')));
+  END IF;
+
+  IF NOT ${platformRoles} OR selector IS NULL OR app_rls.current_licensee_id() IS DISTINCT FROM selector
+     OR app_rls.current_manufacturer_id() IS NOT NULL OR app_rls.current_organization_id() IS NOT NULL
+     OR NOT EXISTS (
+       SELECT 1 FROM public.${q("Licensee")} l JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+       WHERE l.${q("id")}=selector AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
+     )
+  THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  RETURN md5(concat_ws('|','platform',app_rls.current_user_id(),app_rls.current_role(),selector,route_surface,coalesce(focus_id,'list')));
+END
+$function$;
+
+CREATE FUNCTION app_rls.batch_operational_batch_allowed(candidate_batch_id text,focus_batch_id text) RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE focus_id text := NULLIF(btrim(focus_batch_id),''); focus_licensee_id text; source_batch_id text;
+BEGIN
+  IF candidate_batch_id IS NULL OR candidate_batch_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN RETURN FALSE; END IF;
+  IF focus_id IS NULL THEN
+    RETURN EXISTS (SELECT 1 FROM public.${q("Batch")} b WHERE b.${q("id")}=candidate_batch_id AND (
+      ((${tenantAdminRoles} OR ${platformRoles}) AND b.${q("licenseeId")}=app_rls.current_licensee_id())
+      OR (${manufacturerRoles} AND b.${q("manufacturerId")}=app_rls.current_user_id() AND ${batchOperationalLinkedLicensee(`b.${q("licenseeId")}`)})
+    ));
+  END IF;
+  SELECT f.${q("licenseeId")},coalesce(f.${q("rootBatchId")},f.${q("parentBatchId")},f.${q("id")}) INTO focus_licensee_id,source_batch_id
+  FROM public.${q("Batch")} f WHERE f.${q("id")}=focus_id AND (
+    ((${tenantAdminRoles} OR ${platformRoles}) AND f.${q("licenseeId")}=app_rls.current_licensee_id())
+    OR (${manufacturerRoles} AND f.${q("manufacturerId")}=app_rls.current_user_id() AND ${batchOperationalLinkedLicensee(`f.${q("licenseeId")}`)})
+  );
+  IF NOT FOUND THEN RETURN FALSE; END IF;
+  RETURN EXISTS (SELECT 1 FROM public.${q("Batch")} b WHERE b.${q("id")}=candidate_batch_id AND b.${q("licenseeId")}=focus_licensee_id
+    AND (b.${q("id")}=source_batch_id OR b.${q("parentBatchId")}=source_batch_id OR b.${q("rootBatchId")}=source_batch_id));
+END
+$function$;
+
+CREATE FUNCTION app_rls.authorize_batch_operational_read(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text) RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE fingerprint text; audit_organization_id text := app_rls.current_organization_id(); focus_id text := NULLIF(btrim(focus_batch_id),'');
+BEGIN
+  IF audit_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  fingerprint := app_rls.batch_scope_fingerprint(requested_licensee_id,route_surface,focus_id);
+  IF focus_id IS NOT NULL AND NOT app_rls.batch_operational_batch_allowed(focus_id,focus_id) THEN
+    RAISE EXCEPTION 'batch operational access denied';
+  END IF;
+  IF app_rls.current_licensee_id() IS NOT NULL AND audit_organization_id IS NULL THEN
+    SELECT l.${q("orgId")} INTO audit_organization_id FROM public.${q("Licensee")} l JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
+    WHERE l.${q("id")}=app_rls.current_licensee_id() AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  END IF;
+  INSERT INTO public.${q("AuditLog")} (${q("id")},${q("userId")},${q("orgId")},${q("licenseeId")},${q("action")},${q("entityType")},${q("entityId")},${q("details")})
+  VALUES (lower(audit_id),app_rls.current_user_id(),audit_organization_id,app_rls.current_licensee_id(),'BATCH_OPERATIONAL_READ','BatchOperationalRead',coalesce(focus_id,app_rls.current_licensee_id(),app_rls.current_user_id()),
+    jsonb_build_object('actorId',app_rls.current_user_id(),'role',app_rls.current_role(),'assurance',app_rls.current_assurance(),'requestId',app_rls.current_request_id(),'purposeCode',app_rls.current_purpose(),'route',route_surface,'focusBatchId',focus_id,'scopeFingerprint',fingerprint,'outcome','SUCCESS','workflowIds',jsonb_build_array(${batchOperationalWorkflowIdsSql})))
+  ON CONFLICT (${q("id")}) DO NOTHING;
+  IF NOT EXISTS (SELECT 1 FROM public.${q("AuditLog")} a WHERE a.${q("id")}=lower(audit_id) AND a.${q("userId")}=app_rls.current_user_id()
+    AND a.${q("orgId")} IS NOT DISTINCT FROM audit_organization_id AND a.${q("licenseeId")} IS NOT DISTINCT FROM app_rls.current_licensee_id()
+    AND a.${q("action")}='BATCH_OPERATIONAL_READ' AND a.${q("entityType")}='BatchOperationalRead'
+    AND a.${q("entityId")}=coalesce(focus_id,app_rls.current_licensee_id(),app_rls.current_user_id())
+    AND a.${q("details")}->>'requestId'=app_rls.current_request_id() AND a.${q("details")}->>'purposeCode'='batch-operational-read'
+    AND a.${q("details")}->>'route'=route_surface AND a.${q("details")}->>'focusBatchId' IS NOT DISTINCT FROM focus_id
+    AND a.${q("details")}->>'scopeFingerprint'=fingerprint AND a.${q("details")}->>'outcome'='SUCCESS'
+    AND a.${q("details")}->'workflowIds'=jsonb_build_array(${batchOperationalWorkflowIdsSql}))
+  THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  RETURN fingerprint;
+END
+$function$;
+
+CREATE FUNCTION app_rls.batch_operational_scope(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text)
+RETURNS TABLE(scope_fingerprint text) LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+  SELECT app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id)
+$function$;`;
+
+const batchOperationalRowFunctionsSql = `
+CREATE FUNCTION app_rls.batch_operational_rows(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,page_limit integer,page_offset integer)
+RETURNS TABLE(row_data jsonb) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE fingerprint text; focus_licensee_id text; source_batch_id text;
+BEGIN
+  fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
+  IF expected_scope_fingerprint IS DISTINCT FROM fingerprint OR page_limit IS NULL OR page_offset IS NULL
+     OR page_limit NOT BETWEEN 0 AND 500 OR page_offset<0
+     OR (focus_batch_id IS NULL AND page_limit=0)
+  THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  IF focus_batch_id IS NOT NULL THEN
+    SELECT f.${q("licenseeId")},coalesce(f.${q("rootBatchId")},f.${q("parentBatchId")},f.${q("id")})
+      INTO focus_licensee_id,source_batch_id
+    FROM public.${q("Batch")} f WHERE f.${q("id")}=focus_batch_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  END IF;
+  RETURN QUERY
+  SELECT to_jsonb(b) || jsonb_build_object(
+    'licensee',jsonb_build_object('id',l.${q("id")},'name',l.${q("name")},'prefix',l.${q("prefix")}),
+    'manufacturer',CASE WHEN m.${q("id")} IS NULL THEN 'null'::jsonb ELSE jsonb_build_object('id',m.${q("id")},'name',m.${q("name")},'email',m.${q("email")}) END,
+    '_count',jsonb_build_object('qrCodes',(SELECT count(*) FROM public.${q("QRCode")} qcode WHERE qcode.${q("batchId")}=b.${q("id")}))
+  ) || CASE WHEN focus_batch_id IS NULL THEN jsonb_build_object(
+    'parentBatch',CASE WHEN parent_b.${q("id")} IS NULL THEN 'null'::jsonb ELSE jsonb_build_object('id',parent_b.${q("id")},'name',parent_b.${q("name")}) END,
+    'rootBatch',CASE WHEN root_b.${q("id")} IS NULL THEN 'null'::jsonb ELSE jsonb_build_object('id',root_b.${q("id")},'name',root_b.${q("name")}) END
+  ) ELSE '{}'::jsonb END
+  FROM public.${q("Batch")} b
+  JOIN public.${q("Licensee")} l ON l.${q("id")}=b.${q("licenseeId")}
+  LEFT JOIN public.${q("User")} m ON m.${q("id")}=b.${q("manufacturerId")}
+  LEFT JOIN public.${q("Batch")} parent_b ON parent_b.${q("id")}=b.${q("parentBatchId")}
+  LEFT JOIN public.${q("Batch")} root_b ON root_b.${q("id")}=b.${q("rootBatchId")}
+  WHERE (focus_batch_id IS NULL AND ${batchOperationalListBatchScope("b")})
+     OR (focus_batch_id IS NOT NULL AND b.${q("licenseeId")}=focus_licensee_id
+       AND (b.${q("id")}=source_batch_id OR b.${q("parentBatchId")}=source_batch_id OR b.${q("rootBatchId")}=source_batch_id))
+  ORDER BY CASE WHEN focus_batch_id IS NULL THEN b.${q("updatedAt")} END DESC,
+           CASE WHEN focus_batch_id IS NULL THEN b.${q("createdAt")} END DESC,
+           CASE WHEN focus_batch_id IS NOT NULL THEN b.${q("createdAt")} END ASC,
+           CASE WHEN focus_batch_id IS NOT NULL THEN b.${q("id")} END ASC
+  LIMIT CASE WHEN focus_batch_id IS NULL THEN page_limit ELSE 2147483647 END
+  OFFSET CASE WHEN focus_batch_id IS NULL THEN page_offset ELSE 0 END;
+END
+$function$;
+
+CREATE FUNCTION app_rls.batch_operational_total(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text)
+RETURNS TABLE(total bigint) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE fingerprint text; focus_licensee_id text; source_batch_id text;
+BEGIN
+  fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
+  IF expected_scope_fingerprint IS DISTINCT FROM fingerprint THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  IF focus_batch_id IS NOT NULL THEN
+    SELECT f.${q("licenseeId")},coalesce(f.${q("rootBatchId")},f.${q("parentBatchId")},f.${q("id")})
+      INTO focus_licensee_id,source_batch_id
+    FROM public.${q("Batch")} f WHERE f.${q("id")}=focus_batch_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  END IF;
+  RETURN QUERY SELECT count(*) FROM public.${q("Batch")} b
+  WHERE (focus_batch_id IS NULL AND ${batchOperationalListBatchScope("b")})
+     OR (focus_batch_id IS NOT NULL AND b.${q("licenseeId")}=focus_licensee_id
+       AND (b.${q("id")}=source_batch_id OR b.${q("parentBatchId")}=source_batch_id OR b.${q("rootBatchId")}=source_batch_id));
+END
+$function$;`;
+
+const batchOperationalArrayGuardSql = `expected_scope_fingerprint IS DISTINCT FROM fingerprint OR batch_ids IS NULL OR cardinality(batch_ids) NOT BETWEEN 1 AND 500
+     OR cardinality(batch_ids)<>(SELECT count(DISTINCT id) FROM unnest(batch_ids) id)
+     OR EXISTS (SELECT 1 FROM unnest(batch_ids) id WHERE id IS NULL OR NOT app_rls.batch_operational_batch_allowed(id,focus_batch_id))`;
+
+const batchOperationalSummaryFunctionsSql = `
+CREATE FUNCTION app_rls.batch_inventory_rollups(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,batch_ids text[])
+RETURNS TABLE(batch_id text,dormant integer,active integer,activated integer,allocated integer,printed integer,redeemed integer,blocked integer,scanned integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE fingerprint text;
+BEGIN
+  fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
+  IF ${batchOperationalArrayGuardSql} THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  RETURN QUERY SELECT r.${q("batchId")},r.${q("dormant")},r.${q("active")},r.${q("activated")},r.${q("allocated")},r.${q("printed")},r.${q("redeemed")},r.${q("blocked")},r.${q("scanned")}
+  FROM public.${q("InventoryStatusRollup")} r WHERE r.${q("batchId")}=ANY(batch_ids);
+END
+$function$;
+
+CREATE FUNCTION app_rls.batch_unassigned_ranges(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,batch_ids text[])
+RETURNS TABLE(batch_id text,item_count bigint,start_code text,end_code text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE fingerprint text;
+BEGIN
+  fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
+  IF ${batchOperationalArrayGuardSql} THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  RETURN QUERY SELECT qcode.${q("batchId")},count(*),coalesce(min(qcode.${q("displayCode")}),min(qcode.${q("code")})),coalesce(max(qcode.${q("displayCode")}),max(qcode.${q("code")}))
+  FROM public.${q("QRCode")} qcode WHERE qcode.${q("batchId")}=ANY(batch_ids) AND qcode.${q("status")} IN ('DORMANT','ACTIVE')
+  GROUP BY qcode.${q("batchId")};
+END
+$function$;
+
+CREATE FUNCTION app_rls.batch_status_fallback(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,batch_ids text[])
+RETURNS TABLE(batch_id text,status text,item_count bigint)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE fingerprint text;
+BEGIN
+  fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
+  IF ${batchOperationalArrayGuardSql} THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  RETURN QUERY SELECT qcode.${q("batchId")},qcode.${q("status")}::text,count(*) FROM public.${q("QRCode")} qcode
+  WHERE qcode.${q("batchId")}=ANY(batch_ids) GROUP BY qcode.${q("batchId")},qcode.${q("status")};
+END
+$function$;
+
+CREATE FUNCTION app_rls.batch_reservable_qr_summaries(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,batch_ids text[])
+RETURNS TABLE(batch_id text,item_count bigint,start_code text,end_code text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,app_rls AS $function$
+DECLARE fingerprint text;
+BEGIN
+  fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
+  IF ${batchOperationalArrayGuardSql} THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
+  RETURN QUERY
+  SELECT qcode.${q("batchId")},count(*),min(coalesce(qcode.${q("displayCode")},qcode.${q("code")})),max(coalesce(qcode.${q("displayCode")},qcode.${q("code")}))
+  FROM public.${q("QRCode")} qcode
+  LEFT JOIN public.${q("PrintItem")} pi ON pi.${q("qrCodeId")}=qcode.${q("id")}
+  LEFT JOIN public.${q("PrintSession")} ps ON ps.${q("id")}=pi.${q("printSessionId")}
+  LEFT JOIN public.${q("PrintJob")} pj ON pj.${q("id")}=ps.${q("printJobId")}
+  WHERE qcode.${q("batchId")}=ANY(batch_ids) AND qcode.${q("status")}='ALLOCATED' AND qcode.${q("printJobId")} IS NULL
+    AND (pi.${q("id")} IS NULL OR (pi.${q("printConfirmedAt")} IS NULL
+      AND (pi.${q("confirmationEvidence")} IS NULL OR pi.${q("confirmationEvidence")}::text IN ('null','{}'))
+      AND ((pi.${q("state")}::text IN ('FAILED','FROZEN') AND pi.${q("agentAckedAt")} IS NULL AND pi.${q("dispatchedAt")} IS NULL AND pi.${q("deviceJobRef")} IS NULL
+        AND (pi.${q("deadLetterReason")} IN ('operator_abandoned_unconfirmed_run','pre_dispatch_failure','connector_payload_validation_failed_before_dispatch','printer_agent_payload_failed_before_dispatch')
+          OR pi.${q("failureReason")} ILIKE '%operator closed unconfirmed failed print run%' OR pi.${q("failureReason")} ILIKE '%operator abandoned unconfirmed print run%'
+          OR pi.${q("failureReason")} ILIKE '%before any printer acknowledgement%' OR pi.${q("failureReason")} ILIKE '%pre-dispatch%' OR pi.${q("failureReason")} ILIKE '%pre dispatch%')
+        AND ps.${q("status")}::text IN ('CANCELLED','FAILED') AND pj.${q("status")}::text IN ('CANCELLED','FAILED'))
+      OR (pi.${q("state")}::text='CANCELLED' AND ps.${q("status")}::text='STOPPED' AND pj.${q("status")}::text IN ('STOPPED','PARTIALLY_COMPLETED')))))
+  GROUP BY qcode.${q("batchId")};
+END
+$function$;`;
+
 const contextHelpersSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
 ${requirePackagePhaseSql("ownership-installed", "context helpers")}
@@ -823,10 +1123,16 @@ CREATE FUNCTION app_rls.platform_audit_log_details(log_ids text[]) RETURNS TABLE
     AND a.${q("licenseeId")}=app_rls.current_licensee_id() AND a.${q("id")}=ANY(log_ids)
 $$;
 ${dashboardSnapshotFunctionsSql}
+${batchOperationalAuthorizationFunctionsSql}
+${batchOperationalRowFunctionsSql}
+${batchOperationalSummaryFunctionsSql}
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_rls FROM PUBLIC;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app_rls TO ${q(roleNames.app)};
 REVOKE EXECUTE ON FUNCTION app_rls.dashboard_scope_fingerprint(text) FROM ${q(roleNames.app)};
 REVOKE EXECUTE ON FUNCTION app_rls.authorize_dashboard_snapshot(text,text,text) FROM ${q(roleNames.app)};
+REVOKE EXECUTE ON FUNCTION app_rls.batch_scope_fingerprint(text,text,text) FROM ${q(roleNames.app)};
+REVOKE EXECUTE ON FUNCTION app_rls.batch_operational_batch_allowed(text,text) FROM ${q(roleNames.app)};
+REVOKE EXECUTE ON FUNCTION app_rls.authorize_batch_operational_read(text,text,text,text) FROM ${q(roleNames.app)};
 ${resetRole}
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
@@ -869,11 +1175,26 @@ const dashboardRuleIdsFor = (table, command) => {
   if (!ids.length) throw new Error(`Dashboard policy ${table}:${command} has no exact source rule`);
   return ids;
 };
+const batchWorkflowIds = new Set(BATCH_OPERATIONAL_READ_WORKFLOW_IDS);
+const batchSourceRuleIds = commandSemantics.rules
+  .filter((rule) => rule.supportingWorkflowIds?.some((workflowId) => batchWorkflowIds.has(workflowId)))
+  .map((rule) => rule.id)
+  .sort();
+if (!batchSourceRuleIds.length) throw new Error("Batch operational policies have no exact source rules");
+const batchRuleIdsFor = (table, command) => {
+  const tableId = tables.find((item) => item.physicalTable === table)?.id;
+  const ids = commandSemantics.rules
+    .filter((rule) => rule.tableId === tableId && rule.command === command && rule.supportingWorkflowIds?.some((workflowId) => batchWorkflowIds.has(workflowId)))
+    .map((rule) => rule.id)
+    .sort();
+  if (!ids.length) throw new Error(`Batch operational policy ${table}:${command} has no exact source rule`);
+  return ids;
+};
 const dashboardPolicyBase = `(app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (
   ((${platformRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))
   OR (${tenantAdminRoles} AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))
 ))`;
-const internalPolicies = [
+const internalPolicySlices = [
   { table: "User", name: "full_rls_internal_actor_user", predicate: `(((${q("id")}=app_rls.current_user_id() AND ${q("role")}::text=app_rls.current_role()) OR (((${tenantAdminRoles} OR ${platformRoles}) AND app_rls.current_purpose()='tenant-risk-analytics') AND ${q("role")} IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) OR (${platformRoles} AND app_rls.current_purpose()='platform-audit-log-read' AND ${q("licenseeId")}=app_rls.current_licensee_id())) AND ${q("isActive")}=TRUE AND ${q("status")}='ACTIVE' AND ${q("deletedAt")} IS NULL AND ${q("disabledAt")} IS NULL)` },
   { table: "ManufacturerLicenseeLink", name: "full_rls_internal_manufacturer_link", predicate: `${q("licenseeId")}=app_rls.current_licensee_id() AND ((${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id()) OR ((${tenantAdminRoles} OR ${platformRoles}) AND app_rls.current_purpose()='tenant-risk-analytics'))` },
   { table: "Licensee", name: "full_rls_internal_manufacturer_licensee", predicate: `${q("id")}=app_rls.current_licensee_id() AND (app_rls.current_organization_id() IS NULL OR ${q("orgId")}=app_rls.current_organization_id()) AND ${q("isActive")}=TRUE AND ${q("suspendedAt")} IS NULL` },
@@ -957,19 +1278,143 @@ const internalPolicies = [
       columns: ["id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details"],
       predicate: `${dashboardPolicyBase} AND ${q("userId")}=app_rls.current_user_id() AND ${q("action")}='DASHBOARD_SNAPSHOT_READ' AND ${q("entityType")}='DashboardSnapshot' AND ${q("details")}->>'requestId'=app_rls.current_request_id() AND ${q("details")}->>'purposeCode'='dashboard-snapshot-read' AND ${q("details")}->>'route' IN ('GET /api/dashboard/stats','GET /api/events/dashboard')`,
     })),
-  ].map((policy) => ({
-    ...policy,
-    projectedColumns: policy.columns,
+  ].map((policy) => {
+    const predicate = `(CASE WHEN ${dashboardPolicyBase} THEN (${policy.predicate}) ELSE FALSE END)`;
+    return {
+      ...policy,
+      predicate,
+      projectedColumns: policy.columns,
+      columns: [],
+      sourceCommandRuleIds: dashboardRuleIdsFor(policy.table, policy.command),
+      actors: ["licensee-admin", "manufacturer", "platform-admin"],
+      assurance: "source-rule-specific",
+      purpose: ["dashboard-snapshot-read"],
+      scopeType: "database-revalidated-dashboard-aggregate",
+      scopePredicate: predicate,
+      certificationStatus: "pending",
+      internalHelperOnly: true,
+    };
+  }))
+  .concat([
+    {
+      table: "User", name: "full_rls_internal_batch_user", command: "SELECT",
+      columns: ["id", "email", "name", "role", "licenseeId", "orgId", "status", "isActive", "disabledAt", "deletedAt"],
+      predicate: `${batchOperationalBase} AND (
+        (${q("id")}=app_rls.current_user_id() AND ${q("role")}::text=app_rls.current_role())
+        OR ${q("role")} IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')
+      )`,
+    },
+    {
+      table: "ManufacturerLicenseeLink", name: "full_rls_internal_batch_manufacturer_link", command: "SELECT",
+      columns: ["manufacturerId", "licenseeId", "isPrimary", "updatedAt"],
+      predicate: `${batchOperationalBase} AND (
+        (${manufacturerRoles} AND ${q("manufacturerId")}=app_rls.current_user_id() AND (app_rls.current_licensee_id() IS NULL OR ${q("licenseeId")}=app_rls.current_licensee_id()))
+        OR ((${tenantAdminRoles} OR ${platformRoles}) AND ${q("licenseeId")}=app_rls.current_licensee_id())
+      )`,
+    },
+    {
+      table: "Licensee", name: "full_rls_internal_batch_licensee", command: "SELECT",
+      columns: ["id", "orgId", "name", "prefix", "isActive", "suspendedAt"],
+      predicate: `${batchOperationalBase} AND ${q("isActive")}=TRUE AND ${q("suspendedAt")} IS NULL AND (
+        ((${tenantAdminRoles} OR ${platformRoles}) AND ${q("id")}=app_rls.current_licensee_id())
+        OR ${manufacturerRoles}
+      )`,
+    },
+    {
+      table: "Organization", name: "full_rls_internal_batch_organization", command: "SELECT",
+      columns: ["id", "isActive"],
+      predicate: `${batchOperationalBase} AND ${q("isActive")}=TRUE AND (
+        (${tenantAdminRoles} AND ${q("id")}=app_rls.current_organization_id())
+        OR ${manufacturerRoles}
+        OR ${platformRoles}
+      )`,
+    },
+    {
+      table: "Batch", name: "full_rls_internal_batch_rows", command: "SELECT",
+      columns: ["createdAt", "endCode", "id", "lifecycleState", "licenseeId", "manufacturerId", "metadata", "name", "parentBatchId", "printPackDownloadedAt", "printPackDownloadedByUserId", "printedAt", "releasedAt", "releasedByUserId", "rootBatchId", "sampleScanPolicy", "startCode", "suspendedAt", "suspendedReason", "totalCodes", "updatedAt"],
+      predicate: `${batchOperationalBase} AND (((${tenantAdminRoles} OR ${platformRoles}) AND ${q("licenseeId")}=app_rls.current_licensee_id()) OR ${manufacturerRoles})`,
+    },
+    {
+      table: "QRCode", name: "full_rls_internal_batch_qrcode", command: "SELECT",
+      columns: ["id", "batchId", "licenseeId", "status", "code", "displayCode", "printJobId"],
+      predicate: `${batchOperationalBase} AND (((${tenantAdminRoles} OR ${platformRoles}) AND ${q("licenseeId")}=app_rls.current_licensee_id()) OR ${manufacturerRoles})`,
+    },
+    {
+      table: "InventoryStatusRollup", name: "full_rls_internal_batch_rollup", command: "SELECT",
+      columns: ["batchId", "licenseeId", "manufacturerId", "dormant", "active", "activated", "allocated", "printed", "redeemed", "blocked", "scanned"],
+      predicate: `${batchOperationalBase} AND (((${tenantAdminRoles} OR ${platformRoles}) AND ${q("licenseeId")}=app_rls.current_licensee_id()) OR ${manufacturerRoles})`,
+    },
+    {
+      table: "PrintItem", name: "full_rls_internal_batch_print_item", command: "SELECT",
+      columns: ["id", "qrCodeId", "printSessionId", "state", "agentAckedAt", "dispatchedAt", "printConfirmedAt", "confirmationEvidence", "deviceJobRef", "deadLetterReason", "failureReason"],
+      predicate: batchOperationalBase,
+    },
+    {
+      table: "PrintSession", name: "full_rls_internal_batch_print_session", command: "SELECT",
+      columns: ["id", "printJobId", "batchId", "status"],
+      predicate: batchOperationalBase,
+    },
+    {
+      table: "PrintJob", name: "full_rls_internal_batch_print_job", command: "SELECT",
+      columns: ["id", "batchId", "status"],
+      predicate: batchOperationalBase,
+    },
+    ...["SELECT", "INSERT"].map((command) => ({
+      table: "AuditLog", name: `full_rls_internal_batch_audit_${command.toLowerCase()}`, command,
+      columns: ["id", "userId", "orgId", "licenseeId", "action", "entityType", "entityId", "details"],
+      predicate: `${batchOperationalBase} AND ${q("userId")}=app_rls.current_user_id() AND ${q("action")}='BATCH_OPERATIONAL_READ'
+        AND ${q("entityType")}='BatchOperationalRead' AND ${q("details")}->>'requestId'=app_rls.current_request_id()
+        AND ${q("details")}->>'purposeCode'='batch-operational-read'
+        AND ${q("details")}->>'route' IN ('GET /api/qr/batches','GET /api/qr/batches/:id/allocation-map')`,
+    })),
+  ].map((policy) => {
+    const predicate = `(CASE WHEN ${batchOperationalBase} THEN (${policy.predicate}) ELSE FALSE END)`;
+    return {
+      ...policy,
+      predicate,
+      projectedColumns: policy.columns,
+      columns: [],
+      sourceCommandRuleIds: batchRuleIdsFor(policy.table, policy.command),
+      workflowIds: BATCH_OPERATIONAL_READ_WORKFLOW_IDS,
+      actors: ["licensee-admin", "manufacturer", "platform-admin"],
+      assurance: "source-rule-specific",
+      purpose: ["batch-operational-read"],
+      scopeType: "database-revalidated-batch-operational-function",
+      scopePredicate: predicate,
+      certificationStatus: "pending",
+      internalHelperOnly: true,
+    };
+  }));
+
+const internalPolicyGroups = new Map();
+for (const policy of internalPolicySlices) {
+  const key = `${policy.table}:${policy.command}`;
+  internalPolicyGroups.set(key, [...(internalPolicyGroups.get(key) || []), policy]);
+}
+const internalPolicies = [...internalPolicyGroups.values()].map((group) => {
+  const sourceCommandRuleIds = [...new Set(group.flatMap((policy) => policy.sourceCommandRuleIds))].sort();
+  const workflowIds = [...new Set(group.flatMap((policy) => policy.workflowIds || policy.sourceCommandRuleIds.flatMap((ruleId) => ruleById.get(ruleId)?.supportingWorkflowIds || [])))].sort();
+  const predicate = group.length === 1
+    ? group[0].predicate
+    : `(${group.map((policy) => `(${policy.predicate})`).join(" OR ")})`;
+  return {
+    table: group[0].table,
+    name: shortName("full_rls_internal", group[0].table, group[0].command),
+    command: group[0].command,
+    predicate,
+    projectedColumns: [...new Set(group.flatMap((policy) => policy.projectedColumns || []))].sort(),
     columns: [],
-    sourceCommandRuleIds: dashboardRuleIdsFor(policy.table, policy.command),
-    actors: ["licensee-admin", "manufacturer", "platform-admin"],
+    sourceCommandRuleIds,
+    workflowIds,
+    actors: [...new Set(group.flatMap((policy) => policy.actors))].sort(),
     assurance: "source-rule-specific",
-    purpose: ["dashboard-snapshot-read"],
-    scopeType: "database-revalidated-dashboard-aggregate",
-    scopePredicate: policy.predicate,
+    purpose: [...new Set(group.flatMap((policy) => policy.purpose))].sort(),
+    scopeType: group.length === 1 ? group[0].scopeType : "purpose-dispatched-internal-function-boundary",
+    scopePredicate: predicate,
     certificationStatus: "pending",
     internalHelperOnly: true,
-  })));
+  };
+});
 
 const policyStatements = forceTargets.flatMap((table) => [`ALTER TABLE public.${q(table.physicalTable)} ENABLE ROW LEVEL SECURITY;`, `ALTER TABLE public.${q(table.physicalTable)} FORCE ROW LEVEL SECURITY;`]);
 for (const slice of slices) {
@@ -980,7 +1425,7 @@ for (const slice of slices) {
 for (const policy of internalPolicies) {
   const clause = policy.command === "INSERT" ? `WITH CHECK (${policy.predicate})` : `USING (${policy.predicate})`;
   policyStatements.push(`CREATE POLICY ${q(policy.name)} ON public.${q(policy.table)} AS PERMISSIVE FOR ${policy.command} TO ${q(roleNames.owner)} ${clause};`);
-  policyStatements.push(`COMMENT ON POLICY ${q(policy.name)} ON public.${q(policy.table)} IS ${lit(JSON.stringify({ sourceCommandRuleIds: policy.sourceCommandRuleIds, actors: policy.actors, assurance: policy.assurance, purpose: policy.purpose, scope: policy.scopeType }))};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policy.name)} ON public.${q(policy.table)} IS ${lit(JSON.stringify({ sourceCommandRuleIds: policy.sourceCommandRuleIds, actors: policy.actors, assurance: policy.assurance, purpose: policy.purpose, scope: policy.scopeType, ...(policy.workflowIds ? { workflowIds: policy.workflowIds } : {}) }))};`);
 }
 const policiesSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
@@ -1029,6 +1474,16 @@ const expectedRoutineIdentities = [
   ["app_rls", "actor_scope_valid", ""],
   ["app_rls", "attributed_request", ""],
   ["app_rls", "authorize_dashboard_snapshot", "audit_id text, requested_licensee_id text, route_surface text"],
+  ["app_rls", "authorize_batch_operational_read", "audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text"],
+  ["app_rls", "batch_inventory_rollups", "audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, batch_ids text[]"],
+  ["app_rls", "batch_operational_batch_allowed", "candidate_batch_id text, focus_batch_id text"],
+  ["app_rls", "batch_operational_rows", "audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, page_limit integer, page_offset integer"],
+  ["app_rls", "batch_operational_scope", "audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text"],
+  ["app_rls", "batch_operational_total", "audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text"],
+  ["app_rls", "batch_reservable_qr_summaries", "audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, batch_ids text[]"],
+  ["app_rls", "batch_scope_fingerprint", "requested_licensee_id text, route_surface text, focus_batch_id text"],
+  ["app_rls", "batch_status_fallback", "audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, batch_ids text[]"],
+  ["app_rls", "batch_unassigned_ranges", "audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, batch_ids text[]"],
   ["app_rls", "current_assurance", ""],
   ["app_rls", "current_licensee_id", ""],
   ["app_rls", "current_manufacturer_id", ""],

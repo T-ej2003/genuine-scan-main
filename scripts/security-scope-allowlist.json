@@ -581,24 +581,11 @@
       "path": "backend/src/services/batchAllocationService.ts",
       "model": "batch",
       "methods": [
-        "count",
-        "findFirst",
-        "findMany",
         "findUnique",
         "updateMany"
       ],
-      "reason": "Allocation service is invoked by scoped QR/batch controllers.",
-      "cannotWidenAccess": "Allocation service is invoked by scoped QR/batch controllers. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
-      "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
-    },
-    {
-      "path": "backend/src/services/batchAllocationService.ts",
-      "model": "qRCode",
-      "methods": [
-        "groupBy"
-      ],
-      "reason": "Allocation aggregation is invoked by scoped QR/batch controllers.",
-      "cannotWidenAccess": "Allocation aggregation is invoked by scoped QR/batch controllers. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
+      "reason": "The isolated lineage backfill reads a recorded parent and repairs only missing lineage columns.",
+      "cannotWidenAccess": "The isolated lineage backfill reads a recorded parent and repairs only missing lineage columns. This exception is bound to the exact file, Prisma model, and method list; it does not authorize client-provided tenant, platform, manufacturer, licensee, or user IDs to widen access beyond the route/service's authenticated scope or public sanitized response contract.",
       "followUp": "Security owner: platform/backend. Replace this exact exception with a scoped repository/helper or a richer scanner proof when this file is next modified."
     },
     {

@@ -7,10 +7,10 @@
   ],
   "workflowCount": 428,
   "summary": {
-    "applicationPathCertified": 3,
+    "applicationPathCertified": 10,
     "postgresqlApplicationPathPending": 4,
     "frozenProductProhibited": 16,
-    "implementationPending": 405
+    "implementationPending": 398
   },
   "workflows": [
     {
@@ -7188,22 +7188,22 @@
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-1252792ed28d006f",
-          "source": "backend/src/services/batchAllocationService.ts:108",
+          "accessId": "access-1b0bf503ff61779c",
+          "source": "backend/src/services/batchAllocationService.ts:260",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-3e918326bcf6e1f1",
+          "source": "backend/src/services/batchAllocationService.ts:233",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-181d3a889b0e16e7",
-          "source": "backend/src/services/batchAllocationService.ts:144",
+          "accessId": "access-79abc2413aad544e",
+          "source": "backend/src/services/batchAllocationService.ts:269",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
-        },
-        {
-          "accessId": "access-d9fb7f80bcf5ccd8",
-          "source": "backend/src/services/batchAllocationService.ts:135",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findUnique"
         }
       ],
       "implementationFamilyId": null,
@@ -7219,24 +7219,98 @@
       "entryPoint": "internal:buildCountMaps",
       "executionSurface": "internal",
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "registeredRoots": [
-        "internal:buildCountMaps"
+        "GET /api/qr/batches",
+        "GET /api/qr/batches/:id/allocation-map"
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-99a97e877c88e7a3",
-          "source": "backend/src/services/batchAllocationService.ts:215",
+          "accessId": "access-0414c0920e10421c",
+          "source": "backend/src/services/batchAllocationService.ts:370",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "groupBy"
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-273f66b99fad9b20",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-690ab6eddb2a2f76",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-6f5de7411dd0e7dd",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-9d555534a9ecda5c",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-cc52aa5998079bd5",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-e709be39b2d18225",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-f6ea1c55371e32f2",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
         }
       ],
-      "implementationFamilyId": null,
-      "canonicalContextInstalled": false,
-      "protectedQueryClient": null,
-      "disposition": "implementation-pending",
-      "certification": null
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "canonicalContextInstalled": true,
+      "protectedQueryClient": "transaction-client-only",
+      "disposition": "application-path-certified",
+      "certification": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
@@ -7245,30 +7319,140 @@
       "entryPoint": "internal:getBatchAllocationMap",
       "executionSurface": "internal",
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "registeredRoots": [
-        "internal:getBatchAllocationMap"
+        "GET /api/qr/batches",
+        "GET /api/qr/batches/:id/allocation-map"
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-93adcc2f302e9245",
-          "source": "backend/src/services/batchAllocationService.ts:366",
+          "accessId": "access-15cdbb9ce1d069d9",
+          "source": "backend/src/services/batchAllocationService.ts:543",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "$function:app_rls.batch_operational_scope"
         },
         {
-          "accessId": "access-ba197a7fb742fd10",
-          "source": "backend/src/services/batchAllocationService.ts:351",
+          "accessId": "access-27f4ac75d9720e9f",
+          "source": "backend/src/services/batchAllocationService.ts:543",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findFirst"
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-4d85b467174de710",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-673db6c6f29ffc0e",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-6b09fe66b0d90961",
+          "source": "backend/src/services/batchAllocationService.ts:543",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-71a3312cb8386d40",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-95a49010ec3cc147",
+          "source": "backend/src/services/batchAllocationService.ts:543",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-9af8e7fd447368d0",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-aaa2dfb9ce3cb0a7",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-c28b2e65004a128f",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-cd10277b9c123b1f",
+          "source": "backend/src/services/batchAllocationService.ts:543",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-cf6804fe14d6fc51",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-d9f123f90ebb6eeb",
+          "source": "backend/src/services/batchAllocationService.ts:543",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-e487ee9021b1daea",
+          "source": "backend/src/services/batchAllocationService.ts:543",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-fa93282f11b02297",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
         }
       ],
-      "implementationFamilyId": null,
-      "canonicalContextInstalled": false,
-      "protectedQueryClient": null,
-      "disposition": "implementation-pending",
-      "certification": null
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "canonicalContextInstalled": true,
+      "protectedQueryClient": "transaction-client-only",
+      "disposition": "application-path-certified",
+      "certification": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -7277,24 +7461,140 @@
       "entryPoint": "internal:readBatches",
       "executionSurface": "internal",
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "registeredRoots": [
-        "internal:readBatches"
+        "GET /api/qr/batches",
+        "GET /api/qr/batches/:id/allocation-map"
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-7af1c857485863cf",
-          "source": "backend/src/services/batchAllocationService.ts:322",
+          "accessId": "access-0594cd52b9d2261f",
+          "source": "backend/src/services/batchAllocationService.ts:487",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-14534e5b95e6dd56",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-20c4a08a3502764a",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-4c69d8a4ce360427",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-593ff3091ef2bdcb",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-5bc94b4f69c57d47",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-751729b1302521fa",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-937e786d82912d43",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-a02843a77ab923cd",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-a90823cc44464bf8",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-b9b4b61192ac10f7",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-d198fe6121bbf066",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-e1843d428bbd1589",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-ee1c737255c8e696",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-eedeb51650d998c5",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
         }
       ],
-      "implementationFamilyId": null,
-      "canonicalContextInstalled": false,
-      "protectedQueryClient": null,
-      "disposition": "implementation-pending",
-      "certification": null
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "canonicalContextInstalled": true,
+      "protectedQueryClient": "transaction-client-only",
+      "disposition": "application-path-certified",
+      "certification": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups",
@@ -7303,24 +7603,98 @@
       "entryPoint": "internal:readRollups",
       "executionSurface": "internal",
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "registeredRoots": [
-        "internal:readRollups"
+        "GET /api/qr/batches",
+        "GET /api/qr/batches/:id/allocation-map"
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-36da5984dbcd4db1",
-          "source": "backend/src/services/batchAllocationService.ts:168",
+          "accessId": "access-0dc7870784d2a49e",
+          "source": "backend/src/services/batchAllocationService.ts:297",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-131a790102780823",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-3537c0b19e0bf640",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-4964fb4d888761bb",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-4bca192a032bed0f",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-6f0871ad27e42f76",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-b6c34c5ccbe4e973",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-d926927050018550",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
         }
       ],
-      "implementationFamilyId": null,
-      "canonicalContextInstalled": false,
-      "protectedQueryClient": null,
-      "disposition": "implementation-pending",
-      "certification": null
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "canonicalContextInstalled": true,
+      "protectedQueryClient": "transaction-client-only",
+      "disposition": "application-path-certified",
+      "certification": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
@@ -7329,24 +7703,92 @@
       "entryPoint": "internal:readTotal",
       "executionSurface": "internal",
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "registeredRoots": [
-        "internal:readTotal"
+        "GET /api/qr/batches",
+        "GET /api/qr/batches/:id/allocation-map"
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-49dd48ebb98ed51d",
-          "source": "backend/src/services/batchAllocationService.ts:335",
+          "accessId": "access-19a7ba96f78ed762",
+          "source": "backend/src/services/batchAllocationService.ts:512",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "count"
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-41ffec452a08cc67",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-4e092dfd80dde723",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-8fa95aaddd6138bd",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-a850106fee4bd059",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-aaa67d38b582e218",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-c5fa67835e99dcc5",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
         }
       ],
-      "implementationFamilyId": null,
-      "canonicalContextInstalled": false,
-      "protectedQueryClient": null,
-      "disposition": "implementation-pending",
-      "certification": null
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "canonicalContextInstalled": true,
+      "protectedQueryClient": "transaction-client-only",
+      "disposition": "application-path-certified",
+      "certification": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "workflowId": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges",
@@ -7355,24 +7797,98 @@
       "entryPoint": "internal:readUnassignedRanges",
       "executionSurface": "internal",
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "registeredRoots": [
-        "internal:readUnassignedRanges"
+        "GET /api/qr/batches",
+        "GET /api/qr/batches/:id/allocation-map"
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-bff2804d7a3ba47d",
-          "source": "backend/src/services/batchAllocationService.ts:183",
+          "accessId": "access-29c29729f836e416",
+          "source": "backend/src/services/batchAllocationService.ts:319",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "groupBy"
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-2f6ec8f73b36369c",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-9bca7720e79bfe8f",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-b5298c30ae6a4eca",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-bbeff0da8874cb4f",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-bc0f7a2d8ac78655",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-c02bbd73dbbbf89a",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-d4acec1c685c045f",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
         }
       ],
-      "implementationFamilyId": null,
-      "canonicalContextInstalled": false,
-      "protectedQueryClient": null,
-      "disposition": "implementation-pending",
-      "certification": null
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "canonicalContextInstalled": true,
+      "protectedQueryClient": "transaction-client-only",
+      "disposition": "application-path-certified",
+      "certification": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "workflowId": "workflow-internal-backend-src-services-batch-print-lifecycle-reconciliation-service-ts-find-print-lifecycle-drift-batches",
@@ -12040,26 +12556,26 @@
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-031db798098040b6",
-          "source": "backend/src/services/printReservationService.ts:225",
+          "accessId": "access-4b4a9128564dba67",
+          "source": "backend/src/services/printReservationService.ts:226",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-27bc0f1e7e96662d",
-          "source": "backend/src/services/printReservationService.ts:225",
+          "accessId": "access-928e883cf24e1af4",
+          "source": "backend/src/services/printReservationService.ts:226",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-ecd33d1e8d3926c6",
-          "source": "backend/src/services/printReservationService.ts:225",
+          "accessId": "access-b50105a9b4f92749",
+          "source": "backend/src/services/printReservationService.ts:226",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-fd9feac088403177",
-          "source": "backend/src/services/printReservationService.ts:225",
+          "accessId": "access-dc4307952e7bda06",
+          "source": "backend/src/services/printReservationService.ts:226",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         }
@@ -12084,26 +12600,26 @@
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-084f732ae8a14f40",
-          "source": "backend/src/services/printReservationService.ts:202",
+          "accessId": "access-1dc1b55eb144189b",
+          "source": "backend/src/services/printReservationService.ts:203",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-40161b0e15c1f124",
-          "source": "backend/src/services/printReservationService.ts:202",
+          "accessId": "access-23a6398811a6f7f5",
+          "source": "backend/src/services/printReservationService.ts:203",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-b17a6d446c05b95c",
-          "source": "backend/src/services/printReservationService.ts:202",
+          "accessId": "access-36fbf7ad5fe71226",
+          "source": "backend/src/services/printReservationService.ts:203",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-c01f2ac91bf83912",
-          "source": "backend/src/services/printReservationService.ts:202",
+          "accessId": "access-7adbe84a2b888429",
+          "source": "backend/src/services/printReservationService.ts:203",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         }
@@ -12128,26 +12644,26 @@
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-36b21a115b5c3c48",
-          "source": "backend/src/services/printReservationService.ts:259",
+          "accessId": "access-9cddebe2904b40fa",
+          "source": "backend/src/services/printReservationService.ts:260",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-451e9a0043059f20",
-          "source": "backend/src/services/printReservationService.ts:259",
+          "accessId": "access-b8e5171991fa2b1f",
+          "source": "backend/src/services/printReservationService.ts:260",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-60e5be6a446c3c7a",
-          "source": "backend/src/services/printReservationService.ts:259",
+          "accessId": "access-e9a8e0cf28aa06f3",
+          "source": "backend/src/services/printReservationService.ts:260",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-ba721fa7dfe00bec",
-          "source": "backend/src/services/printReservationService.ts:259",
+          "accessId": "access-ec3692878bf0e321",
+          "source": "backend/src/services/printReservationService.ts:260",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         }
@@ -12165,42 +12681,116 @@
       "entryPoint": "internal:listReservableQrCodeSummaries",
       "executionSurface": "internal",
       "canonicalSourceFiles": [
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
         "backend/src/services/printReservationService.ts"
       ],
       "registeredRoots": [
-        "internal:listReservableQrCodeSummaries"
+        "GET /api/qr/batches",
+        "GET /api/qr/batches/:id/allocation-map"
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-2b23dcf352d8400e",
-          "source": "backend/src/services/printReservationService.ts:303",
+          "accessId": "access-1d42b422448ba3b3",
+          "source": "backend/src/services/printReservationService.ts:305",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "$queryRaw"
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
         },
         {
-          "accessId": "access-52eaeaea79379404",
-          "source": "backend/src/services/printReservationService.ts:303",
+          "accessId": "access-5122221abcc329d0",
+          "source": "backend/src/services/printReservationService.ts:305",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "$queryRaw"
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
         },
         {
-          "accessId": "access-85b6d3dccd41744e",
-          "source": "backend/src/services/printReservationService.ts:303",
+          "accessId": "access-5ab03a3c5e5167f7",
+          "source": "backend/src/services/printReservationService.ts:305",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "$queryRaw"
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
         },
         {
-          "accessId": "access-86e449a1ed8dd5bd",
-          "source": "backend/src/services/printReservationService.ts:303",
+          "accessId": "access-6b853f43198f797d",
+          "source": "backend/src/services/printReservationService.ts:305",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "$queryRaw"
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-6de7df6711c7055e",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-70217c4c12f431a1",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-8b457d3612a195be",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-b1b4b8d90f55a596",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-bbc4b82e860c0286",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-c95b54698c3a2283",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-e717de489ef9082d",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
         }
       ],
-      "implementationFamilyId": null,
-      "canonicalContextInstalled": false,
-      "protectedQueryClient": null,
-      "disposition": "implementation-pending",
-      "certification": null
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "canonicalContextInstalled": true,
+      "protectedQueryClient": "transaction-client-only",
+      "disposition": "application-path-certified",
+      "certification": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "workflowId": "workflow-internal-backend-src-services-print-reservation-service-ts-select-reservable-qr-codes-for-print",
@@ -12216,26 +12806,26 @@
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-2bd7dce78d7e46b0",
-          "source": "backend/src/services/printReservationService.ts:171",
+          "accessId": "access-06911efa1e30fd1d",
+          "source": "backend/src/services/printReservationService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-8dbd74b2aa10b0ab",
-          "source": "backend/src/services/printReservationService.ts:171",
+          "accessId": "access-4f5efeb0aca4c430",
+          "source": "backend/src/services/printReservationService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-a22b58358557fb75",
-          "source": "backend/src/services/printReservationService.ts:171",
+          "accessId": "access-c08bf6308776712b",
+          "source": "backend/src/services/printReservationService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-e054b619e72caf6e",
-          "source": "backend/src/services/printReservationService.ts:171",
+          "accessId": "access-e4d8b1c40c734782",
+          "source": "backend/src/services/printReservationService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         }

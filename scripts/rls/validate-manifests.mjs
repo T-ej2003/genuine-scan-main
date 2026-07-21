@@ -161,7 +161,13 @@ for (const rule of commandSemantics.rules) {
     for (const column of [...table.tenantKeyColumns, ...table.actorKeyColumns]) assert(rule.protectedColumns.includes(column), `${rule.id} makes ownership column ${column} generally mutable`);
     assert(rule.withCheckRule && rule.withCheckRule !== "not-applicable", `${rule.id} lacks WITH CHECK semantics`);
   }
-  if (table.primaryCategory === "security-sensitive" && rule.command === "SELECT") for (const column of table.sensitiveColumns) assert(!rule.allowedColumns.includes(column) || (rule.publicFunctionId && rule.requiresNamedFunction), `${rule.id} broadly selects secret column ${column}`);
+  if (table.primaryCategory === "security-sensitive" && rule.command === "SELECT") {
+    const exactFunctionBoundary = rule.requiresNamedFunction && (
+      rule.publicFunctionId ||
+      (rule.namedFunctionSignatures?.length && rule.namedFunctionSignatures.every((signature) => signature.startsWith("app_rls.")))
+    );
+    for (const column of table.sensitiveColumns) assert(!rule.allowedColumns.includes(column) || exactFunctionBoundary, `${rule.id} broadly selects secret column ${column}`);
+  }
   assert(!(table.appendOnly && rule.command === "UPDATE" && rule.authorizationBoundary !== "prohibited"), `${rule.id} allows append-only UPDATE`);
   if (rule.command === "DELETE") assert(["prohibited", "soft-delete only", "actor self-delete", "tenant-admin delete", "retention delete", "cascade through approved parent lifecycle", "migration-only", "operator-approved", "break-glass only"].includes(rule.hardDeleteSemantics), `${rule.id} lacks explicit DELETE semantics`);
   if (rule.actorClasses.includes("platform-admin")) {

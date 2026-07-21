@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "groupingRule": "One workflow per execution surface, canonical source file, and containing function; repeated table calls within that function remain one functional workflow.",
   "generatedEvidence": {
-    "productionAccessSites": 1070,
+    "productionAccessSites": 1131,
     "testPathsExcluded": [
       "backend/tests",
       "scripts/tests"
@@ -6924,7 +6924,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -7009,7 +7009,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -7947,7 +7947,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -8024,7 +8024,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -8192,6 +8192,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -8494,7 +8495,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -10797,7 +10798,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -11903,7 +11904,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -12059,7 +12060,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -12593,6 +12594,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -13421,6 +13423,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -13574,6 +13577,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -13981,6 +13985,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -14579,6 +14584,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -14658,6 +14664,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -17698,6 +17705,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -18227,6 +18235,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -18335,6 +18344,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -18441,7 +18451,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -19581,8 +19591,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "mfa-verified",
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -23136,9 +23145,9 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-1252792ed28d006f",
-        "access-181d3a889b0e16e7",
-        "access-d9fb7f80bcf5ccd8"
+        "access-1b0bf503ff61779c",
+        "access-3e918326bcf6e1f1",
+        "access-79abc2413aad544e"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -23151,22 +23160,22 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-1252792ed28d006f",
-          "source": "backend/src/services/batchAllocationService.ts:108",
+          "accessId": "access-1b0bf503ff61779c",
+          "source": "backend/src/services/batchAllocationService.ts:260",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findUnique"
+        },
+        {
+          "accessId": "access-3e918326bcf6e1f1",
+          "source": "backend/src/services/batchAllocationService.ts:233",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findMany"
         },
         {
-          "accessId": "access-181d3a889b0e16e7",
-          "source": "backend/src/services/batchAllocationService.ts:144",
+          "accessId": "access-79abc2413aad544e",
+          "source": "backend/src/services/batchAllocationService.ts:269",
           "registration": "reachable-from-registered-entrypoint",
           "method": "updateMany"
-        },
-        {
-          "accessId": "access-d9fb7f80bcf5ccd8",
-          "source": "backend/src/services/batchAllocationService.ts:135",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findUnique"
         }
       ],
       "contextRequirementsSource": "generated-conservative",
@@ -23197,69 +23206,357 @@
       "authenticationStage": "authenticated",
       "actorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "tablesTouched": [
-        "table-qrcode"
+        "table-audit-log",
+        "table-batch",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-qrcode",
+        "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-batch",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-manufacturer-licensee-link",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
         {
           "tableId": "table-qrcode",
           "commands": [
             "SELECT"
           ]
+        },
+        {
+          "tableId": "table-user",
+          "commands": [
+            "SELECT"
+          ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "An ACTIVE database-revalidated tenant administrator uses its canonical active licensee and organization; an ACTIVE fresh-MFA manufacturer reads only batches assigned to that actor across current active linked licensees or one linked selector; an ACTIVE fresh-MFA platform administrator supplies one explicit active licensee selector. Both list and allocation-map roots use fixed purpose batch-operational-read and immutable request attribution.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "database-revalidated ACTIVE actor, role and scope",
+        "actor-specific password or fresh-MFA assurance",
+        "fixed allowlisted batch-operational-read purpose",
+        "one REPEATABLE READ transaction with immutable per-request attribution",
+        "exact named-function execution with no direct wide Batch, QR, User or print-table privilege"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "An ACTIVE LICENSEE_ADMIN or ORG_ADMIN lists and paginates its tenant batches and reads an in-scope allocation map.",
+        "An ACTIVE fresh-MFA manufacturer reads assigned batches across current active links or narrows to one linked licensee.",
+        "An ACTIVE fresh-MFA platform administrator reads one explicitly selected active licensee.",
+        "Batch ordering, totals, lineage ordering, inventory fallback, reservable print counts and response projections remain unchanged.",
+        "One immutable BATCH_OPERATIONAL_READ attribution commits in the same transaction before serialization."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank or malformed context, wrong purpose, wrong role, inactive session and weak manufacturer/platform assurance are denied.",
+        "Foreign, inactive, suspended or revoked tenant/manufacturer scope and a blank platform selector are denied.",
+        "Direct protected table access, internal helper execution and prohibited User or print-security columns are denied.",
+        "A protected query before canonical context or use of global Prisma in either route root is denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-99a97e877c88e7a3"
+        "access-0414c0920e10421c",
+        "access-273f66b99fad9b20",
+        "access-690ab6eddb2a2f76",
+        "access-6f5de7411dd0e7dd",
+        "access-9d555534a9ecda5c",
+        "access-cc52aa5998079bd5",
+        "access-e709be39b2d18225",
+        "access-f6ea1c55371e32f2"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "compatible",
+      "implementationStatus": "complete",
       "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
+        "backend/tests/batchOperationalReadContext.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
-        "Exact role, context, command, cross-tenant denial, and empty-context denial."
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
       ],
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-99a97e877c88e7a3",
-          "source": "backend/src/services/batchAllocationService.ts:215",
+          "accessId": "access-0414c0920e10421c",
+          "source": "backend/src/services/batchAllocationService.ts:370",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "groupBy"
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-273f66b99fad9b20",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-690ab6eddb2a2f76",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-6f5de7411dd0e7dd",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-9d555534a9ecda5c",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-cc52aa5998079bd5",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-e709be39b2d18225",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
+        },
+        {
+          "accessId": "access-f6ea1c55371e32f2",
+          "source": "backend/src/services/batchAllocationService.ts:370",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_status_fallback"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
-        "command-qrcode-select-c63bbcb4a31f"
+        "command-audit-log-insert-c63bbcb4a31f",
+        "command-audit-log-select-c63bbcb4a31f",
+        "command-batch-select-c63bbcb4a31f",
+        "command-licensee-select-c63bbcb4a31f",
+        "command-manufacturer-licensee-link-select-c63bbcb4a31f",
+        "command-organization-select-c63bbcb4a31f",
+        "command-qrcode-select-c63bbcb4a31f",
+        "command-user-select-c63bbcb4a31f"
       ],
       "commandActorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "runtimeImplementedActorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeBlockedActorClasses": [],
+      "platformRuntimeStatus": "application-path-certified",
+      "platformRuntimeBlockers": [],
+      "contextBoundaryBlockers": [],
+      "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "contextBoundaryCategory": "simple tenant-scoped reads",
+      "approvedReadAttribution": true,
+      "implementationFiles": [
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts",
+        "backend/src/lib/canonicalDbContext.ts"
+      ],
+      "testFiles": [
+        "backend/tests/batchOperationalReadContext.test.js",
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "protectedQueryClient": "transaction-client-only",
+      "consistentReadScopeGuarantee": true,
+      "routeRootVerified": true,
+      "aggregateScopeStatus": "database-revalidated-tenant-manufacturer-or-selected-platform-licensee",
+      "postgresqlCertificationStatus": "certified",
+      "runtimeAllowedColumnsByTableAndCommand": {
+        "table-audit-log": {
+          "INSERT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ],
+          "SELECT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ]
+        },
+        "table-batch": {
+          "SELECT": [
+            "id",
+            "licenseeId",
+            "manufacturerId",
+            "parentBatchId",
+            "rootBatchId"
+          ]
+        },
+        "table-licensee": {
+          "SELECT": [
+            "id",
+            "isActive",
+            "orgId",
+            "suspendedAt"
+          ]
+        },
+        "table-manufacturer-licensee-link": {
+          "SELECT": [
+            "isPrimary",
+            "licenseeId",
+            "manufacturerId",
+            "updatedAt"
+          ]
+        },
+        "table-organization": {
+          "SELECT": [
+            "id",
+            "isActive"
+          ]
+        },
+        "table-user": {
+          "SELECT": [
+            "deletedAt",
+            "disabledAt",
+            "id",
+            "isActive",
+            "licenseeId",
+            "orgId",
+            "role",
+            "status"
+          ]
+        },
+        "table-qrcode": {
+          "SELECT": [
+            "batchId",
+            "status"
+          ]
+        }
+      },
+      "runtimeRequiredAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-21",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": true,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": true
+      },
+      "resolvedContextBlockerIds": [],
+      "rootCallChainEvidence": [
+        "routes/index.ts registers GET /qr/batches and GET /qr/batches/:id/allocation-map behind authentication and tenant isolation.",
+        "qrController delegates both roots to one batch-operational-read family; every protected query uses the same canonical REPEATABLE READ transaction client.",
+        "The repository uses exact audit-bound functions for scope, rows, totals, rollups, QR ranges and reservable print summaries; no feature flag or global Prisma fallback remains."
+      ],
+      "scopeEvidence": [
+        "Tenant actor licensee and organization claims are matched to ACTIVE User, Licensee and Organization rows in PostgreSQL.",
+        "Manufacturer scope is derived from current active ManufacturerLicenseeLink rows and the Batch.manufacturerId actor assignment; stale links fail closed.",
+        "Platform access requires fresh MFA and one explicit active Licensee whose Organization is active."
+      ],
+      "responseProjection": [
+        "Batch list pagination, updatedAt/createdAt ordering, total count, relation projection, inventory fallback and print-readiness fields are preserved.",
+        "Allocation maps preserve source/selected/child lineage, createdAt/id ordering and all existing aggregate totals."
+      ],
+      "applicationPathCertificationEvidence": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
@@ -23269,76 +23566,425 @@
       "authenticationStage": "authenticated",
       "actorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "tablesTouched": [
-        "table-batch"
+        "table-audit-log",
+        "table-batch",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-qrcode",
+        "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ]
+        },
         {
           "tableId": "table-batch",
           "commands": [
             "SELECT"
           ]
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-manufacturer-licensee-link",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-qrcode",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "commands": [
+            "SELECT"
+          ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "An ACTIVE database-revalidated tenant administrator uses its canonical active licensee and organization; an ACTIVE fresh-MFA manufacturer reads only batches assigned to that actor across current active linked licensees or one linked selector; an ACTIVE fresh-MFA platform administrator supplies one explicit active licensee selector. Both list and allocation-map roots use fixed purpose batch-operational-read and immutable request attribution.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "database-revalidated ACTIVE actor, role and scope",
+        "actor-specific password or fresh-MFA assurance",
+        "fixed allowlisted batch-operational-read purpose",
+        "one REPEATABLE READ transaction with immutable per-request attribution",
+        "exact named-function execution with no direct wide Batch, QR, User or print-table privilege"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "An ACTIVE LICENSEE_ADMIN or ORG_ADMIN lists and paginates its tenant batches and reads an in-scope allocation map.",
+        "An ACTIVE fresh-MFA manufacturer reads assigned batches across current active links or narrows to one linked licensee.",
+        "An ACTIVE fresh-MFA platform administrator reads one explicitly selected active licensee.",
+        "Batch ordering, totals, lineage ordering, inventory fallback, reservable print counts and response projections remain unchanged.",
+        "One immutable BATCH_OPERATIONAL_READ attribution commits in the same transaction before serialization."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank or malformed context, wrong purpose, wrong role, inactive session and weak manufacturer/platform assurance are denied.",
+        "Foreign, inactive, suspended or revoked tenant/manufacturer scope and a blank platform selector are denied.",
+        "Direct protected table access, internal helper execution and prohibited User or print-security columns are denied.",
+        "A protected query before canonical context or use of global Prisma in either route root is denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-93adcc2f302e9245",
-        "access-ba197a7fb742fd10"
+        "access-15cdbb9ce1d069d9",
+        "access-27f4ac75d9720e9f",
+        "access-4d85b467174de710",
+        "access-673db6c6f29ffc0e",
+        "access-6b09fe66b0d90961",
+        "access-71a3312cb8386d40",
+        "access-95a49010ec3cc147",
+        "access-9af8e7fd447368d0",
+        "access-aaa2dfb9ce3cb0a7",
+        "access-c28b2e65004a128f",
+        "access-cd10277b9c123b1f",
+        "access-cf6804fe14d6fc51",
+        "access-d9f123f90ebb6eeb",
+        "access-e487ee9021b1daea",
+        "access-fa93282f11b02297"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "compatible",
+      "implementationStatus": "complete",
       "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
+        "backend/tests/batchOperationalReadContext.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
-        "Exact role, context, command, cross-tenant denial, and empty-context denial."
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
       ],
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-93adcc2f302e9245",
-          "source": "backend/src/services/batchAllocationService.ts:366",
+          "accessId": "access-15cdbb9ce1d069d9",
+          "source": "backend/src/services/batchAllocationService.ts:543",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "$function:app_rls.batch_operational_scope"
         },
         {
-          "accessId": "access-ba197a7fb742fd10",
-          "source": "backend/src/services/batchAllocationService.ts:351",
+          "accessId": "access-27f4ac75d9720e9f",
+          "source": "backend/src/services/batchAllocationService.ts:543",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findFirst"
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-4d85b467174de710",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-673db6c6f29ffc0e",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-6b09fe66b0d90961",
+          "source": "backend/src/services/batchAllocationService.ts:543",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-71a3312cb8386d40",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-95a49010ec3cc147",
+          "source": "backend/src/services/batchAllocationService.ts:543",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-9af8e7fd447368d0",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-aaa2dfb9ce3cb0a7",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-c28b2e65004a128f",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-cd10277b9c123b1f",
+          "source": "backend/src/services/batchAllocationService.ts:543",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-cf6804fe14d6fc51",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-d9f123f90ebb6eeb",
+          "source": "backend/src/services/batchAllocationService.ts:543",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-e487ee9021b1daea",
+          "source": "backend/src/services/batchAllocationService.ts:543",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-fa93282f11b02297",
+          "source": "backend/src/services/batchAllocationService.ts:553",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
-        "command-batch-select-7c30e2368afb"
+        "command-audit-log-insert-7c30e2368afb",
+        "command-audit-log-select-7c30e2368afb",
+        "command-batch-select-7c30e2368afb",
+        "command-licensee-select-7c30e2368afb",
+        "command-manufacturer-licensee-link-select-7c30e2368afb",
+        "command-organization-select-7c30e2368afb",
+        "command-qrcode-select-7c30e2368afb",
+        "command-user-select-7c30e2368afb"
       ],
       "commandActorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "runtimeImplementedActorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeBlockedActorClasses": [],
+      "platformRuntimeStatus": "application-path-certified",
+      "platformRuntimeBlockers": [],
+      "contextBoundaryBlockers": [],
+      "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "contextBoundaryCategory": "simple tenant-scoped reads",
+      "approvedReadAttribution": true,
+      "implementationFiles": [
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts",
+        "backend/src/lib/canonicalDbContext.ts"
+      ],
+      "testFiles": [
+        "backend/tests/batchOperationalReadContext.test.js",
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "protectedQueryClient": "transaction-client-only",
+      "consistentReadScopeGuarantee": true,
+      "routeRootVerified": true,
+      "aggregateScopeStatus": "database-revalidated-tenant-manufacturer-or-selected-platform-licensee",
+      "postgresqlCertificationStatus": "certified",
+      "runtimeAllowedColumnsByTableAndCommand": {
+        "table-audit-log": {
+          "INSERT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ],
+          "SELECT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ]
+        },
+        "table-batch": {
+          "SELECT": [
+            "createdAt",
+            "endCode",
+            "id",
+            "lifecycleState",
+            "licenseeId",
+            "manufacturerId",
+            "metadata",
+            "name",
+            "parentBatchId",
+            "printPackDownloadedAt",
+            "printPackDownloadedByUserId",
+            "printedAt",
+            "releasedAt",
+            "releasedByUserId",
+            "rootBatchId",
+            "sampleScanPolicy",
+            "startCode",
+            "suspendedAt",
+            "suspendedReason",
+            "totalCodes",
+            "updatedAt"
+          ]
+        },
+        "table-licensee": {
+          "SELECT": [
+            "id",
+            "isActive",
+            "name",
+            "orgId",
+            "prefix",
+            "suspendedAt"
+          ]
+        },
+        "table-manufacturer-licensee-link": {
+          "SELECT": [
+            "isPrimary",
+            "licenseeId",
+            "manufacturerId",
+            "updatedAt"
+          ]
+        },
+        "table-organization": {
+          "SELECT": [
+            "id",
+            "isActive"
+          ]
+        },
+        "table-user": {
+          "SELECT": [
+            "deletedAt",
+            "disabledAt",
+            "email",
+            "id",
+            "isActive",
+            "licenseeId",
+            "name",
+            "orgId",
+            "role",
+            "status"
+          ]
+        },
+        "table-qrcode": {
+          "SELECT": [
+            "batchId"
+          ]
+        }
+      },
+      "runtimeRequiredAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-21",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": true,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": true
+      },
+      "resolvedContextBlockerIds": [],
+      "rootCallChainEvidence": [
+        "routes/index.ts registers GET /qr/batches and GET /qr/batches/:id/allocation-map behind authentication and tenant isolation.",
+        "qrController delegates both roots to one batch-operational-read family; every protected query uses the same canonical REPEATABLE READ transaction client.",
+        "The repository uses exact audit-bound functions for scope, rows, totals, rollups, QR ranges and reservable print summaries; no feature flag or global Prisma fallback remains."
+      ],
+      "scopeEvidence": [
+        "Tenant actor licensee and organization claims are matched to ACTIVE User, Licensee and Organization rows in PostgreSQL.",
+        "Manufacturer scope is derived from current active ManufacturerLicenseeLink rows and the Batch.manufacturerId actor assignment; stale links fail closed.",
+        "Platform access requires fresh MFA and one explicit active Licensee whose Organization is active."
+      ],
+      "responseProjection": [
+        "Batch list pagination, updatedAt/createdAt ordering, total count, relation projection, inventory fallback and print-readiness fields are preserved.",
+        "Allocation maps preserve source/selected/child lineage, createdAt/id ordering and all existing aggregate totals."
+      ],
+      "applicationPathCertificationEvidence": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -23348,69 +23994,425 @@
       "authenticationStage": "authenticated",
       "actorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "tablesTouched": [
-        "table-batch"
+        "table-audit-log",
+        "table-batch",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-qrcode",
+        "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ]
+        },
         {
           "tableId": "table-batch",
           "commands": [
             "SELECT"
           ]
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-manufacturer-licensee-link",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-qrcode",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "commands": [
+            "SELECT"
+          ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "An ACTIVE database-revalidated tenant administrator uses its canonical active licensee and organization; an ACTIVE fresh-MFA manufacturer reads only batches assigned to that actor across current active linked licensees or one linked selector; an ACTIVE fresh-MFA platform administrator supplies one explicit active licensee selector. Both list and allocation-map roots use fixed purpose batch-operational-read and immutable request attribution.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "database-revalidated ACTIVE actor, role and scope",
+        "actor-specific password or fresh-MFA assurance",
+        "fixed allowlisted batch-operational-read purpose",
+        "one REPEATABLE READ transaction with immutable per-request attribution",
+        "exact named-function execution with no direct wide Batch, QR, User or print-table privilege"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "An ACTIVE LICENSEE_ADMIN or ORG_ADMIN lists and paginates its tenant batches and reads an in-scope allocation map.",
+        "An ACTIVE fresh-MFA manufacturer reads assigned batches across current active links or narrows to one linked licensee.",
+        "An ACTIVE fresh-MFA platform administrator reads one explicitly selected active licensee.",
+        "Batch ordering, totals, lineage ordering, inventory fallback, reservable print counts and response projections remain unchanged.",
+        "One immutable BATCH_OPERATIONAL_READ attribution commits in the same transaction before serialization."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank or malformed context, wrong purpose, wrong role, inactive session and weak manufacturer/platform assurance are denied.",
+        "Foreign, inactive, suspended or revoked tenant/manufacturer scope and a blank platform selector are denied.",
+        "Direct protected table access, internal helper execution and prohibited User or print-security columns are denied.",
+        "A protected query before canonical context or use of global Prisma in either route root is denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-7af1c857485863cf"
+        "access-0594cd52b9d2261f",
+        "access-14534e5b95e6dd56",
+        "access-20c4a08a3502764a",
+        "access-4c69d8a4ce360427",
+        "access-593ff3091ef2bdcb",
+        "access-5bc94b4f69c57d47",
+        "access-751729b1302521fa",
+        "access-937e786d82912d43",
+        "access-a02843a77ab923cd",
+        "access-a90823cc44464bf8",
+        "access-b9b4b61192ac10f7",
+        "access-d198fe6121bbf066",
+        "access-e1843d428bbd1589",
+        "access-ee1c737255c8e696",
+        "access-eedeb51650d998c5"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "compatible",
+      "implementationStatus": "complete",
       "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
+        "backend/tests/batchOperationalReadContext.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
-        "Exact role, context, command, cross-tenant denial, and empty-context denial."
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
       ],
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-7af1c857485863cf",
-          "source": "backend/src/services/batchAllocationService.ts:322",
+          "accessId": "access-0594cd52b9d2261f",
+          "source": "backend/src/services/batchAllocationService.ts:487",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-14534e5b95e6dd56",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-20c4a08a3502764a",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-4c69d8a4ce360427",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-593ff3091ef2bdcb",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-5bc94b4f69c57d47",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-751729b1302521fa",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-937e786d82912d43",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-a02843a77ab923cd",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-a90823cc44464bf8",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-b9b4b61192ac10f7",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-d198fe6121bbf066",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-e1843d428bbd1589",
+          "source": "backend/src/services/batchAllocationService.ts:487",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_scope"
+        },
+        {
+          "accessId": "access-ee1c737255c8e696",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
+        },
+        {
+          "accessId": "access-eedeb51650d998c5",
+          "source": "backend/src/services/batchAllocationService.ts:497",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_rows"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
-        "command-batch-select-aa566e98f219"
+        "command-audit-log-insert-aa566e98f219",
+        "command-audit-log-select-aa566e98f219",
+        "command-batch-select-aa566e98f219",
+        "command-licensee-select-aa566e98f219",
+        "command-manufacturer-licensee-link-select-aa566e98f219",
+        "command-organization-select-aa566e98f219",
+        "command-qrcode-select-aa566e98f219",
+        "command-user-select-aa566e98f219"
       ],
       "commandActorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "runtimeImplementedActorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeBlockedActorClasses": [],
+      "platformRuntimeStatus": "application-path-certified",
+      "platformRuntimeBlockers": [],
+      "contextBoundaryBlockers": [],
+      "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "contextBoundaryCategory": "simple tenant-scoped reads",
+      "approvedReadAttribution": true,
+      "implementationFiles": [
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts",
+        "backend/src/lib/canonicalDbContext.ts"
+      ],
+      "testFiles": [
+        "backend/tests/batchOperationalReadContext.test.js",
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "protectedQueryClient": "transaction-client-only",
+      "consistentReadScopeGuarantee": true,
+      "routeRootVerified": true,
+      "aggregateScopeStatus": "database-revalidated-tenant-manufacturer-or-selected-platform-licensee",
+      "postgresqlCertificationStatus": "certified",
+      "runtimeAllowedColumnsByTableAndCommand": {
+        "table-audit-log": {
+          "INSERT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ],
+          "SELECT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ]
+        },
+        "table-batch": {
+          "SELECT": [
+            "createdAt",
+            "endCode",
+            "id",
+            "lifecycleState",
+            "licenseeId",
+            "manufacturerId",
+            "metadata",
+            "name",
+            "parentBatchId",
+            "printPackDownloadedAt",
+            "printPackDownloadedByUserId",
+            "printedAt",
+            "releasedAt",
+            "releasedByUserId",
+            "rootBatchId",
+            "sampleScanPolicy",
+            "startCode",
+            "suspendedAt",
+            "suspendedReason",
+            "totalCodes",
+            "updatedAt"
+          ]
+        },
+        "table-licensee": {
+          "SELECT": [
+            "id",
+            "isActive",
+            "name",
+            "orgId",
+            "prefix",
+            "suspendedAt"
+          ]
+        },
+        "table-manufacturer-licensee-link": {
+          "SELECT": [
+            "isPrimary",
+            "licenseeId",
+            "manufacturerId",
+            "updatedAt"
+          ]
+        },
+        "table-organization": {
+          "SELECT": [
+            "id",
+            "isActive"
+          ]
+        },
+        "table-user": {
+          "SELECT": [
+            "deletedAt",
+            "disabledAt",
+            "email",
+            "id",
+            "isActive",
+            "licenseeId",
+            "name",
+            "orgId",
+            "role",
+            "status"
+          ]
+        },
+        "table-qrcode": {
+          "SELECT": [
+            "batchId"
+          ]
+        }
+      },
+      "runtimeRequiredAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-21",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": true,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": true
+      },
+      "resolvedContextBlockerIds": [],
+      "rootCallChainEvidence": [
+        "routes/index.ts registers GET /qr/batches and GET /qr/batches/:id/allocation-map behind authentication and tenant isolation.",
+        "qrController delegates both roots to one batch-operational-read family; every protected query uses the same canonical REPEATABLE READ transaction client.",
+        "The repository uses exact audit-bound functions for scope, rows, totals, rollups, QR ranges and reservable print summaries; no feature flag or global Prisma fallback remains."
+      ],
+      "scopeEvidence": [
+        "Tenant actor licensee and organization claims are matched to ACTIVE User, Licensee and Organization rows in PostgreSQL.",
+        "Manufacturer scope is derived from current active ManufacturerLicenseeLink rows and the Batch.manufacturerId actor assignment; stale links fail closed.",
+        "Platform access requires fresh MFA and one explicit active Licensee whose Organization is active."
+      ],
+      "responseProjection": [
+        "Batch list pagination, updatedAt/createdAt ordering, total count, relation projection, inventory fallback and print-readiness fields are preserved.",
+        "Allocation maps preserve source/selected/child lineage, createdAt/id ordering and all existing aggregate totals."
+      ],
+      "applicationPathCertificationEvidence": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups",
@@ -23420,69 +24422,366 @@
       "authenticationStage": "authenticated",
       "actorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "tablesTouched": [
-        "table-inventory-status-rollup"
+        "table-audit-log",
+        "table-batch",
+        "table-inventory-status-rollup",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-batch",
+          "commands": [
+            "SELECT"
+          ]
+        },
         {
           "tableId": "table-inventory-status-rollup",
           "commands": [
             "SELECT"
           ]
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-manufacturer-licensee-link",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "commands": [
+            "SELECT"
+          ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "An ACTIVE database-revalidated tenant administrator uses its canonical active licensee and organization; an ACTIVE fresh-MFA manufacturer reads only batches assigned to that actor across current active linked licensees or one linked selector; an ACTIVE fresh-MFA platform administrator supplies one explicit active licensee selector. Both list and allocation-map roots use fixed purpose batch-operational-read and immutable request attribution.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "database-revalidated ACTIVE actor, role and scope",
+        "actor-specific password or fresh-MFA assurance",
+        "fixed allowlisted batch-operational-read purpose",
+        "one REPEATABLE READ transaction with immutable per-request attribution",
+        "exact named-function execution with no direct wide Batch, QR, User or print-table privilege"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "An ACTIVE LICENSEE_ADMIN or ORG_ADMIN lists and paginates its tenant batches and reads an in-scope allocation map.",
+        "An ACTIVE fresh-MFA manufacturer reads assigned batches across current active links or narrows to one linked licensee.",
+        "An ACTIVE fresh-MFA platform administrator reads one explicitly selected active licensee.",
+        "Batch ordering, totals, lineage ordering, inventory fallback, reservable print counts and response projections remain unchanged.",
+        "One immutable BATCH_OPERATIONAL_READ attribution commits in the same transaction before serialization."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank or malformed context, wrong purpose, wrong role, inactive session and weak manufacturer/platform assurance are denied.",
+        "Foreign, inactive, suspended or revoked tenant/manufacturer scope and a blank platform selector are denied.",
+        "Direct protected table access, internal helper execution and prohibited User or print-security columns are denied.",
+        "A protected query before canonical context or use of global Prisma in either route root is denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-36da5984dbcd4db1"
+        "access-0dc7870784d2a49e",
+        "access-131a790102780823",
+        "access-3537c0b19e0bf640",
+        "access-4964fb4d888761bb",
+        "access-4bca192a032bed0f",
+        "access-6f0871ad27e42f76",
+        "access-b6c34c5ccbe4e973",
+        "access-d926927050018550"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "compatible",
+      "implementationStatus": "complete",
       "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
+        "backend/tests/batchOperationalReadContext.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
-        "Exact role, context, command, cross-tenant denial, and empty-context denial."
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
       ],
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-36da5984dbcd4db1",
-          "source": "backend/src/services/batchAllocationService.ts:168",
+          "accessId": "access-0dc7870784d2a49e",
+          "source": "backend/src/services/batchAllocationService.ts:297",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-131a790102780823",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-3537c0b19e0bf640",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-4964fb4d888761bb",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-4bca192a032bed0f",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-6f0871ad27e42f76",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-b6c34c5ccbe4e973",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
+        },
+        {
+          "accessId": "access-d926927050018550",
+          "source": "backend/src/services/batchAllocationService.ts:297",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_inventory_rollups"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
-        "command-inventory-status-rollup-select-afd12473687a"
+        "command-audit-log-insert-afd12473687a",
+        "command-audit-log-select-afd12473687a",
+        "command-batch-select-afd12473687a",
+        "command-inventory-status-rollup-select-afd12473687a",
+        "command-licensee-select-afd12473687a",
+        "command-manufacturer-licensee-link-select-afd12473687a",
+        "command-organization-select-afd12473687a",
+        "command-user-select-afd12473687a"
       ],
       "commandActorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "runtimeImplementedActorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeBlockedActorClasses": [],
+      "platformRuntimeStatus": "application-path-certified",
+      "platformRuntimeBlockers": [],
+      "contextBoundaryBlockers": [],
+      "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "contextBoundaryCategory": "simple tenant-scoped reads",
+      "approvedReadAttribution": true,
+      "implementationFiles": [
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts",
+        "backend/src/lib/canonicalDbContext.ts"
+      ],
+      "testFiles": [
+        "backend/tests/batchOperationalReadContext.test.js",
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "protectedQueryClient": "transaction-client-only",
+      "consistentReadScopeGuarantee": true,
+      "routeRootVerified": true,
+      "aggregateScopeStatus": "database-revalidated-tenant-manufacturer-or-selected-platform-licensee",
+      "postgresqlCertificationStatus": "certified",
+      "runtimeAllowedColumnsByTableAndCommand": {
+        "table-audit-log": {
+          "INSERT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ],
+          "SELECT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ]
+        },
+        "table-batch": {
+          "SELECT": [
+            "id",
+            "licenseeId",
+            "manufacturerId",
+            "parentBatchId",
+            "rootBatchId"
+          ]
+        },
+        "table-licensee": {
+          "SELECT": [
+            "id",
+            "isActive",
+            "orgId",
+            "suspendedAt"
+          ]
+        },
+        "table-manufacturer-licensee-link": {
+          "SELECT": [
+            "isPrimary",
+            "licenseeId",
+            "manufacturerId",
+            "updatedAt"
+          ]
+        },
+        "table-organization": {
+          "SELECT": [
+            "id",
+            "isActive"
+          ]
+        },
+        "table-user": {
+          "SELECT": [
+            "deletedAt",
+            "disabledAt",
+            "id",
+            "isActive",
+            "licenseeId",
+            "orgId",
+            "role",
+            "status"
+          ]
+        },
+        "table-inventory-status-rollup": {
+          "SELECT": [
+            "active",
+            "activated",
+            "allocated",
+            "batchId",
+            "blocked",
+            "dormant",
+            "licenseeId",
+            "manufacturerId",
+            "printed",
+            "redeemed",
+            "scanned"
+          ]
+        }
+      },
+      "runtimeRequiredAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-21",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": true,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": true
+      },
+      "resolvedContextBlockerIds": [],
+      "rootCallChainEvidence": [
+        "routes/index.ts registers GET /qr/batches and GET /qr/batches/:id/allocation-map behind authentication and tenant isolation.",
+        "qrController delegates both roots to one batch-operational-read family; every protected query uses the same canonical REPEATABLE READ transaction client.",
+        "The repository uses exact audit-bound functions for scope, rows, totals, rollups, QR ranges and reservable print summaries; no feature flag or global Prisma fallback remains."
+      ],
+      "scopeEvidence": [
+        "Tenant actor licensee and organization claims are matched to ACTIVE User, Licensee and Organization rows in PostgreSQL.",
+        "Manufacturer scope is derived from current active ManufacturerLicenseeLink rows and the Batch.manufacturerId actor assignment; stale links fail closed.",
+        "Platform access requires fresh MFA and one explicit active Licensee whose Organization is active."
+      ],
+      "responseProjection": [
+        "Batch list pagination, updatedAt/createdAt ordering, total count, relation projection, inventory fallback and print-readiness fields are preserved.",
+        "Allocation maps preserve source/selected/child lineage, createdAt/id ordering and all existing aggregate totals."
+      ],
+      "applicationPathCertificationEvidence": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
@@ -23492,69 +24791,336 @@
       "authenticationStage": "authenticated",
       "actorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "tablesTouched": [
-        "table-batch"
+        "table-audit-log",
+        "table-batch",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ]
+        },
         {
           "tableId": "table-batch",
           "commands": [
             "SELECT"
           ]
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-manufacturer-licensee-link",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "commands": [
+            "SELECT"
+          ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "An ACTIVE database-revalidated tenant administrator uses its canonical active licensee and organization; an ACTIVE fresh-MFA manufacturer reads only batches assigned to that actor across current active linked licensees or one linked selector; an ACTIVE fresh-MFA platform administrator supplies one explicit active licensee selector. Both list and allocation-map roots use fixed purpose batch-operational-read and immutable request attribution.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "database-revalidated ACTIVE actor, role and scope",
+        "actor-specific password or fresh-MFA assurance",
+        "fixed allowlisted batch-operational-read purpose",
+        "one REPEATABLE READ transaction with immutable per-request attribution",
+        "exact named-function execution with no direct wide Batch, QR, User or print-table privilege"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "An ACTIVE LICENSEE_ADMIN or ORG_ADMIN lists and paginates its tenant batches and reads an in-scope allocation map.",
+        "An ACTIVE fresh-MFA manufacturer reads assigned batches across current active links or narrows to one linked licensee.",
+        "An ACTIVE fresh-MFA platform administrator reads one explicitly selected active licensee.",
+        "Batch ordering, totals, lineage ordering, inventory fallback, reservable print counts and response projections remain unchanged.",
+        "One immutable BATCH_OPERATIONAL_READ attribution commits in the same transaction before serialization."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank or malformed context, wrong purpose, wrong role, inactive session and weak manufacturer/platform assurance are denied.",
+        "Foreign, inactive, suspended or revoked tenant/manufacturer scope and a blank platform selector are denied.",
+        "Direct protected table access, internal helper execution and prohibited User or print-security columns are denied.",
+        "A protected query before canonical context or use of global Prisma in either route root is denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-49dd48ebb98ed51d"
+        "access-19a7ba96f78ed762",
+        "access-41ffec452a08cc67",
+        "access-4e092dfd80dde723",
+        "access-8fa95aaddd6138bd",
+        "access-a850106fee4bd059",
+        "access-aaa67d38b582e218",
+        "access-c5fa67835e99dcc5"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "compatible",
+      "implementationStatus": "complete",
       "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
+        "backend/tests/batchOperationalReadContext.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
-        "Exact role, context, command, cross-tenant denial, and empty-context denial."
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
       ],
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-49dd48ebb98ed51d",
-          "source": "backend/src/services/batchAllocationService.ts:335",
+          "accessId": "access-19a7ba96f78ed762",
+          "source": "backend/src/services/batchAllocationService.ts:512",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "count"
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-41ffec452a08cc67",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-4e092dfd80dde723",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-8fa95aaddd6138bd",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-a850106fee4bd059",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-aaa67d38b582e218",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
+        },
+        {
+          "accessId": "access-c5fa67835e99dcc5",
+          "source": "backend/src/services/batchAllocationService.ts:512",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_operational_total"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
-        "command-batch-select-ba667bcc5353"
+        "command-audit-log-insert-ba667bcc5353",
+        "command-audit-log-select-ba667bcc5353",
+        "command-batch-select-ba667bcc5353",
+        "command-licensee-select-ba667bcc5353",
+        "command-manufacturer-licensee-link-select-ba667bcc5353",
+        "command-organization-select-ba667bcc5353",
+        "command-user-select-ba667bcc5353"
       ],
       "commandActorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "runtimeImplementedActorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeBlockedActorClasses": [],
+      "platformRuntimeStatus": "application-path-certified",
+      "platformRuntimeBlockers": [],
+      "contextBoundaryBlockers": [],
+      "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "contextBoundaryCategory": "simple tenant-scoped reads",
+      "approvedReadAttribution": true,
+      "implementationFiles": [
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts",
+        "backend/src/lib/canonicalDbContext.ts"
+      ],
+      "testFiles": [
+        "backend/tests/batchOperationalReadContext.test.js",
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "protectedQueryClient": "transaction-client-only",
+      "consistentReadScopeGuarantee": true,
+      "routeRootVerified": true,
+      "aggregateScopeStatus": "database-revalidated-tenant-manufacturer-or-selected-platform-licensee",
+      "postgresqlCertificationStatus": "certified",
+      "runtimeAllowedColumnsByTableAndCommand": {
+        "table-audit-log": {
+          "INSERT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ],
+          "SELECT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ]
+        },
+        "table-batch": {
+          "SELECT": [
+            "id",
+            "licenseeId",
+            "manufacturerId",
+            "parentBatchId",
+            "rootBatchId"
+          ]
+        },
+        "table-licensee": {
+          "SELECT": [
+            "id",
+            "isActive",
+            "orgId",
+            "suspendedAt"
+          ]
+        },
+        "table-manufacturer-licensee-link": {
+          "SELECT": [
+            "isPrimary",
+            "licenseeId",
+            "manufacturerId",
+            "updatedAt"
+          ]
+        },
+        "table-organization": {
+          "SELECT": [
+            "id",
+            "isActive"
+          ]
+        },
+        "table-user": {
+          "SELECT": [
+            "deletedAt",
+            "disabledAt",
+            "id",
+            "isActive",
+            "licenseeId",
+            "orgId",
+            "role",
+            "status"
+          ]
+        }
+      },
+      "runtimeRequiredAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-21",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": true,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": true
+      },
+      "resolvedContextBlockerIds": [],
+      "rootCallChainEvidence": [
+        "routes/index.ts registers GET /qr/batches and GET /qr/batches/:id/allocation-map behind authentication and tenant isolation.",
+        "qrController delegates both roots to one batch-operational-read family; every protected query uses the same canonical REPEATABLE READ transaction client.",
+        "The repository uses exact audit-bound functions for scope, rows, totals, rollups, QR ranges and reservable print summaries; no feature flag or global Prisma fallback remains."
+      ],
+      "scopeEvidence": [
+        "Tenant actor licensee and organization claims are matched to ACTIVE User, Licensee and Organization rows in PostgreSQL.",
+        "Manufacturer scope is derived from current active ManufacturerLicenseeLink rows and the Batch.manufacturerId actor assignment; stale links fail closed.",
+        "Platform access requires fresh MFA and one explicit active Licensee whose Organization is active."
+      ],
+      "responseProjection": [
+        "Batch list pagination, updatedAt/createdAt ordering, total count, relation projection, inventory fallback and print-readiness fields are preserved.",
+        "Allocation maps preserve source/selected/child lineage, createdAt/id ordering and all existing aggregate totals."
+      ],
+      "applicationPathCertificationEvidence": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges",
@@ -23564,69 +25130,359 @@
       "authenticationStage": "authenticated",
       "actorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "canonicalSourceFiles": [
-        "backend/src/services/batchAllocationService.ts"
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts"
       ],
       "tablesTouched": [
-        "table-qrcode"
+        "table-audit-log",
+        "table-batch",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-qrcode",
+        "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-batch",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-manufacturer-licensee-link",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
         {
           "tableId": "table-qrcode",
           "commands": [
             "SELECT"
           ]
+        },
+        {
+          "tableId": "table-user",
+          "commands": [
+            "SELECT"
+          ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "An ACTIVE database-revalidated tenant administrator uses its canonical active licensee and organization; an ACTIVE fresh-MFA manufacturer reads only batches assigned to that actor across current active linked licensees or one linked selector; an ACTIVE fresh-MFA platform administrator supplies one explicit active licensee selector. Both list and allocation-map roots use fixed purpose batch-operational-read and immutable request attribution.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "database-revalidated ACTIVE actor, role and scope",
+        "actor-specific password or fresh-MFA assurance",
+        "fixed allowlisted batch-operational-read purpose",
+        "one REPEATABLE READ transaction with immutable per-request attribution",
+        "exact named-function execution with no direct wide Batch, QR, User or print-table privilege"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "An ACTIVE LICENSEE_ADMIN or ORG_ADMIN lists and paginates its tenant batches and reads an in-scope allocation map.",
+        "An ACTIVE fresh-MFA manufacturer reads assigned batches across current active links or narrows to one linked licensee.",
+        "An ACTIVE fresh-MFA platform administrator reads one explicitly selected active licensee.",
+        "Batch ordering, totals, lineage ordering, inventory fallback, reservable print counts and response projections remain unchanged.",
+        "One immutable BATCH_OPERATIONAL_READ attribution commits in the same transaction before serialization."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank or malformed context, wrong purpose, wrong role, inactive session and weak manufacturer/platform assurance are denied.",
+        "Foreign, inactive, suspended or revoked tenant/manufacturer scope and a blank platform selector are denied.",
+        "Direct protected table access, internal helper execution and prohibited User or print-security columns are denied.",
+        "A protected query before canonical context or use of global Prisma in either route root is denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-bff2804d7a3ba47d"
+        "access-29c29729f836e416",
+        "access-2f6ec8f73b36369c",
+        "access-9bca7720e79bfe8f",
+        "access-b5298c30ae6a4eca",
+        "access-bbeff0da8874cb4f",
+        "access-bc0f7a2d8ac78655",
+        "access-c02bbd73dbbbf89a",
+        "access-d4acec1c685c045f"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "compatible",
+      "implementationStatus": "complete",
       "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
+        "backend/tests/batchOperationalReadContext.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
-        "Exact role, context, command, cross-tenant denial, and empty-context denial."
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
       ],
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-bff2804d7a3ba47d",
-          "source": "backend/src/services/batchAllocationService.ts:183",
+          "accessId": "access-29c29729f836e416",
+          "source": "backend/src/services/batchAllocationService.ts:319",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "groupBy"
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-2f6ec8f73b36369c",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-9bca7720e79bfe8f",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-b5298c30ae6a4eca",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-bbeff0da8874cb4f",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-bc0f7a2d8ac78655",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-c02bbd73dbbbf89a",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
+        },
+        {
+          "accessId": "access-d4acec1c685c045f",
+          "source": "backend/src/services/batchAllocationService.ts:319",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_unassigned_ranges"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
-        "command-qrcode-select-bdf8789ff300"
+        "command-audit-log-insert-bdf8789ff300",
+        "command-audit-log-select-bdf8789ff300",
+        "command-batch-select-bdf8789ff300",
+        "command-licensee-select-bdf8789ff300",
+        "command-manufacturer-licensee-link-select-bdf8789ff300",
+        "command-organization-select-bdf8789ff300",
+        "command-qrcode-select-bdf8789ff300",
+        "command-user-select-bdf8789ff300"
       ],
       "commandActorClasses": [
         "licensee-admin",
+        "manufacturer",
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "runtimeImplementedActorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeBlockedActorClasses": [],
+      "platformRuntimeStatus": "application-path-certified",
+      "platformRuntimeBlockers": [],
+      "contextBoundaryBlockers": [],
+      "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "contextBoundaryCategory": "simple tenant-scoped reads",
+      "approvedReadAttribution": true,
+      "implementationFiles": [
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts",
+        "backend/src/lib/canonicalDbContext.ts"
+      ],
+      "testFiles": [
+        "backend/tests/batchOperationalReadContext.test.js",
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "protectedQueryClient": "transaction-client-only",
+      "consistentReadScopeGuarantee": true,
+      "routeRootVerified": true,
+      "aggregateScopeStatus": "database-revalidated-tenant-manufacturer-or-selected-platform-licensee",
+      "postgresqlCertificationStatus": "certified",
+      "runtimeAllowedColumnsByTableAndCommand": {
+        "table-audit-log": {
+          "INSERT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ],
+          "SELECT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ]
+        },
+        "table-batch": {
+          "SELECT": [
+            "id",
+            "licenseeId",
+            "manufacturerId",
+            "parentBatchId",
+            "rootBatchId"
+          ]
+        },
+        "table-licensee": {
+          "SELECT": [
+            "id",
+            "isActive",
+            "orgId",
+            "suspendedAt"
+          ]
+        },
+        "table-manufacturer-licensee-link": {
+          "SELECT": [
+            "isPrimary",
+            "licenseeId",
+            "manufacturerId",
+            "updatedAt"
+          ]
+        },
+        "table-organization": {
+          "SELECT": [
+            "id",
+            "isActive"
+          ]
+        },
+        "table-user": {
+          "SELECT": [
+            "deletedAt",
+            "disabledAt",
+            "id",
+            "isActive",
+            "licenseeId",
+            "orgId",
+            "role",
+            "status"
+          ]
+        },
+        "table-qrcode": {
+          "SELECT": [
+            "batchId",
+            "code",
+            "displayCode",
+            "status"
+          ]
+        }
+      },
+      "runtimeRequiredAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-21",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": true,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": true
+      },
+      "resolvedContextBlockerIds": [],
+      "rootCallChainEvidence": [
+        "routes/index.ts registers GET /qr/batches and GET /qr/batches/:id/allocation-map behind authentication and tenant isolation.",
+        "qrController delegates both roots to one batch-operational-read family; every protected query uses the same canonical REPEATABLE READ transaction client.",
+        "The repository uses exact audit-bound functions for scope, rows, totals, rollups, QR ranges and reservable print summaries; no feature flag or global Prisma fallback remains."
+      ],
+      "scopeEvidence": [
+        "Tenant actor licensee and organization claims are matched to ACTIVE User, Licensee and Organization rows in PostgreSQL.",
+        "Manufacturer scope is derived from current active ManufacturerLicenseeLink rows and the Batch.manufacturerId actor assignment; stale links fail closed.",
+        "Platform access requires fresh MFA and one explicit active Licensee whose Organization is active."
+      ],
+      "responseProjection": [
+        "Batch list pagination, updatedAt/createdAt ordering, total count, relation projection, inventory fallback and print-readiness fields are preserved.",
+        "Allocation maps preserve source/selected/child lineage, createdAt/id ordering and all existing aggregate totals."
+      ],
+      "applicationPathCertificationEvidence": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-batch-print-lifecycle-reconciliation-service-ts-find-print-lifecycle-drift-batches",
@@ -26831,6 +28687,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -27223,6 +29080,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -27645,6 +29503,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -27777,6 +29636,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -28866,6 +30726,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -28936,7 +30797,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -29006,7 +30867,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
@@ -29080,6 +30941,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -29243,6 +31105,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -29317,6 +31180,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -29511,6 +31375,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -29592,6 +31457,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -30242,6 +32108,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -30361,6 +32228,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -33647,6 +35515,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -36400,10 +38269,10 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-031db798098040b6",
-        "access-27bc0f1e7e96662d",
-        "access-ecd33d1e8d3926c6",
-        "access-fd9feac088403177"
+        "access-4b4a9128564dba67",
+        "access-928e883cf24e1af4",
+        "access-b50105a9b4f92749",
+        "access-dc4307952e7bda06"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -36416,26 +38285,26 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-031db798098040b6",
-          "source": "backend/src/services/printReservationService.ts:225",
+          "accessId": "access-4b4a9128564dba67",
+          "source": "backend/src/services/printReservationService.ts:226",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-27bc0f1e7e96662d",
-          "source": "backend/src/services/printReservationService.ts:225",
+          "accessId": "access-928e883cf24e1af4",
+          "source": "backend/src/services/printReservationService.ts:226",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-ecd33d1e8d3926c6",
-          "source": "backend/src/services/printReservationService.ts:225",
+          "accessId": "access-b50105a9b4f92749",
+          "source": "backend/src/services/printReservationService.ts:226",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-fd9feac088403177",
-          "source": "backend/src/services/printReservationService.ts:225",
+          "accessId": "access-dc4307952e7bda06",
+          "source": "backend/src/services/printReservationService.ts:226",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         }
@@ -36515,10 +38384,10 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-084f732ae8a14f40",
-        "access-40161b0e15c1f124",
-        "access-b17a6d446c05b95c",
-        "access-c01f2ac91bf83912"
+        "access-1dc1b55eb144189b",
+        "access-23a6398811a6f7f5",
+        "access-36fbf7ad5fe71226",
+        "access-7adbe84a2b888429"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -36531,26 +38400,26 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-084f732ae8a14f40",
-          "source": "backend/src/services/printReservationService.ts:202",
+          "accessId": "access-1dc1b55eb144189b",
+          "source": "backend/src/services/printReservationService.ts:203",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-40161b0e15c1f124",
-          "source": "backend/src/services/printReservationService.ts:202",
+          "accessId": "access-23a6398811a6f7f5",
+          "source": "backend/src/services/printReservationService.ts:203",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-b17a6d446c05b95c",
-          "source": "backend/src/services/printReservationService.ts:202",
+          "accessId": "access-36fbf7ad5fe71226",
+          "source": "backend/src/services/printReservationService.ts:203",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-c01f2ac91bf83912",
-          "source": "backend/src/services/printReservationService.ts:202",
+          "accessId": "access-7adbe84a2b888429",
+          "source": "backend/src/services/printReservationService.ts:203",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         }
@@ -36630,10 +38499,10 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-36b21a115b5c3c48",
-        "access-451e9a0043059f20",
-        "access-60e5be6a446c3c7a",
-        "access-ba721fa7dfe00bec"
+        "access-9cddebe2904b40fa",
+        "access-b8e5171991fa2b1f",
+        "access-e9a8e0cf28aa06f3",
+        "access-ec3692878bf0e321"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -36646,26 +38515,26 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-36b21a115b5c3c48",
-          "source": "backend/src/services/printReservationService.ts:259",
+          "accessId": "access-9cddebe2904b40fa",
+          "source": "backend/src/services/printReservationService.ts:260",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-451e9a0043059f20",
-          "source": "backend/src/services/printReservationService.ts:259",
+          "accessId": "access-b8e5171991fa2b1f",
+          "source": "backend/src/services/printReservationService.ts:260",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-60e5be6a446c3c7a",
-          "source": "backend/src/services/printReservationService.ts:259",
+          "accessId": "access-e9a8e0cf28aa06f3",
+          "source": "backend/src/services/printReservationService.ts:260",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-ba721fa7dfe00bec",
-          "source": "backend/src/services/printReservationService.ts:259",
+          "accessId": "access-ec3692878bf0e321",
+          "source": "backend/src/services/printReservationService.ts:260",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         }
@@ -36695,18 +38564,64 @@
       "executionSurface": "internal",
       "authenticationStage": "authenticated",
       "actorClasses": [
-        "manufacturer"
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
       ],
       "canonicalSourceFiles": [
+        "backend/src/routes/index.ts",
+        "backend/src/middleware/auth.ts",
+        "backend/src/middleware/tenantIsolation.ts",
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
         "backend/src/services/printReservationService.ts"
       ],
       "tablesTouched": [
+        "table-audit-log",
+        "table-batch",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
         "table-print-item",
         "table-print-job",
         "table-print-session",
-        "table-qrcode"
+        "table-qrcode",
+        "table-user"
       ],
       "commandsPerTable": [
+        {
+          "tableId": "table-audit-log",
+          "commands": [
+            "INSERT",
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-batch",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-manufacturer-licensee-link",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
         {
           "tableId": "table-print-item",
           "commands": [
@@ -36730,78 +38645,357 @@
           "commands": [
             "SELECT"
           ]
+        },
+        {
+          "tableId": "table-user",
+          "commands": [
+            "SELECT"
+          ]
         }
       ],
-      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "tenantScopeRule": "An ACTIVE database-revalidated tenant administrator uses its canonical active licensee and organization; an ACTIVE fresh-MFA manufacturer reads only batches assigned to that actor across current active linked licensees or one linked selector; an ACTIVE fresh-MFA platform administrator supplies one explicit active licensee selector. Both list and allocation-map roots use fixed purpose batch-operational-read and immutable request attribution.",
       "contextRequirements": [
-        "transaction-local canonical actor context"
+        "transaction-local canonical actor context",
+        "database-revalidated ACTIVE actor, role and scope",
+        "actor-specific password or fresh-MFA assurance",
+        "fixed allowlisted batch-operational-read purpose",
+        "one REPEATABLE READ transaction with immutable per-request attribution",
+        "exact named-function execution with no direct wide Batch, QR, User or print-table privilege"
       ],
-      "authorizationBoundaryType": "unresolved",
+      "authorizationBoundaryType": "authenticated-context",
       "expectedAllowedScenarios": [
-        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+        "An ACTIVE LICENSEE_ADMIN or ORG_ADMIN lists and paginates its tenant batches and reads an in-scope allocation map.",
+        "An ACTIVE fresh-MFA manufacturer reads assigned batches across current active links or narrows to one linked licensee.",
+        "An ACTIVE fresh-MFA platform administrator reads one explicitly selected active licensee.",
+        "Batch ordering, totals, lineage ordering, inventory fallback, reservable print counts and response projections remain unchanged.",
+        "One immutable BATCH_OPERATIONAL_READ attribution commits in the same transaction before serialization."
       ],
       "expectedDeniedScenarios": [
-        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+        "Blank or malformed context, wrong purpose, wrong role, inactive session and weak manufacturer/platform assurance are denied.",
+        "Foreign, inactive, suspended or revoked tenant/manufacturer scope and a blank platform selector are denied.",
+        "Direct protected table access, internal helper execution and prohibited User or print-security columns are denied.",
+        "A protected query before canonical context or use of global Prisma in either route root is denied."
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-2b23dcf352d8400e",
-        "access-52eaeaea79379404",
-        "access-85b6d3dccd41744e",
-        "access-86e449a1ed8dd5bd"
+        "access-1d42b422448ba3b3",
+        "access-5122221abcc329d0",
+        "access-5ab03a3c5e5167f7",
+        "access-6b853f43198f797d",
+        "access-6de7df6711c7055e",
+        "access-70217c4c12f431a1",
+        "access-8b457d3612a195be",
+        "access-b1b4b8d90f55a596",
+        "access-bbc4b82e860c0286",
+        "access-c95b54698c3a2283",
+        "access-e717de489ef9082d"
       ],
-      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
-      "implementationStatus": "inventory-only",
+      "currentCompatibilityStatus": "compatible",
+      "implementationStatus": "complete",
       "requiredUnitTests": [
-        "Allowed and denied command contract for this canonical workflow."
+        "backend/tests/batchOperationalReadContext.test.js"
       ],
       "requiredDisposablePostgresqlTests": [
-        "Exact role, context, command, cross-tenant denial, and empty-context denial."
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
       ],
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-2b23dcf352d8400e",
-          "source": "backend/src/services/printReservationService.ts:303",
+          "accessId": "access-1d42b422448ba3b3",
+          "source": "backend/src/services/printReservationService.ts:305",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "$queryRaw"
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
         },
         {
-          "accessId": "access-52eaeaea79379404",
-          "source": "backend/src/services/printReservationService.ts:303",
+          "accessId": "access-5122221abcc329d0",
+          "source": "backend/src/services/printReservationService.ts:305",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "$queryRaw"
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
         },
         {
-          "accessId": "access-85b6d3dccd41744e",
-          "source": "backend/src/services/printReservationService.ts:303",
+          "accessId": "access-5ab03a3c5e5167f7",
+          "source": "backend/src/services/printReservationService.ts:305",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "$queryRaw"
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
         },
         {
-          "accessId": "access-86e449a1ed8dd5bd",
-          "source": "backend/src/services/printReservationService.ts:303",
+          "accessId": "access-6b853f43198f797d",
+          "source": "backend/src/services/printReservationService.ts:305",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "$queryRaw"
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-6de7df6711c7055e",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-70217c4c12f431a1",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-8b457d3612a195be",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-b1b4b8d90f55a596",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-bbc4b82e860c0286",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-c95b54698c3a2283",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
+        },
+        {
+          "accessId": "access-e717de489ef9082d",
+          "source": "backend/src/services/printReservationService.ts:305",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.batch_reservable_qr_summaries"
         }
       ],
-      "contextRequirementsSource": "generated-conservative",
+      "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
+        "command-audit-log-insert-07fec99a574c",
+        "command-audit-log-select-07fec99a574c",
+        "command-batch-select-07fec99a574c",
+        "command-licensee-select-07fec99a574c",
+        "command-manufacturer-licensee-link-select-07fec99a574c",
+        "command-organization-select-07fec99a574c",
         "command-print-item-select-07fec99a574c",
         "command-print-job-select-07fec99a574c",
         "command-print-session-select-07fec99a574c",
-        "command-qrcode-select-07fec99a574c"
+        "command-qrcode-select-07fec99a574c",
+        "command-user-select-07fec99a574c"
       ],
       "commandActorClasses": [
-        "manufacturer"
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "semanticStatus": "mapped"
+      "semanticStatus": "mapped",
+      "runtimeImplementedActorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "runtimeBlockedActorClasses": [],
+      "platformRuntimeStatus": "application-path-certified",
+      "platformRuntimeBlockers": [],
+      "contextBoundaryBlockers": [],
+      "contextBoundaryStatus": "implemented",
+      "implementationFamilyId": "family-batch-operational-read-4a19e4013f",
+      "contextBoundaryCategory": "simple tenant-scoped reads",
+      "approvedReadAttribution": true,
+      "implementationFiles": [
+        "backend/src/controllers/qrController.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts",
+        "backend/src/lib/canonicalDbContext.ts"
+      ],
+      "testFiles": [
+        "backend/tests/batchOperationalReadContext.test.js",
+        "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "sameTransactionGuarantee": true,
+      "protectedQueryClient": "transaction-client-only",
+      "consistentReadScopeGuarantee": true,
+      "routeRootVerified": true,
+      "aggregateScopeStatus": "database-revalidated-tenant-manufacturer-or-selected-platform-licensee",
+      "postgresqlCertificationStatus": "certified",
+      "runtimeAllowedColumnsByTableAndCommand": {
+        "table-audit-log": {
+          "INSERT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ],
+          "SELECT": [
+            "action",
+            "details",
+            "entityId",
+            "entityType",
+            "id",
+            "licenseeId",
+            "orgId",
+            "userId"
+          ]
+        },
+        "table-batch": {
+          "SELECT": [
+            "id",
+            "licenseeId",
+            "manufacturerId",
+            "parentBatchId",
+            "rootBatchId"
+          ]
+        },
+        "table-licensee": {
+          "SELECT": [
+            "id",
+            "isActive",
+            "orgId",
+            "suspendedAt"
+          ]
+        },
+        "table-manufacturer-licensee-link": {
+          "SELECT": [
+            "isPrimary",
+            "licenseeId",
+            "manufacturerId",
+            "updatedAt"
+          ]
+        },
+        "table-organization": {
+          "SELECT": [
+            "id",
+            "isActive"
+          ]
+        },
+        "table-user": {
+          "SELECT": [
+            "deletedAt",
+            "disabledAt",
+            "id",
+            "isActive",
+            "licenseeId",
+            "orgId",
+            "role",
+            "status"
+          ]
+        },
+        "table-print-item": {
+          "SELECT": [
+            "agentAckedAt",
+            "confirmationEvidence",
+            "deadLetterReason",
+            "deviceJobRef",
+            "dispatchedAt",
+            "failureReason",
+            "id",
+            "printConfirmedAt",
+            "printSessionId",
+            "qrCodeId",
+            "state"
+          ]
+        },
+        "table-print-job": {
+          "SELECT": [
+            "batchId",
+            "id",
+            "status"
+          ]
+        },
+        "table-print-session": {
+          "SELECT": [
+            "batchId",
+            "id",
+            "printJobId",
+            "status"
+          ]
+        },
+        "table-qrcode": {
+          "SELECT": [
+            "batchId",
+            "code",
+            "displayCode",
+            "id",
+            "licenseeId",
+            "printJobId",
+            "status"
+          ]
+        }
+      },
+      "runtimeRequiredAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "contextBoundaryPlanningEvidence": {
+        "reviewedAt": "2026-07-21",
+        "registeredRootCallChainVerified": true,
+        "protectedQueryTraceComplete": true,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": true
+      },
+      "resolvedContextBlockerIds": [],
+      "rootCallChainEvidence": [
+        "routes/index.ts registers GET /qr/batches and GET /qr/batches/:id/allocation-map behind authentication and tenant isolation.",
+        "qrController delegates both roots to one batch-operational-read family; every protected query uses the same canonical REPEATABLE READ transaction client.",
+        "The repository uses exact audit-bound functions for scope, rows, totals, rollups, QR ranges and reservable print summaries; no feature flag or global Prisma fallback remains."
+      ],
+      "scopeEvidence": [
+        "Tenant actor licensee and organization claims are matched to ACTIVE User, Licensee and Organization rows in PostgreSQL.",
+        "Manufacturer scope is derived from current active ManufacturerLicenseeLink rows and the Batch.manufacturerId actor assignment; stale links fail closed.",
+        "Platform access requires fresh MFA and one explicit active Licensee whose Organization is active."
+      ],
+      "responseProjection": [
+        "Batch list pagination, updatedAt/createdAt ordering, total count, relation projection, inventory fallback and print-readiness fields are preserved.",
+        "Allocation maps preserve source/selected/child lineage, createdAt/id ordering and all existing aggregate totals."
+      ],
+      "applicationPathCertificationEvidence": {
+        "status": "application-path-certified",
+        "postgresqlMajor": 18,
+        "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
+        "harnessFile": "scripts/rls/certify-clean-room-database.mjs",
+        "runtimeRole": "identity-authenticated-app",
+        "positiveActors": [
+          "licensee-admin",
+          "manufacturer",
+          "platform-admin"
+        ],
+        "deniedCases": [
+          "blank-context",
+          "malformed-context",
+          "foreign-scope",
+          "foreign-focus",
+          "forged-role",
+          "stale-membership",
+          "wrong-assurance",
+          "wrong-purpose",
+          "missing-platform-selector"
+        ],
+        "atomicAttributionVerified": true,
+        "exactColumnPrivilegesVerified": true
+      }
     },
     {
       "id": "workflow-internal-backend-src-services-print-reservation-service-ts-select-reservable-qr-codes-for-print",
@@ -36860,10 +39054,10 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-2bd7dce78d7e46b0",
-        "access-8dbd74b2aa10b0ab",
-        "access-a22b58358557fb75",
-        "access-e054b619e72caf6e"
+        "access-06911efa1e30fd1d",
+        "access-4f5efeb0aca4c430",
+        "access-c08bf6308776712b",
+        "access-e4d8b1c40c734782"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -36876,26 +39070,26 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-2bd7dce78d7e46b0",
-          "source": "backend/src/services/printReservationService.ts:171",
+          "accessId": "access-06911efa1e30fd1d",
+          "source": "backend/src/services/printReservationService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-8dbd74b2aa10b0ab",
-          "source": "backend/src/services/printReservationService.ts:171",
+          "accessId": "access-4f5efeb0aca4c430",
+          "source": "backend/src/services/printReservationService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-a22b58358557fb75",
-          "source": "backend/src/services/printReservationService.ts:171",
+          "accessId": "access-c08bf6308776712b",
+          "source": "backend/src/services/printReservationService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         },
         {
-          "accessId": "access-e054b619e72caf6e",
-          "source": "backend/src/services/printReservationService.ts:171",
+          "accessId": "access-e4d8b1c40c734782",
+          "source": "backend/src/services/printReservationService.ts:172",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$queryRaw"
         }
@@ -39766,6 +41960,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -40956,6 +43151,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -42155,6 +44351,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -42603,6 +44800,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [
@@ -42747,6 +44945,7 @@
         "platform-admin"
       ],
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "runtimeIdentities": [

@@ -7,6 +7,9 @@ import {
   QRStatus,
 } from "@prisma/client";
 
+import type { CanonicalTransactionClient } from "../lib/canonicalDbContext";
+import type { AuthorizedBatchOperationalRepositoryBoundary } from "./batchAllocationService";
+
 const REUSABLE_DEAD_LETTER_REASONS = new Set([
   "operator_abandoned_unconfirmed_run",
   "pre_dispatch_failure",
@@ -63,8 +66,6 @@ export type UnresolvedRecoveryRange = {
   printSessionId: string | null;
   printJobId: string | null;
 };
-
-export type ReservableQrCodeSummaryReadClient = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 const hasNonEmptyJsonEvidence = (value: unknown) => {
   if (value === null || value === undefined) return false;
@@ -295,34 +296,39 @@ export const findUnresolvedRecoveryRangeForBatch = async (
 };
 
 export const listReservableQrCodeSummaries = async (
-  client: ReservableQrCodeSummaryReadClient,
-  batchIds: string[]
+  client: CanonicalTransactionClient,
+  batchIds: string[],
+  boundary: AuthorizedBatchOperationalRepositoryBoundary
 ): Promise<Map<string, ReservableQrCodeSummary>> => {
   if (batchIds.length === 0) return new Map();
 
   const rows = await client.$queryRaw<
-    Array<{ batchId: string; count: bigint | number; startCode: string | null; endCode: string | null }>
-  >(Prisma.sql`
+    Array<{ batch_id: string; count: bigint | number | string; start_code: string | null; end_code: string | null }>
+  >`
     SELECT
-      q."batchId" AS "batchId",
-      COUNT(*)::int AS "count",
-      MIN(COALESCE(q."displayCode", q."code")) AS "startCode",
-      MAX(COALESCE(q."displayCode", q."code")) AS "endCode"
-    FROM "QRCode" q
-    LEFT JOIN "PrintItem" pi ON pi."qrCodeId" = q."id"
-    LEFT JOIN "PrintSession" ps ON ps."id" = pi."printSessionId"
-    LEFT JOIN "PrintJob" pj ON pj."id" = ps."printJobId"
-    WHERE ${reservableQrWhereSql({
-      batchIdSql: Prisma.sql`IN (${Prisma.join(batchIds)})`,
-    })}
-    GROUP BY q."batchId";
-  `);
+      batch_id,
+      item_count AS count,
+      start_code,
+      end_code
+    FROM app_rls.batch_reservable_qr_summaries(
+      ${boundary.auditId},
+      ${boundary.requestedLicenseeId},
+      ${boundary.routeSurface},
+      ${boundary.focusBatchId},
+      ${boundary.scopeFingerprint},
+      ARRAY[${Prisma.join(batchIds)}]::text[]
+    )
+  `;
 
   return rows.reduce<Map<string, ReservableQrCodeSummary>>((acc, row) => {
-    acc.set(row.batchId, {
-      count: Number(row.count || 0),
-      startCode: row.startCode || null,
-      endCode: row.endCode || null,
+    const count = Number(row.count);
+    if (!row.batch_id || !Number.isSafeInteger(count) || count < 0) {
+      throw new Error("Batch operational function returned invalid reservable summary");
+    }
+    acc.set(row.batch_id, {
+      count,
+      startCode: row.start_code || null,
+      endCode: row.end_code || null,
     });
     return acc;
   }, new Map());

@@ -18,7 +18,7 @@
     "backend/prisma/schema.prisma"
   ],
   "workflowCount": 428,
-  "familyCount": 314,
+  "familyCount": 312,
   "baselineImplementedWorkflowIds": [
     "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv",
     "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports",
@@ -138,6 +138,599 @@
   ],
   "families": [
     {
+      "id": "family-batch-operational-read-4a19e4013f",
+      "category": "simple tenant-scoped reads",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges",
+        "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [
+        "backend/src/controllers/qrController.ts"
+      ],
+      "serviceFiles": [
+        "backend/src/services/batchAllocationService.ts",
+        "backend/src/services/printReservationService.ts",
+        "backend/src/services/stagingRlsBatchAllocationMapService.ts",
+        "backend/src/services/stagingRlsBatchReadService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-audit-log",
+        "table-batch",
+        "table-inventory-status-rollup",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-print-item",
+        "table-print-job",
+        "table-print-session",
+        "table-qrcode",
+        "table-user"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "manufacturer",
+        "platform-admin"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified",
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-audit-log-insert-07fec99a574c",
+        "command-audit-log-insert-7c30e2368afb",
+        "command-audit-log-insert-aa566e98f219",
+        "command-audit-log-insert-afd12473687a",
+        "command-audit-log-insert-ba667bcc5353",
+        "command-audit-log-insert-bdf8789ff300",
+        "command-audit-log-insert-c63bbcb4a31f",
+        "command-audit-log-select-07fec99a574c",
+        "command-audit-log-select-7c30e2368afb",
+        "command-audit-log-select-aa566e98f219",
+        "command-audit-log-select-afd12473687a",
+        "command-audit-log-select-ba667bcc5353",
+        "command-audit-log-select-bdf8789ff300",
+        "command-audit-log-select-c63bbcb4a31f",
+        "command-batch-select-07fec99a574c",
+        "command-batch-select-7c30e2368afb",
+        "command-batch-select-aa566e98f219",
+        "command-batch-select-afd12473687a",
+        "command-batch-select-ba667bcc5353",
+        "command-batch-select-bdf8789ff300",
+        "command-batch-select-c63bbcb4a31f",
+        "command-inventory-status-rollup-select-afd12473687a",
+        "command-licensee-select-07fec99a574c",
+        "command-licensee-select-7c30e2368afb",
+        "command-licensee-select-aa566e98f219",
+        "command-licensee-select-afd12473687a",
+        "command-licensee-select-ba667bcc5353",
+        "command-licensee-select-bdf8789ff300",
+        "command-licensee-select-c63bbcb4a31f",
+        "command-manufacturer-licensee-link-select-07fec99a574c",
+        "command-manufacturer-licensee-link-select-7c30e2368afb",
+        "command-manufacturer-licensee-link-select-aa566e98f219",
+        "command-manufacturer-licensee-link-select-afd12473687a",
+        "command-manufacturer-licensee-link-select-ba667bcc5353",
+        "command-manufacturer-licensee-link-select-bdf8789ff300",
+        "command-manufacturer-licensee-link-select-c63bbcb4a31f",
+        "command-organization-select-07fec99a574c",
+        "command-organization-select-7c30e2368afb",
+        "command-organization-select-aa566e98f219",
+        "command-organization-select-afd12473687a",
+        "command-organization-select-ba667bcc5353",
+        "command-organization-select-bdf8789ff300",
+        "command-organization-select-c63bbcb4a31f",
+        "command-print-item-select-07fec99a574c",
+        "command-print-job-select-07fec99a574c",
+        "command-print-session-select-07fec99a574c",
+        "command-qrcode-select-07fec99a574c",
+        "command-qrcode-select-7c30e2368afb",
+        "command-qrcode-select-aa566e98f219",
+        "command-qrcode-select-bdf8789ff300",
+        "command-qrcode-select-c63bbcb4a31f",
+        "command-user-select-07fec99a574c",
+        "command-user-select-7c30e2368afb",
+        "command-user-select-aa566e98f219",
+        "command-user-select-afd12473687a",
+        "command-user-select-ba667bcc5353",
+        "command-user-select-bdf8789ff300",
+        "command-user-select-c63bbcb4a31f"
+      ],
+      "tenantScopeModel": [
+        "The exact batch operational-read functions revalidate the ACTIVE database actor, fixed batch-operational-read purpose and actor-specific assurance. Tenant administrators use their canonical active licensee and organization; manufacturers use only current active linked batches assigned to their actor and may narrow to one linked licensee; platform administrators require fresh MFA and one explicit active licensee selector."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-batch-select-07fec99a574c",
+          "columns": [
+            "lifecycleState",
+            "releasedAt"
+          ],
+          "allowed": [
+            "lifecycleState=DRAFT",
+            "lifecycleState=CODES_GENERATED",
+            "lifecycleState=PRINT_ACKNOWLEDGED",
+            "lifecycleState=PRINT_CONFIRMED",
+            "lifecycleState=SAMPLE_VERIFIED",
+            "lifecycleState=RELEASED",
+            "lifecycleState=FAILED",
+            "lifecycleState=VOIDED",
+            "releasedAt=NULL",
+            "releasedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-batch-select-7c30e2368afb",
+          "columns": [
+            "lifecycleState",
+            "releasedAt"
+          ],
+          "allowed": [
+            "lifecycleState=DRAFT",
+            "lifecycleState=CODES_GENERATED",
+            "lifecycleState=PRINT_ACKNOWLEDGED",
+            "lifecycleState=PRINT_CONFIRMED",
+            "lifecycleState=SAMPLE_VERIFIED",
+            "lifecycleState=RELEASED",
+            "lifecycleState=FAILED",
+            "lifecycleState=VOIDED",
+            "releasedAt=NULL",
+            "releasedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-batch-select-aa566e98f219",
+          "columns": [
+            "lifecycleState",
+            "releasedAt"
+          ],
+          "allowed": [
+            "lifecycleState=DRAFT",
+            "lifecycleState=CODES_GENERATED",
+            "lifecycleState=PRINT_ACKNOWLEDGED",
+            "lifecycleState=PRINT_CONFIRMED",
+            "lifecycleState=SAMPLE_VERIFIED",
+            "lifecycleState=RELEASED",
+            "lifecycleState=FAILED",
+            "lifecycleState=VOIDED",
+            "releasedAt=NULL",
+            "releasedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-batch-select-afd12473687a",
+          "columns": [
+            "lifecycleState",
+            "releasedAt"
+          ],
+          "allowed": [
+            "lifecycleState=DRAFT",
+            "lifecycleState=CODES_GENERATED",
+            "lifecycleState=PRINT_ACKNOWLEDGED",
+            "lifecycleState=PRINT_CONFIRMED",
+            "lifecycleState=SAMPLE_VERIFIED",
+            "lifecycleState=RELEASED",
+            "lifecycleState=FAILED",
+            "lifecycleState=VOIDED",
+            "releasedAt=NULL",
+            "releasedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-batch-select-ba667bcc5353",
+          "columns": [
+            "lifecycleState",
+            "releasedAt"
+          ],
+          "allowed": [
+            "lifecycleState=DRAFT",
+            "lifecycleState=CODES_GENERATED",
+            "lifecycleState=PRINT_ACKNOWLEDGED",
+            "lifecycleState=PRINT_CONFIRMED",
+            "lifecycleState=SAMPLE_VERIFIED",
+            "lifecycleState=RELEASED",
+            "lifecycleState=FAILED",
+            "lifecycleState=VOIDED",
+            "releasedAt=NULL",
+            "releasedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-batch-select-bdf8789ff300",
+          "columns": [
+            "lifecycleState",
+            "releasedAt"
+          ],
+          "allowed": [
+            "lifecycleState=DRAFT",
+            "lifecycleState=CODES_GENERATED",
+            "lifecycleState=PRINT_ACKNOWLEDGED",
+            "lifecycleState=PRINT_CONFIRMED",
+            "lifecycleState=SAMPLE_VERIFIED",
+            "lifecycleState=RELEASED",
+            "lifecycleState=FAILED",
+            "lifecycleState=VOIDED",
+            "releasedAt=NULL",
+            "releasedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-batch-select-c63bbcb4a31f",
+          "columns": [
+            "lifecycleState",
+            "releasedAt"
+          ],
+          "allowed": [
+            "lifecycleState=DRAFT",
+            "lifecycleState=CODES_GENERATED",
+            "lifecycleState=PRINT_ACKNOWLEDGED",
+            "lifecycleState=PRINT_CONFIRMED",
+            "lifecycleState=SAMPLE_VERIFIED",
+            "lifecycleState=RELEASED",
+            "lifecycleState=FAILED",
+            "lifecycleState=VOIDED",
+            "releasedAt=NULL",
+            "releasedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-print-item-select-07fec99a574c",
+          "columns": [
+            "pipelineState",
+            "printConfirmedAt",
+            "state"
+          ],
+          "allowed": [
+            "pipelineState=QUEUED",
+            "pipelineState=PREFLIGHT_OK",
+            "pipelineState=SENT_TO_PRINTER",
+            "pipelineState=PRINTER_ACKNOWLEDGED",
+            "pipelineState=PRINT_CONFIRMED",
+            "pipelineState=LOCKED",
+            "pipelineState=PAUSED",
+            "pipelineState=RESUME_PENDING",
+            "pipelineState=RETRY_WAITING",
+            "pipelineState=STOPPING",
+            "pipelineState=STOPPED",
+            "pipelineState=FAILED",
+            "pipelineState=NEEDS_OPERATOR_ACTION",
+            "printConfirmedAt=NULL",
+            "printConfirmedAt=SERVER_TIMESTAMP_SET",
+            "state=RESERVED",
+            "state=ISSUED",
+            "state=AGENT_ACKED",
+            "state=PRINT_CONFIRMED",
+            "state=CLOSED",
+            "state=FROZEN",
+            "state=FAILED",
+            "state=CANCELLED"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-print-job-select-07fec99a574c",
+          "columns": [
+            "confirmedAt",
+            "pipelineState",
+            "status"
+          ],
+          "allowed": [
+            "confirmedAt=NULL",
+            "confirmedAt=SERVER_TIMESTAMP_SET",
+            "pipelineState=QUEUED",
+            "pipelineState=PREFLIGHT_OK",
+            "pipelineState=SENT_TO_PRINTER",
+            "pipelineState=PRINTER_ACKNOWLEDGED",
+            "pipelineState=PRINT_CONFIRMED",
+            "pipelineState=LOCKED",
+            "pipelineState=PAUSED",
+            "pipelineState=RESUME_PENDING",
+            "pipelineState=RETRY_WAITING",
+            "pipelineState=STOPPING",
+            "pipelineState=STOPPED",
+            "pipelineState=FAILED",
+            "pipelineState=NEEDS_OPERATOR_ACTION",
+            "status=PENDING",
+            "status=SENT",
+            "status=PAUSED",
+            "status=CONFIRMED",
+            "status=PARTIALLY_COMPLETED",
+            "status=FAILED",
+            "status=CANCELLED",
+            "status=STOPPED"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-print-session-select-07fec99a574c",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=ACTIVE",
+            "status=PAUSED",
+            "status=RESUME_PENDING",
+            "status=RETRY_WAITING",
+            "status=STOPPING",
+            "status=STOPPED",
+            "status=FAILED",
+            "status=COMPLETED",
+            "status=CANCELLED"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-qrcode-select-07fec99a574c",
+          "columns": [
+            "status",
+            "tokenExpiresAt"
+          ],
+          "allowed": [
+            "status=DORMANT",
+            "status=ACTIVE",
+            "status=ALLOCATED",
+            "status=ACTIVATED",
+            "status=PRINTED",
+            "status=REDEEMED",
+            "status=BLOCKED",
+            "status=SCANNED",
+            "tokenExpiresAt=NULL",
+            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-qrcode-select-7c30e2368afb",
+          "columns": [
+            "status",
+            "tokenExpiresAt"
+          ],
+          "allowed": [
+            "status=DORMANT",
+            "status=ACTIVE",
+            "status=ALLOCATED",
+            "status=ACTIVATED",
+            "status=PRINTED",
+            "status=REDEEMED",
+            "status=BLOCKED",
+            "status=SCANNED",
+            "tokenExpiresAt=NULL",
+            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-qrcode-select-aa566e98f219",
+          "columns": [
+            "status",
+            "tokenExpiresAt"
+          ],
+          "allowed": [
+            "status=DORMANT",
+            "status=ACTIVE",
+            "status=ALLOCATED",
+            "status=ACTIVATED",
+            "status=PRINTED",
+            "status=REDEEMED",
+            "status=BLOCKED",
+            "status=SCANNED",
+            "tokenExpiresAt=NULL",
+            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-qrcode-select-bdf8789ff300",
+          "columns": [
+            "status",
+            "tokenExpiresAt"
+          ],
+          "allowed": [
+            "status=DORMANT",
+            "status=ACTIVE",
+            "status=ALLOCATED",
+            "status=ACTIVATED",
+            "status=PRINTED",
+            "status=REDEEMED",
+            "status=BLOCKED",
+            "status=SCANNED",
+            "tokenExpiresAt=NULL",
+            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-qrcode-select-c63bbcb4a31f",
+          "columns": [
+            "status",
+            "tokenExpiresAt"
+          ],
+          "allowed": [
+            "status=DORMANT",
+            "status=ACTIVE",
+            "status=ALLOCATED",
+            "status=ACTIVATED",
+            "status=PRINTED",
+            "status=REDEEMED",
+            "status=BLOCKED",
+            "status=SCANNED",
+            "tokenExpiresAt=NULL",
+            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-07fec99a574c",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-7c30e2368afb",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-aa566e98f219",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-afd12473687a",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-ba667bcc5353",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-bdf8789ff300",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-c63bbcb4a31f",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        }
+      ],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "Retain the reviewed transaction-client-only service and focused contract tests; do not broaden the boundary.",
+      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
+      "riskLevel": "high",
+      "automationEligibility": "implemented",
+      "governingBoundaryIds": [],
+      "blockers": [],
+      "implementationStatus": "implemented",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-simple-tenant-scoped-reads-analyticsservice-2c20deef24",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
@@ -176,6 +769,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -581,6 +1175,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -769,7 +1364,7 @@
       }
     },
     {
-      "id": "family-simple-tenant-scoped-reads-governancecontroller-b54454266a",
+      "id": "family-simple-tenant-scoped-reads-governancecontroller-ca434484e4",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
         "workflow-http-backend-src-controllers-governance-controller-ts-download-compliance-pack-job-controller"
@@ -793,7 +1388,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -837,13 +1432,13 @@
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-governancecontroller-b54454266a-unreviewed-scope"
+          "id": "blocker-family-simple-tenant-scoped-reads-governancecontroller-ca434484e4-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-governancecontroller-b54454266a-unverified-execution-path"
+          "id": "blocker-family-simple-tenant-scoped-reads-governancecontroller-ca434484e4-unverified-execution-path"
         }
       ],
       "implementationStatus": "blocked",
@@ -1090,6 +1685,97 @@
       }
     },
     {
+      "id": "family-simple-tenant-scoped-reads-traceeventservice-2d4b0541b3",
+      "category": "simple tenant-scoped reads",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-trace-event-service-ts-backfill-trace-events-from-audit-logs",
+        "workflow-internal-backend-src-services-trace-event-service-ts-create-trace-event-from-audit-log"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/traceEventService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-audit-log",
+        "table-trace-event"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "operator",
+        "platform-admin"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified",
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-audit-log-select-7db9558237d9",
+        "command-trace-event-select-3b06b5cec754"
+      ],
+      "tenantScopeModel": [
+        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+        "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+      ],
+      "lifecycleStateRequirements": [],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
+      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
+      "riskLevel": "medium",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "unresolved-boundary",
+          "reason": "The workflow authorization-boundary type is unresolved.",
+          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
+          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-2d4b0541b3-unresolved-boundary"
+        },
+        {
+          "code": "unreviewed-scope",
+          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
+          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
+          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-2d4b0541b3-unreviewed-scope"
+        },
+        {
+          "code": "unverified-execution-path",
+          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
+          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
+          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-2d4b0541b3-unverified-execution-path"
+        },
+        {
+          "code": "unverified-root-call-chain",
+          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
+          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
+          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-2d4b0541b3-unverified-root-call-chain"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-simple-tenant-scoped-reads-traceeventservice-9ae25d2f9f",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
@@ -1210,96 +1896,6 @@
       }
     },
     {
-      "id": "family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20",
-      "category": "simple tenant-scoped reads",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-trace-event-service-ts-backfill-trace-events-from-audit-logs",
-        "workflow-internal-backend-src-services-trace-event-service-ts-create-trace-event-from-audit-log"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/traceEventService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-audit-log",
-        "table-trace-event"
-      ],
-      "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
-      ],
-      "pendingActorClasses": [],
-      "pendingActorBlockers": [],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-audit-log-select-7db9558237d9",
-        "command-trace-event-select-3b06b5cec754"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-        "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, install canonical context once and move bounded count/list/enrichment reads into one explicit-projection transaction service.",
-      "testStrategy": "Exercise own/foreign/blank scope, assurance, filter narrowing, shared transaction/snapshot, explicit projection, redaction and global-client rejection.",
-      "riskLevel": "medium",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-simple-tenant-scoped-reads-traceeventservice-b7d4206b20-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-simple-tenant-scoped-reads-tracepolicycontroller-c2ecdef3b3",
       "category": "simple tenant-scoped reads",
       "workflowIds": [
@@ -1405,6 +2001,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -5619,204 +6216,6 @@
       }
     },
     {
-      "id": "family-batch-qr-lifecycle-batchallocationservice-696726a875",
-      "category": "batch/QR lifecycle",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups",
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/batchAllocationService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-batch",
-        "table-inventory-status-rollup",
-        "table-qrcode"
-      ],
-      "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
-      ],
-      "pendingActorClasses": [],
-      "pendingActorBlockers": [],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-batch-select-7c30e2368afb",
-        "command-batch-select-aa566e98f219",
-        "command-batch-select-ba667bcc5353",
-        "command-inventory-status-rollup-select-afd12473687a",
-        "command-qrcode-select-bdf8789ff300",
-        "command-qrcode-select-c63bbcb4a31f"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-batch-select-7c30e2368afb",
-          "columns": [
-            "lifecycleState",
-            "releasedAt"
-          ],
-          "allowed": [
-            "lifecycleState=DRAFT",
-            "lifecycleState=CODES_GENERATED",
-            "lifecycleState=PRINT_ACKNOWLEDGED",
-            "lifecycleState=PRINT_CONFIRMED",
-            "lifecycleState=SAMPLE_VERIFIED",
-            "lifecycleState=RELEASED",
-            "lifecycleState=FAILED",
-            "lifecycleState=VOIDED",
-            "releasedAt=NULL",
-            "releasedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-batch-select-aa566e98f219",
-          "columns": [
-            "lifecycleState",
-            "releasedAt"
-          ],
-          "allowed": [
-            "lifecycleState=DRAFT",
-            "lifecycleState=CODES_GENERATED",
-            "lifecycleState=PRINT_ACKNOWLEDGED",
-            "lifecycleState=PRINT_CONFIRMED",
-            "lifecycleState=SAMPLE_VERIFIED",
-            "lifecycleState=RELEASED",
-            "lifecycleState=FAILED",
-            "lifecycleState=VOIDED",
-            "releasedAt=NULL",
-            "releasedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-batch-select-ba667bcc5353",
-          "columns": [
-            "lifecycleState",
-            "releasedAt"
-          ],
-          "allowed": [
-            "lifecycleState=DRAFT",
-            "lifecycleState=CODES_GENERATED",
-            "lifecycleState=PRINT_ACKNOWLEDGED",
-            "lifecycleState=PRINT_CONFIRMED",
-            "lifecycleState=SAMPLE_VERIFIED",
-            "lifecycleState=RELEASED",
-            "lifecycleState=FAILED",
-            "lifecycleState=VOIDED",
-            "releasedAt=NULL",
-            "releasedAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-qrcode-select-bdf8789ff300",
-          "columns": [
-            "status",
-            "tokenExpiresAt"
-          ],
-          "allowed": [
-            "status=DORMANT",
-            "status=ACTIVE",
-            "status=ALLOCATED",
-            "status=ACTIVATED",
-            "status=PRINTED",
-            "status=REDEEMED",
-            "status=BLOCKED",
-            "status=SCANNED",
-            "tokenExpiresAt=NULL",
-            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-qrcode-select-c63bbcb4a31f",
-          "columns": [
-            "status",
-            "tokenExpiresAt"
-          ],
-          "allowed": [
-            "status=DORMANT",
-            "status=ACTIVE",
-            "status=ALLOCATED",
-            "status=ACTIVATED",
-            "status=PRINTED",
-            "status=REDEEMED",
-            "status=BLOCKED",
-            "status=SCANNED",
-            "tokenExpiresAt=NULL",
-            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        }
-      ],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
-      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
-      "riskLevel": "high",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-batch-qr-lifecycle-batchallocationservice-696726a875-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-batch-qr-lifecycle-batchallocationservice-696726a875-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-batch-qr-lifecycle-batchallocationservice-696726a875-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-batch-qr-lifecycle-batchallocationservice-696726a875-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-batch-qr-lifecycle-batchallocationservice-89a4066164",
       "category": "batch/QR lifecycle",
       "workflowIds": [
@@ -7894,7 +8293,7 @@
       }
     },
     {
-      "id": "family-batch-qr-lifecycle-immutableauditexportservice-004909a46d",
+      "id": "family-batch-qr-lifecycle-immutableauditexportservice-0f72c53038",
       "category": "batch/QR lifecycle",
       "workflowIds": [
         "workflow-internal-backend-src-services-immutable-audit-export-service-ts-build-immutable-batch-audit-package"
@@ -7923,6 +8322,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -7998,25 +8398,25 @@
           "code": "unresolved-boundary",
           "reason": "The workflow authorization-boundary type is unresolved.",
           "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-batch-qr-lifecycle-immutableauditexportservice-004909a46d-unresolved-boundary"
+          "id": "blocker-family-batch-qr-lifecycle-immutableauditexportservice-0f72c53038-unresolved-boundary"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-batch-qr-lifecycle-immutableauditexportservice-004909a46d-unreviewed-scope"
+          "id": "blocker-family-batch-qr-lifecycle-immutableauditexportservice-0f72c53038-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-batch-qr-lifecycle-immutableauditexportservice-004909a46d-unverified-execution-path"
+          "id": "blocker-family-batch-qr-lifecycle-immutableauditexportservice-0f72c53038-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-batch-qr-lifecycle-immutableauditexportservice-004909a46d-unverified-root-call-chain"
+          "id": "blocker-family-batch-qr-lifecycle-immutableauditexportservice-0f72c53038-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -8027,7 +8427,7 @@
       }
     },
     {
-      "id": "family-batch-qr-lifecycle-legacyqrrotationservice-065f2764bf",
+      "id": "family-batch-qr-lifecycle-legacyqrrotationservice-98e63c55fe",
       "category": "batch/QR lifecycle",
       "workflowIds": [
         "workflow-internal-backend-src-services-legacy-qr-rotation-service-ts-count-external-audit-evidence"
@@ -8056,6 +8456,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -8123,31 +8524,31 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-batch-qr-lifecycle-legacyqrrotationservice-065f2764bf-named-function-prerequisite"
+          "id": "blocker-family-batch-qr-lifecycle-legacyqrrotationservice-98e63c55fe-named-function-prerequisite"
         },
         {
           "code": "unresolved-boundary",
           "reason": "The workflow authorization-boundary type is unresolved.",
           "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-batch-qr-lifecycle-legacyqrrotationservice-065f2764bf-unresolved-boundary"
+          "id": "blocker-family-batch-qr-lifecycle-legacyqrrotationservice-98e63c55fe-unresolved-boundary"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-batch-qr-lifecycle-legacyqrrotationservice-065f2764bf-unreviewed-scope"
+          "id": "blocker-family-batch-qr-lifecycle-legacyqrrotationservice-98e63c55fe-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-batch-qr-lifecycle-legacyqrrotationservice-065f2764bf-unverified-execution-path"
+          "id": "blocker-family-batch-qr-lifecycle-legacyqrrotationservice-98e63c55fe-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-batch-qr-lifecycle-legacyqrrotationservice-065f2764bf-unverified-root-call-chain"
+          "id": "blocker-family-batch-qr-lifecycle-legacyqrrotationservice-98e63c55fe-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -8721,7 +9122,6 @@
         "workflow-internal-backend-src-services-print-reservation-service-ts-count-blocked-qr-codes-for-print",
         "workflow-internal-backend-src-services-print-reservation-service-ts-count-reservable-qr-codes-for-print",
         "workflow-internal-backend-src-services-print-reservation-service-ts-find-unresolved-recovery-range-for-batch",
-        "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries",
         "workflow-internal-backend-src-services-print-reservation-service-ts-select-reservable-qr-codes-for-print"
       ],
       "reclassifiedFromFamilyIds": [],
@@ -8759,22 +9159,18 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-print-item-select-07fec99a574c",
         "command-print-item-select-3f4ee414827b",
         "command-print-item-select-bb323dd3f65d",
         "command-print-item-select-c66dfd43b633",
         "command-print-item-select-e6d252fb244e",
-        "command-print-job-select-07fec99a574c",
         "command-print-job-select-3f4ee414827b",
         "command-print-job-select-bb323dd3f65d",
         "command-print-job-select-c66dfd43b633",
         "command-print-job-select-e6d252fb244e",
-        "command-print-session-select-07fec99a574c",
         "command-print-session-select-3f4ee414827b",
         "command-print-session-select-bb323dd3f65d",
         "command-print-session-select-c66dfd43b633",
         "command-print-session-select-e6d252fb244e",
-        "command-qrcode-select-07fec99a574c",
         "command-qrcode-select-3f4ee414827b",
         "command-qrcode-select-bb323dd3f65d",
         "command-qrcode-select-c66dfd43b633",
@@ -8787,40 +9183,6 @@
         "table-print-session row must join through table-print-job on printJobId=id; no alternative parent."
       ],
       "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-print-item-select-07fec99a574c",
-          "columns": [
-            "pipelineState",
-            "printConfirmedAt",
-            "state"
-          ],
-          "allowed": [
-            "pipelineState=QUEUED",
-            "pipelineState=PREFLIGHT_OK",
-            "pipelineState=SENT_TO_PRINTER",
-            "pipelineState=PRINTER_ACKNOWLEDGED",
-            "pipelineState=PRINT_CONFIRMED",
-            "pipelineState=LOCKED",
-            "pipelineState=PAUSED",
-            "pipelineState=RESUME_PENDING",
-            "pipelineState=RETRY_WAITING",
-            "pipelineState=STOPPING",
-            "pipelineState=STOPPED",
-            "pipelineState=FAILED",
-            "pipelineState=NEEDS_OPERATOR_ACTION",
-            "printConfirmedAt=NULL",
-            "printConfirmedAt=SERVER_TIMESTAMP_SET",
-            "state=RESERVED",
-            "state=ISSUED",
-            "state=AGENT_ACKED",
-            "state=PRINT_CONFIRMED",
-            "state=CLOSED",
-            "state=FROZEN",
-            "state=FAILED",
-            "state=CANCELLED"
-          ],
-          "forbidden": []
-        },
         {
           "commandRuleId": "command-print-item-select-3f4ee414827b",
           "columns": [
@@ -8954,40 +9316,6 @@
             "state=FROZEN",
             "state=FAILED",
             "state=CANCELLED"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-print-job-select-07fec99a574c",
-          "columns": [
-            "confirmedAt",
-            "pipelineState",
-            "status"
-          ],
-          "allowed": [
-            "confirmedAt=NULL",
-            "confirmedAt=SERVER_TIMESTAMP_SET",
-            "pipelineState=QUEUED",
-            "pipelineState=PREFLIGHT_OK",
-            "pipelineState=SENT_TO_PRINTER",
-            "pipelineState=PRINTER_ACKNOWLEDGED",
-            "pipelineState=PRINT_CONFIRMED",
-            "pipelineState=LOCKED",
-            "pipelineState=PAUSED",
-            "pipelineState=RESUME_PENDING",
-            "pipelineState=RETRY_WAITING",
-            "pipelineState=STOPPING",
-            "pipelineState=STOPPED",
-            "pipelineState=FAILED",
-            "pipelineState=NEEDS_OPERATOR_ACTION",
-            "status=PENDING",
-            "status=SENT",
-            "status=PAUSED",
-            "status=CONFIRMED",
-            "status=PARTIALLY_COMPLETED",
-            "status=FAILED",
-            "status=CANCELLED",
-            "status=STOPPED"
           ],
           "forbidden": []
         },
@@ -9128,24 +9456,6 @@
           "forbidden": []
         },
         {
-          "commandRuleId": "command-print-session-select-07fec99a574c",
-          "columns": [
-            "status"
-          ],
-          "allowed": [
-            "status=ACTIVE",
-            "status=PAUSED",
-            "status=RESUME_PENDING",
-            "status=RETRY_WAITING",
-            "status=STOPPING",
-            "status=STOPPED",
-            "status=FAILED",
-            "status=COMPLETED",
-            "status=CANCELLED"
-          ],
-          "forbidden": []
-        },
-        {
           "commandRuleId": "command-print-session-select-3f4ee414827b",
           "columns": [
             "status"
@@ -9214,26 +9524,6 @@
             "status=FAILED",
             "status=COMPLETED",
             "status=CANCELLED"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-qrcode-select-07fec99a574c",
-          "columns": [
-            "status",
-            "tokenExpiresAt"
-          ],
-          "allowed": [
-            "status=DORMANT",
-            "status=ACTIVE",
-            "status=ALLOCATED",
-            "status=ACTIVATED",
-            "status=PRINTED",
-            "status=REDEEMED",
-            "status=BLOCKED",
-            "status=SCANNED",
-            "tokenExpiresAt=NULL",
-            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": []
         },
@@ -9520,7 +9810,7 @@
       }
     },
     {
-      "id": "family-batch-qr-lifecycle-qrallocationservice-7df8ba4ac2",
+      "id": "family-batch-qr-lifecycle-qrallocationservice-d7711b6972",
       "category": "batch/QR lifecycle",
       "workflowIds": [
         "workflow-internal-backend-src-services-qr-allocation-service-ts-get-next-licensee-qr-number"
@@ -9545,6 +9835,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -9597,25 +9888,25 @@
           "code": "unresolved-boundary",
           "reason": "The workflow authorization-boundary type is unresolved.",
           "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-batch-qr-lifecycle-qrallocationservice-7df8ba4ac2-unresolved-boundary"
+          "id": "blocker-family-batch-qr-lifecycle-qrallocationservice-d7711b6972-unresolved-boundary"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-batch-qr-lifecycle-qrallocationservice-7df8ba4ac2-unreviewed-scope"
+          "id": "blocker-family-batch-qr-lifecycle-qrallocationservice-d7711b6972-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-batch-qr-lifecycle-qrallocationservice-7df8ba4ac2-unverified-execution-path"
+          "id": "blocker-family-batch-qr-lifecycle-qrallocationservice-d7711b6972-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-batch-qr-lifecycle-qrallocationservice-7df8ba4ac2-unverified-root-call-chain"
+          "id": "blocker-family-batch-qr-lifecycle-qrallocationservice-d7711b6972-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -10405,121 +10696,6 @@
       }
     },
     {
-      "id": "family-batch-qr-lifecycle-qrcontroller-7395ca36cb",
-      "category": "batch/QR lifecycle",
-      "workflowIds": [
-        "workflow-http-backend-src-controllers-qr-controller-ts-export-qrcodes-csv",
-        "workflow-http-backend-src-controllers-qr-controller-ts-get-qrcodes"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "http"
-      ],
-      "controllerFiles": [
-        "backend/src/controllers/qrController.ts"
-      ],
-      "serviceFiles": [],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-qrcode"
-      ],
-      "actorClasses": [
-        "platform-admin"
-      ],
-      "pendingActorClasses": [],
-      "pendingActorBlockers": [],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-qrcode-select-311c84b5e825",
-        "command-qrcode-select-3a461e213668"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-qrcode-select-311c84b5e825",
-          "columns": [
-            "status",
-            "tokenExpiresAt"
-          ],
-          "allowed": [
-            "status=DORMANT",
-            "status=ACTIVE",
-            "status=ALLOCATED",
-            "status=ACTIVATED",
-            "status=PRINTED",
-            "status=REDEEMED",
-            "status=BLOCKED",
-            "status=SCANNED",
-            "tokenExpiresAt=NULL",
-            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-qrcode-select-3a461e213668",
-          "columns": [
-            "status",
-            "tokenExpiresAt"
-          ],
-          "allowed": [
-            "status=DORMANT",
-            "status=ACTIVE",
-            "status=ALLOCATED",
-            "status=ACTIVATED",
-            "status=PRINTED",
-            "status=REDEEMED",
-            "status=BLOCKED",
-            "status=SCANNED",
-            "tokenExpiresAt=NULL",
-            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        }
-      ],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
-      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
-      "riskLevel": "high",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-batch-qr-lifecycle-qrcontroller-7395ca36cb-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-batch-qr-lifecycle-qrcontroller-7395ca36cb-unverified-execution-path"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-batch-qr-lifecycle-qrcontroller-7d8cbfafa5",
       "category": "batch/QR lifecycle",
       "workflowIds": [
@@ -10810,7 +10986,9 @@
       "category": "batch/QR lifecycle",
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-controller-ts-block-batch",
-        "workflow-http-backend-src-controllers-qr-controller-ts-block-qrcode"
+        "workflow-http-backend-src-controllers-qr-controller-ts-block-qrcode",
+        "workflow-http-backend-src-controllers-qr-controller-ts-export-qrcodes-csv",
+        "workflow-http-backend-src-controllers-qr-controller-ts-get-qrcodes"
       ],
       "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
@@ -10846,7 +11024,9 @@
       ],
       "readWriteCommandRuleIds": [
         "command-batch-select-462fa05fe79b",
-        "command-qrcode-select-0aa75e2ffddf"
+        "command-qrcode-select-0aa75e2ffddf",
+        "command-qrcode-select-311c84b5e825",
+        "command-qrcode-select-3a461e213668"
       ],
       "tenantScopeModel": [
         "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
@@ -10874,6 +11054,46 @@
         },
         {
           "commandRuleId": "command-qrcode-select-0aa75e2ffddf",
+          "columns": [
+            "status",
+            "tokenExpiresAt"
+          ],
+          "allowed": [
+            "status=DORMANT",
+            "status=ACTIVE",
+            "status=ALLOCATED",
+            "status=ACTIVATED",
+            "status=PRINTED",
+            "status=REDEEMED",
+            "status=BLOCKED",
+            "status=SCANNED",
+            "tokenExpiresAt=NULL",
+            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-qrcode-select-311c84b5e825",
+          "columns": [
+            "status",
+            "tokenExpiresAt"
+          ],
+          "allowed": [
+            "status=DORMANT",
+            "status=ACTIVE",
+            "status=ALLOCATED",
+            "status=ACTIVATED",
+            "status=PRINTED",
+            "status=REDEEMED",
+            "status=BLOCKED",
+            "status=SCANNED",
+            "tokenExpiresAt=NULL",
+            "tokenExpiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-qrcode-select-3a461e213668",
           "columns": [
             "status",
             "tokenExpiresAt"
@@ -11273,6 +11493,99 @@
       }
     },
     {
+      "id": "family-batch-qr-lifecycle-qrrequestcontroller-c4a6ed5bd3",
+      "category": "batch/QR lifecycle",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-qr-request-controller-ts-get-qr-allocation-requests"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "http"
+      ],
+      "controllerFiles": [
+        "backend/src/controllers/qrRequestController.ts"
+      ],
+      "serviceFiles": [],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-qr-allocation-request"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified",
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-qr-allocation-request-select-da091789ae59"
+      ],
+      "tenantScopeModel": [
+        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-qr-allocation-request-select-da091789ae59",
+          "columns": [
+            "approvedAt",
+            "rejectedAt",
+            "status"
+          ],
+          "allowed": [
+            "approvedAt=NULL",
+            "approvedAt=SERVER_TIMESTAMP_SET",
+            "rejectedAt=NULL",
+            "rejectedAt=SERVER_TIMESTAMP_SET",
+            "status=PENDING",
+            "status=APPROVED",
+            "status=REJECTED"
+          ],
+          "forbidden": []
+        }
+      ],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "high",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "unreviewed-scope",
+          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
+          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
+          "id": "blocker-family-batch-qr-lifecycle-qrrequestcontroller-c4a6ed5bd3-unreviewed-scope"
+        },
+        {
+          "code": "unverified-execution-path",
+          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
+          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
+          "id": "blocker-family-batch-qr-lifecycle-qrrequestcontroller-c4a6ed5bd3-unverified-execution-path"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-batch-qr-lifecycle-qrrequestcontroller-d59bf40ec9",
       "category": "batch/QR lifecycle",
       "workflowIds": [
@@ -11518,98 +11831,6 @@
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
           "id": "blocker-family-batch-qr-lifecycle-qrrequestcontroller-e096b7e85d-unverified-execution-path"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
-      "id": "family-batch-qr-lifecycle-qrrequestcontroller-eb70f8d0e8",
-      "category": "batch/QR lifecycle",
-      "workflowIds": [
-        "workflow-http-backend-src-controllers-qr-request-controller-ts-get-qr-allocation-requests"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "http"
-      ],
-      "controllerFiles": [
-        "backend/src/controllers/qrRequestController.ts"
-      ],
-      "serviceFiles": [],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-qr-allocation-request"
-      ],
-      "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
-      ],
-      "pendingActorClasses": [],
-      "pendingActorBlockers": [],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-qr-allocation-request-select-da091789ae59"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-qr-allocation-request-select-da091789ae59",
-          "columns": [
-            "approvedAt",
-            "rejectedAt",
-            "status"
-          ],
-          "allowed": [
-            "approvedAt=NULL",
-            "approvedAt=SERVER_TIMESTAMP_SET",
-            "rejectedAt=NULL",
-            "rejectedAt=SERVER_TIMESTAMP_SET",
-            "status=PENDING",
-            "status=APPROVED",
-            "status=REJECTED"
-          ],
-          "forbidden": []
-        }
-      ],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
-      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
-      "riskLevel": "high",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-batch-qr-lifecycle-qrrequestcontroller-eb70f8d0e8-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-batch-qr-lifecycle-qrrequestcontroller-eb70f8d0e8-unverified-execution-path"
         }
       ],
       "implementationStatus": "blocked",
@@ -12593,7 +12814,7 @@
       }
     },
     {
-      "id": "family-batch-qr-lifecycle-samplescanpolicyservice-9e7350ecae",
+      "id": "family-batch-qr-lifecycle-samplescanpolicyservice-a3f5e7ffc1",
       "category": "batch/QR lifecycle",
       "workflowIds": [
         "workflow-internal-backend-src-services-sample-scan-policy-service-ts-evaluate-sample-scan-policy"
@@ -12620,6 +12841,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -12674,25 +12896,25 @@
           "code": "unresolved-boundary",
           "reason": "The workflow authorization-boundary type is unresolved.",
           "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-batch-qr-lifecycle-samplescanpolicyservice-9e7350ecae-unresolved-boundary"
+          "id": "blocker-family-batch-qr-lifecycle-samplescanpolicyservice-a3f5e7ffc1-unresolved-boundary"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-batch-qr-lifecycle-samplescanpolicyservice-9e7350ecae-unreviewed-scope"
+          "id": "blocker-family-batch-qr-lifecycle-samplescanpolicyservice-a3f5e7ffc1-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-batch-qr-lifecycle-samplescanpolicyservice-9e7350ecae-unverified-execution-path"
+          "id": "blocker-family-batch-qr-lifecycle-samplescanpolicyservice-a3f5e7ffc1-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-batch-qr-lifecycle-samplescanpolicyservice-9e7350ecae-unverified-root-call-chain"
+          "id": "blocker-family-batch-qr-lifecycle-samplescanpolicyservice-a3f5e7ffc1-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -13393,7 +13615,7 @@
       }
     },
     {
-      "id": "family-batch-qr-lifecycle-tracepolicycontroller-d55f6b8c37",
+      "id": "family-batch-qr-lifecycle-tracepolicycontroller-93aa594e99",
       "category": "batch/QR lifecycle",
       "workflowIds": [
         "workflow-http-backend-src-controllers-trace-policy-controller-ts-export-batch-audit-package-controller"
@@ -13418,6 +13640,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -13470,13 +13693,13 @@
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-batch-qr-lifecycle-tracepolicycontroller-d55f6b8c37-unreviewed-scope"
+          "id": "blocker-family-batch-qr-lifecycle-tracepolicycontroller-93aa594e99-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-batch-qr-lifecycle-tracepolicycontroller-d55f6b8c37-unverified-execution-path"
+          "id": "blocker-family-batch-qr-lifecycle-tracepolicycontroller-93aa594e99-unverified-execution-path"
         }
       ],
       "implementationStatus": "blocked",
@@ -25785,7 +26008,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-authemailservice-336360781a",
+      "id": "family-account-and-security-mutations-authemailservice-85d483e7c8",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-internal-backend-src-services-auth-auth-email-service-ts-get-primary-superadmin-email"
@@ -25809,7 +26032,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -25859,25 +26082,25 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-authemailservice-336360781a-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-authemailservice-85d483e7c8-named-function-prerequisite"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-authemailservice-336360781a-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-authemailservice-85d483e7c8-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-authemailservice-336360781a-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-authemailservice-85d483e7c8-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-authemailservice-336360781a-unverified-root-call-chain"
+          "id": "blocker-family-account-and-security-mutations-authemailservice-85d483e7c8-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -27601,7 +27824,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-governancecontroller-a966271201",
+      "id": "family-account-and-security-mutations-governancecontroller-954dadd6bf",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-http-backend-src-controllers-governance-controller-ts-export-incident-evidence-bundle-controller"
@@ -27626,7 +27849,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -27694,19 +27917,19 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-governancecontroller-a966271201-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-governancecontroller-954dadd6bf-named-function-prerequisite"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-governancecontroller-a966271201-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-governancecontroller-954dadd6bf-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-governancecontroller-a966271201-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-governancecontroller-954dadd6bf-unverified-execution-path"
         }
       ],
       "implementationStatus": "blocked",
@@ -27717,7 +27940,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-governanceservice-fab0398df0",
+      "id": "family-account-and-security-mutations-governanceservice-4ed4ff7625",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-internal-backend-src-services-governance-service-ts-build-incident-evidence-audit-bundle",
@@ -27746,6 +27969,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -27844,31 +28068,31 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-governanceservice-fab0398df0-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-governanceservice-4ed4ff7625-named-function-prerequisite"
         },
         {
           "code": "unresolved-boundary",
           "reason": "The workflow authorization-boundary type is unresolved.",
           "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-account-and-security-mutations-governanceservice-fab0398df0-unresolved-boundary"
+          "id": "blocker-family-account-and-security-mutations-governanceservice-4ed4ff7625-unresolved-boundary"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-governanceservice-fab0398df0-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-governanceservice-4ed4ff7625-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-governanceservice-fab0398df0-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-governanceservice-4ed4ff7625-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-governanceservice-fab0398df0-unverified-root-call-chain"
+          "id": "blocker-family-account-and-security-mutations-governanceservice-4ed4ff7625-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -28221,7 +28445,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-incidentemailservice-0a5bcf0048",
+      "id": "family-account-and-security-mutations-incidentemailservice-8d2155ceea",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-internal-backend-src-services-incident-email-service-ts-resolve-actor-user"
@@ -28247,6 +28471,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -28297,31 +28522,31 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-incidentemailservice-0a5bcf0048-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-incidentemailservice-8d2155ceea-named-function-prerequisite"
         },
         {
           "code": "unresolved-boundary",
           "reason": "The workflow authorization-boundary type is unresolved.",
           "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-account-and-security-mutations-incidentemailservice-0a5bcf0048-unresolved-boundary"
+          "id": "blocker-family-account-and-security-mutations-incidentemailservice-8d2155ceea-unresolved-boundary"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-incidentemailservice-0a5bcf0048-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-incidentemailservice-8d2155ceea-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-incidentemailservice-0a5bcf0048-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-incidentemailservice-8d2155ceea-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-incidentemailservice-0a5bcf0048-unverified-root-call-chain"
+          "id": "blocker-family-account-and-security-mutations-incidentemailservice-8d2155ceea-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -28332,7 +28557,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-incidentemailservice-29beda5e3e",
+      "id": "family-account-and-security-mutations-incidentemailservice-e176bfe685",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-internal-backend-src-services-incident-email-service-ts-get-primary-superadmin-email",
@@ -28357,7 +28582,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -28426,25 +28651,25 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-incidentemailservice-29beda5e3e-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-incidentemailservice-e176bfe685-named-function-prerequisite"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-incidentemailservice-29beda5e3e-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-incidentemailservice-e176bfe685-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-incidentemailservice-29beda5e3e-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-incidentemailservice-e176bfe685-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-incidentemailservice-29beda5e3e-unverified-root-call-chain"
+          "id": "blocker-family-account-and-security-mutations-incidentemailservice-e176bfe685-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -28455,7 +28680,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-incidentservice-74b2ee3d87",
+      "id": "family-account-and-security-mutations-incidentservice-9f861b8fa5",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-internal-backend-src-services-incident-service-ts-compute-severity",
@@ -28484,6 +28709,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -28611,31 +28837,31 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-incidentservice-74b2ee3d87-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-incidentservice-9f861b8fa5-named-function-prerequisite"
         },
         {
           "code": "unresolved-boundary",
           "reason": "The workflow authorization-boundary type is unresolved.",
           "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-account-and-security-mutations-incidentservice-74b2ee3d87-unresolved-boundary"
+          "id": "blocker-family-account-and-security-mutations-incidentservice-9f861b8fa5-unresolved-boundary"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-incidentservice-74b2ee3d87-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-incidentservice-9f861b8fa5-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-incidentservice-74b2ee3d87-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-incidentservice-9f861b8fa5-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-incidentservice-74b2ee3d87-unverified-root-call-chain"
+          "id": "blocker-family-account-and-security-mutations-incidentservice-9f861b8fa5-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -28776,92 +29002,6 @@
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
           "id": "blocker-family-account-and-security-mutations-incidentservice-cb90634c44-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
-      "id": "family-account-and-security-mutations-inviteservice-3f90ae51f8",
-      "category": "account and security mutations",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-auth-invite-service-ts-get-or-create-platform-org-id"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/auth/inviteService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-organization"
-      ],
-      "actorClasses": [
-        "platform-admin"
-      ],
-      "pendingActorClasses": [],
-      "pendingActorBlockers": [],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "mfa-verified",
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-organization-insert-c61d0f915adc",
-        "command-organization-select-c61d0f915adc"
-      ],
-      "tenantScopeModel": [
-        "tenant-root boundary from tables.json; empty or forged context is denied."
-      ],
-      "lifecycleStateRequirements": [],
-      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
-      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
-      "riskLevel": "critical",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "mutation-concurrency-proof",
-          "reason": "The mutation lacks family-level database concurrency and replay proof.",
-          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
-          "id": "blocker-family-account-and-security-mutations-inviteservice-3f90ae51f8-mutation-concurrency-proof"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-inviteservice-3f90ae51f8-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-inviteservice-3f90ae51f8-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-inviteservice-3f90ae51f8-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -29152,34 +29292,31 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-irincidentcontroller-17f2630ef2",
+      "id": "family-account-and-security-mutations-inviteservice-dcfaaa4d67",
       "category": "account and security mutations",
       "workflowIds": [
-        "workflow-http-backend-src-controllers-ir-incident-controller-ts-resolve-org-admin-email"
+        "workflow-internal-backend-src-services-auth-invite-service-ts-get-or-create-platform-org-id"
       ],
       "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
-        "http"
+        "internal"
       ],
-      "controllerFiles": [
-        "backend/src/controllers/irIncidentController.ts"
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/auth/inviteService.ts"
       ],
-      "serviceFiles": [],
       "repositoryFiles": [],
       "protectedTables": [
-        "table-licensee",
-        "table-user"
+        "table-organization"
       ],
       "actorClasses": [
-        "licensee-admin",
-        "operator",
         "platform-admin"
       ],
       "pendingActorClasses": [],
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -29192,34 +29329,14 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-licensee-select-bf4ed20e8b5b",
-        "command-user-select-bf4ed20e8b5b"
+        "command-organization-insert-c61d0f915adc",
+        "command-organization-select-c61d0f915adc"
       ],
       "tenantScopeModel": [
-        "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-        "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "tenant-root boundary from tables.json; empty or forged context is denied."
       ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-user-select-bf4ed20e8b5b",
-          "columns": [
-            "deletedAt",
-            "disabledAt",
-            "status"
-          ],
-          "allowed": [
-            "deletedAt=NULL",
-            "deletedAt=SERVER_TIMESTAMP_SET",
-            "disabledAt=NULL",
-            "disabledAt=SERVER_TIMESTAMP_SET",
-            "status=INVITED",
-            "status=ACTIVE",
-            "status=DISABLED"
-          ],
-          "forbidden": []
-        }
-      ],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "lifecycleStateRequirements": [],
+      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
       "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
       "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
       "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
@@ -29228,22 +29345,28 @@
       "governingBoundaryIds": [],
       "blockers": [
         {
-          "code": "named-function-prerequisite",
-          "reason": "At least one command rule requires a named function boundary.",
-          "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-irincidentcontroller-17f2630ef2-named-function-prerequisite"
+          "code": "mutation-concurrency-proof",
+          "reason": "The mutation lacks family-level database concurrency and replay proof.",
+          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
+          "id": "blocker-family-account-and-security-mutations-inviteservice-dcfaaa4d67-mutation-concurrency-proof"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-irincidentcontroller-17f2630ef2-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-inviteservice-dcfaaa4d67-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-irincidentcontroller-17f2630ef2-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-inviteservice-dcfaaa4d67-unverified-execution-path"
+        },
+        {
+          "code": "unverified-root-call-chain",
+          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
+          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
+          "id": "blocker-family-account-and-security-mutations-inviteservice-dcfaaa4d67-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -29388,11 +29511,10 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-irincidentcontroller-67b6f026f6",
+      "id": "family-account-and-security-mutations-irincidentcontroller-61a887d0de",
       "category": "account and security mutations",
       "workflowIds": [
-        "workflow-http-backend-src-controllers-ir-incident-controller-ts-get-ir-incident",
-        "workflow-http-backend-src-controllers-ir-incident-controller-ts-list-ir-incidents"
+        "workflow-http-backend-src-controllers-ir-incident-controller-ts-resolve-org-admin-email"
       ],
       "reclassifiedFromFamilyIds": [],
       "executionSurfaces": [
@@ -29404,15 +29526,19 @@
       "serviceFiles": [],
       "repositoryFiles": [],
       "protectedTables": [
-        "table-incident"
+        "table-licensee",
+        "table-user"
       ],
       "actorClasses": [
+        "licensee-admin",
+        "operator",
         "platform-admin"
       ],
       "pendingActorClasses": [],
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -29426,56 +29552,29 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-incident-select-7db7d24917f6",
-        "command-incident-select-ff41ff8a7c43"
+        "command-licensee-select-bf4ed20e8b5b",
+        "command-user-select-bf4ed20e8b5b"
       ],
       "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+        "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+        "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
       ],
       "lifecycleStateRequirements": [
         {
-          "commandRuleId": "command-incident-select-7db7d24917f6",
+          "commandRuleId": "command-user-select-bf4ed20e8b5b",
           "columns": [
+            "deletedAt",
+            "disabledAt",
             "status"
           ],
           "allowed": [
-            "status=NEW",
-            "status=TRIAGED",
-            "status=TRIAGE",
-            "status=INVESTIGATING",
-            "status=CONTAINMENT",
-            "status=ERADICATION",
-            "status=RECOVERY",
-            "status=AWAITING_CUSTOMER",
-            "status=AWAITING_LICENSEE",
-            "status=MITIGATED",
-            "status=RESOLVED",
-            "status=CLOSED",
-            "status=REOPENED",
-            "status=REJECTED_SPAM"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-incident-select-ff41ff8a7c43",
-          "columns": [
-            "status"
-          ],
-          "allowed": [
-            "status=NEW",
-            "status=TRIAGED",
-            "status=TRIAGE",
-            "status=INVESTIGATING",
-            "status=CONTAINMENT",
-            "status=ERADICATION",
-            "status=RECOVERY",
-            "status=AWAITING_CUSTOMER",
-            "status=AWAITING_LICENSEE",
-            "status=MITIGATED",
-            "status=RESOLVED",
-            "status=CLOSED",
-            "status=REOPENED",
-            "status=REJECTED_SPAM"
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
           ],
           "forbidden": []
         }
@@ -29492,19 +29591,19 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-irincidentcontroller-67b6f026f6-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-irincidentcontroller-61a887d0de-named-function-prerequisite"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-irincidentcontroller-67b6f026f6-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-irincidentcontroller-61a887d0de-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-irincidentcontroller-67b6f026f6-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-irincidentcontroller-61a887d0de-unverified-execution-path"
         }
       ],
       "implementationStatus": "blocked",
@@ -29638,6 +29737,8 @@
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-incident-controller-ts-add-ir-incident-event",
+        "workflow-http-backend-src-controllers-ir-incident-controller-ts-get-ir-incident",
+        "workflow-http-backend-src-controllers-ir-incident-controller-ts-list-ir-incidents",
         "workflow-http-backend-src-controllers-ir-incident-controller-ts-review-ir-incident-customer-trust",
         "workflow-http-backend-src-controllers-ir-incident-controller-ts-send-ir-incident-communication"
       ],
@@ -29673,14 +29774,39 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
+        "command-incident-select-7db7d24917f6",
         "command-incident-select-870a0f430208",
         "command-incident-select-a82269aceabf",
-        "command-incident-select-b5a5aa6959be"
+        "command-incident-select-b5a5aa6959be",
+        "command-incident-select-ff41ff8a7c43"
       ],
       "tenantScopeModel": [
         "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
       ],
       "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-incident-select-7db7d24917f6",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=NEW",
+            "status=TRIAGED",
+            "status=TRIAGE",
+            "status=INVESTIGATING",
+            "status=CONTAINMENT",
+            "status=ERADICATION",
+            "status=RECOVERY",
+            "status=AWAITING_CUSTOMER",
+            "status=AWAITING_LICENSEE",
+            "status=MITIGATED",
+            "status=RESOLVED",
+            "status=CLOSED",
+            "status=REOPENED",
+            "status=REJECTED_SPAM"
+          ],
+          "forbidden": []
+        },
         {
           "commandRuleId": "command-incident-select-870a0f430208",
           "columns": [
@@ -29729,6 +29855,29 @@
         },
         {
           "commandRuleId": "command-incident-select-b5a5aa6959be",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=NEW",
+            "status=TRIAGED",
+            "status=TRIAGE",
+            "status=INVESTIGATING",
+            "status=CONTAINMENT",
+            "status=ERADICATION",
+            "status=RECOVERY",
+            "status=AWAITING_CUSTOMER",
+            "status=AWAITING_LICENSEE",
+            "status=MITIGATED",
+            "status=RESOLVED",
+            "status=CLOSED",
+            "status=REOPENED",
+            "status=REJECTED_SPAM"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-incident-select-ff41ff8a7c43",
           "columns": [
             "status"
           ],
@@ -29958,7 +30107,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-irpolicycontroller-965feee510",
+      "id": "family-account-and-security-mutations-irpolicycontroller-8504c2701a",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-http-backend-src-controllers-ir-policy-controller-ts-list-ir-policies"
@@ -29982,7 +30131,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -30013,13 +30162,13 @@
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-irpolicycontroller-965feee510-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-irpolicycontroller-8504c2701a-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-irpolicycontroller-965feee510-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-irpolicycontroller-8504c2701a-unverified-execution-path"
         }
       ],
       "implementationStatus": "blocked",
@@ -32404,6 +32553,123 @@
       }
     },
     {
+      "id": "family-account-and-security-mutations-notificationservice-8c7b5c293e",
+      "category": "account and security mutations",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-notification-service-ts-notify-incident-lifecycle"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/notificationService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-incident"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "operator",
+        "platform-admin"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified",
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-incident-select-217b37df4742"
+      ],
+      "tenantScopeModel": [
+        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-incident-select-217b37df4742",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=NEW",
+            "status=TRIAGED",
+            "status=TRIAGE",
+            "status=INVESTIGATING",
+            "status=CONTAINMENT",
+            "status=ERADICATION",
+            "status=RECOVERY",
+            "status=AWAITING_CUSTOMER",
+            "status=AWAITING_LICENSEE",
+            "status=MITIGATED",
+            "status=RESOLVED",
+            "status=CLOSED",
+            "status=REOPENED",
+            "status=REJECTED_SPAM"
+          ],
+          "forbidden": []
+        }
+      ],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "critical",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "named-function-prerequisite",
+          "reason": "At least one command rule requires a named function boundary.",
+          "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
+          "id": "blocker-family-account-and-security-mutations-notificationservice-8c7b5c293e-named-function-prerequisite"
+        },
+        {
+          "code": "unresolved-boundary",
+          "reason": "The workflow authorization-boundary type is unresolved.",
+          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
+          "id": "blocker-family-account-and-security-mutations-notificationservice-8c7b5c293e-unresolved-boundary"
+        },
+        {
+          "code": "unreviewed-scope",
+          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
+          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
+          "id": "blocker-family-account-and-security-mutations-notificationservice-8c7b5c293e-unreviewed-scope"
+        },
+        {
+          "code": "unverified-execution-path",
+          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
+          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
+          "id": "blocker-family-account-and-security-mutations-notificationservice-8c7b5c293e-unverified-execution-path"
+        },
+        {
+          "code": "unverified-root-call-chain",
+          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
+          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
+          "id": "blocker-family-account-and-security-mutations-notificationservice-8c7b5c293e-unverified-root-call-chain"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
       "id": "family-account-and-security-mutations-notificationservice-98e9f10a07",
       "category": "account and security mutations",
       "workflowIds": [
@@ -32643,122 +32909,6 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-notificationservice-bc16571eb5",
-      "category": "account and security mutations",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-notification-service-ts-notify-incident-lifecycle"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/notificationService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-incident"
-      ],
-      "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
-      ],
-      "pendingActorClasses": [],
-      "pendingActorBlockers": [],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-incident-select-217b37df4742"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-incident-select-217b37df4742",
-          "columns": [
-            "status"
-          ],
-          "allowed": [
-            "status=NEW",
-            "status=TRIAGED",
-            "status=TRIAGE",
-            "status=INVESTIGATING",
-            "status=CONTAINMENT",
-            "status=ERADICATION",
-            "status=RECOVERY",
-            "status=AWAITING_CUSTOMER",
-            "status=AWAITING_LICENSEE",
-            "status=MITIGATED",
-            "status=RESOLVED",
-            "status=CLOSED",
-            "status=REOPENED",
-            "status=REJECTED_SPAM"
-          ],
-          "forbidden": []
-        }
-      ],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
-      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
-      "riskLevel": "critical",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "named-function-prerequisite",
-          "reason": "At least one command rule requires a named function boundary.",
-          "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-notificationservice-bc16571eb5-named-function-prerequisite"
-        },
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-account-and-security-mutations-notificationservice-bc16571eb5-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-notificationservice-bc16571eb5-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-notificationservice-bc16571eb5-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-notificationservice-bc16571eb5-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-account-and-security-mutations-policyengineservice-6d0bb8bc90",
       "category": "account and security mutations",
       "workflowIds": [
@@ -32874,6 +33024,96 @@
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
           "id": "blocker-family-account-and-security-mutations-policyengineservice-6d0bb8bc90-unverified-root-call-chain"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-account-and-security-mutations-policyruleengineservice-0475589694",
+      "category": "account and security mutations",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-ir-policy-rule-engine-service-ts-resolve-active-rules-for-licensee"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/ir/policyRuleEngineService.ts"
+      ],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-licensee",
+        "table-policy-rule"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "operator",
+        "platform-admin"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified",
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-licensee-select-808a0114622f",
+        "command-policy-rule-select-808a0114622f"
+      ],
+      "tenantScopeModel": [
+        "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+        "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+      ],
+      "lifecycleStateRequirements": [],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "critical",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "unresolved-boundary",
+          "reason": "The workflow authorization-boundary type is unresolved.",
+          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
+          "id": "blocker-family-account-and-security-mutations-policyruleengineservice-0475589694-unresolved-boundary"
+        },
+        {
+          "code": "unreviewed-scope",
+          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
+          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
+          "id": "blocker-family-account-and-security-mutations-policyruleengineservice-0475589694-unreviewed-scope"
+        },
+        {
+          "code": "unverified-execution-path",
+          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
+          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
+          "id": "blocker-family-account-and-security-mutations-policyruleengineservice-0475589694-unverified-execution-path"
+        },
+        {
+          "code": "unverified-root-call-chain",
+          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
+          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
+          "id": "blocker-family-account-and-security-mutations-policyruleengineservice-0475589694-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -33009,95 +33249,6 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-policyruleengineservice-a01e36772f",
-      "category": "account and security mutations",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-ir-policy-rule-engine-service-ts-resolve-active-rules-for-licensee"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "internal"
-      ],
-      "controllerFiles": [],
-      "serviceFiles": [
-        "backend/src/services/ir/policyRuleEngineService.ts"
-      ],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-licensee",
-        "table-policy-rule"
-      ],
-      "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
-      ],
-      "pendingActorClasses": [],
-      "pendingActorBlockers": [],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-licensee-select-808a0114622f",
-        "command-policy-rule-select-808a0114622f"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-        "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
-      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
-      "riskLevel": "critical",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "unresolved-boundary",
-          "reason": "The workflow authorization-boundary type is unresolved.",
-          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-account-and-security-mutations-policyruleengineservice-a01e36772f-unresolved-boundary"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-policyruleengineservice-a01e36772f-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-policyruleengineservice-a01e36772f-unverified-execution-path"
-        },
-        {
-          "code": "unverified-root-call-chain",
-          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
-          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-policyruleengineservice-a01e36772f-unverified-root-call-chain"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
       "id": "family-account-and-security-mutations-publicintakecontroller-2a15e15280",
       "category": "account and security mutations",
       "workflowIds": [
@@ -33220,7 +33371,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-publicintakecontroller-47353d7677",
+      "id": "family-account-and-security-mutations-publicintakecontroller-746bc99b1b",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-http-backend-src-controllers-public-intake-controller-ts-list-request-access-records"
@@ -33244,7 +33395,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
-        "password-verified"
+        "mfa-verified"
       ],
       "canonicalContextKeys": [
         "app.user_id",
@@ -33293,19 +33444,19 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-publicintakecontroller-47353d7677-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-publicintakecontroller-746bc99b1b-named-function-prerequisite"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-publicintakecontroller-47353d7677-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-publicintakecontroller-746bc99b1b-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-publicintakecontroller-47353d7677-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-publicintakecontroller-746bc99b1b-unverified-execution-path"
         }
       ],
       "implementationStatus": "blocked",
@@ -34599,7 +34750,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-soarservice-f7755d215d",
+      "id": "family-account-and-security-mutations-soarservice-13c16f03c3",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-internal-backend-src-services-soar-service-ts-run-incident-auto-containment"
@@ -34625,6 +34776,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -34680,31 +34832,31 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-soarservice-f7755d215d-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-soarservice-13c16f03c3-named-function-prerequisite"
         },
         {
           "code": "unresolved-boundary",
           "reason": "The workflow authorization-boundary type is unresolved.",
           "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
-          "id": "blocker-family-account-and-security-mutations-soarservice-f7755d215d-unresolved-boundary"
+          "id": "blocker-family-account-and-security-mutations-soarservice-13c16f03c3-unresolved-boundary"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-soarservice-f7755d215d-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-soarservice-13c16f03c3-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-soarservice-f7755d215d-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-soarservice-13c16f03c3-unverified-execution-path"
         },
         {
           "code": "unverified-root-call-chain",
           "reason": "The internal function is not linked to one verified root transaction in the manifest.",
           "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
-          "id": "blocker-family-account-and-security-mutations-soarservice-f7755d215d-unverified-root-call-chain"
+          "id": "blocker-family-account-and-security-mutations-soarservice-13c16f03c3-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -34808,123 +34960,6 @@
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
           "id": "blocker-family-account-and-security-mutations-supportissuecontroller-386402382c-unverified-execution-path"
-        }
-      ],
-      "implementationStatus": "blocked",
-      "changeSizeGuard": {
-        "maximumProductionFiles": 15,
-        "maximumTestFiles": 10,
-        "maximumNetChangedLines": 2500
-      }
-    },
-    {
-      "id": "family-account-and-security-mutations-supportissuecontroller-d5f250602e",
-      "category": "account and security mutations",
-      "workflowIds": [
-        "workflow-http-backend-src-controllers-support-issue-controller-ts-list-support-issue-reports",
-        "workflow-http-backend-src-controllers-support-issue-controller-ts-serve-support-issue-screenshot"
-      ],
-      "reclassifiedFromFamilyIds": [],
-      "executionSurfaces": [
-        "http"
-      ],
-      "controllerFiles": [
-        "backend/src/controllers/supportIssueController.ts"
-      ],
-      "serviceFiles": [],
-      "repositoryFiles": [],
-      "protectedTables": [
-        "table-support-issue-report"
-      ],
-      "actorClasses": [
-        "licensee-admin",
-        "operator",
-        "platform-admin"
-      ],
-      "pendingActorClasses": [],
-      "pendingActorBlockers": [],
-      "runtimeIdentity": "identity-authenticated-app",
-      "requiredAssurance": [
-        "password-verified"
-      ],
-      "canonicalContextKeys": [
-        "app.user_id",
-        "app.role",
-        "app.organization_id",
-        "app.licensee_id",
-        "app.manufacturer_id",
-        "app.auth_assurance",
-        "app.request_id",
-        "app.purpose"
-      ],
-      "readWriteCommandRuleIds": [
-        "command-support-issue-report-select-3933cbc5a557",
-        "command-support-issue-report-select-9c4ad8bcc0b0"
-      ],
-      "tenantScopeModel": [
-        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
-      ],
-      "lifecycleStateRequirements": [
-        {
-          "commandRuleId": "command-support-issue-report-select-3933cbc5a557",
-          "columns": [
-            "acknowledgementEmailDeliveryStatus",
-            "emailDeliveryStatus",
-            "status"
-          ],
-          "allowed": [
-            "acknowledgementEmailDeliveryStatus=NULL",
-            "acknowledgementEmailDeliveryStatus=SERVER_TIMESTAMP_SET",
-            "emailDeliveryStatus=NULL",
-            "emailDeliveryStatus=SERVER_TIMESTAMP_SET",
-            "status=NULL",
-            "status=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        },
-        {
-          "commandRuleId": "command-support-issue-report-select-9c4ad8bcc0b0",
-          "columns": [
-            "acknowledgementEmailDeliveryStatus",
-            "emailDeliveryStatus",
-            "status"
-          ],
-          "allowed": [
-            "acknowledgementEmailDeliveryStatus=NULL",
-            "acknowledgementEmailDeliveryStatus=SERVER_TIMESTAMP_SET",
-            "emailDeliveryStatus=NULL",
-            "emailDeliveryStatus=SERVER_TIMESTAMP_SET",
-            "status=NULL",
-            "status=SERVER_TIMESTAMP_SET"
-          ],
-          "forbidden": []
-        }
-      ],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
-      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
-      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
-      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
-      "riskLevel": "critical",
-      "automationEligibility": "blocked",
-      "governingBoundaryIds": [],
-      "blockers": [
-        {
-          "code": "named-function-prerequisite",
-          "reason": "At least one command rule requires a named function boundary.",
-          "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-supportissuecontroller-d5f250602e-named-function-prerequisite"
-        },
-        {
-          "code": "unreviewed-scope",
-          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
-          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-supportissuecontroller-d5f250602e-unreviewed-scope"
-        },
-        {
-          "code": "unverified-execution-path",
-          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
-          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-supportissuecontroller-d5f250602e-unverified-execution-path"
         }
       ],
       "implementationStatus": "blocked",
@@ -35047,6 +35082,124 @@
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
           "id": "blocker-family-account-and-security-mutations-supportissuecontroller-ee6ee0f26b-unverified-execution-path"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-account-and-security-mutations-supportissuecontroller-ef3d651dc6",
+      "category": "account and security mutations",
+      "workflowIds": [
+        "workflow-http-backend-src-controllers-support-issue-controller-ts-list-support-issue-reports",
+        "workflow-http-backend-src-controllers-support-issue-controller-ts-serve-support-issue-screenshot"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "http"
+      ],
+      "controllerFiles": [
+        "backend/src/controllers/supportIssueController.ts"
+      ],
+      "serviceFiles": [],
+      "repositoryFiles": [],
+      "protectedTables": [
+        "table-support-issue-report"
+      ],
+      "actorClasses": [
+        "licensee-admin",
+        "operator",
+        "platform-admin"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified",
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-support-issue-report-select-3933cbc5a557",
+        "command-support-issue-report-select-9c4ad8bcc0b0"
+      ],
+      "tenantScopeModel": [
+        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-support-issue-report-select-3933cbc5a557",
+          "columns": [
+            "acknowledgementEmailDeliveryStatus",
+            "emailDeliveryStatus",
+            "status"
+          ],
+          "allowed": [
+            "acknowledgementEmailDeliveryStatus=NULL",
+            "acknowledgementEmailDeliveryStatus=SERVER_TIMESTAMP_SET",
+            "emailDeliveryStatus=NULL",
+            "emailDeliveryStatus=SERVER_TIMESTAMP_SET",
+            "status=NULL",
+            "status=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-support-issue-report-select-9c4ad8bcc0b0",
+          "columns": [
+            "acknowledgementEmailDeliveryStatus",
+            "emailDeliveryStatus",
+            "status"
+          ],
+          "allowed": [
+            "acknowledgementEmailDeliveryStatus=NULL",
+            "acknowledgementEmailDeliveryStatus=SERVER_TIMESTAMP_SET",
+            "emailDeliveryStatus=NULL",
+            "emailDeliveryStatus=SERVER_TIMESTAMP_SET",
+            "status=NULL",
+            "status=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        }
+      ],
+      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "critical",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "named-function-prerequisite",
+          "reason": "At least one command rule requires a named function boundary.",
+          "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
+          "id": "blocker-family-account-and-security-mutations-supportissuecontroller-ef3d651dc6-named-function-prerequisite"
+        },
+        {
+          "code": "unreviewed-scope",
+          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
+          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
+          "id": "blocker-family-account-and-security-mutations-supportissuecontroller-ef3d651dc6-unreviewed-scope"
+        },
+        {
+          "code": "unverified-execution-path",
+          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
+          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
+          "id": "blocker-family-account-and-security-mutations-supportissuecontroller-ef3d651dc6-unverified-execution-path"
         }
       ],
       "implementationStatus": "blocked",
@@ -35672,7 +35825,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-usercontroller-376a5e41ca",
+      "id": "family-account-and-security-mutations-usercontroller-92a69bb20f",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-http-backend-src-controllers-user-controller-ts-get-manufacturers",
@@ -35698,6 +35851,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [
@@ -35767,19 +35921,19 @@
           "code": "named-function-prerequisite",
           "reason": "At least one command rule requires a named function boundary.",
           "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
-          "id": "blocker-family-account-and-security-mutations-usercontroller-376a5e41ca-named-function-prerequisite"
+          "id": "blocker-family-account-and-security-mutations-usercontroller-92a69bb20f-named-function-prerequisite"
         },
         {
           "code": "unreviewed-scope",
           "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
           "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
-          "id": "blocker-family-account-and-security-mutations-usercontroller-376a5e41ca-unreviewed-scope"
+          "id": "blocker-family-account-and-security-mutations-usercontroller-92a69bb20f-unreviewed-scope"
         },
         {
           "code": "unverified-execution-path",
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
-          "id": "blocker-family-account-and-security-mutations-usercontroller-376a5e41ca-unverified-execution-path"
+          "id": "blocker-family-account-and-security-mutations-usercontroller-92a69bb20f-unverified-execution-path"
         }
       ],
       "implementationStatus": "blocked",
@@ -39440,6 +39594,7 @@
       "pendingActorBlockers": [],
       "runtimeIdentity": "identity-authenticated-app",
       "requiredAssurance": [
+        "mfa-verified",
         "password-verified"
       ],
       "canonicalContextKeys": [

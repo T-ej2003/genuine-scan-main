@@ -40,7 +40,8 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
   }
   for (const profile of namedProfiles) {
     ensure(profile.workflowId && profile.route && profile.routes?.length && profile.actorClass, `${profile.id} lacks workflow, routes or actor`);
-    ensure(profile.functionSignature?.startsWith("app_rls.") && profile.minimumAssurance && profile.purposeCodes?.length && profile.scopeType, `${profile.id} lacks an exact named-function boundary`);
+    const functionSignatures = profile.functionSignatures || [profile.functionSignature];
+    ensure(functionSignatures.length > 0 && functionSignatures.every((signature) => signature?.startsWith("app_rls.")) && profile.minimumAssurance && profile.purposeCodes?.length && profile.scopeType, `${profile.id} lacks an exact named-function boundary`);
     for (const ruleId of profile.commandRuleIds || []) {
       const rule = rules.get(ruleId);
       ensure(rule, `${profile.id} references unknown command rule ${ruleId}`);
@@ -49,6 +50,10 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
       const required = rule.minimumAssuranceByActorClass?.[profile.actorClass] || rule.minimumAssurance;
       ensure(required === profile.minimumAssurance, `${profile.id}/${ruleId} weakens actor-specific assurance`);
       ensure(rule.status === "architecture-resolved" && rule.requiresNamedFunction, `${profile.id}/${ruleId} is not a named-function rule`);
+      if (rule.namedFunctionSignatures) ensure(
+        JSON.stringify([...functionSignatures].sort()) === JSON.stringify([...rule.namedFunctionSignatures].sort()),
+        `${profile.id}/${ruleId} named-function set drifted`
+      );
     }
   }
   const dashboardProfiles = namedProfiles.filter((profile) => profile.id.startsWith("sql-profile-dashboard-snapshot-"));

@@ -75,7 +75,7 @@ test("implemented protected workflows use only typed transaction clients", () =>
   const workflows = manifests().workflows;
   const scan = scanProductionAccess();
   const result = validateProtectedTransactionClients(workflows, scan);
-  assert.equal(result.workflows, 7);
+  assert.equal(result.workflows, workflows.workflows.filter((workflow) => workflow.contextBoundaryStatus === "implemented" && workflow.sameTransactionGuarantee === true).length);
   assert(result.accesses > 0);
   for (const clientKind of ["global-prisma", "transaction-client", "unknown"]) {
     const candidate = structuredClone(scan);
@@ -146,11 +146,11 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   validateSystemBoundaryContracts(systemBoundaries, workflows);
   validateContextBoundaryPlan(generated, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract);
   assert.equal(generated.workflowCount, 428);
-  assert.equal(generated.familyCount, 314);
+  assert.equal(generated.familyCount, 312);
   const count = (eligibility) => generated.families.filter((family) => family.automationEligibility === eligibility).reduce((total, family) => total + family.workflowIds.length, 0);
-  assert.equal(count("implemented"), 7);
+  assert.equal(count("implemented"), 14);
   assert.equal(count("contract-only"), 59);
-  assert.equal(count("blocked"), 362);
+  assert.equal(count("blocked"), 355);
   assert.equal(count("auto-implementable"), 0);
   const mfaDisableWorkflowId = "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa";
   const mfaDisableFamily = generated.families.find((family) => family.workflowIds.includes(mfaDisableWorkflowId));
@@ -430,7 +430,8 @@ test("command semantics mutation guards fail closed", () => {
       const table = tableById.get(rule.tableId);
       if (["INSERT", "UPDATE"].includes(rule.command)) for (const column of [...table.tenantKeyColumns, ...table.actorKeyColumns]) assert(rule.protectedColumns.includes(column), "ownership mutable");
       if (table.primaryCategory === "security-sensitive" && rule.command === "SELECT") for (const column of table.sensitiveColumns) {
-        assert(!rule.allowedColumns.includes(column) || (rule.publicFunctionId && rule.requiresNamedFunction), "secret selectable");
+        const exactFunctionBoundary = rule.requiresNamedFunction && (rule.publicFunctionId || rule.namedFunctionSignatures?.length);
+        assert(!rule.allowedColumns.includes(column) || exactFunctionBoundary, "secret selectable");
       }
       assert(!(table.appendOnly && rule.command === "UPDATE" && rule.authorizationBoundary !== "prohibited"), "append-only update");
       if (rule.actorClasses.includes("licensee-admin") && ["User", "Invite"].includes(table.prismaModel) && ["INSERT", "UPDATE"].includes(rule.command)) assert(rule.protectedColumns.includes("role"), "platform role assignable");
@@ -452,7 +453,7 @@ test("command semantics mutation guards fail closed", () => {
     assert.throws(() => verify(candidate), pattern);
   };
   rejects((rule) => rule.command === "INSERT" && tableById.get(rule.tableId).tenantKeyColumns.length, (rule) => { rule.protectedColumns = rule.protectedColumns.filter((column) => !tableById.get(rule.tableId).tenantKeyColumns.includes(column)); }, /ownership mutable/);
-  rejects((rule) => rule.command === "SELECT" && !rule.publicFunctionId && tableById.get(rule.tableId).primaryCategory === "security-sensitive" && tableById.get(rule.tableId).sensitiveColumns.length, (rule) => { rule.allowedColumns.push(tableById.get(rule.tableId).sensitiveColumns[0]); }, /secret selectable/);
+  rejects((rule) => rule.command === "SELECT" && !rule.publicFunctionId && !rule.namedFunctionSignatures?.length && tableById.get(rule.tableId).primaryCategory === "security-sensitive" && tableById.get(rule.tableId).sensitiveColumns.length, (rule) => { rule.allowedColumns.push(tableById.get(rule.tableId).sensitiveColumns[0]); }, /secret selectable/);
   rejects((rule) => rule.command === "SELECT" && tableById.get(rule.tableId).appendOnly, (rule) => { rule.command = "UPDATE"; rule.authorizationBoundary = "ordinary-rls"; }, /append-only update/);
   rejects((rule) => rule.actorClasses.includes("licensee-admin") && ["INSERT", "UPDATE"].includes(rule.command) && ["User", "Invite"].includes(tableById.get(rule.tableId).prismaModel), (rule) => { rule.protectedColumns = rule.protectedColumns.filter((column) => column !== "role"); }, /platform role assignable/);
   rejects((rule) => rule.actorClasses.includes("platform-admin"), (rule) => { rule.minimumAssuranceByActorClass["platform-admin"] = "password-verified"; }, /platform MFA missing/);
@@ -730,7 +731,7 @@ test("clean-room full-RLS foundation remains exact and fail closed", () => {
   assert.deepEqual(validateGeneratedPackage({ manifest: generated, policies, privileges, commandSemantics }), {
     tables: 77,
     forceRlsTargets: 75,
-    policies: 48,
+    policies: 46,
     directPolicySlices: 34,
     columnPrivilegeCells: 78,
   });

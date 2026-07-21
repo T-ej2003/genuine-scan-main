@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='40c6c8cee5cba8ae7f912ee3eae289420d40219366e44c921ae8d4e0601d86cd'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:40c6c8cee5cba8ae7f912ee3eae289420d40219366e44c921ae8d4e0601d86cd'
+    AND source_contract_sha256='5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6'
     AND administrator_role='certification-administrator'
     AND phase='context-helpers-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'runtime grants lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:40c6c8cee5cba8ae7f912ee3eae289420d40219366e44c921ae8d4e0601d86cd')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
