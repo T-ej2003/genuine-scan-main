@@ -1,0 +1,2675 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": [
+    "backend/src",
+    "scripts/rls/lib/named-sql-function-contracts.mjs"
+  ],
+  "calls": [
+    {
+      "functionName": "app_rls.revalidate_authenticated_actor",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/actorRevalidationRepository.ts",
+      "sourceFunction": "revalidateAuthenticatedActor",
+      "line": 55
+    },
+    {
+      "functionName": "app_rls.record_auth_session_risk_signal",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "sourceFunction": "recordAuthSessionRiskSignal",
+      "line": 114
+    },
+    {
+      "functionName": "app_rls.update_authenticated_profile",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "sourceFunction": "updateAuthenticatedProfile",
+      "line": 134
+    },
+    {
+      "functionName": "app_rls.request_authenticated_email_change",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "sourceFunction": "prepareAuthenticatedEmailChange",
+      "line": 157
+    },
+    {
+      "functionName": "app_rls.prove_authenticated_password_step_up",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "sourceFunction": "proveAuthenticatedPasswordStepUp",
+      "line": 184
+    },
+    {
+      "functionName": "app_rls.require_recent_sensitive_session",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "sourceFunction": "requireRecentSensitiveSession",
+      "line": 199
+    },
+    {
+      "functionName": "app_rls.change_authenticated_password",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "sourceFunction": "changeAuthenticatedPassword",
+      "line": 215
+    },
+    {
+      "functionName": "app_rls.load_authenticated_actor",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "sourceFunction": "loadAuthenticatedActor",
+      "line": 43
+    },
+    {
+      "functionName": "app_rls.load_authenticated_password_actor",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "sourceFunction": "loadAuthenticatedPasswordActor",
+      "line": 50
+    },
+    {
+      "functionName": "app_rls.require_recent_mfa_session",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "sourceFunction": "requireRecentMfaSession",
+      "line": 72
+    },
+    {
+      "functionName": "app_rls.load_recent_auth_session_risk_inputs",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+      "sourceFunction": "loadRecentAuthSessionRiskInputs",
+      "line": 88
+    },
+    {
+      "functionName": "app_rls.prepare_invitation",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/invitationRepository.ts",
+      "sourceFunction": "prepareInvitation",
+      "line": 178
+    },
+    {
+      "functionName": "app_auth.record_password_failure",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+      "sourceFunction": "recordPasswordLoginFailure",
+      "line": 116
+    },
+    {
+      "functionName": "app_auth.request_password_reset",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+      "sourceFunction": "requestPasswordResetBoundary",
+      "line": 146
+    },
+    {
+      "functionName": "app_auth.consume_password_reset_token",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+      "sourceFunction": "consumePasswordResetBoundary",
+      "line": 174
+    },
+    {
+      "functionName": "app_auth.consume_email_verification_token",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+      "sourceFunction": "consumeEmailVerificationBoundary",
+      "line": 197
+    },
+    {
+      "functionName": "app_auth.lookup_invitation_token",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+      "sourceFunction": "lookupInvitationBoundary",
+      "line": 217
+    },
+    {
+      "functionName": "app_auth.consume_invitation_token",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+      "sourceFunction": "consumeInvitationBoundary",
+      "line": 259
+    },
+    {
+      "functionName": "app_auth.lookup_password_user",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+      "sourceFunction": "lookupPasswordBootstrapUser",
+      "line": 93
+    },
+    {
+      "functionName": "app_auth.claim_refresh_token_rotation",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "claimRefreshTokenRotation",
+      "line": 139
+    },
+    {
+      "functionName": "app_auth.load_refresh_session_state",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "loadRefreshSessionState",
+      "line": 269
+    },
+    {
+      "functionName": "app_auth.create_refresh_mfa_challenge",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "createRefreshMfaChallengeRecord",
+      "line": 352
+    },
+    {
+      "functionName": "app_rls.create_refresh_token",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "createRefreshTokenRecord",
+      "line": 418
+    },
+    {
+      "functionName": "app_rls.find_refresh_token_by_hashes",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "findRefreshTokenByHashes",
+      "line": 432
+    },
+    {
+      "functionName": "app_rls.find_refresh_token_by_id",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "findRefreshTokenByIdentifier",
+      "line": 440
+    },
+    {
+      "functionName": "app_rls.list_active_refresh_tokens",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "listActiveRefreshTokenRecords",
+      "line": 453
+    },
+    {
+      "functionName": "app_rls.revoke_refresh_token_by_hashes",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "revokeRefreshTokenByHashes",
+      "line": 477
+    },
+    {
+      "functionName": "app_rls.revoke_all_refresh_tokens",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "revokeAllRefreshTokenRecords",
+      "line": 488
+    },
+    {
+      "functionName": "app_rls.revoke_password_only_refresh_tokens",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "revokePasswordOnlyRefreshTokenRecords",
+      "line": 499
+    },
+    {
+      "functionName": "app_rls.revoke_refresh_token_by_id",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "revokeRefreshTokenByIdentifier",
+      "line": 510
+    },
+    {
+      "functionName": "app_auth.revoke_refresh_token_scope",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "revokeRefreshTokenRotationScope",
+      "line": 533
+    },
+    {
+      "functionName": "app_auth.complete_refresh_token_rotation",
+      "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+      "sourceFunction": "completeRefreshTokenRotation",
+      "line": 564
+    },
+    {
+      "functionName": "app_rls.session_c_create_licensee",
+      "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+      "sourceFunction": "createLicenseeInTransaction",
+      "line": 132
+    },
+    {
+      "functionName": "app_rls.session_c_update_licensee",
+      "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+      "sourceFunction": "updateLicenseeInTransaction",
+      "line": 140
+    },
+    {
+      "functionName": "app_rls.session_c_delete_licensee",
+      "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+      "sourceFunction": "deleteLicenseeInTransaction",
+      "line": 148
+    },
+    {
+      "functionName": "app_rls.session_c_create_user",
+      "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+      "sourceFunction": "createUserInTransaction",
+      "line": 156
+    },
+    {
+      "functionName": "app_rls.session_c_update_user",
+      "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+      "sourceFunction": "updateUserInTransaction",
+      "line": 164
+    },
+    {
+      "functionName": "app_rls.session_c_delete_user",
+      "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+      "sourceFunction": "deleteUserInTransaction",
+      "line": 172
+    },
+    {
+      "functionName": "app_rls.session_c_restore_manufacturer",
+      "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+      "sourceFunction": "restoreManufacturerInTransaction",
+      "line": 180
+    },
+    {
+      "functionName": "app_rls.session_c_upsert_manufacturer_licensee_link",
+      "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+      "sourceFunction": "upsertManufacturerLicenseeLinkInTransaction",
+      "line": 191
+    },
+    {
+      "functionName": "app_rls.c02_respond_fraud_report",
+      "sourceFile": "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
+      "sourceFunction": "respondToFraudReportInTransaction",
+      "line": 59
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_platform_actor_scope",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+      "sourceFunction": "revalidatePlatformActor",
+      "line": 130
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_actor_scope",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+      "sourceFunction": "revalidateActorAndScope",
+      "line": 168
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_incident_actor_scope",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+      "sourceFunction": "revalidateResourceActorAndScope",
+      "line": 207
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_policy_rule_actor_scope",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+      "sourceFunction": "revalidateResourceActorAndScope",
+      "line": 216
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+      "sourceFunction": "revalidateResourceActorAndScope",
+      "line": 225
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_incident_evidence_actor_scope",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+      "sourceFunction": "revalidateResourceActorAndScope",
+      "line": 234
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_incident_evidence_storage_actor_scope",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+      "sourceFunction": "revalidateResourceActorAndScope",
+      "line": 243
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_sensitive_approval_actor_scope",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+      "sourceFunction": "revalidateResourceActorAndScope",
+      "line": 252
+    },
+    {
+      "functionName": "app_rls.c03_create_sensitive_action_approval",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+      "sourceFunction": "createSensitiveApprovalInTransaction",
+      "line": 24
+    },
+    {
+      "functionName": "app_rls.c03_list_sensitive_action_approvals",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+      "sourceFunction": "listSensitiveApprovalsInTransaction",
+      "line": 34
+    },
+    {
+      "functionName": "app_rls.c03_approve_sensitive_action_approval",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+      "sourceFunction": "approveSensitiveApprovalInTransaction",
+      "line": 56
+    },
+    {
+      "functionName": "app_rls.c03_reject_sensitive_action_approval",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+      "sourceFunction": "rejectSensitiveApprovalInTransaction",
+      "line": 71
+    },
+    {
+      "functionName": "app_rls.c03_complete_compliance_pack_rebuild",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+      "sourceFunction": "completeCompliancePackRebuildInTransaction",
+      "line": 106
+    },
+    {
+      "functionName": "app_rls.c03_start_compliance_pack_job",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+      "sourceFunction": "startCompliancePackJobInTransaction",
+      "line": 26
+    },
+    {
+      "functionName": "app_rls.c03_complete_compliance_pack_job",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+      "sourceFunction": "completeCompliancePackJobInTransaction",
+      "line": 42
+    },
+    {
+      "functionName": "app_rls.c03_fail_compliance_pack_job",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+      "sourceFunction": "failCompliancePackJobInTransaction",
+      "line": 54
+    },
+    {
+      "functionName": "app_rls.c03_get_compliance_pack_job",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+      "sourceFunction": "loadCompliancePackJobInTransaction",
+      "line": 94
+    },
+    {
+      "functionName": "app_rls.c03_generate_compliance_report",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+      "sourceFunction": "generateComplianceReportInTransaction",
+      "line": 107
+    },
+    {
+      "functionName": "app_rls.c03_upsert_tenant_feature_flag",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+      "sourceFunction": "upsertTenantFeatureFlagInTransaction",
+      "line": 37
+    },
+    {
+      "functionName": "app_rls.c03_get_or_create_retention_policy",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+      "sourceFunction": "getOrCreateRetentionPolicyInTransaction",
+      "line": 49
+    },
+    {
+      "functionName": "app_rls.c03_update_retention_policy",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+      "sourceFunction": "updateRetentionPolicyInTransaction",
+      "line": 60
+    },
+    {
+      "functionName": "app_rls.c03_run_retention_lifecycle",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+      "sourceFunction": "runRetentionLifecycleInTransaction",
+      "line": 82
+    },
+    {
+      "functionName": "app_rls.c03_build_incident_evidence_audit_snapshot",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+      "sourceFunction": "loadIncidentEvidenceAuditSnapshotInTransaction",
+      "line": 96
+    },
+    {
+      "functionName": "app_rls.c03_list_incidents",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "listIncidentsInTransaction",
+      "line": 105
+    },
+    {
+      "functionName": "app_rls.c03_patch_incident",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "patchIncidentInTransaction",
+      "line": 121
+    },
+    {
+      "functionName": "app_rls.c03_add_incident_evidence",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "addIncidentEvidenceInTransaction",
+      "line": 134
+    },
+    {
+      "functionName": "app_rls.c03_get_incident_evidence_file_by_storage_key",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "loadIncidentEvidenceFileInTransaction",
+      "line": 149
+    },
+    {
+      "functionName": "app_rls.c03_create_ir_incident",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "createIrIncidentInTransaction",
+      "line": 161
+    },
+    {
+      "functionName": "app_rls.c03_get_ir_incident_detail",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "getIrIncidentDetailInTransaction",
+      "line": 176
+    },
+    {
+      "functionName": "app_rls.c03_review_incident_customer_trust",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "reviewIncidentCustomerTrustInTransaction",
+      "line": 191
+    },
+    {
+      "functionName": "app_rls.c03_prepare_incident_communication",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "prepareIncidentCommunicationInTransaction",
+      "line": 207
+    },
+    {
+      "functionName": "app_rls.c03_record_incident_communication_delivery",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "recordIncidentCommunicationDeliveryInTransaction",
+      "line": 224
+    },
+    {
+      "functionName": "app_rls.c03_compute_incident_spam_signal",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "computeIncidentSpamSignalInTransaction",
+      "line": 24
+    },
+    {
+      "functionName": "app_rls.c03_compute_incident_severity",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "computeIncidentSeverityInTransaction",
+      "line": 41
+    },
+    {
+      "functionName": "app_rls.c03_create_public_incident_report",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "createPublicIncidentReportInTransaction",
+      "line": 64
+    },
+    {
+      "functionName": "app_rls.c03_record_incident_event",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "recordIncidentEventInTransaction",
+      "line": 82
+    },
+    {
+      "functionName": "app_rls.c03_get_incident_detail",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+      "sourceFunction": "getIncidentDetailInTransaction",
+      "line": 94
+    },
+    {
+      "functionName": "app_rls.c03_list_ir_alerts",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+      "sourceFunction": "listIncidentPolicyAlertsInTransaction",
+      "line": 139
+    },
+    {
+      "functionName": "app_rls.c03_link_ir_alert_incident",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+      "sourceFunction": "linkPolicyAlertToIncidentInTransaction",
+      "line": 174
+    },
+    {
+      "functionName": "app_rls.c03_list_policy_rules",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+      "sourceFunction": "listPolicyRulesInTransaction",
+      "line": 27
+    },
+    {
+      "functionName": "app_rls.c03_list_platform_policy_rules",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+      "sourceFunction": "listPlatformPolicyRulesInTransaction",
+      "line": 48
+    },
+    {
+      "functionName": "app_rls.c03_create_policy_rule",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+      "sourceFunction": "createPolicyRuleInTransaction",
+      "line": 77
+    },
+    {
+      "functionName": "app_rls.c03_update_policy_rule",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+      "sourceFunction": "updatePolicyRuleInTransaction",
+      "line": 89
+    },
+    {
+      "functionName": "app_rls.c03_assert_restricted_identity",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03RestrictedDatabase.ts",
+      "sourceFunction": "withRestrictedTransaction",
+      "line": 44
+    },
+    {
+      "functionName": "app_rls.platform_audit_log_details",
+      "sourceFile": "backend/src/services/auditLogQueryService.ts",
+      "sourceFunction": "queryAuditLogs",
+      "line": 167
+    },
+    {
+      "functionName": "app_rls.batch_inventory_rollups",
+      "sourceFile": "backend/src/services/batchAllocationService.ts",
+      "sourceFunction": "readRollups",
+      "line": 297
+    },
+    {
+      "functionName": "app_rls.batch_unassigned_ranges",
+      "sourceFile": "backend/src/services/batchAllocationService.ts",
+      "sourceFunction": "readUnassignedRanges",
+      "line": 319
+    },
+    {
+      "functionName": "app_rls.batch_status_fallback",
+      "sourceFile": "backend/src/services/batchAllocationService.ts",
+      "sourceFunction": "buildCountMaps",
+      "line": 370
+    },
+    {
+      "functionName": "app_rls.batch_operational_scope",
+      "sourceFile": "backend/src/services/batchAllocationService.ts",
+      "sourceFunction": "readBatches",
+      "line": 487
+    },
+    {
+      "functionName": "app_rls.batch_operational_rows",
+      "sourceFile": "backend/src/services/batchAllocationService.ts",
+      "sourceFunction": "readBatches",
+      "line": 497
+    },
+    {
+      "functionName": "app_rls.batch_operational_total",
+      "sourceFile": "backend/src/services/batchAllocationService.ts",
+      "sourceFunction": "readTotal",
+      "line": 512
+    },
+    {
+      "functionName": "app_rls.batch_operational_scope",
+      "sourceFile": "backend/src/services/batchAllocationService.ts",
+      "sourceFunction": "getBatchAllocationMap",
+      "line": 543
+    },
+    {
+      "functionName": "app_rls.batch_operational_rows",
+      "sourceFile": "backend/src/services/batchAllocationService.ts",
+      "sourceFunction": "getBatchAllocationMap",
+      "line": 553
+    },
+    {
+      "functionName": "app_rls.dashboard_snapshot_data",
+      "sourceFile": "backend/src/services/dashboardSnapshotService.ts",
+      "sourceFunction": "loadInventoryAggregate",
+      "line": 153
+    },
+    {
+      "functionName": "app_rls.dashboard_snapshot_scope",
+      "sourceFile": "backend/src/services/dashboardSnapshotService.ts",
+      "sourceFunction": "computeDashboardSnapshot",
+      "line": 193
+    },
+    {
+      "functionName": "app_rls.c02_fraud_report_network_details",
+      "sourceFile": "backend/src/services/fraudReportQueryService.ts",
+      "sourceFunction": "queryFraudReports",
+      "line": 88
+    },
+    {
+      "functionName": "app_rls.batch_reservable_qr_summaries",
+      "sourceFile": "backend/src/services/printReservationService.ts",
+      "sourceFunction": "listReservableQrCodeSummaries",
+      "line": 305
+    }
+  ],
+  "functions": [
+    {
+      "functionName": "app_auth.claim_refresh_token_rotation",
+      "schema": "app_auth",
+      "name": "claim_refresh_token_rotation",
+      "signature": "text[],timestamp without time zone,text",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "definitionKind": "fixture-only-non-production",
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_auth.claim_refresh_token_rotation",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "claimRefreshTokenRotation",
+          "line": 139
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.complete_refresh_token_rotation",
+      "schema": "app_auth",
+      "name": "complete_refresh_token_rotation",
+      "signature": "text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "definitionKind": "fixture-only-non-production",
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_auth.complete_refresh_token_rotation",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "completeRefreshTokenRotation",
+          "line": 564
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.consume_email_verification_token",
+      "schema": "app_auth",
+      "name": "consume_email_verification_token",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.consume_email_verification_token",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "consumeEmailVerificationBoundary",
+          "line": 197
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.consume_invitation_token",
+      "schema": "app_auth",
+      "name": "consume_invitation_token",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.consume_invitation_token",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "consumeInvitationBoundary",
+          "line": 259
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.consume_password_reset_token",
+      "schema": "app_auth",
+      "name": "consume_password_reset_token",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.consume_password_reset_token",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "consumePasswordResetBoundary",
+          "line": 174
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.create_refresh_mfa_challenge",
+      "schema": "app_auth",
+      "name": "create_refresh_mfa_challenge",
+      "signature": "text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "definitionKind": "fixture-only-non-production",
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_auth.create_refresh_mfa_challenge",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "createRefreshMfaChallengeRecord",
+          "line": 352
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.load_refresh_session_state",
+      "schema": "app_auth",
+      "name": "load_refresh_session_state",
+      "signature": "text,text[],text,text,timestamp without time zone,text",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "definitionKind": "fixture-only-non-production",
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_auth.load_refresh_session_state",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "loadRefreshSessionState",
+          "line": 269
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.lookup_invitation_token",
+      "schema": "app_auth",
+      "name": "lookup_invitation_token",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.lookup_invitation_token",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "lookupInvitationBoundary",
+          "line": 217
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.lookup_password_user",
+      "schema": "app_auth",
+      "name": "lookup_password_user",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.lookup_password_user",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "lookupPasswordBootstrapUser",
+          "line": 93
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.record_password_failure",
+      "schema": "app_auth",
+      "name": "record_password_failure",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.record_password_failure",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "recordPasswordLoginFailure",
+          "line": 116
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.request_password_reset",
+      "schema": "app_auth",
+      "name": "request_password_reset",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.request_password_reset",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+          "sourceFunction": "requestPasswordResetBoundary",
+          "line": 146
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.revoke_refresh_token_scope",
+      "schema": "app_auth",
+      "name": "revoke_refresh_token_scope",
+      "signature": "text,text[],text,text,text,timestamp without time zone",
+      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+      "definitionKind": "fixture-only-non-production",
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_auth.revoke_refresh_token_scope",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "revokeRefreshTokenRotationScope",
+          "line": 533
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.batch_inventory_rollups",
+      "schema": "app_rls",
+      "name": "batch_inventory_rollups",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.batch_inventory_rollups",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "readRollups",
+          "line": 297
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.batch_operational_rows",
+      "schema": "app_rls",
+      "name": "batch_operational_rows",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.batch_operational_rows",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "getBatchAllocationMap",
+          "line": 553
+        },
+        {
+          "functionName": "app_rls.batch_operational_rows",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "readBatches",
+          "line": 497
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.batch_operational_scope",
+      "schema": "app_rls",
+      "name": "batch_operational_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.batch_operational_scope",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "getBatchAllocationMap",
+          "line": 543
+        },
+        {
+          "functionName": "app_rls.batch_operational_scope",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "readBatches",
+          "line": 487
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.batch_operational_total",
+      "schema": "app_rls",
+      "name": "batch_operational_total",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.batch_operational_total",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "readTotal",
+          "line": 512
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.batch_reservable_qr_summaries",
+      "schema": "app_rls",
+      "name": "batch_reservable_qr_summaries",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.batch_reservable_qr_summaries",
+          "sourceFile": "backend/src/services/printReservationService.ts",
+          "sourceFunction": "listReservableQrCodeSummaries",
+          "line": 305
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.batch_status_fallback",
+      "schema": "app_rls",
+      "name": "batch_status_fallback",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.batch_status_fallback",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "buildCountMaps",
+          "line": 370
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.batch_unassigned_ranges",
+      "schema": "app_rls",
+      "name": "batch_unassigned_ranges",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.batch_unassigned_ranges",
+          "sourceFile": "backend/src/services/batchAllocationService.ts",
+          "sourceFunction": "readUnassignedRanges",
+          "line": 319
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c02_fraud_report_network_details",
+      "schema": "app_rls",
+      "name": "c02_fraud_report_network_details",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.c02_fraud_report_network_details",
+          "sourceFile": "backend/src/services/fraudReportQueryService.ts",
+          "sourceFunction": "queryFraudReports",
+          "line": 88
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c02_respond_fraud_report",
+      "schema": "app_rls",
+      "name": "c02_respond_fraud_report",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-audit-controller-ts-respond-to-fraud-report"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.c02_respond_fraud_report",
+          "sourceFile": "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
+          "sourceFunction": "respondToFraudReportInTransaction",
+          "line": 59
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_add_incident_evidence",
+      "schema": "app_rls",
+      "name": "c03_add_incident_evidence",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_add_incident_evidence",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "addIncidentEvidenceInTransaction",
+          "line": 134
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_approve_sensitive_action_approval",
+      "schema": "app_rls",
+      "name": "c03_approve_sensitive_action_approval",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_approve_sensitive_action_approval",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+          "sourceFunction": "approveSensitiveApprovalInTransaction",
+          "line": 56
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_assert_restricted_identity",
+      "schema": "app_rls",
+      "name": "c03_assert_restricted_identity",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_assert_restricted_identity",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03RestrictedDatabase.ts",
+          "sourceFunction": "withRestrictedTransaction",
+          "line": 44
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_build_incident_evidence_audit_snapshot",
+      "schema": "app_rls",
+      "name": "c03_build_incident_evidence_audit_snapshot",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_build_incident_evidence_audit_snapshot",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "loadIncidentEvidenceAuditSnapshotInTransaction",
+          "line": 96
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_complete_compliance_pack_job",
+      "schema": "app_rls",
+      "name": "c03_complete_compliance_pack_job",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_complete_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+          "sourceFunction": "completeCompliancePackJobInTransaction",
+          "line": 42
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_complete_compliance_pack_rebuild",
+      "schema": "app_rls",
+      "name": "c03_complete_compliance_pack_rebuild",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_complete_compliance_pack_rebuild",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+          "sourceFunction": "completeCompliancePackRebuildInTransaction",
+          "line": 106
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_compute_incident_severity",
+      "schema": "app_rls",
+      "name": "c03_compute_incident_severity",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_compute_incident_severity",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "computeIncidentSeverityInTransaction",
+          "line": 41
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_compute_incident_spam_signal",
+      "schema": "app_rls",
+      "name": "c03_compute_incident_spam_signal",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_compute_incident_spam_signal",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "computeIncidentSpamSignalInTransaction",
+          "line": 24
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_create_ir_incident",
+      "schema": "app_rls",
+      "name": "c03_create_ir_incident",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_create_ir_incident",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "createIrIncidentInTransaction",
+          "line": 161
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_create_policy_rule",
+      "schema": "app_rls",
+      "name": "c03_create_policy_rule",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_create_policy_rule",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "createPolicyRuleInTransaction",
+          "line": 77
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_create_public_incident_report",
+      "schema": "app_rls",
+      "name": "c03_create_public_incident_report",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-report-incident"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_create_public_incident_report",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "createPublicIncidentReportInTransaction",
+          "line": 64
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_create_sensitive_action_approval",
+      "schema": "app_rls",
+      "name": "c03_create_sensitive_action_approval",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_create_sensitive_action_approval",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+          "sourceFunction": "createSensitiveApprovalInTransaction",
+          "line": 24
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_fail_compliance_pack_job",
+      "schema": "app_rls",
+      "name": "c03_fail_compliance_pack_job",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_fail_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+          "sourceFunction": "failCompliancePackJobInTransaction",
+          "line": 54
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_generate_compliance_report",
+      "schema": "app_rls",
+      "name": "c03_generate_compliance_report",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_generate_compliance_report",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "generateComplianceReportInTransaction",
+          "line": 107
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_get_compliance_pack_job",
+      "schema": "app_rls",
+      "name": "c03_get_compliance_pack_job",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_get_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+          "sourceFunction": "loadCompliancePackJobInTransaction",
+          "line": 94
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_get_incident_detail",
+      "schema": "app_rls",
+      "name": "c03_get_incident_detail",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_get_incident_detail",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "getIncidentDetailInTransaction",
+          "line": 94
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_get_incident_evidence_file_by_storage_key",
+      "schema": "app_rls",
+      "name": "c03_get_incident_evidence_file_by_storage_key",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_get_incident_evidence_file_by_storage_key",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "loadIncidentEvidenceFileInTransaction",
+          "line": 149
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_get_ir_incident_detail",
+      "schema": "app_rls",
+      "name": "c03_get_ir_incident_detail",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_get_ir_incident_detail",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "getIrIncidentDetailInTransaction",
+          "line": 176
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_get_or_create_retention_policy",
+      "schema": "app_rls",
+      "name": "c03_get_or_create_retention_policy",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_get_or_create_retention_policy",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "getOrCreateRetentionPolicyInTransaction",
+          "line": 49
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_link_ir_alert_incident",
+      "schema": "app_rls",
+      "name": "c03_link_ir_alert_incident",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-ir-alert-controller-ts-patch-ir-alert"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_link_ir_alert_incident",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "linkPolicyAlertToIncidentInTransaction",
+          "line": 174
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_list_incidents",
+      "schema": "app_rls",
+      "name": "c03_list_incidents",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_list_incidents",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "listIncidentsInTransaction",
+          "line": 105
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_list_ir_alerts",
+      "schema": "app_rls",
+      "name": "c03_list_ir_alerts",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-ir-alert-controller-ts-list-ir-alerts"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_list_ir_alerts",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "listIncidentPolicyAlertsInTransaction",
+          "line": 139
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_list_platform_policy_rules",
+      "schema": "app_rls",
+      "name": "c03_list_platform_policy_rules",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_list_platform_policy_rules",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "listPlatformPolicyRulesInTransaction",
+          "line": 48
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_list_policy_rules",
+      "schema": "app_rls",
+      "name": "c03_list_policy_rules",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_list_policy_rules",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "listPolicyRulesInTransaction",
+          "line": 27
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_list_sensitive_action_approvals",
+      "schema": "app_rls",
+      "name": "c03_list_sensitive_action_approvals",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_list_sensitive_action_approvals",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+          "sourceFunction": "listSensitiveApprovalsInTransaction",
+          "line": 34
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_patch_incident",
+      "schema": "app_rls",
+      "name": "c03_patch_incident",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_patch_incident",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "patchIncidentInTransaction",
+          "line": 121
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_prepare_incident_communication",
+      "schema": "app_rls",
+      "name": "c03_prepare_incident_communication",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_prepare_incident_communication",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "prepareIncidentCommunicationInTransaction",
+          "line": 207
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_record_incident_communication_delivery",
+      "schema": "app_rls",
+      "name": "c03_record_incident_communication_delivery",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_record_incident_communication_delivery",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "recordIncidentCommunicationDeliveryInTransaction",
+          "line": 224
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_record_incident_event",
+      "schema": "app_rls",
+      "name": "c03_record_incident_event",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_record_incident_event",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "recordIncidentEventInTransaction",
+          "line": 82
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_reject_sensitive_action_approval",
+      "schema": "app_rls",
+      "name": "c03_reject_sensitive_action_approval",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_reject_sensitive_action_approval",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ApprovalRepository.ts",
+          "sourceFunction": "rejectSensitiveApprovalInTransaction",
+          "line": 71
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_actor_scope",
+      "schema": "app_rls",
+      "name": "c03_revalidate_actor_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_revalidate_actor_scope",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "revalidateActorAndScope",
+          "line": 168
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
+      "schema": "app_rls",
+      "name": "c03_revalidate_compliance_pack_job_actor_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "revalidateResourceActorAndScope",
+          "line": 225
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_incident_actor_scope",
+      "schema": "app_rls",
+      "name": "c03_revalidate_incident_actor_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_revalidate_incident_actor_scope",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "revalidateResourceActorAndScope",
+          "line": 207
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_incident_evidence_actor_scope",
+      "schema": "app_rls",
+      "name": "c03_revalidate_incident_evidence_actor_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_revalidate_incident_evidence_actor_scope",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "revalidateResourceActorAndScope",
+          "line": 234
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_incident_evidence_storage_actor_scope",
+      "schema": "app_rls",
+      "name": "c03_revalidate_incident_evidence_storage_actor_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_revalidate_incident_evidence_storage_actor_scope",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "revalidateResourceActorAndScope",
+          "line": 243
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_platform_actor_scope",
+      "schema": "app_rls",
+      "name": "c03_revalidate_platform_actor_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_revalidate_platform_actor_scope",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "revalidatePlatformActor",
+          "line": 130
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_policy_rule_actor_scope",
+      "schema": "app_rls",
+      "name": "c03_revalidate_policy_rule_actor_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_revalidate_policy_rule_actor_scope",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "revalidateResourceActorAndScope",
+          "line": 216
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_revalidate_sensitive_approval_actor_scope",
+      "schema": "app_rls",
+      "name": "c03_revalidate_sensitive_approval_actor_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_revalidate_sensitive_approval_actor_scope",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "revalidateResourceActorAndScope",
+          "line": 252
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_review_incident_customer_trust",
+      "schema": "app_rls",
+      "name": "c03_review_incident_customer_trust",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_review_incident_customer_trust",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+          "sourceFunction": "reviewIncidentCustomerTrustInTransaction",
+          "line": 191
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_run_retention_lifecycle",
+      "schema": "app_rls",
+      "name": "c03_run_retention_lifecycle",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_run_retention_lifecycle",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "runRetentionLifecycleInTransaction",
+          "line": 82
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_start_compliance_pack_job",
+      "schema": "app_rls",
+      "name": "c03_start_compliance_pack_job",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_start_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+          "sourceFunction": "startCompliancePackJobInTransaction",
+          "line": 26
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_update_policy_rule",
+      "schema": "app_rls",
+      "name": "c03_update_policy_rule",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_update_policy_rule",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03PolicyRepository.ts",
+          "sourceFunction": "updatePolicyRuleInTransaction",
+          "line": 89
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_update_retention_policy",
+      "schema": "app_rls",
+      "name": "c03_update_retention_policy",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_update_retention_policy",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "updateRetentionPolicyInTransaction",
+          "line": 60
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.c03_upsert_tenant_feature_flag",
+      "schema": "app_rls",
+      "name": "c03_upsert_tenant_feature_flag",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.c03_upsert_tenant_feature_flag",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
+          "sourceFunction": "upsertTenantFeatureFlagInTransaction",
+          "line": 37
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.change_authenticated_password",
+      "schema": "app_rls",
+      "name": "change_authenticated_password",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.change_authenticated_password",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "changeAuthenticatedPassword",
+          "line": 215
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.create_refresh_token",
+      "schema": "app_rls",
+      "name": "create_refresh_token",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.create_refresh_token",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "createRefreshTokenRecord",
+          "line": 418
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.dashboard_snapshot_data",
+      "schema": "app_rls",
+      "name": "dashboard_snapshot_data",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.dashboard_snapshot_data",
+          "sourceFile": "backend/src/services/dashboardSnapshotService.ts",
+          "sourceFunction": "loadInventoryAggregate",
+          "line": 153
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.dashboard_snapshot_scope",
+      "schema": "app_rls",
+      "name": "dashboard_snapshot_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.dashboard_snapshot_scope",
+          "sourceFile": "backend/src/services/dashboardSnapshotService.ts",
+          "sourceFunction": "computeDashboardSnapshot",
+          "line": 193
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.find_refresh_token_by_hashes",
+      "schema": "app_rls",
+      "name": "find_refresh_token_by_hashes",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.find_refresh_token_by_hashes",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "findRefreshTokenByHashes",
+          "line": 432
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.find_refresh_token_by_id",
+      "schema": "app_rls",
+      "name": "find_refresh_token_by_id",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.find_refresh_token_by_id",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "findRefreshTokenByIdentifier",
+          "line": 440
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.list_active_refresh_tokens",
+      "schema": "app_rls",
+      "name": "list_active_refresh_tokens",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.list_active_refresh_tokens",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "listActiveRefreshTokenRecords",
+          "line": 453
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.load_authenticated_actor",
+      "schema": "app_rls",
+      "name": "load_authenticated_actor",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.load_authenticated_actor",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "loadAuthenticatedActor",
+          "line": 43
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.load_authenticated_password_actor",
+      "schema": "app_rls",
+      "name": "load_authenticated_password_actor",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.load_authenticated_password_actor",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "loadAuthenticatedPasswordActor",
+          "line": 50
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.load_recent_auth_session_risk_inputs",
+      "schema": "app_rls",
+      "name": "load_recent_auth_session_risk_inputs",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.load_recent_auth_session_risk_inputs",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "loadRecentAuthSessionRiskInputs",
+          "line": 88
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.platform_audit_log_details",
+      "schema": "app_rls",
+      "name": "platform_audit_log_details",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [
+        "workflow-http-backend-src-controllers-audit-controller-ts-get-logs"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.platform_audit_log_details",
+          "sourceFile": "backend/src/services/auditLogQueryService.ts",
+          "sourceFunction": "queryAuditLogs",
+          "line": 167
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.prepare_invitation",
+      "schema": "app_rls",
+      "name": "prepare_invitation",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.prepare_invitation",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/invitationRepository.ts",
+          "sourceFunction": "prepareInvitation",
+          "line": 178
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.prove_authenticated_password_step_up",
+      "schema": "app_rls",
+      "name": "prove_authenticated_password_step_up",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.prove_authenticated_password_step_up",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "proveAuthenticatedPasswordStepUp",
+          "line": 184
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.record_auth_session_risk_signal",
+      "schema": "app_rls",
+      "name": "record_auth_session_risk_signal",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.record_auth_session_risk_signal",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "recordAuthSessionRiskSignal",
+          "line": 114
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.request_authenticated_email_change",
+      "schema": "app_rls",
+      "name": "request_authenticated_email_change",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.request_authenticated_email_change",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "prepareAuthenticatedEmailChange",
+          "line": 157
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.require_recent_mfa_session",
+      "schema": "app_rls",
+      "name": "require_recent_mfa_session",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.require_recent_mfa_session",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "requireRecentMfaSession",
+          "line": 72
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.require_recent_sensitive_session",
+      "schema": "app_rls",
+      "name": "require_recent_sensitive_session",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.require_recent_sensitive_session",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "requireRecentSensitiveSession",
+          "line": 199
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.revalidate_authenticated_actor",
+      "schema": "app_rls",
+      "name": "revalidate_authenticated_actor",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.revalidate_authenticated_actor",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/actorRevalidationRepository.ts",
+          "sourceFunction": "revalidateAuthenticatedActor",
+          "line": 55
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.revoke_all_refresh_tokens",
+      "schema": "app_rls",
+      "name": "revoke_all_refresh_tokens",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.revoke_all_refresh_tokens",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "revokeAllRefreshTokenRecords",
+          "line": 488
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.revoke_password_only_refresh_tokens",
+      "schema": "app_rls",
+      "name": "revoke_password_only_refresh_tokens",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.revoke_password_only_refresh_tokens",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "revokePasswordOnlyRefreshTokenRecords",
+          "line": 499
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.revoke_refresh_token_by_hashes",
+      "schema": "app_rls",
+      "name": "revoke_refresh_token_by_hashes",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.revoke_refresh_token_by_hashes",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "revokeRefreshTokenByHashes",
+          "line": 477
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.revoke_refresh_token_by_id",
+      "schema": "app_rls",
+      "name": "revoke_refresh_token_by_id",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.revoke_refresh_token_by_id",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+          "sourceFunction": "revokeRefreshTokenByIdentifier",
+          "line": 510
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_create_licensee",
+      "schema": "app_rls",
+      "name": "session_c_create_licensee",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_create_licensee",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "createLicenseeInTransaction",
+          "line": 132
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_create_user",
+      "schema": "app_rls",
+      "name": "session_c_create_user",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_create_user",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "createUserInTransaction",
+          "line": 156
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_delete_licensee",
+      "schema": "app_rls",
+      "name": "session_c_delete_licensee",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_delete_licensee",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "deleteLicenseeInTransaction",
+          "line": 148
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_delete_user",
+      "schema": "app_rls",
+      "name": "session_c_delete_user",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_delete_user",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "deleteUserInTransaction",
+          "line": 172
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_restore_manufacturer",
+      "schema": "app_rls",
+      "name": "session_c_restore_manufacturer",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_restore_manufacturer",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "restoreManufacturerInTransaction",
+          "line": 180
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_update_licensee",
+      "schema": "app_rls",
+      "name": "session_c_update_licensee",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_update_licensee",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "updateLicenseeInTransaction",
+          "line": 140
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_update_user",
+      "schema": "app_rls",
+      "name": "session_c_update_user",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_update_user",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "updateUserInTransaction",
+          "line": 164
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.session_c_upsert_manufacturer_licensee_link",
+      "schema": "app_rls",
+      "name": "session_c_upsert_manufacturer_licensee_link",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.session_c_upsert_manufacturer_licensee_link",
+          "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
+          "sourceFunction": "upsertManufacturerLicenseeLinkInTransaction",
+          "line": 191
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.update_authenticated_profile",
+      "schema": "app_rls",
+      "name": "update_authenticated_profile",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.update_authenticated_profile",
+          "sourceFile": "backend/src/rls-waves/session-b/b01/authenticatedSecurityRepository.ts",
+          "sourceFunction": "updateAuthenticatedProfile",
+          "line": 134
+        }
+      ]
+    }
+  ]
+}

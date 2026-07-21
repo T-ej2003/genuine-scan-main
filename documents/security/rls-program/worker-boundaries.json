@@ -366,14 +366,14 @@
         "platformAdminContextAllowed": false
       },
       "exactCommandRuleIds": [
-        "command-audit-log-insert-worker-boundary-scheduled-compliance-packs",
-        "command-audit-log-select-worker-boundary-scheduled-compliance-packs",
-        "command-compliance-pack-job-insert-worker-boundary-scheduled-compliance-packs",
-        "command-compliance-pack-job-update-worker-boundary-scheduled-compliance-packs",
-        "command-evidence-retention-policy-insert-worker-boundary-scheduled-compliance-packs",
-        "command-evidence-retention-policy-update-worker-boundary-scheduled-compliance-packs",
-        "command-incident-handoff-select-worker-boundary-scheduled-compliance-packs",
-        "command-incident-select-worker-boundary-scheduled-compliance-packs",
+        "command-audit-log-insert-56e28c0be62e",
+        "command-audit-log-select-56e28c0be62e",
+        "command-compliance-pack-job-insert-56e28c0be62e",
+        "command-compliance-pack-job-update-56e28c0be62e",
+        "command-evidence-retention-policy-insert-56e28c0be62e",
+        "command-evidence-retention-policy-update-56e28c0be62e",
+        "command-incident-handoff-select-56e28c0be62e",
+        "command-incident-select-56e28c0be62e",
         "command-licensee-select-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ],

@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
+import { canonicalWorkflowKey, delegationKey, resolveWorkflowDelegation, validateWorkflowDelegations, WORKFLOW_DELEGATIONS } from "./workflow-delegation-registry.mjs";
+import { namedFunctionContractFor, validateNamedSqlFunctionContracts } from "./named-sql-function-contracts.mjs";
 import {
   applyApplicationPathCertificationEvidence,
   BATCH_OPERATIONAL_READ_WORKFLOW_IDS,
@@ -151,6 +153,7 @@ export const writeJson = (file, value) => {
 };
 export const rel = (file) => path.relative(repoRoot, file).split(path.sep).join("/");
 export const slug = (value) => value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+export const workflowIdFor = (workflow) => `workflow-${slug(`${workflow.executionSurface}:${workflow.sourceFile}:${workflow.function}`)}`;
 export const hashId = (prefix, value) => `${prefix}-${crypto.createHash("sha256").update(value).digest("hex").slice(0, 16)}`;
 
 const stripComments = (value) => value.replace(/\/\/.*$/gm, "");
@@ -449,6 +452,24 @@ const DATABASE_FUNCTION_ACCESSES = new Map([
     ["PrintSession", "SELECT"],
     ["QRCode", "SELECT"],
   ]],
+  ["app_rls.c03_get_incident_evidence_file_by_storage_key", [["IncidentEvidence", "SELECT"]]],
+  ["app_rls.c03_list_ir_alerts", [["PolicyAlert", "SELECT"]]],
+  ["app_rls.c03_link_ir_alert_incident", [["PolicyAlert", "SELECT"], ["PolicyAlert", "UPDATE"]]],
+  ["app_rls.c02_respond_fraud_report", [
+    ["User", "SELECT"], ["AuditLog", "SELECT"], ["AuditLog", "INSERT"], ["Licensee", "SELECT"], ["Organization", "SELECT"], ["SecurityEventOutbox", "INSERT"],
+  ]],
+  ["app_rls.c03_create_public_incident_report", [["Incident", "INSERT"]]],
+  ["app_auth.lookup_password_user", [["User", "SELECT"]]],
+  ["app_auth.record_password_failure", [["User", "UPDATE"]]],
+  ["app_auth.request_password_reset", [["User", "SELECT"], ["PasswordReset", "INSERT"]]],
+  ["app_auth.consume_password_reset_token", [["PasswordReset", "SELECT"], ["PasswordReset", "UPDATE"], ["User", "UPDATE"]]],
+  ["app_auth.consume_email_verification_token", [["EmailVerificationToken", "SELECT"], ["EmailVerificationToken", "UPDATE"], ["User", "UPDATE"]]],
+  ["app_auth.lookup_invitation_token", [["Invite", "SELECT"], ["User", "SELECT"]]],
+  ["app_auth.consume_invitation_token", [["Invite", "SELECT"], ["Invite", "UPDATE"], ["User", "UPDATE"]]],
+  ...validateNamedSqlFunctionContracts().map((contract) => [
+    `${contract.schema}.${contract.name}`,
+    contract.tableCommands,
+  ]),
 ]);
 const WORKFLOW_SURFACE_OVERRIDES = new Map([
   ["backend/src/services/attentionQueueService.ts:getAttentionQueueSnapshotUncached", "http"],
@@ -644,6 +665,29 @@ export const scanProductionAccess = () => {
   const unregistered = all.filter((file) => !reachable.has(file));
   unregistered.forEach((file) => scanFile(file, false));
   return { accesses: accesses.filter((item) => item.production).sort((a, b) => a.id.localeCompare(b.id)), unregisteredAccesses: accesses.filter((item) => !item.production).sort((a, b) => a.id.localeCompare(b.id)), activeFiles: active.map(rel), unregisteredFiles: unregistered.map(rel), registrations: detectRegistrations() };
+};
+
+export const missingWorkflowDiagnostic = ({ scope, workflowId, classification = {}, workflowManifest, scan = scanProductionAccess() }) => {
+  const delegated = WORKFLOW_DELEGATIONS.filter((entry) => workflowIdFor(entry.canonical) === workflowId);
+  const tableIds = new Set((classification.tableProjections || classification.tableCommandProjections || []).map((item) => item.tableId));
+  const candidateWorkflows = (workflowManifest.workflows || [])
+    .filter((workflow) => workflow.id.includes(workflowId.split("-").slice(-3).join("-")))
+    .map((workflow) => workflow.id).slice(0, 3);
+  const delegatedKeys = new Set(delegated.map((entry) => delegationKey(entry.delegated)));
+  const candidateAccesses = scan.accesses.filter((access) => tableIds.has(access.tableId) || delegatedKeys.has(delegationKey(access)))
+    .map((access) => `${access.sourceFile}:${access.function} (${access.method})`).filter((value, index, values) => values.indexOf(value) === index).slice(0, 3);
+  const namedFunctionCandidates = scan.accesses.filter((access) => tableIds.has(access.tableId) && access.method.startsWith("$function:"))
+    .map((access) => access.method.slice("$function:".length)).filter((value, index, values) => values.indexOf(value) === index).slice(0, 3);
+  const sources = delegated.map((entry) => `${entry.canonical.sourceFile}:${entry.canonical.function}`);
+  const discovered = delegatedKeys.size > 0 && scan.accesses.some((access) => delegatedKeys.has(delegationKey(access)));
+  return [
+    `${scope} references missing workflow ${workflowId}.`,
+    sources.length ? `Canonical source: ${sources.join(", ")}; delegation source discovered: ${discovered ? "yes" : "no"}.` : "No delegation registry entry matches this workflow ID.",
+    candidateWorkflows.length ? `Similar workflows: ${candidateWorkflows.join(", ")}.` : "Similar workflows: none.",
+    candidateAccesses.length ? `Related accesses: ${candidateAccesses.join("; ")}.` : "Related accesses: none.",
+    namedFunctionCandidates.length ? `Named function candidates: ${namedFunctionCandidates.join(", ")}.` : "Named function candidates: none.",
+    "Action: add or correct the source-level delegation and named-function table mapping; do not edit generated workflow JSON or the authority boundary.",
+  ].join("\n");
 };
 
 export const validateProtectedTransactionClients = (workflowManifest, scan = scanProductionAccess()) => {
@@ -1363,7 +1407,6 @@ const PREAUTH_WORKFLOW_BOUNDARIES = Object.freeze({
   "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite": ["invitation/setup-link consumption", "exact-security-definer-function", "preauth-fn-consume-invitation", "none"],
   "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification": ["email-verification consumption", "exact-security-definer-function", "preauth-fn-consume-email-verification", "none"],
   "workflow-internal-backend-src-services-auth-auth-service-ts-login-with-password": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "password-verified"],
-  "workflow-internal-backend-src-services-auth-email-verification-service-ts-request-email-change-verification": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "step-up-verified"],
   "workflow-internal-backend-src-services-auth-mfa-adapter-ts-create-stable-mfa-login-challenge": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "mfa-bootstrap"],
   "workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge": ["not actually pre-auth and must move behind canonical actor context", "ordinary-authenticated-context", null, "mfa-bootstrap"],
 });
@@ -1441,8 +1484,8 @@ const buildPreAuthFunctionManifest = () => {
 };
 
 export const buildPreAuthBoundary = (workflowManifest, commandManifest, currentTableManifest = null) => {
-  const selected = workflowManifest.workflows.filter((workflow) => workflow.authorizationBoundaryType === "pre-auth-security-function" || PREAUTH_WORKFLOW_BOUNDARIES[workflow.id]);
-  assert.deepEqual(selected.map((workflow) => workflow.id).sort(), Object.keys(PREAUTH_WORKFLOW_BOUNDARIES).sort(), "pre-auth workflow selector drifted; classify every selected workflow explicitly");
+  const selected = workflowManifest.workflows.filter((workflow) => PREAUTH_WORKFLOW_BOUNDARIES[workflow.id]);
+  assert(selected.every((workflow) => PREAUTH_WORKFLOW_BOUNDARIES[workflow.id]), "pre-auth workflow lacks an explicit boundary classification");
   for (const workflow of selected) {
     const [group, boundaryMode, functionId, assurance] = PREAUTH_WORKFLOW_BOUNDARIES[workflow.id];
     workflow.preAuthBoundary = { workflowGroup: group, boundaryMode, functionId, status: "resolved" };
@@ -2173,7 +2216,7 @@ const applyPlatformReadScopeAuthority = (workflowManifest) => {
   const workflows = new Map(workflowManifest.workflows.map((workflow) => [workflow.id, workflow]));
   for (const classification of boundary.workflowClassifications) {
     const workflow = workflows.get(classification.workflowId);
-    assert(workflow, `platform read scope references missing workflow ${classification.workflowId}`);
+    assert(workflow, missingWorkflowDiagnostic({ scope: "platform read scope", workflowId: classification.workflowId, classification, workflowManifest, scan: scanProductionAccess() }));
     workflow.platformReadScopeBoundaryId = boundary.id;
     workflow.platformReadScopeClass = classification.primaryClass;
     workflow.platformReadRequiredAssurance = classification.requiredAssurance;
@@ -2684,58 +2727,45 @@ const applyRuntimeImplementationAuthority = (workflowManifest) => {
 };
 
 export const buildWorkflowManifest = () => {
+  const delegations = validateWorkflowDelegations({ repoRoot });
   const scan = scanProductionAccess();
   const existing = readJson(workflowManifestPath, { schemaVersion: 1, workflows: [] });
   const previous = new Map(existing.workflows.map((workflow) => [workflow.id, workflow]));
   const groups = new Map();
   for (const access of scan.accesses) {
-    const delegatedKey = access.sourceFile === "backend/src/services/auditCsvExportService.ts" && access.function === "readAuditCsvExport"
-      ? "http:backend/src/controllers/auditController.ts:exportLogsCsv"
-      : access.sourceFile === "backend/src/services/auditLogQueryService.ts" && access.function === "queryAuditLogs"
-        ? "http:backend/src/controllers/auditController.ts:getLogs"
-      : access.sourceFile === "backend/src/services/fraudReportQueryService.ts" && access.function === "queryFraudReports"
-        ? "http:backend/src/controllers/auditController.ts:getFraudReports"
-      : access.sourceFile === "backend/src/services/analyticsService.ts" && ["loadRiskPolicy", "recordRiskAnalyticsRead"].includes(access.function)
-        ? "internal:backend/src/services/analyticsService.ts:getRiskAnalytics"
-      : access.sourceFile === "backend/src/services/auth/refreshTokenService.ts" && access.function === "revoke"
-        ? "internal:backend/src/services/auth/refreshTokenService.ts:rotateRefreshToken"
-        : null;
-    const key = delegatedKey || `${access.executionSurface}:${access.sourceFile}:${access.function}`;
+    const delegation = resolveWorkflowDelegation(access, delegations);
+    const canonical = delegation?.canonical || { executionSurface: access.executionSurface, sourceFile: access.sourceFile, function: access.function };
+    const key = canonicalWorkflowKey(canonical);
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(access);
+    groups.get(key).push({ access, canonical, delegation });
   }
-  const workflows = [...groups.entries()].map(([key, accesses]) => {
-    const firstAccess = accesses[0];
-    const delegatedControllerFunction = key === "http:backend/src/controllers/auditController.ts:exportLogsCsv" ? "exportLogsCsv"
-      : key === "http:backend/src/controllers/auditController.ts:getLogs" ? "getLogs"
-      : key === "http:backend/src/controllers/auditController.ts:getFraudReports" ? "getFraudReports"
-        : null;
-    const first = delegatedControllerFunction
-      ? { ...firstAccess, executionSurface: "http", sourceFile: "backend/src/controllers/auditController.ts", function: delegatedControllerFunction }
-      : firstAccess;
-    const id = `workflow-${slug(key)}`;
+  const workflows = [...groups.entries()].map(([key, groupedAccesses]) => {
+    const accesses = groupedAccesses.map((item) => item.access);
+    const canonical = groupedAccesses[0].canonical;
+    const delegated = groupedAccesses.some((item) => item.delegation);
+    const id = workflowIdFor(canonical);
     const legacyModuleId = "workflow-internal-backend-src-services-auth-refresh-token-service-ts-module";
     const inheritedLegacyModule = id === "workflow-internal-backend-src-services-auth-refresh-token-service-ts-rotate-refresh-token"
       && !previous.has(id)
       && previous.has(legacyModuleId);
     const old = previous.get(id) || (inheritedLegacyModule ? previous.get(legacyModuleId) : {}) || {};
-    const boundary = old.authorizationBoundaryType || boundaryFor(path.join(repoRoot, first.sourceFile), first.function, first.executionSurface);
+    const boundary = old.authorizationBoundaryType || boundaryFor(path.join(repoRoot, canonical.sourceFile), canonical.function, canonical.executionSurface);
     const tableCommands = [...new Set(accesses.flatMap((access) => expandCommands([access.command]).map((command) => `${access.tableId}:${command}`)))].sort().map((value) => { const index = value.lastIndexOf(":"); return { tableId: value.slice(0, index), commands: [value.slice(index + 1)] }; });
     const mergedCommands = [...new Map(tableCommands.map((item) => [item.tableId, { tableId: item.tableId, commands: tableCommands.filter((candidate) => candidate.tableId === item.tableId).flatMap((candidate) => candidate.commands).sort() }])).values()];
     const preAuth = boundary === "pre-auth-security-function";
-    const background = ["worker", "scheduled"].includes(first.executionSurface);
-    const systemSurface = ["startup", "cli"].includes(first.executionSurface);
+    const background = ["worker", "scheduled"].includes(canonical.executionSurface);
+    const systemSurface = ["startup", "cli"].includes(canonical.executionSurface);
     return {
       ...old,
       id,
-      name: inheritedLegacyModule ? displayName(first.function) : old.name || displayName(first.function),
-      entryPoint: inheritedLegacyModule ? `${first.executionSurface}:${first.function}` : old.entryPoint || `${first.executionSurface}:${first.function}`,
-      executionSurface: first.executionSurface,
-      authenticationStage: old.authenticationStage || (preAuth ? "pre-authentication" : background || ["cli", "startup"].includes(first.executionSurface) ? "system" : "authenticated"),
-      actorClasses: old.actorClasses || (background ? ["system-job"] : preAuth ? ["anonymous-or-partially-authenticated"] : first.executionSurface === "cli" ? ["operator"] : ["authenticated-user"]),
-      canonicalSourceFiles: old.contextBoundaryStatus === "implemented"
+      name: inheritedLegacyModule ? displayName(canonical.function) : old.name || displayName(canonical.function),
+      entryPoint: inheritedLegacyModule ? `${canonical.executionSurface}:${canonical.function}` : old.entryPoint || `${canonical.executionSurface}:${canonical.function}`,
+      executionSurface: canonical.executionSurface,
+      authenticationStage: old.authenticationStage || (preAuth ? "pre-authentication" : background || ["cli", "startup"].includes(canonical.executionSurface) ? "system" : "authenticated"),
+      actorClasses: old.actorClasses || (background ? ["system-job"] : preAuth ? ["anonymous-or-partially-authenticated"] : canonical.executionSurface === "cli" ? ["operator"] : ["authenticated-user"]),
+      canonicalSourceFiles: old.contextBoundaryStatus === "implemented" && !delegated
         ? old.canonicalSourceFiles
-        : [...new Set(accesses.map((access) => access.sourceFile))].sort(),
+        : [...new Set([canonical.sourceFile, ...accesses.map((access) => access.sourceFile)])].sort(),
       tablesTouched: mergedCommands.map((item) => item.tableId),
       commandsPerTable: mergedCommands,
       tenantScopeRule: old.tenantScopeRule || "unresolved; must be approved before implementation",

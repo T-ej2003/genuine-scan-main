@@ -2,7 +2,7 @@
 
 This review defines function contracts only. It creates no SQL function, grant, role, policy, RLS state, or runtime behavior.
 
-Selected workflows: 11; exact functions: 7; moved behind actor context: 4; operator-only: 0; retired: 0.
+Selected workflows: 10; exact functions: 7; moved behind actor context: 3; operator-only: 0; retired: 0.
 
 ## Workflow reconciliation
 
@@ -10,7 +10,6 @@ Selected workflows: 11; exact functions: 7; moved behind actor context: 4; opera
 |---|---|---|---|
 | workflow-internal-backend-src-services-auth-auth-service-ts-login-with-password | not actually pre-auth and must move behind canonical actor context | ordinary-authenticated-context | password-verified |
 | workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification | email-verification consumption | exact-security-definer-function | preauth-fn-consume-email-verification |
-| workflow-internal-backend-src-services-auth-email-verification-service-ts-request-email-change-verification | not actually pre-auth and must move behind canonical actor context | ordinary-authenticated-context | step-up-verified |
 | workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite | invitation/setup-link consumption | exact-security-definer-function | preauth-fn-consume-invitation |
 | workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview | invitation/setup-link lookup | exact-security-definer-function | preauth-fn-lookup-invitation |
 | workflow-internal-backend-src-services-auth-mfa-adapter-ts-complete-stable-mfa-login-challenge | not actually pre-auth and must move behind canonical actor context | ordinary-authenticated-context | mfa-bootstrap |

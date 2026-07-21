@@ -13,7 +13,7 @@ This bounded review considered only the 17 named low/medium-risk read families (
 - Workflows newly implemented: 0
 - Reviewed workflows retaining exact blockers: 22
 - PostgreSQL certifications pending: 4
-- Next deterministic family: family-simple-tenant-scoped-reads-analyticsservice-2c20deef24
+- Next deterministic family: family-simple-tenant-scoped-reads-idempotencyservice-555b944311
 
 No newly isolated ordinary read met every implementation gate. Production code was intentionally unchanged.
 
@@ -30,10 +30,10 @@ Neither boundary has human actor context. Neither may install ordinary authentic
 
 | Parent family | Child family |
 |---|---|
-| family-simple-tenant-scoped-reads-governanceservice-e3aa1df885 | family-split-governanceservice-platform-feature-flag-administration-7bb4b15607 |
+| family-simple-tenant-scoped-reads-governanceservice-e3aa1df885 | family-split-c03governancerepository-platform-feature-flag-administration-7bb4b15607 |
 | family-simple-tenant-scoped-reads-governanceservice-e3aa1df885 | family-split-governanceservice-public-verification-policy-80f0c95935 |
-| family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1 | family-split-manufacturerscopeservice-manufacturer-id-scope-hydration-d04d198c46 |
 | family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1 | family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef |
+| family-simple-tenant-scoped-reads-manufacturerscopeservice-bea2e91ac1 | family-split-manufacturerscopeservice-manufacturer-session-scope-hydration-e038879b07 |
 | family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa | family-split-supportcontroller-platform-support-message-mutation-2b4b2be0d0 |
 | family-platform-admin-bounded-reads-supportcontroller-6ce17f93fa | family-split-supportcontroller-platform-support-ticket-read-4ce4ce4858 |
 | family-simple-tenant-scoped-reads-auditservice-964272fbb7 | family-split-auditservice-audit-write-org-resolution-60e107aefa |
@@ -69,11 +69,11 @@ Each child is uniform by actor ceiling, scope model, assurance/command contract,
 
 | Metric | Before | After |
 |---|---:|---:|
-| Workflow families | 316 | 321 |
+| Workflow families | 316 | 279 |
 | Implemented workflows | 4 | 4 |
-| Contract-only workflows | 38 | 40 |
-| Blocked workflows | 386 | 384 |
-| Blocked families | 295 | 298 |
+| Contract-only workflows | 38 | 32 |
+| Blocked workflows | 386 | 354 |
+| Blocked families | 295 | 249 |
 | PostgreSQL certifications pending | 4 | 4 |
 
 ## Implementation and validation boundary

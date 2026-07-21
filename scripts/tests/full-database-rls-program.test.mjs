@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manufacturerBootstrapBoundaryPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, operatorAdministrationReviewPath, operatorBoundariesPath, parseSchema, platformReadScopeBoundaryPath, policyAlertActorCeilingPath, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, publicReadContractPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, systemBoundariesPath, tableManifestPath, tableOwnershipReviewPath, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validateProtectedTransactionClients, validatePublicReadContract, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
+import { EXPECTED_CONTEXT_FAMILY_COUNT, EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT, EXPECTED_WORKFLOW_COUNT } from "../rls/lib/workflow-inventory-baseline.mjs";
 import { buildContextBoundaryPlan, contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, contextBoundaryReportPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch, validateSystemBoundaryContracts } from "../rls/context-boundary-plan.mjs";
 import { validateGeneratedPackage } from "../rls/verify-full-rls-package.mjs";
 
@@ -145,12 +146,12 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   const { workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract } = manifests();
   validateSystemBoundaryContracts(systemBoundaries, workflows);
   validateContextBoundaryPlan(generated, workflows, commandSemantics, tables, systemBoundaries, manufacturerBootstrapBoundary, platformReadScopeBoundary, policyAlertActorCeiling, publicReadContract);
-  assert.equal(generated.workflowCount, 428);
-  assert.equal(generated.familyCount, 312);
+  assert.equal(generated.workflowCount, EXPECTED_WORKFLOW_COUNT);
+  assert.equal(generated.familyCount, EXPECTED_CONTEXT_FAMILY_COUNT);
   const count = (eligibility) => generated.families.filter((family) => family.automationEligibility === eligibility).reduce((total, family) => total + family.workflowIds.length, 0);
   assert.equal(count("implemented"), 14);
-  assert.equal(count("contract-only"), 59);
-  assert.equal(count("blocked"), 355);
+  assert.equal(count("contract-only"), EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT);
+  assert.equal(count("blocked"), 354);
   assert.equal(count("auto-implementable"), 0);
   const mfaDisableWorkflowId = "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa";
   const mfaDisableFamily = generated.families.find((family) => family.workflowIds.includes(mfaDisableWorkflowId));
@@ -602,7 +603,7 @@ test("tests do not inflate production totals and repeated technical calls remain
   const { accesses } = scanProductionAccess();
   assert(accesses.every((item) => !/(?:^|\/)tests?\//.test(item.sourceFile)), "test-only access leaked into production totals");
   const workflows = manifests().workflows.workflows;
-  assert.equal(workflows.length, 428, "frozen workflow inventory drifted");
+  assert.equal(workflows.length, EXPECTED_WORKFLOW_COUNT, "reviewed workflow inventory drifted");
   const refreshRotation = workflows.find((workflow) => workflow.id === "workflow-internal-backend-src-services-auth-refresh-token-service-ts-rotate-refresh-token");
   assert(refreshRotation?.supportingEvidence.some((item) => item.accessId === "access-bad63221832878a6"), "nested refresh revocation escaped its rotation workflow");
   assert(!workflows.some((workflow) => workflow.id === "workflow-internal-backend-src-services-auth-refresh-token-service-ts-revoke"), "private refresh revocation became a standalone workflow");

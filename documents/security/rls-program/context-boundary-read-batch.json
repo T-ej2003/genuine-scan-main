@@ -17,13 +17,13 @@
   },
   "selectionTotals": {
     "familiesConsidered": 17,
-    "workflowsConsidered": 25,
+    "workflowsConsidered": 27,
     "reclassifiedFamilies": 2,
     "splitFamilies": 4,
     "childFamiliesCreated": 8,
     "contractOnlyWorkflows": 2,
     "newlyImplementedWorkflows": 0,
-    "blockedWorkflows": 23
+    "blockedWorkflows": 25
   },
   "blockerCountsBefore": {
     "unresolved-boundary": 12,
@@ -137,7 +137,7 @@
       "reviewedRisk": "medium",
       "resolution": "split-blocked",
       "resultingFamilyIds": [
-        "family-split-governanceservice-platform-feature-flag-administration-7bb4b15607",
+        "family-split-c03governancerepository-platform-feature-flag-administration-7bb4b15607",
         "family-split-governanceservice-public-verification-policy-80f0c95935"
       ],
       "canonicalFiles": [
@@ -182,8 +182,8 @@
       "reviewedRisk": "low",
       "resolution": "split-blocked",
       "resultingFamilyIds": [
-        "family-split-manufacturerscopeservice-manufacturer-session-scope-hydration-e038879b07",
-        "family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef"
+        "family-split-manufacturerscopeservice-manufacturer-link-auth-and-invite-407543caef",
+        "family-split-manufacturerscopeservice-manufacturer-session-scope-hydration-e038879b07"
       ],
       "canonicalFiles": [
         "backend/src/services/manufacturerScopeService.ts",
@@ -311,8 +311,8 @@
     {
       "familyId": "family-simple-tenant-scoped-reads-dashboardsnapshotservice-af0d3ce887",
       "workflowIds": [
-        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
-        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
+        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot"
       ],
       "reviewedRisk": "medium",
       "resolution": "blocked",
@@ -358,7 +358,7 @@
       "reviewedRisk": "low",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-simple-tenant-scoped-reads-compliancepackservice-27fa200139"
+        "family-account-and-security-mutations-c03compliancepackrepository-bbc6b90e8b"
       ],
       "canonicalFiles": [
         "backend/src/services/compliancePackService.ts",
@@ -398,7 +398,7 @@
       "reviewedRisk": "low",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-simple-tenant-scoped-reads-feedbackhandlers-3c1dc41e5e"
+        "family-contract-public-fn-submit-product-feedback"
       ],
       "canonicalFiles": [
         "backend/src/controllers/verify/feedbackHandlers.ts",
@@ -432,12 +432,14 @@
     {
       "familyId": "family-simple-tenant-scoped-reads-replacementchainservice-768679140d",
       "workflowIds": [
-        "workflow-internal-backend-src-services-replacement-chain-service-ts-resolve-replacement-status"
+        "workflow-internal-backend-src-services-replacement-chain-service-ts-resolve-replacement-status",
+        "workflow-http-backend-src-controllers-verify-verification-handlers-ts-verify-qrcode",
+        "workflow-http-backend-src-controllers-verify-verify-fraud-snapshot-ts-build-fraud-verification-snapshot"
       ],
       "reviewedRisk": "low",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-simple-tenant-scoped-reads-replacementchainservice-768679140d"
+        "family-contract-public-fn-verify-raw-qr"
       ],
       "canonicalFiles": [
         "backend/src/services/replacementChainService.ts",
@@ -476,7 +478,7 @@
       "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-simple-tenant-scoped-reads-supportcontroller-b73b8b041a"
+        "family-contract-public-fn-track-support-status"
       ],
       "canonicalFiles": [
         "backend/src/controllers/supportController.ts",
@@ -556,7 +558,7 @@
       "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-simple-tenant-scoped-reads-incidentcontroller-d1709363b9"
+        "family-account-and-security-mutations-incidentcontroller-bb78168596"
       ],
       "canonicalFiles": [
         "backend/src/controllers/incidentController.ts",
@@ -636,7 +638,7 @@
       "reviewedRisk": "medium",
       "resolution": "blocked",
       "resultingFamilyIds": [
-        "family-platform-admin-bounded-reads-iralertcontroller-0cf5698bdc"
+        "family-account-and-security-mutations-iralertcontroller-c80f926a85"
       ],
       "canonicalFiles": [
         "backend/src/controllers/irAlertController.ts",

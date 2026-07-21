@@ -12,6 +12,7 @@ backend/.connector-build/
 backend/.pkg-cache
 backend/.pkg-cache/
 artifacts/*
+artifacts/rls-runs/
 !artifacts/dr/
 !artifacts/dr/.gitignore
 playwright-report

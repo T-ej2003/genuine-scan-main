@@ -17,8 +17,7 @@
         "userId"
       ],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-509547f03abe",
-        "command-audit-log-insert-97535583a8fe"
+        "command-audit-log-insert-509547f03abe"
       ]
     },
     {

@@ -1,19 +1,19 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6",
+  "sourceContractSha256": "28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
-      "sha256": "802fd40a6722c95b0870dcd56a3ecb70fc2ca426e62f0df85c188f68786ac585"
+      "sha256": "2d445b6d43fc16212d489c4591122a8374f5ea5476b7cebe5f8e5ea7ff596c0d"
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "da6ab3b474c4ac6486cb735a16f7c7a98461d95f3ffbfdaacd5d330620fb42db"
+      "sha256": "2d9d53add0d82c263bbe3aeef639acf230137247be78c930c2b124d65d5c6780"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "47a6ab6b42639a66518abb2dc663ac77a846cb89249bb6ee19afe5271bad4476"
+      "sha256": "72edcc4a5608075213b4827ce9f77e7fee121d75e2471865520f6529d04fbc97"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -29,11 +29,11 @@
     },
     {
       "path": "documents/security/rls-program/context-boundary-families.json",
-      "sha256": "b6346ce743f60545bb887b2cc0bd6cbc5008df33607bfd1d4baa63020d454f30"
+      "sha256": "14f0fec31f7b91ecc05f7d52fc89a64ba63b02e3ff7b60cd0eb0d3c7e218f457"
     },
     {
       "path": "documents/security/rls-program/workflow-three-session-partition.json",
-      "sha256": "c391ee39ef34388c7fe3efb4850cc89136cb073f37394ef5affc538264c5498e"
+      "sha256": "2870499e575d1264c926233cce7ed8fe8a9d0544022951b9ca4d7e77959104df"
     },
     {
       "path": "backend/prisma/schema.prisma",
@@ -45,11 +45,11 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "2bf4947bd8c7d4675dd3ff293a82e47b431cdef0660f62586282cc5e7fbe2046"
+      "sha256": "b8d65b0ad8d6fb868f2f1ea57edb7fc37e5d33121631406757ac7ac837eab9a5"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
-      "sha256": "90deb466386654c75959e433ab436de06d5df7927d9acff5703bdd9afeaf1481"
+      "sha256": "9bd066e9a15938a179d94d764fd48378c28cc5413584e30d65db7dd8b77780e6"
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
@@ -61,7 +61,7 @@
     },
     {
       "path": "scripts/rls/lib/application-path-certifications.mjs",
-      "sha256": "95e7997dc7035f03b857dc5079bb3e2233cb89f1acbb06a92e8be40be548a39d"
+      "sha256": "bc0d4e5a4c6013f1f3e02f7eab050336c79bc074df39b16b25d120a7c0be6b55"
     },
     {
       "path": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
@@ -908,8 +908,7 @@
         "userId"
       ],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-509547f03abe",
-        "command-audit-log-insert-97535583a8fe"
+        "command-audit-log-insert-509547f03abe"
       ]
     },
     {
@@ -1115,102 +1114,6 @@
     }
   ],
   "policies": [
-    {
-      "tableId": "table-audit-log",
-      "table": "AuditLog",
-      "policyName": "full_rls_auditlog_insert_sql_profile_audit_log_licen_94344ee5bf",
-      "command": "INSERT",
-      "actors": [
-        "licensee-admin"
-      ],
-      "assurance": "mfa-verified",
-      "purpose": [
-        "audit-log-read"
-      ],
-      "scopeType": "canonical-licensee-organization",
-      "scopePredicate": "(\"userId\" = app_rls.current_user_id() AND \"licenseeId\" = app_rls.current_licensee_id() AND \"orgId\" = app_rls.current_organization_id())",
-      "columns": [
-        "action",
-        "details",
-        "entityId",
-        "entityType",
-        "id",
-        "licenseeId",
-        "orgId",
-        "userId"
-      ],
-      "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe"
-      ],
-      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
-      "route": "GET /api/audit/logs",
-      "certificationStatus": "pending",
-      "internalHelperOnly": false
-    },
-    {
-      "tableId": "table-audit-log",
-      "table": "AuditLog",
-      "policyName": "full_rls_auditlog_insert_sql_profile_audit_log_manuf_05e750c2a3",
-      "command": "INSERT",
-      "actors": [
-        "manufacturer"
-      ],
-      "assurance": "mfa-verified",
-      "purpose": [
-        "audit-log-read"
-      ],
-      "scopeType": "canonical-manufacturer-linked-licensee",
-      "scopePredicate": "(\"userId\" = app_rls.current_user_id() AND \"licenseeId\" = app_rls.current_licensee_id() AND \"orgId\" = app_rls.current_organization_id() AND app_rls.manufacturer_scope_valid(app_rls.current_user_id()))",
-      "columns": [
-        "action",
-        "details",
-        "entityId",
-        "entityType",
-        "id",
-        "licenseeId",
-        "orgId",
-        "userId"
-      ],
-      "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe"
-      ],
-      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
-      "route": "GET /api/audit/logs",
-      "certificationStatus": "pending",
-      "internalHelperOnly": false
-    },
-    {
-      "tableId": "table-audit-log",
-      "table": "AuditLog",
-      "policyName": "full_rls_auditlog_insert_sql_profile_audit_log_platf_7acd564b55",
-      "command": "INSERT",
-      "actors": [
-        "platform-admin"
-      ],
-      "assurance": "mfa-verified",
-      "purpose": [
-        "platform-audit-log-read"
-      ],
-      "scopeType": "database-validated-selected-licensee",
-      "scopePredicate": "(\"userId\"=app_rls.current_user_id() AND \"licenseeId\"=app_rls.current_licensee_id() AND EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"AuditLog\".\"orgId\" AND scope_licensee.\"isActive\"=TRUE AND scope_licensee.\"suspendedAt\" IS NULL))",
-      "columns": [
-        "action",
-        "details",
-        "entityId",
-        "entityType",
-        "id",
-        "licenseeId",
-        "orgId",
-        "userId"
-      ],
-      "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe"
-      ],
-      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
-      "route": "GET /api/audit/logs",
-      "certificationStatus": "pending",
-      "internalHelperOnly": false
-    },
     {
       "tableId": "table-audit-log",
       "table": "AuditLog",
@@ -1448,7 +1351,7 @@
       ],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-07fec99a574c",
         "command-audit-log-select-7c30e2368afb",
         "command-audit-log-select-97535583a8fe",
@@ -1465,6 +1368,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -1737,7 +1641,7 @@
       ],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-licensee-select-07fec99a574c",
         "command-licensee-select-7c30e2368afb",
@@ -1754,6 +1658,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -1855,7 +1760,7 @@
       ],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-manufacturer-licensee-link-select-07fec99a574c",
         "command-manufacturer-licensee-link-select-7c30e2368afb",
@@ -1872,6 +1777,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -1967,7 +1873,7 @@
       ],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-organization-select-07fec99a574c",
         "command-organization-select-7c30e2368afb",
@@ -1984,6 +1890,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -2627,7 +2534,7 @@
       ],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-policy-rule-select-509547f03abe",
         "command-trace-event-select-f571cd9ea8dd",
@@ -2644,6 +2551,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -2798,55 +2706,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6"
+      "marker": "mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6"
+      "marker": "mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6"
+      "marker": "mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6"
+      "marker": "mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6"
+      "marker": "mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6"
+      "marker": "mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6"
+      "marker": "mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6"
+      "marker": "mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5467a5756b327186e85a0c55b5adf3be700bc7457ebbf705f09834caa1c3d7c6"
+      "marker": "mscqr-full-rls-clean-room:certification:28b6eadef4b0e69a67eaa0e1e6a915785b65d438d9bae18a0668e492e37536ed"
     }
   ]
 }

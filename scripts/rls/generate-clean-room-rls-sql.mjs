@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT } from "./lib/workflow-inventory-baseline.mjs";
 import { calculateCleanRoomSourceContract } from "./lib/clean-room-source-contract.mjs";
 import {
   BATCH_OPERATIONAL_READ_WORKFLOW_IDS,
@@ -1156,7 +1157,24 @@ WHERE n.nspname IN ('app_rls','app_auth');
 UPDATE mscqr_rls_install.state SET phase='context-helpers-installed' WHERE singleton;
 `;
 
-const internalSourceRuleIds = ["command-audit-log-insert-97535583a8fe", "command-audit-log-select-97535583a8fe", "command-policy-rule-select-509547f03abe", "command-trace-event-select-f571cd9ea8dd"];
+const exactRuleIdForSource = ({ sourceFile, functionName, table, command }) => {
+  const workflowIds = new Set(workflowsManifest.workflows
+    .filter((workflow) => workflow.canonicalSourceFiles.includes(sourceFile) && workflow.entryPoint.endsWith(`:${functionName}`))
+    .map((workflow) => workflow.id));
+  const tableId = tables.find((item) => item.physicalTable === table)?.id;
+  const ruleIds = commandSemantics.rules
+    .filter((rule) => rule.tableId === tableId && rule.command === command && rule.supportingWorkflowIds?.some((workflowId) => workflowIds.has(workflowId)))
+    .map((rule) => rule.id)
+    .sort();
+  if (ruleIds.length !== 1) throw new Error(`Expected one source rule for ${sourceFile}:${functionName}:${table}:${command}; found ${ruleIds.length}`);
+  return ruleIds[0];
+};
+const internalSourceRuleIds = [
+  exactRuleIdForSource({ sourceFile: "backend/src/services/auditService.ts", functionName: "createAuditLogInTransaction", table: "AuditLog", command: "INSERT" }),
+  exactRuleIdForSource({ sourceFile: "backend/src/controllers/auditController.ts", functionName: "getLogs", table: "AuditLog", command: "SELECT" }),
+  exactRuleIdForSource({ sourceFile: "backend/src/services/analyticsService.ts", functionName: "getRiskAnalytics", table: "PolicyRule", command: "SELECT" }),
+  exactRuleIdForSource({ sourceFile: "backend/src/services/traceEventService.ts", functionName: "getTraceTimeline", table: "TraceEvent", command: "SELECT" }),
+];
 const dashboardWorkflowIds = new Set([
   "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
   "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
@@ -1904,7 +1922,7 @@ const contractOnlyWorkflowRows = contractOnlyInventory.flatMap((family) => famil
   implementationStatus: family.implementationStatus,
   sourceCommandRuleIds: family.sourceCommandRuleIds,
 })));
-if (contractOnlyWorkflowRows.length !== 59 || new Set(contractOnlyWorkflowRows.map((row) => row.workflowId)).size !== 59) throw new Error(`Expected 59 unique contract-only workflows, found ${contractOnlyWorkflowRows.length}/${new Set(contractOnlyWorkflowRows.map((row) => row.workflowId)).size}`);
+if (contractOnlyWorkflowRows.length !== EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT || new Set(contractOnlyWorkflowRows.map((row) => row.workflowId)).size !== EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT) throw new Error(`Expected ${EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT} unique contract-only workflows, found ${contractOnlyWorkflowRows.length}/${new Set(contractOnlyWorkflowRows.map((row) => row.workflowId)).size}`);
 const contractOnlyGroups = Object.fromEntries([...new Set(contractOnlyWorkflowRows.map((row) => row.boundaryClass))].sort().map((boundaryClass) => [boundaryClass, contractOnlyWorkflowRows.filter((row) => row.boundaryClass === boundaryClass)]));
 const generatedReports = new Map([
   ["full-rls-implementation-manifest.json", implementationManifest],

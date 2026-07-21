@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { calculateCleanRoomSourceContract } from "./lib/clean-room-source-contract.mjs";
 import { buildRegisteredCallPathEvidence } from "./lib/application-path-certifications.mjs";
+import { EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT, EXPECTED_WORKFLOW_COUNT } from "./lib/workflow-inventory-baseline.mjs";
 
 const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const generatedRoot = path.join(root, "documents/security/rls-program/generated");
@@ -141,9 +142,9 @@ export const verifyFullRlsPackage = () => {
     repoRoot: root,
   });
   ensure(JSON.stringify(workflowCallPaths) === JSON.stringify(expectedWorkflowCallPaths), "Generated workflow call-path evidence is stale or manually edited");
-  ensure(workflowCallPaths.workflowCount === 428 && workflowCallPaths.workflows.length === 428, "Workflow call-path evidence is not exhaustive");
+  ensure(workflowCallPaths.workflowCount === EXPECTED_WORKFLOW_COUNT && workflowCallPaths.workflows.length === EXPECTED_WORKFLOW_COUNT, "Workflow call-path evidence is not exhaustive");
   const summary = validateGeneratedPackage({ manifest, policies, privileges, commandSemantics: readJson("command-semantics.json") });
-  ensure(manifest.counts.registeredWorkflowCallPaths === 428 && manifest.counts.applicationPathCertifiedWorkflows === workflowCallPaths.summary.applicationPathCertified, "Implementation manifest workflow evidence counts drifted");
+  ensure(manifest.counts.registeredWorkflowCallPaths === EXPECTED_WORKFLOW_COUNT && manifest.counts.applicationPathCertifiedWorkflows === workflowCallPaths.summary.applicationPathCertified, "Implementation manifest workflow evidence counts drifted");
 
   const sqlNames = fs.readdirSync(sqlRoot).filter((name) => name.endsWith(".sql")).sort();
   ensure(equal(sqlNames, Object.keys(checksums.files).filter((name) => name.endsWith(".sql"))), "Global checksums do not cover every SQL artifact exactly once");
@@ -199,8 +200,8 @@ export const verifyFullRlsPackage = () => {
   ensure(roleLifecycle.preflight?.mutationAllowed === false && roleLifecycle.legacyRoleRestoration === false && roleLifecycle.legacyAclRestoration === false && roleLifecycle.legacyDefaultAclRestoration === false && roleLifecycle.legacyOwnershipRestoration === false, "Role lifecycle report retains historical restoration");
   const contracts = JSON.parse(readGenerated("contract-only-implementation-inventory.json"));
   const grouped = Object.values(contracts.groups || {}).flat();
-  ensure(contracts.workflowCount === 59 && grouped.length === 59 && new Set(grouped.map((entry) => entry.workflowId)).size === 59, "Contract-only workflow inventory lost or duplicated workflows");
-  return { valid: true, ...summary, deploymentModel: "clean-room-blue-green", registeredWorkflowCallPaths: 428, applicationPathCertifiedWorkflows: workflowCallPaths.summary.applicationPathCertified, contractOnlyWorkflows: 59, executionPhases: execution.phases.length, checksums: Object.keys(checksums.files).length };
+  ensure(contracts.workflowCount === EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT && grouped.length === EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT && new Set(grouped.map((entry) => entry.workflowId)).size === EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT, "Contract-only workflow inventory lost or duplicated workflows");
+  return { valid: true, ...summary, deploymentModel: "clean-room-blue-green", registeredWorkflowCallPaths: EXPECTED_WORKFLOW_COUNT, applicationPathCertifiedWorkflows: workflowCallPaths.summary.applicationPathCertified, contractOnlyWorkflows: EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT, executionPhases: execution.phases.length, checksums: Object.keys(checksums.files).length };
 };
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

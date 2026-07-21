@@ -1,103 +1,7 @@
 {
   "schemaVersion": 1,
-  "count": 46,
+  "count": 43,
   "rows": [
-    {
-      "tableId": "table-audit-log",
-      "table": "AuditLog",
-      "policyName": "full_rls_auditlog_insert_sql_profile_audit_log_licen_94344ee5bf",
-      "command": "INSERT",
-      "actors": [
-        "licensee-admin"
-      ],
-      "assurance": "mfa-verified",
-      "purpose": [
-        "audit-log-read"
-      ],
-      "scopeType": "canonical-licensee-organization",
-      "scopePredicate": "(\"userId\" = app_rls.current_user_id() AND \"licenseeId\" = app_rls.current_licensee_id() AND \"orgId\" = app_rls.current_organization_id())",
-      "columns": [
-        "action",
-        "details",
-        "entityId",
-        "entityType",
-        "id",
-        "licenseeId",
-        "orgId",
-        "userId"
-      ],
-      "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe"
-      ],
-      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
-      "route": "GET /api/audit/logs",
-      "certificationStatus": "pending",
-      "internalHelperOnly": false
-    },
-    {
-      "tableId": "table-audit-log",
-      "table": "AuditLog",
-      "policyName": "full_rls_auditlog_insert_sql_profile_audit_log_manuf_05e750c2a3",
-      "command": "INSERT",
-      "actors": [
-        "manufacturer"
-      ],
-      "assurance": "mfa-verified",
-      "purpose": [
-        "audit-log-read"
-      ],
-      "scopeType": "canonical-manufacturer-linked-licensee",
-      "scopePredicate": "(\"userId\" = app_rls.current_user_id() AND \"licenseeId\" = app_rls.current_licensee_id() AND \"orgId\" = app_rls.current_organization_id() AND app_rls.manufacturer_scope_valid(app_rls.current_user_id()))",
-      "columns": [
-        "action",
-        "details",
-        "entityId",
-        "entityType",
-        "id",
-        "licenseeId",
-        "orgId",
-        "userId"
-      ],
-      "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe"
-      ],
-      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
-      "route": "GET /api/audit/logs",
-      "certificationStatus": "pending",
-      "internalHelperOnly": false
-    },
-    {
-      "tableId": "table-audit-log",
-      "table": "AuditLog",
-      "policyName": "full_rls_auditlog_insert_sql_profile_audit_log_platf_7acd564b55",
-      "command": "INSERT",
-      "actors": [
-        "platform-admin"
-      ],
-      "assurance": "mfa-verified",
-      "purpose": [
-        "platform-audit-log-read"
-      ],
-      "scopeType": "database-validated-selected-licensee",
-      "scopePredicate": "(\"userId\"=app_rls.current_user_id() AND \"licenseeId\"=app_rls.current_licensee_id() AND EXISTS (SELECT 1 FROM public.\"Licensee\" scope_licensee WHERE scope_licensee.\"id\"=app_rls.current_licensee_id() AND scope_licensee.\"orgId\"=\"AuditLog\".\"orgId\" AND scope_licensee.\"isActive\"=TRUE AND scope_licensee.\"suspendedAt\" IS NULL))",
-      "columns": [
-        "action",
-        "details",
-        "entityId",
-        "entityType",
-        "id",
-        "licenseeId",
-        "orgId",
-        "userId"
-      ],
-      "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe"
-      ],
-      "workflowId": "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
-      "route": "GET /api/audit/logs",
-      "certificationStatus": "pending",
-      "internalHelperOnly": false
-    },
     {
       "tableId": "table-audit-log",
       "table": "AuditLog",
@@ -335,7 +239,7 @@
       ],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-07fec99a574c",
         "command-audit-log-select-7c30e2368afb",
         "command-audit-log-select-97535583a8fe",
@@ -352,6 +256,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -624,7 +529,7 @@
       ],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-licensee-select-07fec99a574c",
         "command-licensee-select-7c30e2368afb",
@@ -641,6 +546,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -742,7 +648,7 @@
       ],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-manufacturer-licensee-link-select-07fec99a574c",
         "command-manufacturer-licensee-link-select-7c30e2368afb",
@@ -759,6 +665,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -854,7 +761,7 @@
       ],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-organization-select-07fec99a574c",
         "command-organization-select-7c30e2368afb",
@@ -871,6 +778,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
@@ -1514,7 +1422,7 @@
       ],
       "columns": [],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-97535583a8fe",
+        "command-audit-log-insert-c32d179b670c",
         "command-audit-log-select-97535583a8fe",
         "command-policy-rule-select-509547f03abe",
         "command-trace-event-select-f571cd9ea8dd",
@@ -1531,6 +1439,7 @@
       "workflowIds": [
         "workflow-http-backend-src-controllers-audit-controller-ts-get-logs",
         "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
+        "workflow-internal-backend-src-services-audit-service-ts-create-audit-log-in-transaction",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
         "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",

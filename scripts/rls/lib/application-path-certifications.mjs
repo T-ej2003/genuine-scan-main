@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { EXPECTED_WORKFLOW_COUNT } from "./workflow-inventory-baseline.mjs";
 
 const registryRepoRoot = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 
@@ -107,7 +108,7 @@ export const applyApplicationPathCertificationEvidence = (workflowManifest) => {
 };
 
 export const buildRegisteredCallPathEvidence = ({ workflowsManifest, partition, repoRoot }) => {
-  assert.equal(workflowsManifest.workflows.length, 428, "registered workflow inventory must contain 428 workflows");
+  assert.equal(workflowsManifest.workflows.length, EXPECTED_WORKFLOW_COUNT, `registered workflow inventory must contain ${EXPECTED_WORKFLOW_COUNT} workflows`);
   const registeredRoutes = new Set((workflowsManifest.generatedEvidence?.registrations?.routes || [])
     .map((route) => `${route.method} ${route.path}`));
   const assignments = new Map();

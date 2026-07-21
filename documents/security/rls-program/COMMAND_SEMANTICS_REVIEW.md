@@ -2,76 +2,74 @@
 
 This is the compact human review of `command-semantics.json`. It defines architecture only: no SQL, grants, roles, RLS state, or runtime behavior are changed.
 
-Rules: 1069; workflows mapped: 428/428.
+Rules: 946; workflows mapped: 400/400.
 
 ## Review groups
 
 | Group | Tables | Rules | SELECT | INSERT | UPDATE | DELETE |
 |---|---:|---:|---:|---:|---:|---:|
-| A | 21 | 240 | 108 | 38 | 66 | 28 |
-| B | 3 | 95 | 62 | 15 | 13 | 5 |
-| C | 15 | 247 | 141 | 27 | 61 | 18 |
-| D | 13 | 266 | 134 | 43 | 73 | 16 |
-| E | 18 | 183 | 83 | 54 | 26 | 20 |
-| F | 7 | 38 | 9 | 14 | 7 | 8 |
+| A | 21 | 188 | 89 | 24 | 48 | 27 |
+| B | 3 | 56 | 50 | 1 | 2 | 3 |
+| C | 15 | 242 | 148 | 20 | 56 | 18 |
+| D | 13 | 252 | 132 | 36 | 70 | 14 |
+| E | 18 | 170 | 78 | 49 | 25 | 18 |
+| F | 7 | 38 | 7 | 17 | 6 | 8 |
 | G | 0 | 0 | 0 | 0 | 0 | 0 |
 
 ## Actor classes
 
 | Value | Rules |
 |---|---:|
-| anonymous | 47 |
-| authenticated-user | 281 |
-| manufacturer | 316 |
-| operator | 89 |
-| checker | 10 |
-| licensee-admin | 230 |
-| platform-admin | 283 |
+| anonymous | 41 |
+| authenticated-user | 312 |
+| manufacturer | 315 |
+| operator | 67 |
+| checker | 7 |
+| licensee-admin | 194 |
+| platform-admin | 227 |
 | restricted-read | 16 |
-| pre-auth-runtime | 47 |
+| pre-auth-runtime | 41 |
 | worker | 5 |
 | scheduled-job | 10 |
-| migration | 2 |
-| operator-admin | 81 |
-| break-glass | 7 |
+| migration | 0 |
+| operator-admin | 1 |
+| break-glass | 0 |
 
 ## Assurance levels
 
 | Value | Rules |
 |---|---:|
-| none | 122 |
-| password-verified | 579 |
-| mfa-bootstrap | 4 |
-| mfa-verified | 228 |
-| step-up-verified | 15 |
-| system-verified | 33 |
-| operator-approved | 81 |
-| dual-approved-break-glass | 7 |
+| none | 116 |
+| password-verified | 598 |
+| mfa-bootstrap | 5 |
+| mfa-verified | 188 |
+| step-up-verified | 7 |
+| system-verified | 31 |
+| operator-approved | 1 |
+| dual-approved-break-glass | 0 |
 
 ## Commands
 
 | Value | Rules |
 |---|---:|
-| SELECT | 537 |
-| INSERT | 191 |
-| UPDATE | 246 |
-| DELETE | 95 |
+| SELECT | 504 |
+| INSERT | 147 |
+| UPDATE | 207 |
+| DELETE | 88 |
 
 ## Boundary and deletion summary
 
-Named-function rules: 433.
+Named-function rules: 403.
 Restricted-worker rules: 15.
-Approval-gated rules: 101.
+Approval-gated rules: 9.
 
 | Hard-delete classification | Rules |
 |---|---:|
-| actor self-delete | 7 |
-| migration-only | 3 |
-| not-applicable | 974 |
-| operator-approved | 1 |
+| actor self-delete | 8 |
+| not-applicable | 858 |
 | prohibited | 75 |
-| retention delete | 3 |
-| tenant-admin delete | 6 |
+| retention delete | 1 |
+| tenant-admin delete | 4 |
 
 Lifecycle restrictions are carried per rule; Batch rules name the approved DRAFT through RELEASED transition states and terminal FAILED/VOIDED denials. Other state-bearing tables require their canonical service transition before a write can satisfy the rule.
 

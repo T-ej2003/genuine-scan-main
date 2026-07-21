@@ -7,6 +7,7 @@ import {
   applicationPathCertificationFamilies,
   buildRegisteredCallPathEvidence,
 } from "../rls/lib/application-path-certifications.mjs";
+import { EXPECTED_WORKFLOW_COUNT } from "../rls/lib/workflow-inventory-baseline.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const programRoot = path.join(repoRoot, "documents/security/rls-program");
@@ -18,13 +19,13 @@ const sessionA = read("workflow-ownership-session-a.json");
 const sessionB = read("workflow-ownership-session-b.json");
 const sessionC = read("workflow-ownership-session-c.json");
 
-test("three-session partition assigns all 428 workflows exactly once without a catch-all", () => {
+test("three-session partition assigns every reviewed workflow exactly once without a catch-all", () => {
   const sourceIds = workflows.map((workflow) => workflow.id).sort();
   const assignedIds = partition.assignments.map((assignment) => assignment.workflowId).sort();
-  assert.equal(sourceIds.length, 428);
-  assert.equal(new Set(sourceIds).size, 428);
-  assert.equal(assignedIds.length, 428);
-  assert.equal(new Set(assignedIds).size, 428);
+  assert.equal(sourceIds.length, EXPECTED_WORKFLOW_COUNT);
+  assert.equal(new Set(sourceIds).size, EXPECTED_WORKFLOW_COUNT);
+  assert.equal(assignedIds.length, EXPECTED_WORKFLOW_COUNT);
+  assert.equal(new Set(assignedIds).size, EXPECTED_WORKFLOW_COUNT);
   assert.deepEqual(assignedIds, sourceIds);
   assert.deepEqual(partition.validationSummary.missingWorkflowIds, []);
   assert.deepEqual(partition.validationSummary.duplicateWorkflowIds, []);
@@ -38,7 +39,7 @@ test("three-session partition assigns all 428 workflows exactly once without a c
 
 test("registered call paths generate all workflow dispositions from executable family evidence", () => {
   const evidence = buildRegisteredCallPathEvidence({ workflowsManifest: workflowManifest, partition, repoRoot });
-  assert.equal(evidence.workflowCount, 428);
+  assert.equal(evidence.workflowCount, EXPECTED_WORKFLOW_COUNT);
   assert.equal(evidence.summary.applicationPathCertified, applicationPathCertificationFamilies.flatMap((family) => family.workflowIds).length);
   assert.equal(evidence.workflows.filter((row) => row.productionAccessPath.length === 0).length, 0);
   assert.equal(evidence.workflows.flatMap((row) => row.productionAccessPath).filter((row) => row.registration === "unregistered").length, 0);
@@ -60,7 +61,7 @@ test("session ownership is exhaustive and editable production and test files nev
   assert.equal(sessionC.productionFileCount, 39);
   assert.equal(sessionB.existingTestFileCount, 47);
   assert.equal(sessionC.existingTestFileCount, 21);
-  assert.equal(new Set([...sessionA.workflowIds, ...sessionB.workflowIds, ...sessionC.workflowIds]).size, 428);
+  assert.equal(new Set([...sessionA.workflowIds, ...sessionB.workflowIds, ...sessionC.workflowIds]).size, EXPECTED_WORKFLOW_COUNT);
   assert.deepEqual(sessionA.productionFiles.filter((file) => sessionB.productionFiles.includes(file)), []);
   assert.deepEqual(sessionA.productionFiles.filter((file) => sessionC.productionFiles.includes(file)), []);
   assert.deepEqual(sessionB.productionFiles.filter((file) => sessionC.productionFiles.includes(file)), []);
@@ -70,12 +71,12 @@ test("session ownership is exhaustive and editable production and test files nev
     "backend/src/routes/index.ts",
   ]);
   assert.deepEqual(partition.fileOwnership.sessionAAdditionalProductionFiles, ["backend/src/lib/canonicalDbContext.ts"]);
-  assert.deepEqual(partition.fileOwnership.sessionBOwnedSharedFiles, ["backend/src/middleware/auth.ts"]);
+  assert.deepEqual(partition.fileOwnership.sessionBOwnedSharedFiles, []);
   assert.deepEqual(partition.fileOwnership.sessionCOwnedSharedFiles, [
     "backend/src/controllers/incidentController.ts",
-    "backend/src/controllers/licenseeController.ts",
     "backend/src/controllers/tracePolicyController.ts",
-    "backend/src/controllers/userController.ts",
+    "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+    "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
     "backend/src/services/compliancePackService.ts",
     "backend/src/services/governanceService.ts",
     "backend/src/services/manufacturerScopeService.ts",

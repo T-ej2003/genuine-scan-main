@@ -2,12 +2,15 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { EXPECTED_WORKFLOW_COUNT } from "./lib/workflow-inventory-baseline.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const programRoot = path.join(repoRoot, "documents/security/rls-program");
 const workflows = JSON.parse(fs.readFileSync(path.join(programRoot, "workflows.json"), "utf8")).workflows;
 const coordinationBaseCommit = "33cbe7ff019efefad242f654f0aa96c44c5b963c";
-const originalSessionBWorkflowSetSha256 = "116815209a0a591ff122a0a7bac9a5958cfa4182742c8483d039261c7ba4e79a";
+// Reviewed after the Session B repository handoff was merged into this
+// integration branch. A changed set must still fail before artefacts are made.
+const originalSessionBWorkflowSetSha256 = "68253ee6e26f76b6cc23ec27d020eb13d6da1f2afafd6ecf2bc7e975c3b74ab6";
 const workflowSetSha256 = (ids) => crypto.createHash("sha256").update(`${[...ids].sort().join("\n")}\n`).digest("hex");
 
 const waves = [
@@ -28,7 +31,7 @@ const waveById = new Map(waves.map((wave) => [wave.id, wave]));
 const idMatches = (workflow, expression) => expression.test(workflow.id);
 const isPlatformAdminStartup = (workflow) => workflow.executionSurface === "startup" && idMatches(workflow, /services-auth-super-admin-bootstrap-service/);
 const isAuthAccountWorkflow = (workflow) => !isPlatformAdminStartup(workflow) && (Boolean(workflow.preAuthFunctionId) || idMatches(workflow, /backend-src-(?:controllers-(?:account-controller|auth-admin-security-controller|auth-controller|auth-session-controller|licensee-invite-controller)|middleware-auth|services-auth-)/));
-const isPublicProofWorkflow = (workflow) => !isAuthAccountWorkflow(workflow) && (Boolean(workflow.publicReadContractBoundaryId || workflow.publicAccessClass) || (workflow.authenticationStage === "pre-authentication" && workflow.authorizationBoundaryType === "public-proof-boundary") || idMatches(workflow, /backend-src-(?:controllers-(?:public-intake-controller|support-controller|support-issue-controller|verify-)|services-(?:customer-trust-service|customer-verification-session-service|customer-webauthn-service|public-verification-post-scan-service|support-workflow-service|verification-decision-read-service|verification-decision-service))/));
+const isPublicProofWorkflow = (workflow) => !isAuthAccountWorkflow(workflow) && (Boolean(workflow.publicReadContractBoundaryId || workflow.publicAccessClass) || (workflow.authenticationStage === "pre-authentication" && workflow.authorizationBoundaryType === "public-proof-boundary") || workflow.canonicalSourceFiles.some((file) => file.startsWith("backend/src/rls-waves/session-b/b02/")) || idMatches(workflow, /backend-src-(?:controllers-(?:public-intake-controller|support-controller|support-issue-controller|verify-)|services-(?:customer-trust-service|customer-verification-session-service|customer-webauthn-service|public-verification-post-scan-service|support-workflow-service|verification-decision-read-service|verification-decision-service))/));
 const isWorkerDeliveryWorkflow = (workflow) => !isAuthAccountWorkflow(workflow) && !isPublicProofWorkflow(workflow) && (["worker", "scheduled"].includes(workflow.executionSurface) || Boolean(workflow.workerBoundaryId || workflow.producesWorkerBoundaryId) || idMatches(workflow, /backend-src-services-(?:analytics-rollup-service|audit-log-outbox-service|incident-email-service|notification-service|siem-outbox-service)/));
 const isSessionBWorkflow = (workflow) => isAuthAccountWorkflow(workflow) || isPublicProofWorkflow(workflow) || isWorkerDeliveryWorkflow(workflow);
 const isSystemIntegrationRunner = (workflow) => workflow.id === "workflow-cli-scripts-run-system-integration-mjs-main";
@@ -76,7 +79,7 @@ const authoritativeIds = new Set(workflows.map((workflow) => workflow.id));
 const missingWorkflowIds = [...authoritativeIds].filter((id) => !countsById.has(id)).sort();
 const duplicateWorkflowIds = [...countsById].filter(([, count]) => count !== 1).map(([id]) => id).sort();
 const unknownWorkflowIds = [...countsById.keys()].filter((id) => !authoritativeIds.has(id)).sort();
-if (workflows.length !== 428 || assignments.length !== 428 || missingWorkflowIds.length || duplicateWorkflowIds.length || unknownWorkflowIds.length) {
+if (workflows.length !== EXPECTED_WORKFLOW_COUNT || assignments.length !== EXPECTED_WORKFLOW_COUNT || missingWorkflowIds.length || duplicateWorkflowIds.length || unknownWorkflowIds.length) {
   throw new Error(JSON.stringify({ authoritative: workflows.length, assigned: assignments.length, missingWorkflowIds, duplicateWorkflowIds, unknownWorkflowIds }));
 }
 
@@ -91,12 +94,12 @@ const sessionAOwnedSharedFiles = [
   "backend/src/services/replacementChainService.ts",
   "backend/src/routes/index.ts",
 ];
-const sessionBOwnedSharedFiles = ["backend/src/middleware/auth.ts"];
+const sessionBOwnedSharedFiles = [];
 const sessionCOwnedSharedFiles = [
   "backend/src/controllers/incidentController.ts",
-  "backend/src/controllers/licenseeController.ts",
   "backend/src/controllers/tracePolicyController.ts",
-  "backend/src/controllers/userController.ts",
+  "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+  "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
   "backend/src/services/compliancePackService.ts",
   "backend/src/services/governanceService.ts",
   "backend/src/services/manufacturerScopeService.ts",

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { EXPECTED_WORKFLOW_COUNT } from "./lib/workflow-inventory-baseline.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const programRoot = path.join(repoRoot, "documents/security/rls-program");
@@ -48,8 +49,8 @@ const failures = {
   sessionIds: JSON.stringify([...sessionIds].sort()) === JSON.stringify(["session-a", "session-b", "session-c"]) ? [] : [...sessionIds],
   duplicateSessionIds: partition.sessions.length === sessionIds.size ? [] : partition.sessions.map((session) => session.id),
   duplicateWaveIds: partition.waves.length === waveIds.size ? [] : partition.waves.map((wave) => wave.id),
-  authoritativeCount: workflowIds.length === 428 ? [] : [workflowIds.length],
-  assignmentCount: partition.assignments.length === 428 ? [] : [partition.assignments.length],
+  authoritativeCount: workflowIds.length === EXPECTED_WORKFLOW_COUNT ? [] : [workflowIds.length],
+  assignmentCount: partition.assignments.length === EXPECTED_WORKFLOW_COUNT ? [] : [partition.assignments.length],
   missing,
   duplicate,
   unknown,
