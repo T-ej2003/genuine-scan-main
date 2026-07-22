@@ -142,19 +142,6 @@ export const confirmEmailVerification = async (input: {
   const result = await consumeEmailVerificationBoundary({ tokenHashCandidates, consumedAt: now });
   if (!result?.verified) throw new Error("Invalid or expired verification link");
 
-  await createAuditLog({
-    userId: result.userId,
-    action: result.purpose === "EMAIL_CHANGE" ? "AUTH_EMAIL_CHANGE_CONFIRMED" : "AUTH_EMAIL_VERIFIED",
-    entityType: "User",
-    entityId: result.userId,
-    details: {
-      email: result.email,
-      purpose: result.purpose,
-    },
-    ipAddress: input.actorIpAddress || undefined,
-    userAgent: normalizeUserAgent(input.actorUserAgent) || undefined,
-  });
-
   return {
     verified: true as const,
     purpose: result.purpose,

@@ -1288,6 +1288,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -1424,6 +1425,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -1561,6 +1563,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -5273,6 +5276,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -5479,6 +5483,178 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-audit-log-outbox-insert-93fe5e2f9580",
+      "tableId": "table-audit-log-outbox",
+      "command": "INSERT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "attempts",
+        "flushedAuditLogId",
+        "lastError",
+        "nextAttemptAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "payload",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=QUEUED"
+      ],
+      "forbiddenLifecycleStates": [
+        "CLIENT_SELECTED_INITIAL_STATE"
+      ],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "New row preserves approved-system boundary from tables.json; empty or forged context is denied. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/inviteService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "one-time-token-consumption",
+      "publicFunctionId": "preauth-fn-consume-invitation",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
+    },
+    {
+      "id": "command-audit-log-outbox-insert-963323294162",
+      "tableId": "table-audit-log-outbox",
+      "command": "INSERT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "attempts",
+        "flushedAuditLogId",
+        "lastError",
+        "nextAttemptAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "payload",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=QUEUED"
+      ],
+      "forbiddenLifecycleStates": [
+        "CLIENT_SELECTED_INITIAL_STATE"
+      ],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "New row preserves approved-system boundary from tables.json; empty or forged context is denied. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/passwordResetService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "one-time-token-consumption",
+      "publicFunctionId": "preauth-fn-consume-password-reset",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
+    },
+    {
       "id": "command-audit-log-outbox-insert-986a6bc31b69",
       "tableId": "table-audit-log-outbox",
       "command": "INSERT",
@@ -5678,6 +5854,178 @@
         "functionId": null,
         "status": "resolved"
       }
+    },
+    {
+      "id": "command-audit-log-outbox-insert-e1561aa306f2",
+      "tableId": "table-audit-log-outbox",
+      "command": "INSERT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "attempts",
+        "flushedAuditLogId",
+        "lastError",
+        "nextAttemptAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "payload",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=QUEUED"
+      ],
+      "forbiddenLifecycleStates": [
+        "CLIENT_SELECTED_INITIAL_STATE"
+      ],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "New row preserves approved-system boundary from tables.json; empty or forged context is denied. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/emailVerificationService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "email-link-verification",
+      "publicFunctionId": "preauth-fn-consume-email-verification",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
+    },
+    {
+      "id": "command-audit-log-outbox-insert-e45d5f48ae3c",
+      "tableId": "table-audit-log-outbox",
+      "command": "INSERT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "attempts",
+        "flushedAuditLogId",
+        "lastError",
+        "nextAttemptAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "payload",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=QUEUED"
+      ],
+      "forbiddenLifecycleStates": [
+        "CLIENT_SELECTED_INITIAL_STATE"
+      ],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "New row preserves approved-system boundary from tables.json; empty or forged context is denied. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/passwordResetService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "pre-auth-security-function",
+      "publicFunctionId": "preauth-fn-request-password-reset",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset request",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-request-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-request-password-reset"
     },
     {
       "id": "command-audit-log-outbox-insert-f3dffb308a5e",
@@ -6225,6 +6573,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -13581,6 +13930,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -13741,6 +14091,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -13816,6 +14167,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -18480,6 +18832,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -19830,6 +20183,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -21111,6 +21465,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -23615,6 +23970,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -24212,6 +24568,101 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-licensee-select-93fe5e2f9580",
+      "tableId": "table-licensee",
+      "command": "SELECT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "brandName",
+        "createdAt",
+        "description",
+        "id",
+        "isActive",
+        "location",
+        "metadata",
+        "name",
+        "orgId",
+        "prefix",
+        "supportEmail",
+        "supportPhone",
+        "suspendedAt",
+        "suspendedReason",
+        "updatedAt",
+        "website"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "location",
+        "metadata",
+        "orgId",
+        "supportEmail",
+        "supportPhone",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/inviteService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "one-time-token-consumption",
+      "publicFunctionId": "preauth-fn-consume-invitation",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
+    },
+    {
       "id": "command-licensee-select-aa566e98f219",
       "tableId": "table-licensee",
       "command": "SELECT",
@@ -24731,6 +25182,101 @@
       ],
       "confidence": "high",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-licensee-select-d113603cb7d4",
+      "tableId": "table-licensee",
+      "command": "SELECT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "brandName",
+        "createdAt",
+        "description",
+        "id",
+        "isActive",
+        "location",
+        "metadata",
+        "name",
+        "orgId",
+        "prefix",
+        "supportEmail",
+        "supportPhone",
+        "suspendedAt",
+        "suspendedReason",
+        "updatedAt",
+        "website"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "location",
+        "metadata",
+        "orgId",
+        "supportEmail",
+        "supportPhone",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/inviteService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "pre-auth-security-function",
+      "publicFunctionId": "preauth-fn-lookup-invitation",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link lookup",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-lookup-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-lookup-invitation"
     },
     {
       "id": "command-licensee-select-e3ba477495b1",
@@ -27428,6 +27974,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -27624,6 +28171,85 @@
       ],
       "confidence": "high",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-organization-select-93fe5e2f9580",
+      "tableId": "table-organization",
+      "command": "SELECT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "createdAt",
+        "id",
+        "isActive",
+        "name",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/inviteService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "one-time-token-consumption",
+      "publicFunctionId": "preauth-fn-consume-invitation",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
     },
     {
       "id": "command-organization-select-aa566e98f219",
@@ -27960,6 +28586,85 @@
       ],
       "confidence": "high",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-organization-select-d113603cb7d4",
+      "tableId": "table-organization",
+      "command": "SELECT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "createdAt",
+        "id",
+        "isActive",
+        "name",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/inviteService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "pre-auth-security-function",
+      "publicFunctionId": "preauth-fn-lookup-invitation",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link lookup",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-lookup-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-lookup-invitation"
     },
     {
       "id": "command-organization-select-e3ba477495b1",
@@ -66018,6 +66723,16 @@
         "replacedByTokenHash",
         "revokedAt",
         "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason",
         "tokenHash",
         "userId"
       ],
@@ -66028,7 +66743,10 @@
       "lifecycleColumns": [
         "expiresAt",
         "lastUsedAt",
-        "revokedAt"
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
       ],
       "withCheckRule": "not-applicable",
       "requiresNamedFunction": false,
@@ -66073,7 +66791,12 @@
         "authenticatedAt",
         "mfaVerifiedAt",
         "orgId",
-        "revokedReason"
+        "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityRevokedReason"
       ],
       "protectedColumns": [
         "createdAt",
@@ -66084,13 +66807,21 @@
         "lastUsedAt",
         "replacedByTokenHash",
         "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
         "tokenHash",
         "userId"
       ],
       "allowedLifecycleStates": [
         "expiresAt=NULL_OR_SERVER_INITIALIZED",
         "lastUsedAt=NULL_OR_SERVER_INITIALIZED",
-        "revokedAt=NULL_OR_SERVER_INITIALIZED"
+        "revokedAt=NULL_OR_SERVER_INITIALIZED",
+        "sessionCapabilityExpiresAt=NULL_OR_SERVER_INITIALIZED",
+        "sessionCapabilityLastUsedAt=NULL_OR_SERVER_INITIALIZED",
+        "sessionCapabilityRevokedAt=NULL_OR_SERVER_INITIALIZED"
       ],
       "forbiddenLifecycleStates": [
         "CLIENT_SELECTED_INITIAL_STATE"
@@ -66098,7 +66829,10 @@
       "lifecycleColumns": [
         "expiresAt",
         "lastUsedAt",
-        "revokedAt"
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
       ],
       "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
       "requiresNamedFunction": true,
@@ -66155,6 +66889,11 @@
         "lastUsedAt",
         "replacedByTokenHash",
         "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
         "tokenHash",
         "userId"
       ],
@@ -66164,13 +66903,22 @@
         "lastUsedAt=NULL",
         "lastUsedAt=SERVER_TIMESTAMP_SET",
         "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
       ],
       "forbiddenLifecycleStates": [],
       "lifecycleColumns": [
         "expiresAt",
         "lastUsedAt",
-        "revokedAt"
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
       ],
       "withCheckRule": "not-applicable",
       "requiresNamedFunction": true,
@@ -66231,6 +66979,11 @@
         "lastUsedAt",
         "replacedByTokenHash",
         "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
         "tokenHash",
         "userId"
       ],
@@ -66240,13 +66993,22 @@
         "lastUsedAt=NULL",
         "lastUsedAt=SERVER_TIMESTAMP_SET",
         "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
       ],
       "forbiddenLifecycleStates": [],
       "lifecycleColumns": [
         "expiresAt",
         "lastUsedAt",
-        "revokedAt"
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
       ],
       "withCheckRule": "not-applicable",
       "requiresNamedFunction": true,
@@ -66307,6 +67069,14 @@
         "orgId",
         "revokedAt",
         "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason",
         "userId"
       ],
       "protectedColumns": [
@@ -66318,6 +67088,11 @@
         "lastUsedAt",
         "replacedByTokenHash",
         "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
         "tokenHash",
         "userId"
       ],
@@ -66327,13 +67102,22 @@
         "lastUsedAt=NULL",
         "lastUsedAt=SERVER_TIMESTAMP_SET",
         "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
       ],
       "forbiddenLifecycleStates": [],
       "lifecycleColumns": [
         "expiresAt",
         "lastUsedAt",
-        "revokedAt"
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
       ],
       "withCheckRule": "not-applicable",
       "requiresNamedFunction": true,
@@ -66350,6 +67134,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -66388,6 +67173,14 @@
         "orgId",
         "revokedAt",
         "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason",
         "userId"
       ],
       "protectedColumns": [
@@ -66399,6 +67192,11 @@
         "lastUsedAt",
         "replacedByTokenHash",
         "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
         "tokenHash",
         "userId"
       ],
@@ -66408,13 +67206,22 @@
         "lastUsedAt=NULL",
         "lastUsedAt=SERVER_TIMESTAMP_SET",
         "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
       ],
       "forbiddenLifecycleStates": [],
       "lifecycleColumns": [
         "expiresAt",
         "lastUsedAt",
-        "revokedAt"
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
       ],
       "withCheckRule": "not-applicable",
       "requiresNamedFunction": true,
@@ -66467,6 +67274,14 @@
         "orgId",
         "revokedAt",
         "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason",
         "userId"
       ],
       "protectedColumns": [
@@ -66478,6 +67293,11 @@
         "lastUsedAt",
         "replacedByTokenHash",
         "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
         "tokenHash",
         "userId"
       ],
@@ -66487,13 +67307,22 @@
         "lastUsedAt=NULL",
         "lastUsedAt=SERVER_TIMESTAMP_SET",
         "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
       ],
       "forbiddenLifecycleStates": [],
       "lifecycleColumns": [
         "expiresAt",
         "lastUsedAt",
-        "revokedAt"
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
       ],
       "withCheckRule": "not-applicable",
       "requiresNamedFunction": true,
@@ -66524,6 +67353,254 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-refresh-token-select-963323294162",
+      "tableId": "table-refresh-token",
+      "command": "SELECT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "authenticatedAt",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedAt",
+        "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/passwordResetService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "one-time-token-consumption",
+      "publicFunctionId": "preauth-fn-consume-password-reset",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
+    },
+    {
+      "id": "command-refresh-token-select-e1561aa306f2",
+      "tableId": "table-refresh-token",
+      "command": "SELECT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "authenticatedAt",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedAt",
+        "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/emailVerificationService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "email-link-verification",
+      "publicFunctionId": "preauth-fn-consume-email-verification",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
+    },
+    {
       "id": "command-refresh-token-update-0c71149cc376",
       "tableId": "table-refresh-token",
       "command": "UPDATE",
@@ -66546,7 +67623,12 @@
         "authenticatedAt",
         "mfaVerifiedAt",
         "orgId",
-        "revokedReason"
+        "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityRevokedReason"
       ],
       "protectedColumns": [
         "createdAt",
@@ -66557,6 +67639,11 @@
         "lastUsedAt",
         "replacedByTokenHash",
         "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
         "tokenHash",
         "userId"
       ],
@@ -66566,7 +67653,13 @@
         "lastUsedAt=NULL",
         "lastUsedAt=SERVER_TIMESTAMP_SET",
         "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
       ],
       "forbiddenLifecycleStates": [
         "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
@@ -66574,7 +67667,10 @@
       "lifecycleColumns": [
         "expiresAt",
         "lastUsedAt",
-        "revokedAt"
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
       ],
       "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
       "requiresNamedFunction": true,
@@ -66621,7 +67717,12 @@
         "authenticatedAt",
         "mfaVerifiedAt",
         "orgId",
-        "revokedReason"
+        "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityRevokedReason"
       ],
       "protectedColumns": [
         "createdAt",
@@ -66632,6 +67733,11 @@
         "lastUsedAt",
         "replacedByTokenHash",
         "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
         "tokenHash",
         "userId"
       ],
@@ -66641,7 +67747,13 @@
         "lastUsedAt=NULL",
         "lastUsedAt=SERVER_TIMESTAMP_SET",
         "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
       ],
       "forbiddenLifecycleStates": [
         "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
@@ -66649,7 +67761,10 @@
       "lifecycleColumns": [
         "expiresAt",
         "lastUsedAt",
-        "revokedAt"
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
       ],
       "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
       "requiresNamedFunction": true,
@@ -66704,7 +67819,12 @@
         "authenticatedAt",
         "mfaVerifiedAt",
         "orgId",
-        "revokedReason"
+        "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityRevokedReason"
       ],
       "protectedColumns": [
         "createdAt",
@@ -66715,6 +67835,11 @@
         "lastUsedAt",
         "replacedByTokenHash",
         "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
         "tokenHash",
         "userId"
       ],
@@ -66724,7 +67849,13 @@
         "lastUsedAt=NULL",
         "lastUsedAt=SERVER_TIMESTAMP_SET",
         "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
       ],
       "forbiddenLifecycleStates": [
         "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
@@ -66732,7 +67863,10 @@
       "lifecycleColumns": [
         "expiresAt",
         "lastUsedAt",
-        "revokedAt"
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
       ],
       "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
       "requiresNamedFunction": true,
@@ -66761,6 +67895,240 @@
       ],
       "confidence": "medium",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-refresh-token-update-963323294162",
+      "tableId": "table-refresh-token",
+      "command": "UPDATE",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityRevokedReason"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
+      ],
+      "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/passwordResetService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "one-time-token-consumption",
+      "publicFunctionId": "preauth-fn-consume-password-reset",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
+    },
+    {
+      "id": "command-refresh-token-update-e1561aa306f2",
+      "tableId": "table-refresh-token",
+      "command": "UPDATE",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedReason",
+        "rotationClaimedAt",
+        "rotationCompletedAt",
+        "rotationRequestId",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityRevokedReason"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityExpiresAt=NULL",
+        "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityLastUsedAt=NULL",
+        "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+        "sessionCapabilityRevokedAt=NULL",
+        "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt"
+      ],
+      "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/emailVerificationService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "email-link-verification",
+      "publicFunctionId": "preauth-fn-consume-email-verification",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
     },
     {
       "id": "command-replacement-chain-delete-prohibited",
@@ -76508,6 +77876,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -77397,6 +78766,121 @@
       "preAuthFunctionId": "preauth-fn-lookup-password-user"
     },
     {
+      "id": "command-user-select-8bfc0e3d6533",
+      "tableId": "table-user",
+      "command": "SELECT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "disabledReason",
+        "failedLoginAttempts",
+        "id",
+        "isActive",
+        "lastLoginAt",
+        "licenseeId",
+        "lockedUntil",
+        "name",
+        "orgId",
+        "role",
+        "status",
+        "updatedAt",
+        "website"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "email",
+        "emailVerifiedAt",
+        "id",
+        "licenseeId",
+        "location",
+        "metadata",
+        "orgId",
+        "passwordHash",
+        "pendingEmail",
+        "pendingEmailRequestedAt",
+        "role",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "deletedAt=NULL",
+        "deletedAt=SERVER_TIMESTAMP_SET",
+        "disabledAt=NULL",
+        "disabledAt=SERVER_TIMESTAMP_SET",
+        "status=INVITED",
+        "status=ACTIVE",
+        "status=DISABLED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "deletedAt",
+        "disabledAt",
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/authBootstrapRepository.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "pre-auth-security-function",
+      "publicFunctionId": "preauth-fn-record-password-failure",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "failed-login recording",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-record-password-failure",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-record-password-failure"
+    },
+    {
       "id": "command-user-select-92ebfd6a1d0d",
       "tableId": "table-user",
       "command": "SELECT",
@@ -77489,6 +78973,236 @@
       ],
       "confidence": "high",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-user-select-93fe5e2f9580",
+      "tableId": "table-user",
+      "command": "SELECT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "disabledReason",
+        "failedLoginAttempts",
+        "id",
+        "isActive",
+        "lastLoginAt",
+        "licenseeId",
+        "lockedUntil",
+        "name",
+        "orgId",
+        "role",
+        "status",
+        "updatedAt",
+        "website"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "email",
+        "emailVerifiedAt",
+        "id",
+        "licenseeId",
+        "location",
+        "metadata",
+        "orgId",
+        "passwordHash",
+        "pendingEmail",
+        "pendingEmailRequestedAt",
+        "role",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "deletedAt=NULL",
+        "deletedAt=SERVER_TIMESTAMP_SET",
+        "disabledAt=NULL",
+        "disabledAt=SERVER_TIMESTAMP_SET",
+        "status=INVITED",
+        "status=ACTIVE",
+        "status=DISABLED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "deletedAt",
+        "disabledAt",
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/inviteService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "one-time-token-consumption",
+      "publicFunctionId": "preauth-fn-consume-invitation",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
+    },
+    {
+      "id": "command-user-select-963323294162",
+      "tableId": "table-user",
+      "command": "SELECT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "disabledReason",
+        "failedLoginAttempts",
+        "id",
+        "isActive",
+        "lastLoginAt",
+        "licenseeId",
+        "lockedUntil",
+        "name",
+        "orgId",
+        "role",
+        "status",
+        "updatedAt",
+        "website"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "email",
+        "emailVerifiedAt",
+        "id",
+        "licenseeId",
+        "location",
+        "metadata",
+        "orgId",
+        "passwordHash",
+        "pendingEmail",
+        "pendingEmailRequestedAt",
+        "role",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "deletedAt=NULL",
+        "deletedAt=SERVER_TIMESTAMP_SET",
+        "disabledAt=NULL",
+        "disabledAt=SERVER_TIMESTAMP_SET",
+        "status=INVITED",
+        "status=ACTIVE",
+        "status=DISABLED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "deletedAt",
+        "disabledAt",
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/passwordResetService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "one-time-token-consumption",
+      "publicFunctionId": "preauth-fn-consume-password-reset",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
     },
     {
       "id": "command-user-select-97535583a8fe",
@@ -78645,6 +80359,121 @@
       ],
       "confidence": "medium",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-user-select-e1561aa306f2",
+      "tableId": "table-user",
+      "command": "SELECT",
+      "actorClasses": [
+        "anonymous",
+        "pre-auth-runtime"
+      ],
+      "runtimeIdentities": [
+        "identity-pre-auth-app"
+      ],
+      "minimumAssurance": "none",
+      "minimumAssuranceByActorClass": {
+        "anonymous": "none",
+        "pre-auth-runtime": "none"
+      },
+      "scopeRule": "unresolved; must be approved before implementation",
+      "allowedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "disabledReason",
+        "failedLoginAttempts",
+        "id",
+        "isActive",
+        "lastLoginAt",
+        "licenseeId",
+        "lockedUntil",
+        "name",
+        "orgId",
+        "role",
+        "status",
+        "updatedAt",
+        "website"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "email",
+        "emailVerifiedAt",
+        "id",
+        "licenseeId",
+        "location",
+        "metadata",
+        "orgId",
+        "passwordHash",
+        "pendingEmail",
+        "pendingEmailRequestedAt",
+        "role",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "deletedAt=NULL",
+        "deletedAt=SERVER_TIMESTAMP_SET",
+        "disabledAt=NULL",
+        "disabledAt=SERVER_TIMESTAMP_SET",
+        "status=INVITED",
+        "status=ACTIVE",
+        "status=DISABLED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "deletedAt",
+        "disabledAt",
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "narrow-pre-auth-security-definer",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/services/auth/emailVerificationService.ts"
+      ],
+      "allowScenarios": [
+        "A canonical legacy code returns one minimal customer-facing verification result while the compatibility gate remains enabled.",
+        "A valid unexpired Ed25519 token bound to the stored QR, tenant, batch, nonce and epoch returns one signed result.",
+        "A valid session or support proof returns one minimal status and nothing from a foreign resource.",
+        "One-time invitation, reset and email tokens execute only their existing exact pre-auth function and consume atomically.",
+        "Feedback and intake create one bounded attributed row with server-derived routing and generic response.",
+        "A public connector request resolves one allowlisted signed artifact below the release root without database access."
+      ],
+      "denyScenarios": [
+        "Blank, malformed, unknown, ambiguous, inactive, unreleased, orphaned or inconsistent scope never becomes a public wildcard.",
+        "Invalid signed tokens never fall back to raw QR lookup and unsigned claims establish no authority.",
+        "Reference, email, ticket, user, licensee, manufacturer, batch, range or internal ID alone proves nothing.",
+        "Consumed/expired tokens, stale session proofs and rotated QR epochs are denied without existence disclosure.",
+        "Caller-provided tenant, role, purpose or routing fields are ignored or rejected as authority.",
+        "Public lists, raw protected-table queries, internal/test downloads and policy/security configuration are denied."
+      ],
+      "publicReadContractBoundaryId": "public-read-contract-v1",
+      "publicAccessClass": "email-link-verification",
+      "publicFunctionId": "preauth-fn-consume-email-verification",
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
     },
     {
       "id": "command-user-select-e3ba477495b1",

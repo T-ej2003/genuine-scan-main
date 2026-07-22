@@ -24901,7 +24901,10 @@
           "columns": [
             "expiresAt",
             "lastUsedAt",
-            "revokedAt"
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
           ],
           "allowed": [
             "expiresAt=NULL",
@@ -24909,7 +24912,13 @@
             "lastUsedAt=NULL",
             "lastUsedAt=SERVER_TIMESTAMP_SET",
             "revokedAt=NULL",
-            "revokedAt=SERVER_TIMESTAMP_SET"
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": []
         }
@@ -28080,7 +28089,10 @@
           "columns": [
             "expiresAt",
             "lastUsedAt",
-            "revokedAt"
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
           ],
           "allowed": [
             "expiresAt=NULL",
@@ -28088,7 +28100,13 @@
             "lastUsedAt=NULL",
             "lastUsedAt=SERVER_TIMESTAMP_SET",
             "revokedAt=NULL",
-            "revokedAt=SERVER_TIMESTAMP_SET"
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": []
         },
@@ -28097,7 +28115,10 @@
           "columns": [
             "expiresAt",
             "lastUsedAt",
-            "revokedAt"
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
           ],
           "allowed": [
             "expiresAt=NULL",
@@ -28105,7 +28126,13 @@
             "lastUsedAt=NULL",
             "lastUsedAt=SERVER_TIMESTAMP_SET",
             "revokedAt=NULL",
-            "revokedAt=SERVER_TIMESTAMP_SET"
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": [
             "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
@@ -29410,7 +29437,10 @@
           "columns": [
             "expiresAt",
             "lastUsedAt",
-            "revokedAt"
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
           ],
           "allowed": [
             "expiresAt=NULL",
@@ -29418,7 +29448,13 @@
             "lastUsedAt=NULL",
             "lastUsedAt=SERVER_TIMESTAMP_SET",
             "revokedAt=NULL",
-            "revokedAt=SERVER_TIMESTAMP_SET"
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": [
             "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
@@ -29600,7 +29636,10 @@
           "columns": [
             "expiresAt",
             "lastUsedAt",
-            "revokedAt"
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
           ],
           "allowed": [
             "expiresAt=NULL",
@@ -29608,7 +29647,13 @@
             "lastUsedAt=NULL",
             "lastUsedAt=SERVER_TIMESTAMP_SET",
             "revokedAt=NULL",
-            "revokedAt=SERVER_TIMESTAMP_SET"
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": []
         },
@@ -33668,12 +33713,18 @@
           "columns": [
             "expiresAt",
             "lastUsedAt",
-            "revokedAt"
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
           ],
           "allowed": [
             "expiresAt=NULL_OR_SERVER_INITIALIZED",
             "lastUsedAt=NULL_OR_SERVER_INITIALIZED",
-            "revokedAt=NULL_OR_SERVER_INITIALIZED"
+            "revokedAt=NULL_OR_SERVER_INITIALIZED",
+            "sessionCapabilityExpiresAt=NULL_OR_SERVER_INITIALIZED",
+            "sessionCapabilityLastUsedAt=NULL_OR_SERVER_INITIALIZED",
+            "sessionCapabilityRevokedAt=NULL_OR_SERVER_INITIALIZED"
           ],
           "forbidden": [
             "CLIENT_SELECTED_INITIAL_STATE"
@@ -33684,7 +33735,10 @@
           "columns": [
             "expiresAt",
             "lastUsedAt",
-            "revokedAt"
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
           ],
           "allowed": [
             "expiresAt=NULL",
@@ -33692,7 +33746,13 @@
             "lastUsedAt=NULL",
             "lastUsedAt=SERVER_TIMESTAMP_SET",
             "revokedAt=NULL",
-            "revokedAt=SERVER_TIMESTAMP_SET"
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": []
         },
@@ -33701,7 +33761,10 @@
           "columns": [
             "expiresAt",
             "lastUsedAt",
-            "revokedAt"
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
           ],
           "allowed": [
             "expiresAt=NULL",
@@ -33709,7 +33772,13 @@
             "lastUsedAt=NULL",
             "lastUsedAt=SERVER_TIMESTAMP_SET",
             "revokedAt=NULL",
-            "revokedAt=SERVER_TIMESTAMP_SET"
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": [
             "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
@@ -37773,7 +37842,9 @@
         "backend/src/rls-waves/session-b/b01/preAuthRepository.ts"
       ],
       "protectedTables": [
+        "table-audit-log-outbox",
         "table-email-verification-token",
+        "table-refresh-token",
         "table-user"
       ],
       "actorClasses": [
@@ -37788,14 +37859,30 @@
       ],
       "canonicalContextKeys": [],
       "readWriteCommandRuleIds": [
+        "command-audit-log-outbox-insert-e1561aa306f2",
         "command-email-verification-token-select-e1561aa306f2",
         "command-email-verification-token-update-e1561aa306f2",
+        "command-refresh-token-select-e1561aa306f2",
+        "command-refresh-token-update-e1561aa306f2",
+        "command-user-select-e1561aa306f2",
         "command-user-update-e1561aa306f2"
       ],
       "tenantScopeModel": [
         "unresolved; must be approved before implementation"
       ],
       "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-e1561aa306f2",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
         {
           "commandRuleId": "command-email-verification-token-select-e1561aa306f2",
           "columns": [
@@ -37825,6 +37912,78 @@
           "forbidden": [
             "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
           ]
+        },
+        {
+          "commandRuleId": "command-refresh-token-select-e1561aa306f2",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-refresh-token-update-e1561aa306f2",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-select-e1561aa306f2",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
         },
         {
           "commandRuleId": "command-user-update-e1561aa306f2",
@@ -37885,7 +38044,10 @@
         "backend/src/rls-waves/session-b/b01/preAuthRepository.ts"
       ],
       "protectedTables": [
+        "table-audit-log-outbox",
         "table-invite",
+        "table-licensee",
+        "table-organization",
         "table-user"
       ],
       "actorClasses": [
@@ -37900,14 +38062,30 @@
       ],
       "canonicalContextKeys": [],
       "readWriteCommandRuleIds": [
+        "command-audit-log-outbox-insert-93fe5e2f9580",
         "command-invite-select-93fe5e2f9580",
         "command-invite-update-93fe5e2f9580",
+        "command-licensee-select-93fe5e2f9580",
+        "command-organization-select-93fe5e2f9580",
+        "command-user-select-93fe5e2f9580",
         "command-user-update-93fe5e2f9580"
       ],
       "tenantScopeModel": [
         "unresolved; must be approved before implementation"
       ],
       "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-93fe5e2f9580",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
         {
           "commandRuleId": "command-invite-select-93fe5e2f9580",
           "columns": [
@@ -37937,6 +38115,24 @@
           "forbidden": [
             "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
           ]
+        },
+        {
+          "commandRuleId": "command-user-select-93fe5e2f9580",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
         },
         {
           "commandRuleId": "command-user-update-93fe5e2f9580",
@@ -37997,7 +38193,9 @@
         "backend/src/rls-waves/session-b/b01/preAuthRepository.ts"
       ],
       "protectedTables": [
+        "table-audit-log-outbox",
         "table-password-reset",
+        "table-refresh-token",
         "table-user"
       ],
       "actorClasses": [
@@ -38012,14 +38210,30 @@
       ],
       "canonicalContextKeys": [],
       "readWriteCommandRuleIds": [
+        "command-audit-log-outbox-insert-963323294162",
         "command-password-reset-select-963323294162",
         "command-password-reset-update-963323294162",
+        "command-refresh-token-select-963323294162",
+        "command-refresh-token-update-963323294162",
+        "command-user-select-963323294162",
         "command-user-update-963323294162"
       ],
       "tenantScopeModel": [
         "unresolved; must be approved before implementation"
       ],
       "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-963323294162",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
         {
           "commandRuleId": "command-password-reset-select-963323294162",
           "columns": [
@@ -38049,6 +38263,78 @@
           "forbidden": [
             "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
           ]
+        },
+        {
+          "commandRuleId": "command-refresh-token-select-963323294162",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-refresh-token-update-963323294162",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-select-963323294162",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
         },
         {
           "commandRuleId": "command-user-update-963323294162",
@@ -38110,6 +38396,8 @@
       ],
       "protectedTables": [
         "table-invite",
+        "table-licensee",
+        "table-organization",
         "table-user"
       ],
       "actorClasses": [
@@ -38125,6 +38413,8 @@
       "canonicalContextKeys": [],
       "readWriteCommandRuleIds": [
         "command-invite-select-d113603cb7d4",
+        "command-licensee-select-d113603cb7d4",
+        "command-organization-select-d113603cb7d4",
         "command-user-select-d113603cb7d4"
       ],
       "tenantScopeModel": [
@@ -38295,12 +38585,31 @@
       ],
       "canonicalContextKeys": [],
       "readWriteCommandRuleIds": [
+        "command-user-select-8bfc0e3d6533",
         "command-user-update-8bfc0e3d6533"
       ],
       "tenantScopeModel": [
         "unresolved; must be approved before implementation"
       ],
       "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-user-select-8bfc0e3d6533",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        },
         {
           "commandRuleId": "command-user-update-8bfc0e3d6533",
           "columns": [
@@ -38360,6 +38669,7 @@
         "backend/src/rls-waves/session-b/b01/preAuthRepository.ts"
       ],
       "protectedTables": [
+        "table-audit-log-outbox",
         "table-password-reset",
         "table-user"
       ],
@@ -38375,6 +38685,7 @@
       ],
       "canonicalContextKeys": [],
       "readWriteCommandRuleIds": [
+        "command-audit-log-outbox-insert-e45d5f48ae3c",
         "command-password-reset-insert-e45d5f48ae3c",
         "command-user-select-e45d5f48ae3c"
       ],
@@ -38382,6 +38693,18 @@
         "unresolved; must be approved before implementation"
       ],
       "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-e45d5f48ae3c",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
         {
           "commandRuleId": "command-password-reset-insert-e45d5f48ae3c",
           "columns": [
@@ -38773,7 +39096,10 @@
           "columns": [
             "expiresAt",
             "lastUsedAt",
-            "revokedAt"
+            "revokedAt",
+            "sessionCapabilityExpiresAt",
+            "sessionCapabilityLastUsedAt",
+            "sessionCapabilityRevokedAt"
           ],
           "allowed": [
             "expiresAt=NULL",
@@ -38781,7 +39107,13 @@
             "lastUsedAt=NULL",
             "lastUsedAt=SERVER_TIMESTAMP_SET",
             "revokedAt=NULL",
-            "revokedAt=SERVER_TIMESTAMP_SET"
+            "revokedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityExpiresAt=NULL",
+            "sessionCapabilityExpiresAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityLastUsedAt=NULL",
+            "sessionCapabilityLastUsedAt=SERVER_TIMESTAMP_SET",
+            "sessionCapabilityRevokedAt=NULL",
+            "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": []
         },

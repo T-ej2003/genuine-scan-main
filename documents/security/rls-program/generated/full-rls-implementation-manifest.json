@@ -15,19 +15,19 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "4b26861c6ae1e37033afaa11f0e6f6c46ac7fd4961f0bdba0366075305734148",
+  "sourceContractSha256": "0b4be52a6b9a37940964d4263da7f39eb7dbb66ad5cdd259153146d1608d471b",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
-      "sha256": "c677561ffbcc276c0cbc2293e73def7b941d8f50741472fa065f5dbde410ee53"
+      "sha256": "d5d6d4963e14d55ce3308502658729eb1a07c23badaa393dc575b76b1ddeb0d6"
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "fb271ab488d4669362580bb2defc7163dc5ec19d960b2fd56b117d5ce7b8eaa7"
+      "sha256": "7a4735e94d58c38f860dd95d9370f4b14d2542828de9b5b4ae3b559f575d26c9"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "31e4e1d2bb1ea6cc8efd2523d0fabe7bbd77609cf2b17a360f07de93da241216"
+      "sha256": "657929b242b68e8744f7c95d29554805b4509f7c3bb94db7624ea6f1fb58842e"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -35,7 +35,7 @@
     },
     {
       "path": "documents/security/rls-program/object-ownership-chain.json",
-      "sha256": "48a978bc0c07aaba829ad2ef681c4127287bb7a3bf37e59ea845b9cccae6215e"
+      "sha256": "f746ce4a86468e720c2669927959cfe2466629dbd3b4505e36ce37966ce160a9"
     },
     {
       "path": "documents/security/rls-program/essential-workflow-allowlist.json",
@@ -43,11 +43,11 @@
     },
     {
       "path": "documents/security/rls-program/context-boundary-families.json",
-      "sha256": "d9369072f842182e85fff8c69f8f7ede9f830b69a797f621c133df3de54453b3"
+      "sha256": "0782890997f9142ee6b973177c8e168c715912c868f2bff2804d5901a90e9a44"
     },
     {
       "path": "documents/security/rls-program/workflow-three-session-partition.json",
-      "sha256": "c1eada3f32f0caecb541a925af092e108c109256a22c7d77073a953e01aaebca"
+      "sha256": "bdd016179a24f5b9cfceec4ade9cb731e92ebb92db282cbb6fcf683ee86eea1f"
     },
     {
       "path": "backend/prisma/schema.prisma",
@@ -59,7 +59,7 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "c069afb652469f4da5444c50be991fec38bcc083caa184569d4447302f88d24e"
+      "sha256": "0419a1cad457f144e8d1e0a0329bbc565cfcc5f33ad7ea1c6c187e5318abaab3"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
@@ -67,7 +67,7 @@
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
-      "sha256": "2d2548419cb86d30d6e6a1dc2aaa4b658475de5bc8f5f9951e48f422c63987ae"
+      "sha256": "e081bef9f22e7bf463d5ee7d29a7fe2e007efde44857dbc09b336cdb15f8c1d3"
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
@@ -79,7 +79,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "1c79c156a57ee92c64c5d78d8cab29f8c35b1785160c07dde2be47e3ae3e619b"
+      "sha256": "8d05b3bbbe5a555055bce7ebd9f8d57f519d2499d1876e85eca4cef0433cb5e8"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -117,7 +117,7 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 31,
-    "generatedPolicies": 72,
+    "generatedPolicies": 86,
     "columnPrivilegeCells": 78,
     "prismaMigrations": 50,
     "prismaEnums": 58,
@@ -135,7 +135,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:4b26861c6ae1e37033afaa11f0e6f6c46ac7fd4961f0bdba0366075305734148",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:0b4be52a6b9a37940964d4263da7f39eb7dbb66ad5cdd259153146d1608d471b",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

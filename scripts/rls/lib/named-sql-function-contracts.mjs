@@ -48,6 +48,8 @@ const b01Source = "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctio
 const b01Rollback = "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql";
 const authenticatedSessionSource = "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql";
 const authenticatedSessionRollback = "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql";
+const preAuthSource = "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql";
+const preAuthRollback = "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql";
 const c03Source = "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql";
 const c03Rollback = "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql";
 const b01Workflow = "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session";
@@ -78,6 +80,50 @@ const b01Tables = Object.freeze({
   challenge: [["RefreshToken", "SELECT"], ["User", "SELECT"], ["AuthMfaChallenge", "INSERT"], ["AuditLogOutbox", "INSERT"]],
   revoke: [["RefreshToken", "SELECT"], ["RefreshToken", "UPDATE"], ["User", "SELECT"], ["AuditLogOutbox", "INSERT"]],
   complete: [["RefreshToken", "SELECT"], ["RefreshToken", "INSERT"], ["RefreshToken", "UPDATE"], ["User", "SELECT"], ["ManufacturerLicenseeLink", "SELECT"], ["Licensee", "SELECT"], ["Organization", "SELECT"], ["AuditLogOutbox", "INSERT"]],
+});
+
+const preAuthOwner = `current_user={{AUTH_OWNER}}`;
+const preAuthOperation = `current_setting('app.b01_preauth_operation',true)`;
+const preAuthUserId = `current_setting('app.b01_preauth_user_id',true)`;
+const preAuthTokenId = `current_setting('app.b01_preauth_token_id',true)`;
+const preAuthHashes = `string_to_array(current_setting('app.b01_preauth_hashes',true),',')`;
+const preAuthSecurity = Object.freeze({
+  ...b01Security,
+  functionSource: preAuthSource,
+  rollbackDefinition: preAuthRollback,
+  deploymentPhase: "session-b-b01-preauth",
+  ownerPrivileges: [
+    ["User", "SELECT", ["id","email","pendingEmail","passwordHash","name","role","orgId","licenseeId","status","isActive","disabledAt","deletedAt","failedLoginAttempts","lockedUntil","lastLoginAt","emailVerifiedAt","pendingEmailRequestedAt"]],
+    ["User", "UPDATE", ["email","pendingEmail","pendingEmailRequestedAt","passwordHash","name","status","failedLoginAttempts","lockedUntil","emailVerifiedAt","updatedAt"]],
+    ["Invite", "SELECT", ["id","orgId","licenseeId","email","role","manufacturerId","tokenHash","expiresAt","usedAt"]],
+    ["Invite", "UPDATE", ["usedAt","acceptedByUserId"]],
+    ["PasswordReset", "SELECT", ["id","orgId","userId","tokenHash","expiresAt","usedAt"]],
+    ["PasswordReset", "INSERT", ["id","orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","userAgentHash"]],
+    ["PasswordReset", "UPDATE", ["usedAt"]],
+    ["EmailVerificationToken", "SELECT", ["id","userId","email","pendingEmail","purpose","tokenHash","expiresAt","usedAt"]],
+    ["EmailVerificationToken", "UPDATE", ["usedAt"]],
+    ["RefreshToken", "SELECT", ["id","userId","revokedAt","sessionCapabilityRevokedAt"]],
+    ["RefreshToken", "UPDATE", ["revokedAt","revokedReason","lastUsedAt","sessionCapabilityRevokedAt","sessionCapabilityRevokedReason"]],
+    ["Licensee", "SELECT", ["id","orgId","name","isActive","suspendedAt"]],
+    ["Organization", "SELECT", ["id","isActive"]],
+    ["AuditLogOutbox", "INSERT", ["id","payload","updatedAt"]],
+  ],
+  ownerPolicies: [
+    ["User", "SELECT", `(${preAuthOwner} AND ((${preAuthOperation} IN ('password-lookup','password-failure','reset-request','invite-lookup','invite-consume') AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (${preAuthUserId}<>'' AND id=${preAuthUserId}) OR (${preAuthOperation}='email-consume' AND current_setting('app.b01_preauth_pending_email',true)<>'' AND lower(email)=current_setting('app.b01_preauth_pending_email',true))))`],
+    ["User", "UPDATE", `(${preAuthOwner} AND ((${preAuthOperation}='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (${preAuthOperation} IN ('reset-consume','invite-consume','email-consume') AND ${preAuthUserId}<>'' AND id=${preAuthUserId})))`],
+    ["Invite", "SELECT", `(${preAuthOwner} AND ${preAuthOperation} IN ('invite-lookup','invite-consume') AND "tokenHash"=ANY(${preAuthHashes}))`],
+    ["Invite", "UPDATE", `(${preAuthOwner} AND ${preAuthOperation}='invite-consume' AND id=${preAuthTokenId} AND "tokenHash"=ANY(${preAuthHashes}))`],
+    ["PasswordReset", "SELECT", `(${preAuthOwner} AND ${preAuthOperation}='reset-consume' AND "tokenHash"=ANY(${preAuthHashes}))`],
+    ["PasswordReset", "INSERT", `(${preAuthOwner} AND ${preAuthOperation}='reset-request' AND "userId"=${preAuthUserId} AND "tokenHash"=ANY(${preAuthHashes}))`],
+    ["PasswordReset", "UPDATE", `(${preAuthOwner} AND ${preAuthOperation}='reset-consume' AND id=${preAuthTokenId} AND "userId"=${preAuthUserId})`],
+    ["EmailVerificationToken", "SELECT", `(${preAuthOwner} AND ${preAuthOperation}='email-consume' AND "tokenHash"=ANY(${preAuthHashes}))`],
+    ["EmailVerificationToken", "UPDATE", `(${preAuthOwner} AND ${preAuthOperation}='email-consume' AND id=${preAuthTokenId} AND "userId"=${preAuthUserId})`],
+    ["RefreshToken", "SELECT", `(${preAuthOwner} AND ${preAuthOperation} IN ('reset-consume','email-consume') AND "userId"=${preAuthUserId})`],
+    ["RefreshToken", "UPDATE", `(${preAuthOwner} AND ${preAuthOperation} IN ('reset-consume','email-consume') AND "userId"=${preAuthUserId})`],
+    ["Licensee", "SELECT", `(${preAuthOwner} AND ${preAuthOperation} IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_licensee_id',true) AND "orgId"=current_setting('app.b01_preauth_org_id',true))`],
+    ["Organization", "SELECT", `(${preAuthOwner} AND ${preAuthOperation} IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_org_id',true))`],
+    ["AuditLogOutbox", "INSERT", `(${preAuthOwner} AND ${preAuthUserId}<>'' AND payload->>'userId'=${preAuthUserId} AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))`],
+  ],
 });
 
 const c03SessionBinding = `(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public."RefreshToken" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session."userId"=current_setting('app.c03_user_id',true) AND c03_session."sessionCapabilityHash"=current_setting('app.auth_session_hash',true) AND c03_session."sessionCapabilityHashVersion"='sha256-v1' AND c03_session."sessionCapabilityRevokedAt" IS NULL AND c03_session."sessionCapabilityExpiresAt">clock_timestamp() AND c03_session."revokedAt" IS NULL AND c03_session."expiresAt">clock_timestamp()))`;
@@ -140,6 +186,49 @@ const c03Commands = Object.freeze({
 // A function is production-reviewed only when its deployable definition,
 // contract, rollback and exact table-command evidence live together here.
 export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
+  {
+    id: "b01-lookup-password-user", schema: "app_auth", name: "lookup_password_user", signature: "text",
+    returnType: "TABLE(id text, email text, passwordHash text, name text, role text, licenseeId text, orgId text, status text, isActive boolean, disabledAt timestamp without time zone, deletedAt timestamp without time zone, failedLoginAttempts integer, lockedUntil timestamp without time zone, lastLoginAt timestamp without time zone, emailVerifiedAt timestamp without time zone)",
+    identityArguments: "p_requested_email text", definitionLocation: preAuthSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: preAuthSecurity,
+    tableCommands: [["User","SELECT"]], context: "A normalized email selects at most one password bootstrap record; duplicate case-insensitive state fails closed and caller GUCs are overwritten.",
+    canonicalWorkflowIds: ["workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/preAuthRepository.ts:lookupPasswordBootstrapUser"], inputAuthority: "normalized email is lookup-only and never establishes authenticated authority", outputColumns: ["id","email","passwordHash","name","role","licenseeId","orgId","status","isActive","disabledAt","deletedAt","failedLoginAttempts","lockedUntil","lastLoginAt","emailVerifiedAt"], disposableProbes: ["b01-preauth-security-postgres18"],
+  },
+  {
+    id: "b01-record-password-failure", schema: "app_auth", name: "record_password_failure", signature: "text,timestamp without time zone,integer,integer", returnType: "TABLE(failedLoginAttempts integer, lockedUntil timestamp without time zone)",
+    identityArguments: "p_requested_email text, p_attempted_at timestamp without time zone, p_max_attempts integer, p_lockout_minutes integer", definitionLocation: preAuthSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: preAuthSecurity,
+    tableCommands: [["User","SELECT"],["User","UPDATE"]], context: "One bounded failed-login invocation atomically increments the exact normalized account and never shortens an existing lock.",
+    canonicalWorkflowIds: ["workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/preAuthRepository.ts:recordPasswordLoginFailure"], inputAuthority: "normalized email selects the account; bounded threshold and duration are mutation inputs", outputColumns: ["failedLoginAttempts","lockedUntil"], disposableProbes: ["b01-preauth-security-postgres18"],
+  },
+  {
+    id: "b01-request-password-reset", schema: "app_auth", name: "request_password_reset", signature: "text,text,timestamp without time zone,timestamp without time zone,text,text", returnType: "TABLE(accepted boolean, deliveryRequired boolean, userId text, email text, licenseeId text, orgId text, expiresAt timestamp without time zone)",
+    identityArguments: "p_requested_email text, p_reset_token_hash text, p_expires_at timestamp without time zone, p_requested_at timestamp without time zone, p_created_ip_hash text, p_user_agent_hash text", definitionLocation: preAuthSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: preAuthSecurity,
+    tableCommands: [["User","SELECT"],["PasswordReset","INSERT"],["AuditLogOutbox","INSERT"]], context: "Issues one hashed reset bearer only for one eligible normalized account while preserving the constant-success external response and atomic audit outbox.",
+    canonicalWorkflowIds: ["workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/preAuthRepository.ts:requestPasswordResetBoundary"], inputAuthority: "server-generated token hash and normalized email; the matched User row supplies user and tenant binding", outputColumns: ["accepted","deliveryRequired","userId","email","licenseeId","orgId","expiresAt"], disposableProbes: ["b01-preauth-security-postgres18"],
+  },
+  {
+    id: "b01-consume-password-reset", schema: "app_auth", name: "consume_password_reset_token", signature: "text[],text,timestamp without time zone", returnType: "TABLE(id text, email text, name text, role text, licenseeId text, orgId text)",
+    identityArguments: "p_token_hash_candidates text[], p_new_password_hash text, p_consumed_at timestamp without time zone", definitionLocation: preAuthSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: preAuthSecurity,
+    tableCommands: [["PasswordReset","SELECT"],["PasswordReset","UPDATE"],["User","SELECT"],["User","UPDATE"],["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["AuditLogOutbox","INSERT"]], context: "Locks one unused reset bearer, derives its user, changes the password, consumes the token, revokes refresh/session capability state and audits atomically.",
+    canonicalWorkflowIds: ["workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/preAuthRepository.ts:consumePasswordResetBoundary"], inputAuthority: "1..3 server-derived bearer hashes; PasswordReset.userId is the sole account authority", outputColumns: ["id","email","name","role","licenseeId","orgId"], disposableProbes: ["b01-preauth-security-postgres18"],
+  },
+  {
+    id: "b01-lookup-invitation", schema: "app_auth", name: "lookup_invitation_token", signature: "text[],timestamp without time zone", returnType: "TABLE(email text, role text, expiresAt timestamp without time zone, licenseeName text, requiresConnector boolean)",
+    identityArguments: "p_token_hash_candidates text[], p_checked_at timestamp without time zone", definitionLocation: preAuthSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: preAuthSecurity,
+    tableCommands: [["Invite","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"]], context: "Returns only a minimal preview after exact-one bearer, bound invited-user, role-family and live tenant validation.",
+    canonicalWorkflowIds: ["workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/preAuthRepository.ts:lookupInvitationBoundary"], inputAuthority: "hashed invite bearer; all user and tenant data are derived from its stored relationship", outputColumns: ["email","role","expiresAt","licenseeName","requiresConnector"], disposableProbes: ["b01-preauth-security-postgres18"],
+  },
+  {
+    id: "b01-consume-invitation", schema: "app_auth", name: "consume_invitation_token", signature: "text[],text,text,timestamp without time zone,text,text,text", returnType: "TABLE(inviteId text, id text, email text, name text, role text, licenseeId text, orgId text, status text)",
+    identityArguments: "p_token_hash_candidates text[], p_new_password_hash text, p_requested_name text, p_consumed_at timestamp without time zone, p_request_id text, p_ip_hash text, p_user_agent text", definitionLocation: preAuthSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: preAuthSecurity,
+    tableCommands: [["Invite","SELECT"],["Invite","UPDATE"],["User","SELECT"],["User","UPDATE"],["Licensee","SELECT"],["Organization","SELECT"],["AuditLogOutbox","INSERT"]], context: "Locks one invite and its pre-created same-email/same-role/same-tenant user, activates it without changing role or ownership, consumes the bearer and audits atomically.",
+    canonicalWorkflowIds: ["workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/preAuthRepository.ts:consumeInvitationBoundary"], inputAuthority: "hashed invitation bearer; request metadata is attribution only", outputColumns: ["inviteId","id","email","name","role","licenseeId","orgId","status"], disposableProbes: ["b01-preauth-security-postgres18"],
+  },
+  {
+    id: "b01-consume-email-verification", schema: "app_auth", name: "consume_email_verification_token", signature: "text[],timestamp without time zone", returnType: "TABLE(verified boolean, purpose text, userId text, email text)",
+    identityArguments: "p_token_hash_candidates text[], p_consumed_at timestamp without time zone", definitionLocation: preAuthSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: preAuthSecurity,
+    tableCommands: [["EmailVerificationToken","SELECT"],["EmailVerificationToken","UPDATE"],["User","SELECT"],["User","UPDATE"],["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["AuditLogOutbox","INSERT"]], context: "Locks one verification bearer and its bound active user; email change additionally proves the stored pending email and revokes sessions in the same transaction.",
+    canonicalWorkflowIds: ["workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"], repositoryCallers: ["backend/src/rls-waves/session-b/b01/preAuthRepository.ts:consumeEmailVerificationBoundary"], inputAuthority: "hashed verification bearer; EmailVerificationToken.userId and pendingEmail supply all authority", outputColumns: ["verified","purpose","userId","email"], disposableProbes: ["b01-preauth-security-postgres18"],
+  },
   {
     id: "c03-revalidate-compliance-pack-job-actor", schema: "app_rls", name: "c03_revalidate_compliance_pack_job_actor_scope",
     signature: "text,text,text,text", returnType: "TABLE(user_id text, role text, organization_id text, licensee_id text)",

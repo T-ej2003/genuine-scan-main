@@ -733,13 +733,293 @@
       "functionName": "app_auth.consume_email_verification_token",
       "schema": "app_auth",
       "name": "consume_email_verification_token",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text[],timestamp without time zone",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "preauth"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "deploymentPhase": "session-b-b01-preauth",
+        "ownerPrivileges": [
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "email",
+              "pendingEmail",
+              "passwordHash",
+              "name",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "lastLoginAt",
+              "emailVerifiedAt",
+              "pendingEmailRequestedAt"
+            ]
+          ],
+          [
+            "User",
+            "UPDATE",
+            [
+              "email",
+              "pendingEmail",
+              "pendingEmailRequestedAt",
+              "passwordHash",
+              "name",
+              "status",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "emailVerifiedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "licenseeId",
+              "email",
+              "role",
+              "manufacturerId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            [
+              "usedAt",
+              "acceptedByUserId"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "createdAt",
+              "createdIpHash",
+              "userAgentHash"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "email",
+              "pendingEmail",
+              "purpose",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "revokedAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            [
+              "revokedAt",
+              "revokedReason",
+              "lastUsedAt",
+              "sessionCapabilityRevokedAt",
+              "sessionCapabilityRevokedReason"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "name",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "User",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true) IN ('password-lookup','password-failure','reset-request','invite-lookup','invite-consume') AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true)) OR (current_setting('app.b01_preauth_operation',true)='email-consume' AND current_setting('app.b01_preauth_pending_email',true)<>'' AND lower(email)=current_setting('app.b01_preauth_pending_email',true))))"
+          ],
+          [
+            "User",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true)='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_operation',true) IN ('reset-consume','invite-consume','email-consume') AND current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true))))"
+          ],
+          [
+            "Invite",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='invite-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-request' AND \"userId\"=current_setting('app.b01_preauth_user_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_licensee_id',true) AND \"orgId\"=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_preauth_user_id',true) AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "EmailVerificationToken",
+          "SELECT"
+        ],
+        [
+          "EmailVerificationToken",
+          "UPDATE"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "User",
+          "UPDATE"
+        ],
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "RefreshToken",
+          "UPDATE"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Locks one verification bearer and its bound active user; email change additionally proves the stored pending email and revokes sessions in the same transaction.",
       "canonicalWorkflowIds": [
         "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
       ],
@@ -766,13 +1046,293 @@
       "functionName": "app_auth.consume_invitation_token",
       "schema": "app_auth",
       "name": "consume_invitation_token",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text[],text,text,timestamp without time zone,text,text,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "preauth"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "deploymentPhase": "session-b-b01-preauth",
+        "ownerPrivileges": [
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "email",
+              "pendingEmail",
+              "passwordHash",
+              "name",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "lastLoginAt",
+              "emailVerifiedAt",
+              "pendingEmailRequestedAt"
+            ]
+          ],
+          [
+            "User",
+            "UPDATE",
+            [
+              "email",
+              "pendingEmail",
+              "pendingEmailRequestedAt",
+              "passwordHash",
+              "name",
+              "status",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "emailVerifiedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "licenseeId",
+              "email",
+              "role",
+              "manufacturerId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            [
+              "usedAt",
+              "acceptedByUserId"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "createdAt",
+              "createdIpHash",
+              "userAgentHash"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "email",
+              "pendingEmail",
+              "purpose",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "revokedAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            [
+              "revokedAt",
+              "revokedReason",
+              "lastUsedAt",
+              "sessionCapabilityRevokedAt",
+              "sessionCapabilityRevokedReason"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "name",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "User",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true) IN ('password-lookup','password-failure','reset-request','invite-lookup','invite-consume') AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true)) OR (current_setting('app.b01_preauth_operation',true)='email-consume' AND current_setting('app.b01_preauth_pending_email',true)<>'' AND lower(email)=current_setting('app.b01_preauth_pending_email',true))))"
+          ],
+          [
+            "User",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true)='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_operation',true) IN ('reset-consume','invite-consume','email-consume') AND current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true))))"
+          ],
+          [
+            "Invite",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='invite-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-request' AND \"userId\"=current_setting('app.b01_preauth_user_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_licensee_id',true) AND \"orgId\"=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_preauth_user_id',true) AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "Invite",
+          "SELECT"
+        ],
+        [
+          "Invite",
+          "UPDATE"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "User",
+          "UPDATE"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Locks one invite and its pre-created same-email/same-role/same-tenant user, activates it without changing role or ownership, consumes the bearer and audits atomically.",
       "canonicalWorkflowIds": [
         "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
       ],
@@ -799,13 +1359,293 @@
       "functionName": "app_auth.consume_password_reset_token",
       "schema": "app_auth",
       "name": "consume_password_reset_token",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text[],text,timestamp without time zone",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "preauth"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "deploymentPhase": "session-b-b01-preauth",
+        "ownerPrivileges": [
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "email",
+              "pendingEmail",
+              "passwordHash",
+              "name",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "lastLoginAt",
+              "emailVerifiedAt",
+              "pendingEmailRequestedAt"
+            ]
+          ],
+          [
+            "User",
+            "UPDATE",
+            [
+              "email",
+              "pendingEmail",
+              "pendingEmailRequestedAt",
+              "passwordHash",
+              "name",
+              "status",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "emailVerifiedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "licenseeId",
+              "email",
+              "role",
+              "manufacturerId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            [
+              "usedAt",
+              "acceptedByUserId"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "createdAt",
+              "createdIpHash",
+              "userAgentHash"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "email",
+              "pendingEmail",
+              "purpose",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "revokedAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            [
+              "revokedAt",
+              "revokedReason",
+              "lastUsedAt",
+              "sessionCapabilityRevokedAt",
+              "sessionCapabilityRevokedReason"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "name",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "User",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true) IN ('password-lookup','password-failure','reset-request','invite-lookup','invite-consume') AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true)) OR (current_setting('app.b01_preauth_operation',true)='email-consume' AND current_setting('app.b01_preauth_pending_email',true)<>'' AND lower(email)=current_setting('app.b01_preauth_pending_email',true))))"
+          ],
+          [
+            "User",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true)='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_operation',true) IN ('reset-consume','invite-consume','email-consume') AND current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true))))"
+          ],
+          [
+            "Invite",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='invite-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-request' AND \"userId\"=current_setting('app.b01_preauth_user_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_licensee_id',true) AND \"orgId\"=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_preauth_user_id',true) AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "PasswordReset",
+          "SELECT"
+        ],
+        [
+          "PasswordReset",
+          "UPDATE"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "User",
+          "UPDATE"
+        ],
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "RefreshToken",
+          "UPDATE"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Locks one unused reset bearer, derives its user, changes the password, consumes the token, revokes refresh/session capability state and audits atomically.",
       "canonicalWorkflowIds": [
         "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
       ],
@@ -1034,13 +1874,281 @@
       "functionName": "app_auth.lookup_invitation_token",
       "schema": "app_auth",
       "name": "lookup_invitation_token",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text[],timestamp without time zone",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "preauth"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "deploymentPhase": "session-b-b01-preauth",
+        "ownerPrivileges": [
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "email",
+              "pendingEmail",
+              "passwordHash",
+              "name",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "lastLoginAt",
+              "emailVerifiedAt",
+              "pendingEmailRequestedAt"
+            ]
+          ],
+          [
+            "User",
+            "UPDATE",
+            [
+              "email",
+              "pendingEmail",
+              "pendingEmailRequestedAt",
+              "passwordHash",
+              "name",
+              "status",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "emailVerifiedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "licenseeId",
+              "email",
+              "role",
+              "manufacturerId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            [
+              "usedAt",
+              "acceptedByUserId"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "createdAt",
+              "createdIpHash",
+              "userAgentHash"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "email",
+              "pendingEmail",
+              "purpose",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "revokedAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            [
+              "revokedAt",
+              "revokedReason",
+              "lastUsedAt",
+              "sessionCapabilityRevokedAt",
+              "sessionCapabilityRevokedReason"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "name",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "User",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true) IN ('password-lookup','password-failure','reset-request','invite-lookup','invite-consume') AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true)) OR (current_setting('app.b01_preauth_operation',true)='email-consume' AND current_setting('app.b01_preauth_pending_email',true)<>'' AND lower(email)=current_setting('app.b01_preauth_pending_email',true))))"
+          ],
+          [
+            "User",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true)='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_operation',true) IN ('reset-consume','invite-consume','email-consume') AND current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true))))"
+          ],
+          [
+            "Invite",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='invite-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-request' AND \"userId\"=current_setting('app.b01_preauth_user_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_licensee_id',true) AND \"orgId\"=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_preauth_user_id',true) AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "Invite",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ]
+      ],
+      "requiredContext": "Returns only a minimal preview after exact-one bearer, bound invited-user, role-family and live tenant validation.",
       "canonicalWorkflowIds": [
         "workflow-internal-backend-src-services-auth-invite-service-ts-get-invite-preview"
       ],
@@ -1067,13 +2175,269 @@
       "functionName": "app_auth.lookup_password_user",
       "schema": "app_auth",
       "name": "lookup_password_user",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "preauth"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "deploymentPhase": "session-b-b01-preauth",
+        "ownerPrivileges": [
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "email",
+              "pendingEmail",
+              "passwordHash",
+              "name",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "lastLoginAt",
+              "emailVerifiedAt",
+              "pendingEmailRequestedAt"
+            ]
+          ],
+          [
+            "User",
+            "UPDATE",
+            [
+              "email",
+              "pendingEmail",
+              "pendingEmailRequestedAt",
+              "passwordHash",
+              "name",
+              "status",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "emailVerifiedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "licenseeId",
+              "email",
+              "role",
+              "manufacturerId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            [
+              "usedAt",
+              "acceptedByUserId"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "createdAt",
+              "createdIpHash",
+              "userAgentHash"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "email",
+              "pendingEmail",
+              "purpose",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "revokedAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            [
+              "revokedAt",
+              "revokedReason",
+              "lastUsedAt",
+              "sessionCapabilityRevokedAt",
+              "sessionCapabilityRevokedReason"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "name",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "User",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true) IN ('password-lookup','password-failure','reset-request','invite-lookup','invite-consume') AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true)) OR (current_setting('app.b01_preauth_operation',true)='email-consume' AND current_setting('app.b01_preauth_pending_email',true)<>'' AND lower(email)=current_setting('app.b01_preauth_pending_email',true))))"
+          ],
+          [
+            "User",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true)='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_operation',true) IN ('reset-consume','invite-consume','email-consume') AND current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true))))"
+          ],
+          [
+            "Invite",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='invite-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-request' AND \"userId\"=current_setting('app.b01_preauth_user_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_licensee_id',true) AND \"orgId\"=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_preauth_user_id',true) AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "User",
+          "SELECT"
+        ]
+      ],
+      "requiredContext": "A normalized email selects at most one password bootstrap record; duplicate case-insensitive state fails closed and caller GUCs are overwritten.",
       "canonicalWorkflowIds": [
         "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-find-pre-candidate-password-user"
       ],
@@ -1100,13 +2464,273 @@
       "functionName": "app_auth.record_password_failure",
       "schema": "app_auth",
       "name": "record_password_failure",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text,timestamp without time zone,integer,integer",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "preauth"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "deploymentPhase": "session-b-b01-preauth",
+        "ownerPrivileges": [
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "email",
+              "pendingEmail",
+              "passwordHash",
+              "name",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "lastLoginAt",
+              "emailVerifiedAt",
+              "pendingEmailRequestedAt"
+            ]
+          ],
+          [
+            "User",
+            "UPDATE",
+            [
+              "email",
+              "pendingEmail",
+              "pendingEmailRequestedAt",
+              "passwordHash",
+              "name",
+              "status",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "emailVerifiedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "licenseeId",
+              "email",
+              "role",
+              "manufacturerId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            [
+              "usedAt",
+              "acceptedByUserId"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "createdAt",
+              "createdIpHash",
+              "userAgentHash"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "email",
+              "pendingEmail",
+              "purpose",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "revokedAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            [
+              "revokedAt",
+              "revokedReason",
+              "lastUsedAt",
+              "sessionCapabilityRevokedAt",
+              "sessionCapabilityRevokedReason"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "name",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "User",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true) IN ('password-lookup','password-failure','reset-request','invite-lookup','invite-consume') AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true)) OR (current_setting('app.b01_preauth_operation',true)='email-consume' AND current_setting('app.b01_preauth_pending_email',true)<>'' AND lower(email)=current_setting('app.b01_preauth_pending_email',true))))"
+          ],
+          [
+            "User",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true)='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_operation',true) IN ('reset-consume','invite-consume','email-consume') AND current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true))))"
+          ],
+          [
+            "Invite",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='invite-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-request' AND \"userId\"=current_setting('app.b01_preauth_user_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_licensee_id',true) AND \"orgId\"=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_preauth_user_id',true) AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "User",
+          "UPDATE"
+        ]
+      ],
+      "requiredContext": "One bounded failed-login invocation atomically increments the exact normalized account and never shortens an existing lock.",
       "canonicalWorkflowIds": [
         "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure"
       ],
@@ -1133,13 +2757,277 @@
       "functionName": "app_auth.request_password_reset",
       "schema": "app_auth",
       "name": "request_password_reset",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text,text,timestamp without time zone,timestamp without time zone,text,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "preauth"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+        "deploymentPhase": "session-b-b01-preauth",
+        "ownerPrivileges": [
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "email",
+              "pendingEmail",
+              "passwordHash",
+              "name",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "lastLoginAt",
+              "emailVerifiedAt",
+              "pendingEmailRequestedAt"
+            ]
+          ],
+          [
+            "User",
+            "UPDATE",
+            [
+              "email",
+              "pendingEmail",
+              "pendingEmailRequestedAt",
+              "passwordHash",
+              "name",
+              "status",
+              "failedLoginAttempts",
+              "lockedUntil",
+              "emailVerifiedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "licenseeId",
+              "email",
+              "role",
+              "manufacturerId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            [
+              "usedAt",
+              "acceptedByUserId"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            [
+              "id",
+              "orgId",
+              "userId",
+              "tokenHash",
+              "expiresAt",
+              "createdAt",
+              "createdIpHash",
+              "userAgentHash"
+            ]
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "email",
+              "pendingEmail",
+              "purpose",
+              "tokenHash",
+              "expiresAt",
+              "usedAt"
+            ]
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            [
+              "usedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "revokedAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            [
+              "revokedAt",
+              "revokedReason",
+              "lastUsedAt",
+              "sessionCapabilityRevokedAt",
+              "sessionCapabilityRevokedReason"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "name",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "User",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true) IN ('password-lookup','password-failure','reset-request','invite-lookup','invite-consume') AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true)) OR (current_setting('app.b01_preauth_operation',true)='email-consume' AND current_setting('app.b01_preauth_pending_email',true)<>'' AND lower(email)=current_setting('app.b01_preauth_pending_email',true))))"
+          ],
+          [
+            "User",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND ((current_setting('app.b01_preauth_operation',true)='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_operation',true) IN ('reset-consume','invite-consume','email-consume') AND current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true))))"
+          ],
+          [
+            "Invite",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "Invite",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='invite-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-request' AND \"userId\"=current_setting('app.b01_preauth_user_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "PasswordReset",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "EmailVerificationToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))"
+          ],
+          [
+            "EmailVerificationToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true)='email-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "RefreshToken",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))"
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_licensee_id',true) AND \"orgId\"=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_org_id',true))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.b01_preauth_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_preauth_user_id',true) AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "PasswordReset",
+          "INSERT"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Issues one hashed reset bearer only for one eligible normalized account while preserving the constant-success external response and atomic audit outbox.",
       "canonicalWorkflowIds": [
         "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset"
       ],
@@ -4555,7 +6443,7 @@
       ],
       "requiredContext": "Verifies the opaque authenticated-session capability, derives the live actor, locks scope to the selected compliance job and rejects inactive or cross-tenant scope.",
       "canonicalWorkflowIds": [
-        "workflow-internal-backend-src-rls-waves-session-c-c03-c03-actor-boundary-ts-with-c03-resource-transaction"
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "callers": [
         {

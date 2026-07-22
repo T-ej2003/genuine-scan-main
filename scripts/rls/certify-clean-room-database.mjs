@@ -167,6 +167,25 @@ const runC03AuthenticatedCertification = (connections, env) => {
   if (!/C03 authenticated boundaries application-path proof passed/.test(result.stdout || "")) throw new Error("C03 authenticated certification did not emit its success marker");
   return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-c/c03/c03AuthenticatedBoundariesPostgres18.test.js" };
 };
+const runB01PreAuthCertification = (connections, env) => {
+  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/rls-wave-b/b01/preAuthSecurityPostgres18.test.js")], {
+    cwd: root,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      DATABASE_URL: connections.app,
+      PREAUTH_DATABASE_URL: connections.preauth,
+      MSCQR_B01_PREAUTH_BOOTSTRAP_URL: connections.bootstrap,
+      MSCQR_B01_PREAUTH_POSTGRES18_TEST: "true",
+      MSCQR_B01_PREAUTH_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_B01_PREAUTH_POSTGRES18_TEST",
+    },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`B01 pre-auth certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/B01 pre-auth security application-path proof passed/.test(result.stdout || "")) throw new Error("B01 pre-auth certification did not emit its success marker");
+  return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-b/b01/preAuthSecurityPostgres18.test.js" };
+};
 const injectBeforeCommit = (file, label) => {
   const source = fs.readFileSync(path.join(sqlRoot, file), "utf8");
   const index = source.lastIndexOf("\nCOMMIT;");
@@ -748,6 +767,7 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     runSqlFile(urls.administrator, "verification.sql", "run exact verification entrypoint");
     const catalogTamperResults = certifyCatalogTamperDetection(urls.administrator, manifest, policies);
     const b01Certification = certifyB01RefreshRotation(urls, manifest);
+    const b01PreAuthCertification = runB01PreAuthCertification({ app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth }, env);
     issueSemanticCapabilities(urls);
     const tablesCertified = certifyTablesAndColumns(urls.administrator, urls.app, manifest, policies, privileges);
     certifySemantics(urls.bootstrap, urls.app);
@@ -759,7 +779,7 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
       ? []
       : runApplicationPathCertifications(connections, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, c03Certification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, c03Certification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -807,6 +827,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     workflowsApplicationPathCertified: 0,
     applicationPathCertifiedWorkflowIds: [],
     applicationPathResults: [],
+    b01PreAuthCertification: null,
     workflowsProductProhibited: workflowEvidence.summary.frozenProductProhibited,
     cleanRoomPreflightCertified: false,
     migrationsFromZeroCertified: false,
@@ -865,6 +886,7 @@ export const runCertification = (adminUrl, env = process.env) => {
       : "pending-application-path-certification";
     result.catalogTamperResults = finalRun.catalogTamperResults;
     result.b01Certification = finalRun.b01Certification;
+    result.b01PreAuthCertification = finalRun.b01PreAuthCertification;
     result.c03Certification = finalRun.c03Certification;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
     result.generatedPoliciesCertified = policies.count;

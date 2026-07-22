@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 72,
+  "count": 86,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -451,6 +451,43 @@
     {
       "tableId": "table-audit-log-outbox",
       "table": "AuditLogOutbox",
+      "policyName": "b01_preauth_auditlogoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_user_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_preauth_user_id',true) AND payload->>'action' IN ('AUTH_PASSWORD_RESET_REQUESTED','AUTH_PASSWORD_RESET_COMPLETED','AUTH_EMAIL_VERIFIED','AUTH_EMAIL_CHANGE_CONFIRMED','AUTH_INVITE_ACCEPTED'))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-0b4b95c51d1e",
+        "command-audit-log-outbox-insert-0c52b3004f35",
+        "command-audit-log-outbox-insert-2d0779382f94",
+        "command-audit-log-outbox-insert-56e28c0be62e",
+        "command-audit-log-outbox-insert-62fc51366420",
+        "command-audit-log-outbox-insert-65b85bc0759d",
+        "command-audit-log-outbox-insert-88bea5f1af06",
+        "command-audit-log-outbox-insert-93fe5e2f9580",
+        "command-audit-log-outbox-insert-963323294162",
+        "command-audit-log-outbox-insert-986a6bc31b69",
+        "command-audit-log-outbox-insert-c4febf718039",
+        "command-audit-log-outbox-insert-ce5627f3ff70",
+        "command-audit-log-outbox-insert-e1561aa306f2",
+        "command-audit-log-outbox-insert-e45d5f48ae3c",
+        "command-audit-log-outbox-insert-f3dffb308a5e"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
       "policyName": "c03_capability_auditlogoutbox_insert",
       "command": "INSERT",
       "actors": [
@@ -686,6 +723,52 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-email-verification-token",
+      "table": "EmailVerificationToken",
+      "policyName": "b01_preauth_emailverificationtoken_select",
+      "command": "SELECT",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true)='email-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-email-verification-token-select-e1561aa306f2"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-email-verification-token",
+      "table": "EmailVerificationToken",
+      "policyName": "b01_preauth_emailverificationtoken_update",
+      "command": "UPDATE",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true)='email-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-email-verification-token-update-e1561aa306f2"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-evidence-retention-policy",
       "table": "EvidenceRetentionPolicy",
       "policyName": "c03_capability_evidenceretentionpolicy_select",
@@ -881,6 +964,53 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-invite",
+      "table": "Invite",
+      "policyName": "b01_preauth_invite_select",
+      "command": "SELECT",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-invite-select-93fe5e2f9580",
+        "command-invite-select-d113603cb7d4"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-invite",
+      "table": "Invite",
+      "policyName": "b01_preauth_invite_update",
+      "command": "UPDATE",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true)='invite-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-invite-update-93fe5e2f9580"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-licensee",
       "table": "Licensee",
       "policyName": "b01_licensee_select",
@@ -900,6 +1030,55 @@
       ],
       "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
       "route": "POST /auth/refresh",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "policyName": "b01_preauth_licensee_select",
+      "command": "SELECT",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_licensee_id',true) AND \"orgId\"=current_setting('app.b01_preauth_org_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-licensee-select-00b44dd2511d",
+        "command-licensee-select-07fec99a574c",
+        "command-licensee-select-32463a66da3a",
+        "command-licensee-select-509547f03abe",
+        "command-licensee-select-54c31d8e3c1b",
+        "command-licensee-select-56e28c0be62e",
+        "command-licensee-select-58fa2fc9edab",
+        "command-licensee-select-606090826f02",
+        "command-licensee-select-65b85bc0759d",
+        "command-licensee-select-7c30e2368afb",
+        "command-licensee-select-808a0114622f",
+        "command-licensee-select-87ac040872c6",
+        "command-licensee-select-92ebfd6a1d0d",
+        "command-licensee-select-93fe5e2f9580",
+        "command-licensee-select-aa566e98f219",
+        "command-licensee-select-afd12473687a",
+        "command-licensee-select-ba667bcc5353",
+        "command-licensee-select-bdf8789ff300",
+        "command-licensee-select-bf4ed20e8b5b",
+        "command-licensee-select-bf81eba5b4e6",
+        "command-licensee-select-c63bbcb4a31f",
+        "command-licensee-select-d113603cb7d4",
+        "command-licensee-select-e3ba477495b1",
+        "command-licensee-select-f1b547f804cd",
+        "command-licensee-select-f64d10600903",
+        "command-licensee-select-fc757fc42aee",
+        "command-licensee-select-restricted-read"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -1211,6 +1390,45 @@
     {
       "tableId": "table-organization",
       "table": "Organization",
+      "policyName": "b01_preauth_organization_select",
+      "command": "SELECT",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true) IN ('invite-lookup','invite-consume') AND id=current_setting('app.b01_preauth_org_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-organization-select-00b44dd2511d",
+        "command-organization-select-07fec99a574c",
+        "command-organization-select-509547f03abe",
+        "command-organization-select-56e28c0be62e",
+        "command-organization-select-65b85bc0759d",
+        "command-organization-select-7c30e2368afb",
+        "command-organization-select-92ebfd6a1d0d",
+        "command-organization-select-93fe5e2f9580",
+        "command-organization-select-aa566e98f219",
+        "command-organization-select-afd12473687a",
+        "command-organization-select-ba667bcc5353",
+        "command-organization-select-bdf8789ff300",
+        "command-organization-select-c63bbcb4a31f",
+        "command-organization-select-d113603cb7d4",
+        "command-organization-select-e3ba477495b1",
+        "command-organization-select-f64d10600903",
+        "command-organization-select-restricted-read"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
       "policyName": "c03_capability_organization_select",
       "command": "SELECT",
       "actors": [
@@ -1343,6 +1561,75 @@
       "route": "GET /api/analytics/risk-scores",
       "certificationStatus": "pending",
       "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-password-reset",
+      "table": "PasswordReset",
+      "policyName": "b01_preauth_passwordreset_insert",
+      "command": "INSERT",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true)='reset-request' AND \"userId\"=current_setting('app.b01_preauth_user_id',true) AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-password-reset-insert-e45d5f48ae3c"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-password-reset",
+      "table": "PasswordReset",
+      "policyName": "b01_preauth_passwordreset_select",
+      "command": "SELECT",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND \"tokenHash\"=ANY(string_to_array(current_setting('app.b01_preauth_hashes',true),',')))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-password-reset-select-963323294162"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-password-reset",
+      "table": "PasswordReset",
+      "policyName": "b01_preauth_passwordreset_update",
+      "command": "UPDATE",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true)='reset-consume' AND id=current_setting('app.b01_preauth_token_id',true) AND \"userId\"=current_setting('app.b01_preauth_user_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-password-reset-update-963323294162"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-policy-alert",
@@ -1787,6 +2074,62 @@
     {
       "tableId": "table-refresh-token",
       "table": "RefreshToken",
+      "policyName": "b01_preauth_refreshtoken_select",
+      "command": "SELECT",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-refresh-token-select-00b44dd2511d",
+        "command-refresh-token-select-4ef0f20c1c1d",
+        "command-refresh-token-select-56e28c0be62e",
+        "command-refresh-token-select-5e5eeb444a02",
+        "command-refresh-token-select-65b85bc0759d",
+        "command-refresh-token-select-963323294162",
+        "command-refresh-token-select-e1561aa306f2"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-refresh-token",
+      "table": "RefreshToken",
+      "policyName": "b01_preauth_refreshtoken_update",
+      "command": "UPDATE",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_preauth_operation',true) IN ('reset-consume','email-consume') AND \"userId\"=current_setting('app.b01_preauth_user_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-refresh-token-update-0c71149cc376",
+        "command-refresh-token-update-4ef0f20c1c1d",
+        "command-refresh-token-update-65b85bc0759d",
+        "command-refresh-token-update-963323294162",
+        "command-refresh-token-update-e1561aa306f2"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-refresh-token",
+      "table": "RefreshToken",
       "policyName": "b01_refreshtoken_insert",
       "command": "INSERT",
       "actors": [
@@ -1997,6 +2340,97 @@
       ],
       "workflowId": null,
       "route": "authenticated session capability",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "b01_preauth_user_select",
+      "command": "SELECT",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND ((current_setting('app.b01_preauth_operation',true) IN ('password-lookup','password-failure','reset-request','invite-lookup','invite-consume') AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true)) OR (current_setting('app.b01_preauth_operation',true)='email-consume' AND current_setting('app.b01_preauth_pending_email',true)<>'' AND lower(email)=current_setting('app.b01_preauth_pending_email',true))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-user-select-00b44dd2511d",
+        "command-user-select-07fec99a574c",
+        "command-user-select-0c71149cc376",
+        "command-user-select-10bb09d50d24",
+        "command-user-select-14453c400b30",
+        "command-user-select-1b49a7d74b68",
+        "command-user-select-34fb5ef197af",
+        "command-user-select-3a1d5a69ff46",
+        "command-user-select-4ef0f20c1c1d",
+        "command-user-select-509547f03abe",
+        "command-user-select-56e28c0be62e",
+        "command-user-select-58fa2fc9edab",
+        "command-user-select-65b85bc0759d",
+        "command-user-select-6777511827cd",
+        "command-user-select-7331cc8183dd",
+        "command-user-select-745b51404816",
+        "command-user-select-77a1dff5a8de",
+        "command-user-select-7be8106b6d19",
+        "command-user-select-7c30e2368afb",
+        "command-user-select-83c9cafb2978",
+        "command-user-select-8bfc0e3d6533",
+        "command-user-select-92ebfd6a1d0d",
+        "command-user-select-93fe5e2f9580",
+        "command-user-select-963323294162",
+        "command-user-select-97535583a8fe",
+        "command-user-select-a8d0398b4d3f",
+        "command-user-select-aa566e98f219",
+        "command-user-select-afd12473687a",
+        "command-user-select-b1184d208431",
+        "command-user-select-ba667bcc5353",
+        "command-user-select-bdf8789ff300",
+        "command-user-select-bf4ed20e8b5b",
+        "command-user-select-c63bbcb4a31f",
+        "command-user-select-d113603cb7d4",
+        "command-user-select-def90113be13",
+        "command-user-select-e06ecc7a3b91",
+        "command-user-select-e1561aa306f2",
+        "command-user-select-e3ba477495b1",
+        "command-user-select-e45d5f48ae3c",
+        "command-user-select-f64d10600903",
+        "command-user-select-restricted-read"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "b01_preauth_user_update",
+      "command": "UPDATE",
+      "actors": [
+        "pre-auth"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "b01-preauth-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-and-locked-bearer-derived-context",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND ((current_setting('app.b01_preauth_operation',true)='password-failure' AND lower(email)=current_setting('app.b01_preauth_email',true)) OR (current_setting('app.b01_preauth_operation',true) IN ('reset-consume','invite-consume','email-consume') AND current_setting('app.b01_preauth_user_id',true)<>'' AND id=current_setting('app.b01_preauth_user_id',true))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-user-update-0c71149cc376",
+        "command-user-update-8bfc0e3d6533",
+        "command-user-update-93fe5e2f9580",
+        "command-user-update-963323294162",
+        "command-user-update-97a7383cb700",
+        "command-user-update-e1561aa306f2"
+      ],
+      "workflowId": null,
+      "route": "B01 exact pre-auth SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },

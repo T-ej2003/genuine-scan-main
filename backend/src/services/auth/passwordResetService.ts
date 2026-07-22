@@ -1,7 +1,6 @@
 import { hashPassword } from "./passwordService";
 import { buildTokenHashCandidates, hashToken, randomOpaqueToken } from "../../utils/security";
 import { sendAuthEmail } from "./authEmailService";
-import { createAuditLog } from "../auditService";
 import { renderActionEmail } from "../emailTemplateService";
 import {
   consumePasswordResetBoundary,
@@ -78,18 +77,6 @@ export const requestPasswordReset = async (input: {
     userAgent: input.userAgent,
   });
 
-  await createAuditLog({
-    userId: request.userId,
-    licenseeId: request.licenseeId || undefined,
-    orgId: request.orgId || undefined,
-    action: "AUTH_PASSWORD_RESET_REQUESTED",
-    entityType: "PasswordReset",
-    entityId: null,
-    details: { expiresAt: request.expiresAt || expiresAt },
-    ipHash: input.ipHash || undefined,
-    userAgent: input.userAgent || undefined,
-  } as any);
-
   return { ok: true as const };
 };
 
@@ -104,18 +91,6 @@ export const resetPasswordWithToken = async (input: {
   const passwordHash = await hashPassword(input.newPassword);
   const out = await consumePasswordResetBoundary({ tokenHashCandidates, passwordHash, consumedAt: now });
   if (!out) throw new Error("Invalid or expired reset token");
-
-  await createAuditLog({
-    userId: out.id,
-    licenseeId: out.licenseeId || undefined,
-    orgId: out.orgId || undefined,
-    action: "AUTH_PASSWORD_RESET_COMPLETED",
-    entityType: "User",
-    entityId: out.id,
-    details: {},
-    ipHash: input.ipHash || undefined,
-    userAgent: input.userAgent || undefined,
-  } as any);
 
   return out;
 };

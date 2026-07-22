@@ -461,11 +461,11 @@ const DATABASE_FUNCTION_ACCESSES = new Map([
   ["app_rls.c03_create_public_incident_report", [["Incident", "INSERT"]]],
   ["app_auth.lookup_password_user", [["User", "SELECT"]]],
   ["app_auth.record_password_failure", [["User", "UPDATE"]]],
-  ["app_auth.request_password_reset", [["User", "SELECT"], ["PasswordReset", "INSERT"]]],
-  ["app_auth.consume_password_reset_token", [["PasswordReset", "SELECT"], ["PasswordReset", "UPDATE"], ["User", "UPDATE"]]],
-  ["app_auth.consume_email_verification_token", [["EmailVerificationToken", "SELECT"], ["EmailVerificationToken", "UPDATE"], ["User", "UPDATE"]]],
-  ["app_auth.lookup_invitation_token", [["Invite", "SELECT"], ["User", "SELECT"]]],
-  ["app_auth.consume_invitation_token", [["Invite", "SELECT"], ["Invite", "UPDATE"], ["User", "UPDATE"]]],
+  ["app_auth.request_password_reset", [["User", "SELECT"], ["PasswordReset", "INSERT"], ["AuditLogOutbox", "INSERT"]]],
+  ["app_auth.consume_password_reset_token", [["PasswordReset", "SELECT"], ["PasswordReset", "UPDATE"], ["User", "SELECT"], ["User", "UPDATE"], ["RefreshToken", "SELECT"], ["RefreshToken", "UPDATE"], ["AuditLogOutbox", "INSERT"]]],
+  ["app_auth.consume_email_verification_token", [["EmailVerificationToken", "SELECT"], ["EmailVerificationToken", "UPDATE"], ["User", "SELECT"], ["User", "UPDATE"], ["RefreshToken", "SELECT"], ["RefreshToken", "UPDATE"], ["AuditLogOutbox", "INSERT"]]],
+  ["app_auth.lookup_invitation_token", [["Invite", "SELECT"], ["User", "SELECT"], ["Licensee", "SELECT"], ["Organization", "SELECT"]]],
+  ["app_auth.consume_invitation_token", [["Invite", "SELECT"], ["Invite", "UPDATE"], ["User", "SELECT"], ["User", "UPDATE"], ["Licensee", "SELECT"], ["Organization", "SELECT"], ["AuditLogOutbox", "INSERT"]]],
   ...validateNamedSqlFunctionContracts().map((contract) => [
     `${contract.schema}.${contract.name}`,
     contract.tableCommands,
@@ -1416,7 +1416,7 @@ const column = (name, type, nullable = false) => ({ name, type, nullable });
 const access = (tableId, command, columns) => ({ tableId, command, columns });
 const functionContract = (definition) => ({
   sqlSchema: "app_auth",
-  fixedSearchPath: "pg_catalog",
+  fixedSearchPath: "pg_catalog,public",
   securityDefiner: true,
   dynamicSqlAllowed: false,
   genericQueryInputsAllowed: false,
@@ -1429,7 +1429,7 @@ const functionContract = (definition) => ({
   restrictedReadExecutionDenied: true,
   appExecutionStatus: "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
   transactionRequirements: "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
-  implementationStatus: "contract-only; SQL not generated",
+  implementationStatus: "production-reviewed SQL generated from the named-function contract registry",
   ...definition,
 });
 
@@ -1468,7 +1468,7 @@ const buildPreAuthFunctionManifest = () => {
       allowScenarios: ["One unused unexpired token returns only its intended email, role, expiry, licensee display name, and connector requirement."], denyScenarios: ["Unknown, malformed, ambiguous, expired, used, token-fragment, or cross-invite input returns no preview."], p2TestRequirements: ["minimal projection", "used/expired/duplicate denial", "candidate bounds", "no hash or unrelated Licensee columns returned"],
     }),
     functionContract({
-      id: "preauth-fn-consume-invitation", sqlFunctionName: "consume_invitation_token", arguments: [arg("token_hash_candidates", "text[]"), arg("new_password_hash", "text"), arg("requested_name", "text", true), arg("consumed_at", "timestamp without time zone")], returnColumns: [column("id", "text"), column("email", "text"), column("name", "text"), column("role", "text"), column("licenseeId", "text", true), column("orgId", "text", true), column("status", "text")],
+      id: "preauth-fn-consume-invitation", sqlFunctionName: "consume_invitation_token", arguments: [arg("token_hash_candidates", "text[]"), arg("new_password_hash", "text"), arg("requested_name", "text", true), arg("consumed_at", "timestamp without time zone"), arg("request_id", "text"), arg("ip_hash", "text", true), arg("user_agent", "text", true)], returnColumns: [column("inviteId", "text"), column("id", "text"), column("email", "text"), column("name", "text"), column("role", "text"), column("licenseeId", "text", true), column("orgId", "text", true), column("status", "text")],
       purpose: "Atomically activate the existing account bound to one invitation without changing its role or tenant ownership.", supportingWorkflowIds: ["workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"], tablesRead: ["table-invite", "table-user"], tablesWritten: ["table-invite", "table-user"], exactAllowedColumns: [access("table-invite", "SELECT", ["id", "orgId", "licenseeId", "email", "role", "manufacturerId", "tokenHash", "expiresAt", "usedAt"]), access("table-invite", "UPDATE", ["usedAt", "acceptedByUserId"]), access("table-user", "SELECT", ["id", "email", "role", "orgId", "licenseeId", "status", "isActive", "deletedAt"]), access("table-user", "UPDATE", ["passwordHash", "status", "emailVerifiedAt", "name", "failedLoginAttempts", "lockedUntil", "updatedAt"])],
       inputNormalization: "Require bounded unique server-derived hash candidates, approved password hash, name trimmed to the product limit, and non-null consumed_at.", duplicateStateBehavior: "Lock at most two matches and fail unless exactly one Invite and exactly one existing User with normalized Invite.email exist.", tokenBindingRequirements: "Invite email, role, orgId and licenseeId must equal the existing User binding; function never creates a user or writes role/orgId/licenseeId/manufacturerId.", expiryChecks: "Require Invite.expiresAt > consumed_at.", expiryRequired: true, oneTimeConsumptionBehavior: "Require usedAt IS NULL under lock and atomically set usedAt/acceptedByUserId with account activation.", oneTimeToken: true, rowLockingRequirements: "Lock the Invite and bound User; exactly one transaction performs validation, password/state update, and consumption.", replayProtection: "Atomic usedAt transition, row locks, and exact account/tenant/role binding.", volatility: "VOLATILE", parallelSafety: "UNSAFE", auditEventRequirement: "AUTH_INVITE_ACCEPTED after commit with invite/user IDs; no token/hash/password.", rateLimitExpectation: "Invite-accept route plus IP and actor limiter.", secretColumnExposures: [{ tableId: "table-user", column: "passwordHash", justification: "Accepted only as a server-generated write value; never selected or returned." }, { tableId: "table-invite", column: "tokenHash", justification: "Compared internally only; never returned." }], externalResponseMode: "generic-invalid-or-expired-invite", returnsAccountExistenceToExternalCaller: false, roleCeiling: "Never writes User.role or tenant keys. A licensee/manufacturer invite cannot create or promote SUPER_ADMIN/PLATFORM_SUPER_ADMIN; any platform invite must already bind an operator-created matching platform user.",
       allowScenarios: ["One matching unused invite activates only its pre-created, same-email, same-role, same-tenant account."], denyScenarios: ["Role/tenant mismatch, missing user, attempted platform elevation, expired/used/ambiguous token, disabled/deleted account, or replay changes nothing."], p2TestRequirements: ["single concurrent winner", "role/org/licensee immutability", "licensee invite platform ceiling", "missing/disabled/deleted user denial", "atomic invite/user rollback"],
@@ -1480,6 +1480,15 @@ const buildPreAuthFunctionManifest = () => {
       allowScenarios: ["One unused unexpired token verifies only its bound account; EMAIL_CHANGE also applies the bound pending email and revokes that account's sessions."], denyScenarios: ["Unknown, ambiguous, expired, used, cross-account, pending-email mismatch/collision, disabled/deleted account, fragment lookup, or replay changes nothing."], p2TestRequirements: ["account binding", "single concurrent winner", "already-verified safe behavior", "email collision denial", "EMAIL_CHANGE session revocation", "atomic rollback"],
     }),
   ].sort((a, b) => a.id.localeCompare(b.id));
+  for (const fn of functions) {
+    const contract = namedFunctionContractFor(`app_auth.${fn.sqlFunctionName}`);
+    assert(contract, `${fn.id} lacks its authoritative named-function contract`);
+    fn.definitionSource = contract.definitionLocation;
+    fn.rollbackSource = contract.security.rollbackDefinition;
+    fn.disposableProbes = [...contract.disposableProbes];
+    fn.tablesRead = [...new Set(contract.tableCommands.filter(([, command]) => command === "SELECT").map(([table]) => `table-${slug(table)}`))].sort();
+    fn.tablesWritten = [...new Set(contract.tableCommands.filter(([, command]) => command !== "SELECT").map(([table]) => `table-${slug(table)}`))].sort();
+  }
   return { schemaVersion: 1, generatedFrom: ["documents/security/rls-program/workflows.json", "documents/security/rls-program/command-semantics.json", "documents/security/rls-program/public-read-contract.json", "backend/src/services/auth"], publicReadContractReference: "public-read-contract-v1 preserves these seven exact app_auth functions and defines separate app_public functions; no generic pre-auth function or direct-table fallback is approved.", functionCount: functions.length, securityInvariants: ["No dynamic SQL or generic query input", "SET search_path=pg_catalog and fully qualified application objects", "NOLOGIN auth owner; EXECUTE only for pre-auth runtime", "PUBLIC, restricted-read and authenticated-app execution denied", "No direct table grants to pre-auth runtime", "Caller-set app.* variables are not authority"], functions };
 };
 
@@ -1553,11 +1562,11 @@ export const buildPreAuthBoundary = (workflowManifest, commandManifest, currentT
 export const writePreAuthBoundaryReview = (manifest, workflows) => {
   const selected = workflows.filter((workflow) => workflow.preAuthBoundary);
   const moved = selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context");
-  const lines = ["# MSCQR pre-authentication boundary review", "", "This review defines function contracts only. It creates no SQL function, grant, role, policy, RLS state, or runtime behavior.", "", `Selected workflows: ${selected.length}; exact functions: ${manifest.functions.length}; moved behind actor context: ${moved.length}; operator-only: 0; retired: 0.`, "", "## Workflow reconciliation", "", "| Workflow | Group | Boundary | Function/assurance |", "|---|---|---|---|"];
+  const lines = ["# MSCQR pre-authentication boundary review", "", "This review records the seven production SQL boundaries generated from the authoritative named-function contracts, including exact ownership, grants, FORCE-RLS policies, rollback, and PostgreSQL 18 probes.", "", `Selected workflows: ${selected.length}; exact functions: ${manifest.functions.length}; moved behind actor context: ${moved.length}; operator-only: 0; retired: 0.`, "", "## Workflow reconciliation", "", "| Workflow | Group | Boundary | Function/assurance |", "|---|---|---|---|"];
   for (const workflow of selected.sort((a, b) => a.id.localeCompare(b.id))) lines.push(`| ${workflow.id} | ${workflow.preAuthBoundary.workflowGroup} | ${workflow.preAuthBoundary.boundaryMode} | ${workflow.preAuthBoundary.functionId || workflow.requiredAssurance.join(", ")} |`);
   lines.push("", "## Exact function families", "", "| Function | Purpose | Reads | Writes | One-time |", "|---|---|---|---|---:|");
   for (const fn of manifest.functions) lines.push(`| ${fn.id} (` + "`" + `${fn.sqlSchema}.${fn.sqlFunctionName}` + "`" + `) | ${fn.purpose} | ${fn.tablesRead.join(", ") || "none"} | ${fn.tablesWritten.join(", ") || "none"} | ${fn.oneTimeToken ? "yes" : "no"} |`);
-  lines.push("", "Exact arguments, return columns, table/column exposure, normalization, duplicate-state handling, expiry, locking, replay, transaction and P2 requirements live in `pre-auth-functions.json`.", "", "## Execution grants and remaining implementation", "", "The LOGIN pre-auth runtime receives only CONNECT, app_auth USAGE and EXECUTE on the seven exact signatures. PUBLIC, restricted-read and authenticated-app execution are denied; the NOLOGIN auth owner owns only app_auth and approved functions and receives exact required table-column privileges. SQL implementation, grants, caller migration and disposable PostgreSQL proof remain future work.", "", "All token functions reject ambiguous matches. Reset, invitation and email-consumption functions lock the token row and atomically consume it with account/session mutations. Reset request uses a constant-success external response. Invitation consumption never writes role or tenant ownership and cannot elevate a licensee invitation to a platform role.", "");
+  lines.push("", "Exact arguments, return columns, table/column exposure, normalization, duplicate-state handling, expiry, locking, replay, transaction and P2 requirements live in `pre-auth-functions.json`.", "", "## Execution grants and certification", "", "The LOGIN pre-auth runtime receives only CONNECT, app_auth USAGE and EXECUTE on the seven exact signatures. PUBLIC, restricted-read and authenticated-app execution are denied; the NOLOGIN auth owner owns only app_auth and approved functions and receives exact required table-column privileges. The checked-in production definitions, rollback, generated policies and PostgreSQL 18 probe are maintained by the named-function contract registry.", "", "All token functions reject ambiguous matches. Reset, invitation and email-consumption functions lock the token row and atomically consume it with account/session mutations. Reset request uses a constant-success external response. Invitation consumption never writes role or tenant ownership and cannot elevate a licensee invitation to a platform role.", "");
   fs.writeFileSync(preAuthBoundaryReviewPath, `${lines.join("\n")}\n`);
 };
 
@@ -1647,7 +1656,7 @@ const WORKER_BOUNDARY_DEFINITIONS = Object.freeze({
     authorizationRevalidationRules: ["Licensee remains active", "Licensee-to-organization binding matches", "Schedule ID and UTC partition are allowlisted", "Current platform-user lookup and human impersonation are removed before activation"],
     tablesRead: ["table-licensee", "table-compliance-pack-job", "table-action-idempotency-key", "table-incident", "table-incident-handoff", "table-audit-log", "table-evidence-retention-policy"],
     tablesWritten: ["table-compliance-pack-job", "table-action-idempotency-key", "table-audit-log-outbox"],
-    tableCommands: [{ tableId: "table-licensee", commands: ["SELECT"], authority: "worker-fn-claim-compliance-pack-slice" }, { tableId: "table-compliance-pack-job", commands: ["INSERT", "UPDATE"] }, { tableId: "table-action-idempotency-key", commands: ["SELECT", "INSERT", "UPDATE"] }, { tableId: "table-incident", commands: ["SELECT"] }, { tableId: "table-incident-handoff", commands: ["SELECT"] }, { tableId: "table-audit-log", commands: ["SELECT"] }, { tableId: "table-evidence-retention-policy", commands: ["SELECT"] }, { tableId: "table-audit-log-outbox", commands: ["INSERT"] }],
+    tableCommands: [{ tableId: "table-user", commands: ["SELECT"], disposition: "remove-before-activation; no human impersonation" }, { tableId: "table-licensee", commands: ["SELECT"], authority: "worker-fn-claim-compliance-pack-slice" }, { tableId: "table-compliance-pack-job", commands: ["INSERT", "UPDATE"] }, { tableId: "table-action-idempotency-key", commands: ["SELECT", "INSERT", "UPDATE"] }, { tableId: "table-incident", commands: ["SELECT"] }, { tableId: "table-incident-handoff", commands: ["SELECT"] }, { tableId: "table-audit-log", commands: ["SELECT"] }, { tableId: "table-evidence-retention-policy", commands: ["SELECT"] }, { tableId: "table-audit-log-outbox", commands: ["INSERT"] }],
     idempotencyStrategy: { keySource: "compliance-pack + licensee_id + UTC schedule stamp + report period", uniquenessBoundary: "job_type + licensee_id + schedule stamp", conflictBehavior: "reject a different tenant/period/digest for the same key", replayResult: "return the existing job/result; RELEASED/COMPLETED work is not regenerated", conflictingPayloadDenied: true },
     replayProtection: "Unique schedule-partition key, durable job state, maximum age and RUNNING-to-COMPLETED/FAILED compare-and-set.",
     retryPolicy: { maxAttempts: 3, backoffSeconds: "bounded exponential 60..900 within maximum job age", duplicateSideEffectsAllowed: false, retryableStates: ["FAILED"] },
@@ -3128,6 +3137,9 @@ export const validatePlatformReadScopeBoundary = (boundary, workflowManifest, co
   assert.equal(new Set(boundary.purposeCodes.map((item) => item.code)).size, boundary.purposeCodes.length, "platform purpose codes are duplicated");
   const tableIds = new Set(tableManifest.tables.map((item) => item.id));
   const workflows = new Map(workflowManifest.workflows.map((item) => [item.id, item]));
+  const authenticatedSessionContract = namedFunctionContractFor("app_auth.require_authenticated_session");
+  assert(authenticatedSessionContract, "authenticated-session verification contract is missing");
+  const authenticatedSessionCommands = new Set(authenticatedSessionContract.tableCommands.map(([table, command]) => `table-${slug(table)}:${command}`));
   assert.deepEqual(boundary.affectedWorkflows, boundary.workflowClassifications.map((item) => item.workflowId), "platform affected workflow coverage drifted");
   assert.equal(new Set(boundary.affectedWorkflows).size, boundary.affectedWorkflows.length, "platform affected workflows are duplicated");
   const secretPattern = /password|token|secret|recovery|backup|credential|privateKey|platformAdmin|details|metadata|customerEmail|supportEmail|supportPhone/i;
@@ -3194,6 +3206,13 @@ export const validatePlatformReadScopeBoundary = (boundary, workflowManifest, co
         assert(rule.actorClasses.includes("platform-admin"), `${ruleId} loses the certified bounded platform actor`);
       }
       assert.equal(rule.requiresAuditEvent, true, `${ruleId} read attribution is missing`);
+      const isAuthenticatedSessionSupport = workflow.supportingEvidence.some((item) => item.method === "$function:app_auth.require_authenticated_session") &&
+        authenticatedSessionCommands.has(`${rule.tableId}:${rule.command}`);
+      if (isAuthenticatedSessionSupport) {
+        assert.equal(rule.requiresNamedFunction, true, `${ruleId} authentication support is not bound to an exact function`);
+        assert.equal(authenticatedSessionContract.definitionStatus, "production-reviewed", `${ruleId} authentication support is not reviewed`);
+        continue;
+      }
       const projection = classification.tableProjections.find((item) => item.tableId === rule.tableId);
       const implementedProjection = classification.runtimeImplementedActorClasses
         ? workflow.riskAnalyticsAllowedColumnsByTableAndCommand?.[rule.tableId]?.[rule.command]
@@ -3465,7 +3484,7 @@ export const validatePreAuthFunctions = (manifest, workflowManifest, commandMani
     assert.equal(fn.publicExecutionDenied, true, `${fn.id} allows PUBLIC execute`);
     assert.equal(fn.restrictedReadExecutionDenied, true, `${fn.id} allows restricted-read execute`);
     assert.equal(fn.appExecutionStatus.startsWith("denied"), true, `${fn.id} allows authenticated-app execution`);
-    assert.equal(fn.fixedSearchPath, "pg_catalog", `${fn.id} search_path is not fixed`);
+    assert.equal(fn.fixedSearchPath, "pg_catalog,public", `${fn.id} search_path is not fixed`);
     assert.equal(fn.dynamicSqlAllowed, false, `${fn.id} permits dynamic SQL`);
     assert.equal(fn.genericQueryInputsAllowed, false, `${fn.id} permits generic query input`);
     assert.equal(fn.fullyQualifiedApplicationObjects, true, `${fn.id} may use unqualified application objects`);

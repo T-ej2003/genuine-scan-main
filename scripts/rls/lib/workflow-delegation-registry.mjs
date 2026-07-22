@@ -59,6 +59,11 @@ export const WORKFLOW_DELEGATIONS = Object.freeze([
     reason: "Capability verification is shared C03 transaction bootstrap evidence; it is not a separately registered business workflow.",
   },
   {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts", function: "withC03ResourceTransaction" },
+    canonical: { executionSurface: "scheduled", sourceFile: "backend/src/services/compliancePackService.ts", function: "startCompliancePackScheduler" },
+    reason: "The resource wrapper's only named SQL access revalidates compliance-pack job scope; it is implementation evidence for the registered scheduled compliance lifecycle, not a separate workflow.",
+  },
+  {
     delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts", function: "loadIncidentEvidenceFileInTransaction" },
     canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/incidentController.ts", function: "serveIncidentEvidenceFile" },
     reason: "The registered controller owns incident-evidence delivery; the C03 repository performs its transaction-bound named-function read.",

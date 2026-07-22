@@ -75,6 +75,7 @@ test("session ownership is exhaustive and editable production and test files nev
   assert.deepEqual(partition.fileOwnership.sessionCOwnedSharedFiles, [
     "backend/src/controllers/incidentController.ts",
     "backend/src/controllers/tracePolicyController.ts",
+    "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
     "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
     "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
     "backend/src/services/compliancePackService.ts",

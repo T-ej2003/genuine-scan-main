@@ -2,25 +2,25 @@
 
 This is the compact human review of `command-semantics.json`. It defines architecture only: no SQL, grants, roles, RLS state, or runtime behavior are changed.
 
-Rules: 972; workflows mapped: 401/401.
+Rules: 988; workflows mapped: 401/401.
 
 ## Review groups
 
 | Group | Tables | Rules | SELECT | INSERT | UPDATE | DELETE |
 |---|---:|---:|---:|---:|---:|---:|
-| A | 21 | 203 | 100 | 26 | 50 | 27 |
-| B | 3 | 62 | 56 | 1 | 2 | 3 |
+| A | 21 | 211 | 106 | 26 | 52 | 27 |
+| B | 3 | 66 | 60 | 1 | 2 | 3 |
 | C | 15 | 242 | 148 | 20 | 56 | 18 |
 | D | 13 | 252 | 132 | 36 | 70 | 14 |
 | E | 18 | 169 | 80 | 47 | 24 | 18 |
-| F | 7 | 44 | 9 | 20 | 7 | 8 |
+| F | 7 | 48 | 9 | 24 | 7 | 8 |
 | G | 0 | 0 | 0 | 0 | 0 | 0 |
 
 ## Actor classes
 
 | Value | Rules |
 |---|---:|
-| anonymous | 41 |
+| anonymous | 57 |
 | authenticated-user | 325 |
 | manufacturer | 315 |
 | operator | 67 |
@@ -28,7 +28,7 @@ Rules: 972; workflows mapped: 401/401.
 | licensee-admin | 199 |
 | platform-admin | 235 |
 | restricted-read | 16 |
-| pre-auth-runtime | 41 |
+| pre-auth-runtime | 57 |
 | worker | 5 |
 | scheduled-job | 15 |
 | migration | 0 |
@@ -39,7 +39,7 @@ Rules: 972; workflows mapped: 401/401.
 
 | Value | Rules |
 |---|---:|
-| none | 116 |
+| none | 132 |
 | password-verified | 608 |
 | mfa-bootstrap | 5 |
 | mfa-verified | 199 |
@@ -52,21 +52,21 @@ Rules: 972; workflows mapped: 401/401.
 
 | Value | Rules |
 |---|---:|
-| SELECT | 525 |
-| INSERT | 150 |
-| UPDATE | 209 |
+| SELECT | 535 |
+| INSERT | 154 |
+| UPDATE | 211 |
 | DELETE | 88 |
 
 ## Boundary and deletion summary
 
-Named-function rules: 430.
+Named-function rules: 446.
 Restricted-worker rules: 20.
 Approval-gated rules: 9.
 
 | Hard-delete classification | Rules |
 |---|---:|
 | actor self-delete | 8 |
-| not-applicable | 884 |
+| not-applicable | 900 |
 | prohibited | 75 |
 | retention delete | 1 |
 | tenant-admin delete | 4 |

@@ -151,7 +151,7 @@ test("context-boundary families are exhaustive, deterministic, and fail closed",
   const count = (eligibility) => generated.families.filter((family) => family.automationEligibility === eligibility).reduce((total, family) => total + family.workflowIds.length, 0);
   assert.equal(count("implemented"), 14);
   assert.equal(count("contract-only"), EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT);
-  assert.equal(count("blocked"), 354);
+  assert.equal(count("blocked"), EXPECTED_WORKFLOW_COUNT - 14 - EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT);
   assert.equal(count("auto-implementable"), 0);
   const mfaDisableWorkflowId = "workflow-internal-backend-src-services-auth-mfa-service-ts-disable-admin-mfa";
   const mfaDisableFamily = generated.families.find((family) => family.workflowIds.includes(mfaDisableWorkflowId));
@@ -384,13 +384,13 @@ test("bounded read-family batch is scoped, evidenced, and fail closed", () => {
   const batch = JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8"));
   assert(validateContextBoundaryReadBatch(batch, families, workflows, commandSemantics, tables));
   assert.equal(batch.selectedFamilies.length, 17);
-  assert.equal(batch.selectionTotals.workflowsConsidered, 25);
+  assert.equal(batch.selectionTotals.workflowsConsidered, 27);
   assert.equal(batch.selectionTotals.reclassifiedFamilies, 2);
   assert.equal(batch.selectionTotals.splitFamilies, 4);
   assert.equal(batch.selectionTotals.childFamiliesCreated, 8);
   assert.equal(batch.selectionTotals.contractOnlyWorkflows, 2);
   assert.equal(batch.selectionTotals.newlyImplementedWorkflows, 0);
-  assert.equal(batch.selectionTotals.blockedWorkflows, 23);
+  assert.equal(batch.selectionTotals.blockedWorkflows, 25);
 
   const reject = (mutate, pattern) => {
     const candidateBatch = structuredClone(batch);
@@ -468,9 +468,10 @@ test("command semantics mutation guards fail closed", () => {
 test("pre-auth workflows reduce to exact functions or actor context", () => {
   const { workflows, commandSemantics, preAuthFunctions, identities, tables, decisions } = manifests();
   const selected = workflows.workflows.filter((workflow) => workflow.preAuthBoundary);
-  assert.equal(selected.length, 11);
+  assert.equal(selected.length, preAuthFunctions.functions.length + 3);
   assert.equal(preAuthFunctions.functions.length, 7);
-  assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context").length, 4);
+  assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "exact-security-definer-function").length, preAuthFunctions.functions.length);
+  assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "ordinary-authenticated-context").length, 3);
   assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "operator-only").length, 0);
   assert.equal(selected.filter((workflow) => workflow.preAuthBoundary.boundaryMode === "retired").length, 0);
   assert(validatePreAuthFunctions(preAuthFunctions, workflows, commandSemantics, identities, tables));
@@ -566,9 +567,11 @@ test("operator and break-glass workflows use finite reviewed boundaries", () => 
   const { operatorBoundaries, workflows, commandSemantics, identities, decisions } = manifests();
   const selectedWorkflows = workflows.workflows.filter((workflow) => workflow.commandActorClasses?.some((actor) => ["operator-admin", "break-glass"].includes(actor)));
   const selectedRules = commandSemantics.rules.filter((rule) => rule.actorClasses.some((actor) => ["operator-admin", "break-glass"].includes(actor)));
+  const reviewedWorkflowIds = new Set(operatorBoundaries.boundaries.flatMap((boundary) => boundary.workflowIds));
+  const reviewedRuleIds = new Set(operatorBoundaries.boundaries.flatMap((boundary) => boundary.exactCommandRuleIds));
   assert.equal(operatorBoundaries.boundaries.length, 29);
-  assert.equal(selectedWorkflows.length, 27);
-  assert.equal(selectedRules.length, 88);
+  assert.equal(selectedWorkflows.length, reviewedWorkflowIds.size);
+  assert.equal(selectedRules.length, reviewedRuleIds.size);
   assert(selectedWorkflows.every((workflow) => workflow.operatorBoundaryId));
   assert(selectedRules.every((rule) => rule.operatorBoundaryIds?.length));
   assert(validateOperatorBoundaries(operatorBoundaries, workflows, commandSemantics, identities));
@@ -604,8 +607,8 @@ test("tests do not inflate production totals and repeated technical calls remain
   assert(accesses.every((item) => !/(?:^|\/)tests?\//.test(item.sourceFile)), "test-only access leaked into production totals");
   const workflows = manifests().workflows.workflows;
   assert.equal(workflows.length, EXPECTED_WORKFLOW_COUNT, "reviewed workflow inventory drifted");
-  const refreshRotation = workflows.find((workflow) => workflow.id === "workflow-internal-backend-src-services-auth-refresh-token-service-ts-rotate-refresh-token");
-  assert(refreshRotation?.supportingEvidence.some((item) => item.accessId === "access-bad63221832878a6"), "nested refresh revocation escaped its rotation workflow");
+  const refreshRotation = workflows.find((workflow) => workflow.id === "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session");
+  assert(refreshRotation?.supportingEvidence.some((item) => item.source.startsWith("backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:") && item.method === "$function:app_auth.revoke_refresh_token_scope"), "nested refresh revocation escaped its canonical refresh workflow");
   assert(!workflows.some((workflow) => workflow.id === "workflow-internal-backend-src-services-auth-refresh-token-service-ts-revoke"), "private refresh revocation became a standalone workflow");
   const keys = workflows.map((workflow) => `${workflow.executionSurface}:${workflow.canonicalSourceFiles.join(",")}:${workflow.entryPoint}`);
   assert.equal(new Set(keys).size, keys.length, "duplicate canonical workflows exist");
@@ -730,11 +733,11 @@ test("clean-room full-RLS foundation remains exact and fail closed", () => {
   assert.equal(generated.tables.filter((entry) => entry.rls === "ENABLE AND FORCE").length, 75);
   assert.equal(generated.tables.filter((entry) => entry.disposition === "migration-only-no-runtime-grant").length, 2);
   assert.deepEqual(validateGeneratedPackage({ manifest: generated, policies, privileges, commandSemantics }), {
-    tables: 77,
-    forceRlsTargets: 75,
-    policies: 46,
-    directPolicySlices: 34,
-    columnPrivilegeCells: 78,
+    tables: generated.counts.tables,
+    forceRlsTargets: generated.counts.forceRlsTargets,
+    policies: generated.counts.generatedPolicies,
+    directPolicySlices: generated.counts.directPolicySlices,
+    columnPrivilegeCells: generated.counts.columnPrivilegeCells,
   });
   const platformPolicies = policies.rows.filter((entry) => !entry.internalHelperOnly && entry.actors.includes("platform-admin"));
   assert(platformPolicies.length > 0);

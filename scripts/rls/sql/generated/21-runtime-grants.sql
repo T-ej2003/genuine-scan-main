@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='4b26861c6ae1e37033afaa11f0e6f6c46ac7fd4961f0bdba0366075305734148'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:4b26861c6ae1e37033afaa11f0e6f6c46ac7fd4961f0bdba0366075305734148'
+    AND source_contract_sha256='0b4be52a6b9a37940964d4263da7f39eb7dbb66ad5cdd259153146d1608d471b'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:0b4be52a6b9a37940964d4263da7f39eb7dbb66ad5cdd259153146d1608d471b'
     AND administrator_role='certification-administrator'
     AND phase='context-helpers-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'runtime grants lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:4b26861c6ae1e37033afaa11f0e6f6c46ac7fd4961f0bdba0366075305734148')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:0b4be52a6b9a37940964d4263da7f39eb7dbb66ad5cdd259153146d1608d471b')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -69,6 +69,20 @@ GRANT SELECT ("userId", "lastUsedAt") ON TABLE public."AdminWebAuthnCredential" 
 GRANT SELECT ("userId", "type", "lastUsedAt", "disabledAt") ON TABLE public."UserMfaFactor" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("userId", "usedAt") ON TABLE public."UserBackupCode" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "userId", "ticketHash", "sessionBindingHash", "purpose", "riskScore", "riskLevel", "reasons", "createdIpHash", "createdUserAgentHash", "maxAttempts", "createdAt", "updatedAt", "expiresAt") ON TABLE public."AuthMfaChallenge" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "payload", "updatedAt") ON TABLE public."AuditLogOutbox" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "email", "pendingEmail", "passwordHash", "name", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt", "failedLoginAttempts", "lockedUntil", "lastLoginAt", "emailVerifiedAt", "pendingEmailRequestedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("email", "pendingEmail", "pendingEmailRequestedAt", "passwordHash", "name", "status", "failedLoginAttempts", "lockedUntil", "emailVerifiedAt", "updatedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "orgId", "licenseeId", "email", "role", "manufacturerId", "tokenHash", "expiresAt", "usedAt") ON TABLE public."Invite" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("usedAt", "acceptedByUserId") ON TABLE public."Invite" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "orgId", "userId", "tokenHash", "expiresAt", "usedAt") ON TABLE public."PasswordReset" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "orgId", "userId", "tokenHash", "expiresAt", "createdAt", "createdIpHash", "userAgentHash") ON TABLE public."PasswordReset" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("usedAt") ON TABLE public."PasswordReset" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "email", "pendingEmail", "purpose", "tokenHash", "expiresAt", "usedAt") ON TABLE public."EmailVerificationToken" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("usedAt") ON TABLE public."EmailVerificationToken" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "userId", "revokedAt", "sessionCapabilityRevokedAt") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("revokedAt", "revokedReason", "lastUsedAt", "sessionCapabilityRevokedAt", "sessionCapabilityRevokedReason") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "orgId", "name", "isActive", "suspendedAt") ON TABLE public."Licensee" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "payload", "updatedAt") ON TABLE public."AuditLogOutbox" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "userId", "expiresAt", "revokedAt", "sessionCapabilityHash", "sessionCapabilityHashVersion", "sessionCapabilityExpiresAt", "sessionCapabilityRevokedAt") ON TABLE public."RefreshToken" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "role", "orgId", "licenseeId", "status", "isActive", "disabledAt", "deletedAt") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";

@@ -2,26 +2,25 @@
 
 Generated from tracked source and all local Git refs. Fixture SQL is evidence only and is never deployable production SQL.
 
-- external migration reference recovered: 2
-- fixture-only definition: 14
-- no definition found: 32
-- production definition recovered: 36
+- fixture-only definition: 12
+- no definition found: 29
+- production definition recovered: 43
 - repository contract only: 9
 
 | Function | Classification | Definition | Commit | Deployable |
 |---|---|---|---|---|
 | `app_auth.claim_refresh_token_rotation` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 4add7dec147d | yes |
 | `app_auth.complete_refresh_token_rotation` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 4add7dec147d | yes |
-| `app_auth.consume_email_verification_token` | no definition found | none | none | no |
-| `app_auth.consume_invitation_token` | fixture-only definition | backend/tests/rls-wave-b/b01/invitationPostgres18.fixture.sql | 62b73a98b6e0 | no |
-| `app_auth.consume_password_reset_token` | no definition found | none | none | no |
+| `app_auth.consume_email_verification_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | none | yes |
+| `app_auth.consume_invitation_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | 62b73a98b6e0 | yes |
+| `app_auth.consume_password_reset_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | none | yes |
 | `app_auth.create_refresh_mfa_challenge` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 4add7dec147d | yes |
 | `app_auth.issue_authenticated_session_capability` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 4add7dec147d | yes |
 | `app_auth.load_refresh_session_state` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 4add7dec147d | yes |
-| `app_auth.lookup_invitation_token` | fixture-only definition | backend/tests/rls-wave-b/b01/invitationPostgres18.fixture.sql | 62b73a98b6e0 | no |
-| `app_auth.lookup_password_user` | external migration reference recovered | documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql | 3fbcf1402d34 | no |
-| `app_auth.record_password_failure` | external migration reference recovered | documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql | 3fbcf1402d34 | no |
-| `app_auth.request_password_reset` | no definition found | none | none | no |
+| `app_auth.lookup_invitation_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | 62b73a98b6e0 | yes |
+| `app_auth.lookup_password_user` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | 3fbcf1402d34 | yes |
+| `app_auth.record_password_failure` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | 3fbcf1402d34 | yes |
+| `app_auth.request_password_reset` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | none | yes |
 | `app_auth.require_authenticated_session` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 6a6ca469499b | yes |
 | `app_auth.revoke_all_authenticated_session_capabilities` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 6a6ca469499b | yes |
 | `app_auth.revoke_authenticated_session_capability` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 6a6ca469499b | yes |

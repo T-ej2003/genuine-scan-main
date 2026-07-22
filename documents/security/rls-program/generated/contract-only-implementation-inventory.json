@@ -180,8 +180,12 @@
         "boundaryClass": "pre-auth function-backed workflows",
         "implementationStatus": "contract-ready",
         "sourceCommandRuleIds": [
+          "command-audit-log-outbox-insert-e1561aa306f2",
           "command-email-verification-token-select-e1561aa306f2",
           "command-email-verification-token-update-e1561aa306f2",
+          "command-refresh-token-select-e1561aa306f2",
+          "command-refresh-token-update-e1561aa306f2",
+          "command-user-select-e1561aa306f2",
           "command-user-update-e1561aa306f2"
         ]
       },
@@ -191,8 +195,12 @@
         "boundaryClass": "pre-auth function-backed workflows",
         "implementationStatus": "contract-ready",
         "sourceCommandRuleIds": [
+          "command-audit-log-outbox-insert-93fe5e2f9580",
           "command-invite-select-93fe5e2f9580",
           "command-invite-update-93fe5e2f9580",
+          "command-licensee-select-93fe5e2f9580",
+          "command-organization-select-93fe5e2f9580",
+          "command-user-select-93fe5e2f9580",
           "command-user-update-93fe5e2f9580"
         ]
       },
@@ -202,8 +210,12 @@
         "boundaryClass": "pre-auth function-backed workflows",
         "implementationStatus": "contract-ready",
         "sourceCommandRuleIds": [
+          "command-audit-log-outbox-insert-963323294162",
           "command-password-reset-select-963323294162",
           "command-password-reset-update-963323294162",
+          "command-refresh-token-select-963323294162",
+          "command-refresh-token-update-963323294162",
+          "command-user-select-963323294162",
           "command-user-update-963323294162"
         ]
       },
@@ -214,6 +226,8 @@
         "implementationStatus": "contract-ready",
         "sourceCommandRuleIds": [
           "command-invite-select-d113603cb7d4",
+          "command-licensee-select-d113603cb7d4",
+          "command-organization-select-d113603cb7d4",
           "command-user-select-d113603cb7d4"
         ]
       },
@@ -232,6 +246,7 @@
         "boundaryClass": "pre-auth function-backed workflows",
         "implementationStatus": "contract-ready",
         "sourceCommandRuleIds": [
+          "command-user-select-8bfc0e3d6533",
           "command-user-update-8bfc0e3d6533"
         ]
       },
@@ -241,6 +256,7 @@
         "boundaryClass": "pre-auth function-backed workflows",
         "implementationStatus": "contract-ready",
         "sourceCommandRuleIds": [
+          "command-audit-log-outbox-insert-e45d5f48ae3c",
           "command-password-reset-insert-e45d5f48ae3c",
           "command-user-select-e45d5f48ae3c"
         ]
@@ -530,8 +546,12 @@
         "workflow-internal-backend-src-services-auth-email-verification-service-ts-confirm-email-verification"
       ],
       "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-e1561aa306f2",
         "command-email-verification-token-select-e1561aa306f2",
         "command-email-verification-token-update-e1561aa306f2",
+        "command-refresh-token-select-e1561aa306f2",
+        "command-refresh-token-update-e1561aa306f2",
+        "command-user-select-e1561aa306f2",
         "command-user-update-e1561aa306f2"
       ]
     },
@@ -543,8 +563,12 @@
         "workflow-internal-backend-src-services-auth-invite-service-ts-accept-invite"
       ],
       "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-93fe5e2f9580",
         "command-invite-select-93fe5e2f9580",
         "command-invite-update-93fe5e2f9580",
+        "command-licensee-select-93fe5e2f9580",
+        "command-organization-select-93fe5e2f9580",
+        "command-user-select-93fe5e2f9580",
         "command-user-update-93fe5e2f9580"
       ]
     },
@@ -556,8 +580,12 @@
         "workflow-internal-backend-src-services-auth-password-reset-service-ts-reset-password-with-token"
       ],
       "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-963323294162",
         "command-password-reset-select-963323294162",
         "command-password-reset-update-963323294162",
+        "command-refresh-token-select-963323294162",
+        "command-refresh-token-update-963323294162",
+        "command-user-select-963323294162",
         "command-user-update-963323294162"
       ]
     },
@@ -570,6 +598,8 @@
       ],
       "sourceCommandRuleIds": [
         "command-invite-select-d113603cb7d4",
+        "command-licensee-select-d113603cb7d4",
+        "command-organization-select-d113603cb7d4",
         "command-user-select-d113603cb7d4"
       ]
     },
@@ -592,6 +622,7 @@
         "workflow-startup-backend-src-services-auth-auth-bootstrap-repository-ts-record-password-login-failure"
       ],
       "sourceCommandRuleIds": [
+        "command-user-select-8bfc0e3d6533",
         "command-user-update-8bfc0e3d6533"
       ]
     },
@@ -603,6 +634,7 @@
         "workflow-internal-backend-src-services-auth-password-reset-service-ts-request-password-reset"
       ],
       "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-e45d5f48ae3c",
         "command-password-reset-insert-e45d5f48ae3c",
         "command-user-select-e45d5f48ae3c"
       ]

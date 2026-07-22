@@ -240,6 +240,13 @@
       ],
       "tableCommands": [
         {
+          "tableId": "table-user",
+          "commands": [
+            "SELECT"
+          ],
+          "disposition": "remove-before-activation; no human impersonation"
+        },
+        {
           "tableId": "table-licensee",
           "commands": [
             "SELECT"

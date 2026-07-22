@@ -26,7 +26,7 @@ Tables: 21; resolved: 21; unresolved: 0; dependency edges: 15; confidence high/m
 | MfaLoginChallenge | security-sensitive | Special repository/function boundary with row scope inherited from User through userId=id. | table-user | yes | identity-authenticated-app | identity-authenticated-app | high | none |
 | PasswordReset | security-sensitive | Special repository/function boundary with row scope inherited from User through userId=id. | table-user | yes | identity-pre-auth-app | identity-pre-auth-app | high | none |
 | PrintRenderToken | migration-only | No production runtime row access; migration identity only. | — | no | none | none | high | none |
-| RefreshToken | security-sensitive | Special repository/function boundary with row scope inherited from User through userId=id. | table-user | yes | identity-authenticated-app, identity-scheduled-job | identity-authenticated-app | high | none |
+| RefreshToken | security-sensitive | Special repository/function boundary with row scope inherited from User through userId=id. | table-user | yes | identity-authenticated-app, identity-pre-auth-app, identity-scheduled-job | identity-authenticated-app, identity-pre-auth-app | high | none |
 | SensitiveActionApproval | security-sensitive | Special actor-owned repository/function boundary using requestedByUserId; administrator access is command-specific and audited. | — | yes | identity-authenticated-app | none | medium | none |
 | User | security-sensitive | Special actor-owned repository/function boundary using id; administrator access is command-specific and audited. | — | yes | identity-authenticated-app, identity-pre-auth-app, identity-restricted-read, identity-scheduled-job | identity-authenticated-app, identity-pre-auth-app | medium | none |
 | UserBackupCode | security-sensitive | Special repository/function boundary with row scope inherited from User through userId=id. | table-user | yes | identity-authenticated-app | identity-authenticated-app | high | none |
@@ -38,9 +38,9 @@ Tables: 3; resolved: 3; unresolved: 0; dependency edges: 0; confidence high/medi
 
 | Table | Category | Row scope | Parent | FORCE RLS | Readers | Writers | Confidence | Blocker |
 |---|---|---|---|---:|---|---|---|---|
-| Licensee | tenant-owned | Direct transaction-context scope using orgId; platform-admin access remains command-specific. | — | yes | identity-authenticated-app, identity-restricted-read, identity-scheduled-job | identity-authenticated-app | high | none |
+| Licensee | tenant-owned | Direct transaction-context scope using orgId; platform-admin access remains command-specific. | — | yes | identity-authenticated-app, identity-pre-auth-app, identity-restricted-read, identity-scheduled-job | identity-authenticated-app | high | none |
 | ManufacturerLicenseeLink | tenant-owned | Direct transaction-context scope using licenseeId; platform-admin access remains command-specific. | — | yes | identity-authenticated-app, identity-restricted-read | identity-authenticated-app | high | none |
-| Organization | tenant-root | Organization.id is the canonical tenant identifier; ordinary actors may read only app.organization_id, while create/update/delete require explicit platform-admin commands. | — | yes | identity-authenticated-app, identity-restricted-read, identity-scheduled-job | none | high | none |
+| Organization | tenant-root | Organization.id is the canonical tenant identifier; ordinary actors may read only app.organization_id, while create/update/delete require explicit platform-admin commands. | — | yes | identity-authenticated-app, identity-pre-auth-app, identity-restricted-read, identity-scheduled-job | none | high | none |
 
 ## Group C — Batch and QR lifecycle
 
@@ -116,7 +116,7 @@ Tables: 7; resolved: 7; unresolved: 0; dependency edges: 0; confidence high/medi
 | Table | Category | Row scope | Parent | FORCE RLS | Readers | Writers | Confidence | Blocker |
 |---|---|---|---|---:|---|---|---|---|
 | ActionIdempotencyKey | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-authenticated-app, identity-scheduled-job | identity-authenticated-app, identity-scheduled-job | medium | none |
-| AuditLogOutbox | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-worker | identity-authenticated-app, identity-scheduled-job, identity-worker | medium | none |
+| AuditLogOutbox | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-worker | identity-authenticated-app, identity-pre-auth-app, identity-scheduled-job, identity-worker | medium | none |
 | CompliancePackJob | operational-system | Restricted worker/scheduled coordination scoped by licenseeId; no platform-global bypass. | — | yes | identity-authenticated-app, identity-scheduled-job | identity-scheduled-job | medium | none |
 | EvidenceRetentionJob | operational-system | Restricted worker/scheduled coordination scoped by licenseeId; no platform-global bypass. | — | yes | none | none | medium | none |
 | RouteTransitionMetric | append-only-audit | Append-only evidence is scoped directly by licenseeId; NULL/platform events require the restricted audit boundary. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |

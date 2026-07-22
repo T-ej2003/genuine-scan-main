@@ -10,6 +10,18 @@ test("incident repository access resolves to the canonical controller workflow",
   assert.equal(access.method, "$function:app_rls.c03_get_incident_evidence_file_by_storage_key");
 });
 
+test("C03 job-scope revalidation stays with the scheduled compliance workflow", () => {
+  const entry = WORKFLOW_DELEGATIONS.find(({ delegated }) =>
+    delegated.sourceFile.endsWith("c03ActorBoundary.ts") && delegated.function === "withC03ResourceTransaction"
+  );
+  assert(entry);
+  assert.deepEqual(entry.canonical, {
+    executionSurface: "scheduled",
+    sourceFile: "backend/src/services/compliancePackService.ts",
+    function: "startCompliancePackScheduler",
+  });
+});
+
 test("registry rejects duplicate keys, invalid surfaces, missing functions, and sorts deterministically", () => {
   const entry = structuredClone(WORKFLOW_DELEGATIONS[0]);
   assert.throws(() => validateWorkflowDelegations({ entries: [entry, structuredClone(entry)], repoRoot }), /duplicate delegated source key/);

@@ -430,6 +430,199 @@
       "ownerIdentity": "identity-auth-function-owner"
     },
     {
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "email",
+        "pendingEmail",
+        "passwordHash",
+        "name",
+        "role",
+        "orgId",
+        "licenseeId",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt",
+        "failedLoginAttempts",
+        "lockedUntil",
+        "lastLoginAt",
+        "emailVerifiedAt",
+        "pendingEmailRequestedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "User",
+      "command": "UPDATE",
+      "columns": [
+        "email",
+        "pendingEmail",
+        "pendingEmailRequestedAt",
+        "passwordHash",
+        "name",
+        "status",
+        "failedLoginAttempts",
+        "lockedUntil",
+        "emailVerifiedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "Invite",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "licenseeId",
+        "email",
+        "role",
+        "manufacturerId",
+        "tokenHash",
+        "expiresAt",
+        "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "Invite",
+      "command": "UPDATE",
+      "columns": [
+        "usedAt",
+        "acceptedByUserId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "PasswordReset",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "userId",
+        "tokenHash",
+        "expiresAt",
+        "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "PasswordReset",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "orgId",
+        "userId",
+        "tokenHash",
+        "expiresAt",
+        "createdAt",
+        "createdIpHash",
+        "userAgentHash"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "PasswordReset",
+      "command": "UPDATE",
+      "columns": [
+        "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "EmailVerificationToken",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "email",
+        "pendingEmail",
+        "purpose",
+        "tokenHash",
+        "expiresAt",
+        "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "EmailVerificationToken",
+      "command": "UPDATE",
+      "columns": [
+        "usedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "RefreshToken",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "revokedAt",
+        "sessionCapabilityRevokedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "RefreshToken",
+      "command": "UPDATE",
+      "columns": [
+        "revokedAt",
+        "revokedReason",
+        "lastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "name",
+        "isActive",
+        "suspendedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "AuditLogOutbox",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "payload",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
       "table": "RefreshToken",
       "command": "SELECT",
       "columns": [

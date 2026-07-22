@@ -165,6 +165,9 @@ const b01Contracts = validateNamedSqlFunctionContracts().filter((contract) =>
 const authenticatedSessionContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   ["b01-issue-authenticated-session", "b01-require-authenticated-session", "b01-revoke-authenticated-session", "b01-revoke-all-authenticated-sessions"].includes(contract.id)
 );
+const preAuthContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "session-b-b01-preauth"
+);
 const c03Contracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-c-c03"
 );
@@ -178,6 +181,12 @@ const authenticatedSessionFunctionSource = authenticatedSessionContracts.length
 const authenticatedSessionFunctionSignatures = authenticatedSessionContracts.map((contract) => `app_auth.${contract.name}(${contract.signature})`);
 const authenticatedSessionPreauthSignatures = authenticatedSessionContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("preauth")).map((contract) => `app_auth.${contract.name}(${contract.signature})`);
 const authenticatedSessionAppSignatures = authenticatedSessionContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_auth.${contract.name}(${contract.signature})`);
+const preAuthFunctionSource = preAuthContracts.length
+  ? fs.readFileSync(path.join(repoRoot, preAuthContracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
+  : "";
+const preAuthFunctionSignatures = preAuthContracts.map((contract) => `app_auth.${contract.name}(${contract.signature})`);
+const preAuthOwnerPrivileges = [...new Map(preAuthContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const preAuthOwnerPolicies = [...new Map(preAuthContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const c03FunctionSource = c03Contracts.length
   ? fs.readFileSync(path.join(repoRoot, c03Contracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
   : "";
@@ -228,9 +237,11 @@ const b01FunctionOwnerGrants = [
   ["AuditLogOutbox", "INSERT", ["id","payload","updatedAt"]],
 ];
 const b01OwnerGrantSql = b01FunctionOwnerGrants.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const preAuthOwnerGrantSql = preAuthOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const c03OwnerGrantSql = c03OwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const functionOwnerRows = [
   ...b01FunctionOwnerGrants.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: b01Contracts.map((contract) => contract.id) })),
+  ...preAuthOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: preAuthContracts.map((contract) => contract.id) })),
   ...c03OwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: c03Contracts.map((contract) => contract.id) })),
 ];
 const b01PolicyOwner = `current_user=${lit(roleNames.authOwner)}`;
@@ -610,6 +621,7 @@ GRANT USAGE ON SCHEMA public TO ${q(roleNames.operator)};
 ${columnGrantSql}
 ${appTypeGrantSql}
 ${b01OwnerGrantSql}
+${preAuthOwnerGrantSql}
 ${c03OwnerGrantSql}
 GRANT USAGE ON SCHEMA public TO ${q(roleNames.authOwner)};
 ${resetRole}
@@ -1258,6 +1270,10 @@ ${b01FunctionSource ? `${setRole(roleNames.authOwner)}
 ${b01FunctionSource}
 ${b01FunctionSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
 ${resetRole}` : ""}
+${preAuthFunctionSource ? `${setRole(roleNames.authOwner)}
+${preAuthFunctionSource}
+${preAuthFunctionSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
+${resetRole}` : ""}
 ${authenticatedSessionFunctionSource ? `${setRole(roleNames.authOwner)}
 ${authenticatedSessionFunctionSource}
 GRANT USAGE ON SCHEMA app_auth TO ${q(roleNames.app)};
@@ -1590,6 +1606,13 @@ for (const [table, command, predicate] of b01TablePolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b01-refresh-rotation", ownerIdentity: "identity-auth-function-owner", scope: "transaction-local bearer-derived context" }))};`);
 }
+for (const [table, command, rawPredicate] of preAuthOwnerPolicies) {
+  const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner));
+  const policyName = shortName("b01_preauth", table, command);
+  const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b01-preauth-bearer", ownerIdentity: "identity-auth-function-owner", scope: "operation-specific selector rebound to locked token or account" }))};`);
+}
 if (authenticatedSessionContracts.length) {
   const policyName = shortName("authenticated_session", "RefreshToken", "SELECT_UPDATE");
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q("RefreshToken")} AS PERMISSIVE FOR ALL TO ${q(roleNames.authOwner)} USING ${authenticatedSessionPolicy} WITH CHECK ${authenticatedSessionPolicy};`);
@@ -1645,6 +1668,7 @@ const expectedTableAclSelect = expectedRowsSelect(grants.filter((grant) => grant
 const expectedColumnAclSelect = expectedRowsSelect([
   ...grants.flatMap((grant) => grant.command === "DELETE" ? [] : grant.columns.map((column) => ["public", grant.table, column, roleNames.app, roleNames.owner, grant.command, false])),
   ...b01FunctionOwnerGrants.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...preAuthOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...c03OwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
 ], columnAclColumns);
 const expectedTypeAclSelect = expectedRowsSelect(appTypeGrantNames.map((type) => ["public", type, roleNames.app, roleNames.owner, "USAGE", false]), aclColumns);
@@ -1693,7 +1717,8 @@ const expectedRoutineIdentities = [
   ["app_rls", "c03_validate_compliance_result", "p_result jsonb"],
   ["app_rls", "c03_queue_audit", "p_action text, p_entity_type text, p_entity_id text, p_details jsonb"],
   ["app_rls", "c03_build_compliance_report", "p_licensee_id text, p_from timestamp with time zone, p_to timestamp with time zone"],
-  ...[...b01Contracts, ...authenticatedSessionContracts, ...c03Contracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
+  ["app_auth", "b01_preauth_audit", "p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb"],
+  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...c03Contracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
@@ -1735,6 +1760,26 @@ const policyInventory = [
     sourceCommandRuleIds: [b01SourceRuleIds.get(`${table}:${command}`)],
     workflowId: "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
     route: "POST /auth/refresh",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
+  ...preAuthOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("b01_preauth", table, command),
+    command,
+    actors: ["pre-auth"],
+    assurance: "source-rule-specific",
+    purpose: ["b01-preauth-reviewed-boundary"],
+    scopeType: "security-definer-owner-and-locked-bearer-derived-context",
+    scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)),
+    columns: [],
+    sourceCommandRuleIds: commandSemantics.rules.filter((rule) =>
+      rule.tableId === tables.find((entry) => entry.physicalTable === table)?.id &&
+      rule.command === command && rule.authorizationBoundary !== "prohibited"
+    ).map((rule) => rule.id).sort(),
+    workflowId: null,
+    route: "B01 exact pre-auth SQL boundary",
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),

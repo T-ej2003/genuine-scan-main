@@ -931,7 +931,7 @@
       "resolvedAt": "2026-07-16",
       "resolution": {
         "authority": "documents/security/rls-program/command-semantics.json",
-        "rules": 972,
+        "rules": 988,
         "forceRlsTables": 75,
         "workflowsMapped": 401,
         "commandVocabulary": [
@@ -966,8 +966,11 @@
         "table-audit-log-outbox",
         "table-email-verification-token",
         "table-invite",
+        "table-licensee",
         "table-mfa-login-challenge",
+        "table-organization",
         "table-password-reset",
+        "table-refresh-token",
         "table-user"
       ],
       "question": "Which pre-authentication operations require exact named SECURITY DEFINER functions and which may continue only after canonical actor context exists?",

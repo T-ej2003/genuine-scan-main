@@ -448,7 +448,10 @@
           "text[]",
           "text",
           "text",
-          "timestamp without time zone"
+          "timestamp without time zone",
+          "text",
+          "text",
+          "text"
         ],
         "owner": "identity-auth-function-owner",
         "securityMode": "DEFINER"

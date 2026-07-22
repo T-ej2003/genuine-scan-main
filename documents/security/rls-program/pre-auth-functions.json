@@ -19,7 +19,7 @@
   "functions": [
     {
       "sqlSchema": "app_auth",
-      "fixedSearchPath": "pg_catalog",
+      "fixedSearchPath": "pg_catalog,public",
       "securityDefiner": true,
       "dynamicSqlAllowed": false,
       "genericQueryInputsAllowed": false,
@@ -34,7 +34,7 @@
       "restrictedReadExecutionDenied": true,
       "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
       "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
-      "implementationStatus": "contract-only; SQL not generated",
+      "implementationStatus": "production-reviewed SQL generated from the named-function contract registry",
       "id": "preauth-fn-consume-email-verification",
       "sqlFunctionName": "consume_email_verification_token",
       "arguments": [
@@ -77,13 +77,14 @@
       ],
       "tablesRead": [
         "table-email-verification-token",
-        "table-user",
-        "table-refresh-token"
+        "table-refresh-token",
+        "table-user"
       ],
       "tablesWritten": [
+        "table-audit-log-outbox",
         "table-email-verification-token",
-        "table-user",
-        "table-refresh-token"
+        "table-refresh-token",
+        "table-user"
       ],
       "exactAllowedColumns": [
         {
@@ -186,11 +187,16 @@
         "email collision denial",
         "EMAIL_CHANGE session revocation",
         "atomic rollback"
+      ],
+      "definitionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "rollbackSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+      "disposableProbes": [
+        "b01-preauth-security-postgres18"
       ]
     },
     {
       "sqlSchema": "app_auth",
-      "fixedSearchPath": "pg_catalog",
+      "fixedSearchPath": "pg_catalog,public",
       "securityDefiner": true,
       "dynamicSqlAllowed": false,
       "genericQueryInputsAllowed": false,
@@ -205,7 +211,7 @@
       "restrictedReadExecutionDenied": true,
       "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
       "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
-      "implementationStatus": "contract-only; SQL not generated",
+      "implementationStatus": "production-reviewed SQL generated from the named-function contract registry",
       "id": "preauth-fn-consume-invitation",
       "sqlFunctionName": "consume_invitation_token",
       "arguments": [
@@ -228,9 +234,29 @@
           "name": "consumed_at",
           "type": "timestamp without time zone",
           "nullable": false
+        },
+        {
+          "name": "request_id",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "ip_hash",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "user_agent",
+          "type": "text",
+          "nullable": true
         }
       ],
       "returnColumns": [
+        {
+          "name": "inviteId",
+          "type": "text",
+          "nullable": false
+        },
         {
           "name": "id",
           "type": "text",
@@ -273,9 +299,12 @@
       ],
       "tablesRead": [
         "table-invite",
+        "table-licensee",
+        "table-organization",
         "table-user"
       ],
       "tablesWritten": [
+        "table-audit-log-outbox",
         "table-invite",
         "table-user"
       ],
@@ -371,11 +400,16 @@
         "licensee invite platform ceiling",
         "missing/disabled/deleted user denial",
         "atomic invite/user rollback"
+      ],
+      "definitionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "rollbackSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+      "disposableProbes": [
+        "b01-preauth-security-postgres18"
       ]
     },
     {
       "sqlSchema": "app_auth",
-      "fixedSearchPath": "pg_catalog",
+      "fixedSearchPath": "pg_catalog,public",
       "securityDefiner": true,
       "dynamicSqlAllowed": false,
       "genericQueryInputsAllowed": false,
@@ -390,7 +424,7 @@
       "restrictedReadExecutionDenied": true,
       "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
       "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
-      "implementationStatus": "contract-only; SQL not generated",
+      "implementationStatus": "production-reviewed SQL generated from the named-function contract registry",
       "id": "preauth-fn-consume-password-reset",
       "sqlFunctionName": "consume_password_reset_token",
       "arguments": [
@@ -448,13 +482,14 @@
       ],
       "tablesRead": [
         "table-password-reset",
-        "table-user",
-        "table-refresh-token"
+        "table-refresh-token",
+        "table-user"
       ],
       "tablesWritten": [
+        "table-audit-log-outbox",
         "table-password-reset",
-        "table-user",
-        "table-refresh-token"
+        "table-refresh-token",
+        "table-user"
       ],
       "exactAllowedColumns": [
         {
@@ -556,11 +591,16 @@
         "atomic rollback across three tables",
         "all live sessions revoked",
         "cross-account and duplicate hash denial"
+      ],
+      "definitionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "rollbackSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+      "disposableProbes": [
+        "b01-preauth-security-postgres18"
       ]
     },
     {
       "sqlSchema": "app_auth",
-      "fixedSearchPath": "pg_catalog",
+      "fixedSearchPath": "pg_catalog,public",
       "securityDefiner": true,
       "dynamicSqlAllowed": false,
       "genericQueryInputsAllowed": false,
@@ -575,7 +615,7 @@
       "restrictedReadExecutionDenied": true,
       "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
       "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
-      "implementationStatus": "contract-only; SQL not generated",
+      "implementationStatus": "production-reviewed SQL generated from the named-function contract registry",
       "id": "preauth-fn-lookup-invitation",
       "sqlFunctionName": "lookup_invitation_token",
       "arguments": [
@@ -623,7 +663,9 @@
       ],
       "tablesRead": [
         "table-invite",
-        "table-licensee"
+        "table-licensee",
+        "table-organization",
+        "table-user"
       ],
       "tablesWritten": [],
       "exactAllowedColumns": [
@@ -681,11 +723,16 @@
         "used/expired/duplicate denial",
         "candidate bounds",
         "no hash or unrelated Licensee columns returned"
+      ],
+      "definitionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "rollbackSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+      "disposableProbes": [
+        "b01-preauth-security-postgres18"
       ]
     },
     {
       "sqlSchema": "app_auth",
-      "fixedSearchPath": "pg_catalog",
+      "fixedSearchPath": "pg_catalog,public",
       "securityDefiner": true,
       "dynamicSqlAllowed": false,
       "genericQueryInputsAllowed": false,
@@ -700,7 +747,7 @@
       "restrictedReadExecutionDenied": true,
       "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
       "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
-      "implementationStatus": "contract-only; SQL not generated",
+      "implementationStatus": "production-reviewed SQL generated from the named-function contract registry",
       "id": "preauth-fn-lookup-password-user",
       "sqlFunctionName": "lookup_password_user",
       "arguments": [
@@ -852,11 +899,16 @@
         "zero/one/duplicate matches",
         "session-variable manipulation cannot redirect lookup",
         "passwordHash is never exposed outside backend verification"
+      ],
+      "definitionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "rollbackSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+      "disposableProbes": [
+        "b01-preauth-security-postgres18"
       ]
     },
     {
       "sqlSchema": "app_auth",
-      "fixedSearchPath": "pg_catalog",
+      "fixedSearchPath": "pg_catalog,public",
       "securityDefiner": true,
       "dynamicSqlAllowed": false,
       "genericQueryInputsAllowed": false,
@@ -871,7 +923,7 @@
       "restrictedReadExecutionDenied": true,
       "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
       "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
-      "implementationStatus": "contract-only; SQL not generated",
+      "implementationStatus": "production-reviewed SQL generated from the named-function contract registry",
       "id": "preauth-fn-record-password-failure",
       "sqlFunctionName": "record_password_failure",
       "arguments": [
@@ -967,11 +1019,16 @@
         "bounded inputs",
         "existing lock preservation",
         "exact returned columns"
+      ],
+      "definitionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "rollbackSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+      "disposableProbes": [
+        "b01-preauth-security-postgres18"
       ]
     },
     {
       "sqlSchema": "app_auth",
-      "fixedSearchPath": "pg_catalog",
+      "fixedSearchPath": "pg_catalog,public",
       "securityDefiner": true,
       "dynamicSqlAllowed": false,
       "genericQueryInputsAllowed": false,
@@ -986,7 +1043,7 @@
       "restrictedReadExecutionDenied": true,
       "appExecutionStatus": "denied after the runtime-role split; any current prototype app-role grant must be removed before activation",
       "transactionRequirements": "One database transaction; any mutation, token consumption, session revocation, and returned result commit or roll back together.",
-      "implementationStatus": "contract-only; SQL not generated",
+      "implementationStatus": "production-reviewed SQL generated from the named-function contract registry",
       "id": "preauth-fn-request-password-reset",
       "sqlFunctionName": "request_password_reset",
       "arguments": [
@@ -1066,6 +1123,7 @@
         "table-user"
       ],
       "tablesWritten": [
+        "table-audit-log-outbox",
         "table-password-reset"
       ],
       "exactAllowedColumns": [
@@ -1121,6 +1179,11 @@
         "duplicate/inactive/deleted no issuance",
         "unique hash and bounded expiry",
         "returned internal fields cannot cross the route response"
+      ],
+      "definitionSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql",
+      "rollbackSource": "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql",
+      "disposableProbes": [
+        "b01-preauth-security-postgres18"
       ]
     }
   ]
