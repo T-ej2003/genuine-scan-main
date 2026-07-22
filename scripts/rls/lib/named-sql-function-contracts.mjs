@@ -142,11 +142,11 @@ const c03Commands = Object.freeze({
 export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
   {
     id: "c03-revalidate-compliance-pack-job-actor", schema: "app_rls", name: "c03_revalidate_compliance_pack_job_actor_scope",
-    signature: "text,text,text,text", returnType: "TABLE(userId text, role text, organizationId text, licenseeId text)",
+    signature: "text,text,text,text", returnType: "TABLE(user_id text, role text, organization_id text, licensee_id text)",
     identityArguments: "p_capability text, p_purpose text, p_request_id text, p_job_id text",
     definitionLocation: c03Source, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed", security: c03Security,
     tableCommands: c03Commands.get, context: "Verifies the opaque authenticated-session capability, derives the live actor, locks scope to the selected compliance job and rejects inactive or cross-tenant scope.",
-    canonicalWorkflowIds: [c03ComplianceWorkflow], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:withC03ResourceTransaction"], inputAuthority: "capability is authority; job ID is a selector only", outputColumns: ["userId","role","organizationId","licenseeId"], disposableProbes: ["c03-authenticated-boundaries-postgres18"],
+    canonicalWorkflowIds: [c03ComplianceWorkflow], repositoryCallers: ["backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:withC03ResourceTransaction"], inputAuthority: "capability is authority; job ID is a selector only", outputColumns: ["user_id","role","organization_id","licensee_id"], disposableProbes: ["c03-authenticated-boundaries-postgres18"],
   },
   {
     id: "c03-start-compliance-pack-job", schema: "app_rls", name: "c03_start_compliance_pack_job",

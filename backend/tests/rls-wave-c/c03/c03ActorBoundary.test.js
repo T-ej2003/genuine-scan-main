@@ -98,7 +98,7 @@ const run = async () => {
     resourceType: "compliancePackJob",
   }, async (_db, verified) => verified);
   assert.equal(resource.sessionId, ids.session);
-  assert.match(lastQuery, /app_auth\.require_authenticated_session/);
+  assert.match(lastQuery, /app_rls\.c03_revalidate_compliance_pack_job_actor_scope/);
 
   queryError = new Error("AUTHENTICATED_SESSION_REVOKED");
   await assert.rejects(

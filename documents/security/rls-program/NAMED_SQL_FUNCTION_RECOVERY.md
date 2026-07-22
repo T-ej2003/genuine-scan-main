@@ -5,7 +5,7 @@ Generated from tracked source and all local Git refs. Fixture SQL is evidence on
 - external migration reference recovered: 2
 - fixture-only definition: 14
 - no definition found: 32
-- production definition recovered: 35
+- production definition recovered: 36
 - repository contract only: 9
 
 | Function | Classification | Definition | Commit | Deployable |
@@ -22,9 +22,9 @@ Generated from tracked source and all local Git refs. Fixture SQL is evidence on
 | `app_auth.lookup_password_user` | external migration reference recovered | documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql | 3fbcf1402d34 | no |
 | `app_auth.record_password_failure` | external migration reference recovered | documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql | 3fbcf1402d34 | no |
 | `app_auth.request_password_reset` | no definition found | none | none | no |
-| `app_auth.require_authenticated_session` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 4add7dec147d | yes |
-| `app_auth.revoke_all_authenticated_session_capabilities` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 4add7dec147d | yes |
-| `app_auth.revoke_authenticated_session_capability` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 4add7dec147d | yes |
+| `app_auth.require_authenticated_session` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 6a6ca469499b | yes |
+| `app_auth.revoke_all_authenticated_session_capabilities` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 6a6ca469499b | yes |
+| `app_auth.revoke_authenticated_session_capability` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 6a6ca469499b | yes |
 | `app_auth.revoke_refresh_token_scope` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 4add7dec147d | yes |
 | `app_rls.batch_inventory_rollups` | repository contract only | none | 4add7dec147d | no |
 | `app_rls.batch_operational_rows` | repository contract only | none | 4add7dec147d | no |
@@ -39,19 +39,19 @@ Generated from tracked source and all local Git refs. Fixture SQL is evidence on
 | `app_rls.c03_approve_sensitive_action_approval` | no definition found | none | none | no |
 | `app_rls.c03_assert_restricted_identity` | no definition found | none | none | no |
 | `app_rls.c03_build_incident_evidence_audit_snapshot` | no definition found | none | none | no |
-| `app_rls.c03_complete_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | none | yes |
-| `app_rls.c03_complete_compliance_pack_rebuild` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | none | yes |
+| `app_rls.c03_complete_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | 6a6ca469499b | yes |
+| `app_rls.c03_complete_compliance_pack_rebuild` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | 6a6ca469499b | yes |
 | `app_rls.c03_compute_incident_severity` | no definition found | none | none | no |
 | `app_rls.c03_compute_incident_spam_signal` | no definition found | none | none | no |
 | `app_rls.c03_create_ir_incident` | no definition found | none | none | no |
 | `app_rls.c03_create_policy_rule` | production definition recovered | backend/src/rls-waves/session-c/c03/c03Policy.sql | d4edf6e4a63e | yes |
 | `app_rls.c03_create_public_incident_report` | no definition found | none | none | no |
 | `app_rls.c03_create_sensitive_action_approval` | no definition found | none | none | no |
-| `app_rls.c03_fail_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | none | yes |
+| `app_rls.c03_fail_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | 6a6ca469499b | yes |
 | `app_rls.c03_generate_compliance_report` | production definition recovered | backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql | fb555a0315ba | yes |
-| `app_rls.c03_get_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | none | yes |
+| `app_rls.c03_get_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | 6a6ca469499b | yes |
 | `app_rls.c03_get_incident_detail` | no definition found | none | none | no |
-| `app_rls.c03_get_incident_evidence_file_by_storage_key` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | none | yes |
+| `app_rls.c03_get_incident_evidence_file_by_storage_key` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | 6a6ca469499b | yes |
 | `app_rls.c03_get_ir_incident_detail` | no definition found | none | none | no |
 | `app_rls.c03_get_or_create_retention_policy` | production definition recovered | backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql | fb555a0315ba | yes |
 | `app_rls.c03_link_ir_alert_incident` | no definition found | none | none | no |
@@ -65,9 +65,10 @@ Generated from tracked source and all local Git refs. Fixture SQL is evidence on
 | `app_rls.c03_record_incident_communication_delivery` | no definition found | none | none | no |
 | `app_rls.c03_record_incident_event` | no definition found | none | none | no |
 | `app_rls.c03_reject_sensitive_action_approval` | no definition found | none | none | no |
+| `app_rls.c03_revalidate_compliance_pack_job_actor_scope` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | 6a6ca469499b | yes |
 | `app_rls.c03_review_incident_customer_trust` | no definition found | none | none | no |
 | `app_rls.c03_run_retention_lifecycle` | production definition recovered | backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql | fb555a0315ba | yes |
-| `app_rls.c03_start_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | none | yes |
+| `app_rls.c03_start_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql | 6a6ca469499b | yes |
 | `app_rls.c03_update_policy_rule` | production definition recovered | backend/src/rls-waves/session-c/c03/c03Policy.sql | d4edf6e4a63e | yes |
 | `app_rls.c03_update_retention_policy` | production definition recovered | backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql | fb555a0315ba | yes |
 | `app_rls.c03_upsert_tenant_feature_flag` | production definition recovered | backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql | fb555a0315ba | yes |

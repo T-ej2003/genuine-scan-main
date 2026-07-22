@@ -60,6 +60,13 @@ type VerifiedActorRow = {
   assurance: string;
 };
 
+type VerifiedResourceScopeRow = {
+  userId: string;
+  role: string;
+  organizationId: string | null;
+  licenseeId: string | null;
+};
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CAPABILITY_RE = /^[A-Za-z0-9_-]{43}$/;
 const REQUEST_RE = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -163,7 +170,28 @@ export const withC03ResourceTransaction = <T>(
   isolationLevel: Prisma.TransactionIsolationLevel = Prisma.TransactionIsolationLevel.Serializable
 ): Promise<T> => {
   requireResourceSelector(boundary);
-  return withCapabilityTransaction<T>(boundary, callback, isolationLevel);
+  return withCapabilityTransaction<T>(boundary, async (tx, context) => {
+    if (boundary.resourceType === "compliancePackJob") {
+      const rows = await tx.$queryRaw<VerifiedResourceScopeRow[]>`
+        SELECT
+          scope.user_id AS "userId",
+          scope.role,
+          scope.organization_id AS "organizationId",
+          scope.licensee_id AS "licenseeId"
+        FROM app_rls.c03_revalidate_compliance_pack_job_actor_scope(
+          ${context.databaseSessionCapability}, ${context.purpose}, ${context.requestId}, ${boundary.resourceId}
+        ) AS scope
+      `;
+      const scope = rows[0];
+      if (
+        rows.length !== 1 || scope.userId !== context.userId || scope.role !== context.role ||
+        scope.organizationId !== context.organizationId || scope.licenseeId !== context.licenseeId
+      ) {
+        throw new C03AccessError("Access denied to this compliance job");
+      }
+    }
+    return callback(tx, context);
+  }, isolationLevel);
 };
 
 export const withC03PlatformTransaction = <T>(

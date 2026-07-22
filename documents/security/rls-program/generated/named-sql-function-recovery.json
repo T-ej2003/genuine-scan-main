@@ -523,7 +523,7 @@
           "functionName": "app_auth.require_authenticated_session",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
           "sourceFunction": "verifyCapability",
-          "line": 84
+          "line": 91
         }
       ],
       "canonicalWorkflowIds": [
@@ -531,8 +531,9 @@
       ],
       "classification": "production definition recovered",
       "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
-      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
       "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670",
         "4add7dec147de5530a3f39a884c87d129df020a8"
       ],
       "deployable": true,
@@ -577,8 +578,9 @@
       ],
       "classification": "production definition recovered",
       "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
-      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
       "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670",
         "4add7dec147de5530a3f39a884c87d129df020a8"
       ],
       "deployable": true,
@@ -622,8 +624,9 @@
       ],
       "classification": "production definition recovered",
       "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
-      "originatingCommit": "4add7dec147de5530a3f39a884c87d129df020a8",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
       "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670",
         "4add7dec147de5530a3f39a884c87d129df020a8"
       ],
       "deployable": true,
@@ -1165,8 +1168,10 @@
       ],
       "classification": "production definition recovered",
       "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
-      "originatingCommit": null,
-      "historyCommits": [],
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
       "deployable": true,
       "definitionChecksum": "4d37d58cd59719ab3ac21a935b64f32320c7fed8c09c8615c363f0f3bdad5198",
       "returnType": "jsonb",
@@ -1208,8 +1213,10 @@
       ],
       "classification": "production definition recovered",
       "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
-      "originatingCommit": null,
-      "historyCommits": [],
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
       "deployable": true,
       "definitionChecksum": "4b1b2e90e8b9225f82d7322e886c88cae726e2303dc3d8e8a613a224aad2f3ca",
       "returnType": "jsonb",
@@ -1427,8 +1434,10 @@
       ],
       "classification": "production definition recovered",
       "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
-      "originatingCommit": null,
-      "historyCommits": [],
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
       "deployable": true,
       "definitionChecksum": "31914ccfb59c39b71596d27f3ce6093eb6cdf0268d34c84e95175fff032f63a8",
       "returnType": "jsonb",
@@ -1506,8 +1515,10 @@
       ],
       "classification": "production definition recovered",
       "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
-      "originatingCommit": null,
-      "historyCommits": [],
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
       "deployable": true,
       "definitionChecksum": "74ded71f3fa823f878d2853f4c200395f545814d7097659d06975109ba73a9a2",
       "returnType": "jsonb",
@@ -1576,8 +1587,10 @@
       ],
       "classification": "production definition recovered",
       "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
-      "originatingCommit": null,
-      "historyCommits": [],
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
       "deployable": true,
       "definitionChecksum": "2ce8d7c300b43d7ef6fac7629529cecb57c9b082d6be5248a9ea96da1706c4bd",
       "returnType": "jsonb",
@@ -1991,6 +2004,55 @@
       "revokeLocations": []
     },
     {
+      "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
+      "signature": "text,text,text,text",
+      "callers": [
+        {
+          "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "withC03ResourceTransaction",
+          "line": 175
+        }
+      ],
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-rls-waves-session-c-c03-c03-actor-boundary-ts-with-c03-resource-transaction"
+      ],
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670",
+        "d4edf6e4a63e4daf792c82fe06b5c7be1edbb1a9",
+        "3011e341c7233d01c2e1f4147a8b02a452287362"
+      ],
+      "deployable": true,
+      "definitionChecksum": "9b073508368e8aee7cd8277d0affd99e1cd1e8aa495390f428ca15644e575b18",
+      "returnType": "TABLE(user_id text,role text,organization_id text,licensee_id text)",
+      "matchesCurrentPrismaSchema": null,
+      "signatureMatchesRepositoryCall": null,
+      "securityMetadata": {
+        "securityMode": "SECURITY DEFINER",
+        "safeSearchPath": true,
+        "publicRevoked": true,
+        "grantsPresent": true
+      },
+      "requiresAdaptation": false,
+      "candidateLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "backend/src/rls-waves/session-c/c03/c03Boundary.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "backend/src/rls-waves/session-c/c03/c03Boundary.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
+    },
+    {
       "functionName": "app_rls.c03_review_incident_customer_trust",
       "signature": null,
       "callers": [
@@ -2069,8 +2131,10 @@
       ],
       "classification": "production definition recovered",
       "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
-      "originatingCommit": null,
-      "historyCommits": [],
+      "originatingCommit": "6a6ca469499b9a3df92f322c18de58056598a670",
+      "historyCommits": [
+        "6a6ca469499b9a3df92f322c18de58056598a670"
+      ],
       "deployable": true,
       "definitionChecksum": "c0b23fbf5247c263d404488f7c4147b6b451d92e48b66cb87572db7de4739deb",
       "returnType": "jsonb",

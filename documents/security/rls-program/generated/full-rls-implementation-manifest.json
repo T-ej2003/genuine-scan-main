@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "0aa0de7979049ca489b8239148728dd16a38b4bb93b13a94a8f246d6716a79a3",
+  "sourceContractSha256": "4b26861c6ae1e37033afaa11f0e6f6c46ac7fd4961f0bdba0366075305734148",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -79,7 +79,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "30d1f840beb528d53a27c5529f7948a0b38d8eb9200a64cf9cc475f3a4c977d5"
+      "sha256": "1c79c156a57ee92c64c5d78d8cab29f8c35b1785160c07dde2be47e3ae3e619b"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -135,7 +135,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:0aa0de7979049ca489b8239148728dd16a38b4bb93b13a94a8f246d6716a79a3",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:4b26861c6ae1e37033afaa11f0e6f6c46ac7fd4961f0bdba0366075305734148",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
