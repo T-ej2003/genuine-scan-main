@@ -4,6 +4,13 @@ Coordination SHA: `22bfdb0cfd19d7b435b1390611b452a419923f9f`
 
 This document records the global SQL and integration-owner work that C03 cannot own. The C03 application code fails closed when a required function or caller context is absent. Session A must review these contracts, install the functions in the generated GREEN package, and update the named integration call sites before merging Session C.
 
+> **Security prerequisite:** the current clean-room context helper accepts
+> caller-provided actor fields and writes `app.*` GUCs. It is not a
+> database-verifiable authenticated-actor proof and must not authorize new C03
+> function-owner policies. The repository-backed analysis and required shared
+> decision are recorded in
+> [`C03_TRUSTED_ACTOR_CONTEXT_PREREQUISITE.md`](./C03_TRUSTED_ACTOR_CONTEXT_PREREQUISITE.md).
+
 ## Authenticated actor and resource scope
 
 All functions below execute only for the authenticated application identity. They re-read an active `User`, active parent `Licensee` and active `Organization`, verify the installed user ID and role rather than trusting token strings, enforce the requested assurance and allowlisted purpose, and return exactly one row or no row.
