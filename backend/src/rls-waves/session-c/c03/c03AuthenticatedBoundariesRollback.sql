@@ -1,0 +1,14 @@
+DROP FUNCTION IF EXISTS app_rls.c03_get_incident_evidence_file_by_storage_key(text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.c03_complete_compliance_pack_rebuild(text,text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_get_compliance_pack_job(text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.c03_fail_compliance_pack_job(text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.c03_complete_compliance_pack_job(text,text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_start_compliance_pack_job(text,text,text,text,text,timestamp with time zone,timestamp with time zone);
+DROP FUNCTION IF EXISTS app_rls.c03_revalidate_compliance_pack_job_actor_scope(text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.c03_build_compliance_report(text,timestamp with time zone,timestamp with time zone);
+DROP FUNCTION IF EXISTS app_rls.c03_queue_audit(text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_validate_compliance_result(jsonb);
+DROP FUNCTION IF EXISTS app_rls.c03_compliance_job_projection(text);
+DROP FUNCTION IF EXISTS app_rls.c03_bind_operation(text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.c03_assert_live_licensee_scope(text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.c03_require_authenticated_actor(text,text,text);

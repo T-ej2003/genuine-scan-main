@@ -1,5 +1,7 @@
 import { Prisma } from "@prisma/client";
 
+import type { C03VerifiedDbContext } from "./c03ActorBoundary";
+
 type IncidentDb = Pick<Prisma.TransactionClient, "$queryRaw">;
 type JsonRow = { result: Prisma.JsonValue };
 
@@ -143,11 +145,14 @@ export const addIncidentEvidenceInTransaction = async <T>(
 
 export const loadIncidentEvidenceFileInTransaction = async <T>(
   tx: IncidentDb,
+  authority: C03VerifiedDbContext,
   storageKey: string
 ) =>
   requiredObject<T>(
     await tx.$queryRaw<JsonRow[]>`
-      SELECT app_rls.c03_get_incident_evidence_file_by_storage_key(${storageKey}) AS result
+      SELECT app_rls.c03_get_incident_evidence_file_by_storage_key(
+        ${authority.databaseSessionCapability}, ${authority.purpose}, ${authority.requestId}, ${storageKey}
+      ) AS result
     `,
     "load incident evidence file"
   );

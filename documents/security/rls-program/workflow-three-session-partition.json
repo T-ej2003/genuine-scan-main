@@ -43,6 +43,7 @@
         "backend/src/middleware/customerVerifyAuth.ts",
         "backend/src/middleware/supportIssueUpload.ts",
         "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
+        "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
         "backend/src/rls-waves/session-b/b02/actorRevalidationRepository.ts",
         "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts",
         "backend/src/routes/modules/authRoutes.ts",
@@ -54,6 +55,7 @@
         "backend/src/services/auth/authDurationConfig.ts",
         "backend/src/services/auth/authEmailService.ts",
         "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
         "backend/src/services/auth/backupCodeHashService.ts",
         "backend/src/services/auth/backupCodeMfaProvider.ts",
         "backend/src/services/auth/cookieTokenProtectionService.ts",
@@ -95,6 +97,7 @@
         "backend/src/controllers/irIncidentController.ts",
         "backend/src/controllers/tracePolicyController.ts",
         "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
@@ -175,9 +178,9 @@
       ],
       "waveLocalResultManifest": "documents/security/rls-program/waves/session-b-auth-public-workers-result.json",
       "originalBranchPoint": "061b3134ba89db84e0564b893e920a2601c14452",
-      "workflowCount": 180,
+      "workflowCount": 181,
       "workflowFamilyCount": 3,
-      "productionFileCount": 74,
+      "productionFileCount": 76,
       "existingTestFileCount": 47
     },
     {
@@ -220,7 +223,7 @@
       "requiredBaseAncestor": "33cbe7ff019efefad242f654f0aa96c44c5b963c",
       "workflowCount": 44,
       "workflowFamilyCount": 4,
-      "productionFileCount": 27,
+      "productionFileCount": 28,
       "existingTestFileCount": 21
     }
   ],
@@ -2509,6 +2512,21 @@
       ]
     },
     {
+      "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
+      "sessionId": "session-b",
+      "waveId": "b-01-auth-preauth-session-account-security",
+      "assignmentRuleId": "b01-auth-preauth-account-contract",
+      "corroboratingRuleIds": [],
+      "entryPoint": "internal:refreshSession",
+      "executionSurface": "internal",
+      "contract": "Authentication, pre-authentication, sessions, MFA, WebAuthn, invitations, password reset, email verification and actor-owned account security.",
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
+      ]
+    },
+    {
       "workflowId": "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-consume-legacy-backup-code",
       "sessionId": "session-b",
       "waveId": "b-01-auth-preauth-session-account-security",
@@ -3241,6 +3259,7 @@
       "executionSurface": "internal",
       "contract": "Governance, policies, incident response, compliance, evidence, approval and containment workflows under reviewed actor boundaries.",
       "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ]
@@ -5590,16 +5609,16 @@
     ]
   },
   "validationSummary": {
-    "authoritativeWorkflowCount": 400,
-    "assignmentCount": 400,
-    "uniqueAssignmentCount": 400,
+    "authoritativeWorkflowCount": 401,
+    "assignmentCount": 401,
+    "uniqueAssignmentCount": 401,
     "missingWorkflowIds": [],
     "duplicateWorkflowIds": [],
     "unknownWorkflowIds": [],
     "genericCatchAllAssignments": [],
     "sessionCounts": {
       "session-a": 176,
-      "session-b": 180,
+      "session-b": 181,
       "session-c": 44
     },
     "waveCounts": {
@@ -5608,7 +5627,7 @@
       "a-04-printing-reissue-recovery-release": 111,
       "a-08-runtime-idempotency-telemetry": 5,
       "a-09-system-integration-owner": 1,
-      "b-01-auth-preauth-session-account-security": 41,
+      "b-01-auth-preauth-session-account-security": 42,
       "b-02-public-proof-support-intake": 118,
       "b-03-workers-scheduled-outbox-delivery": 21,
       "c-01-administration-general-mutations": 1,
@@ -5616,7 +5635,7 @@
       "c-03-governance-policies-incidents-compliance": 25,
       "c-04-operator-recovery-startup-migration-cli": 0
     },
-    "sessionBWorkflowSetSha256": "68253ee6e26f76b6cc23ec27d020eb13d6da1f2afafd6ecf2bc7e975c3b74ab6",
+    "sessionBWorkflowSetSha256": "078751379c2b3cb9addc46318901bb9af6ccdc56b56748d7d305c84a785ae18f",
     "sessionBWorkflowOwnershipPreserved": true,
     "sharedReferencedProductionFiles": [
       "backend/src/controllers/incidentController.ts",

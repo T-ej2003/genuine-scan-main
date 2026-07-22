@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "groupingRule": "One workflow per execution surface, canonical source file, and containing function; repeated table calls within that function remain one functional workflow.",
   "generatedEvidence": {
-    "productionAccessSites": 1006,
+    "productionAccessSites": 1087,
     "testPathsExcluded": [
       "backend/tests",
       "scripts/tests"
@@ -2050,6 +2050,16 @@
           "packageFile": "package.json",
           "name": "rls:integration-check",
           "command": "./scripts/local/rls-integration-check.sh"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "rls:named-function-inventory",
+          "command": "node scripts/rls/named-sql-function-inventory.mjs"
+        },
+        {
+          "packageFile": "package.json",
+          "name": "rls:named-function-recovery",
+          "command": "node scripts/rls/named-sql-function-recovery.mjs"
         },
         {
           "packageFile": "package.json",
@@ -4113,7 +4123,7 @@
       "supportingEvidence": [
         {
           "accessId": "access-72fe49e1e4298ae3",
-          "source": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:64",
+          "source": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:66",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_create_public_incident_report"
         }
@@ -4198,11 +4208,46 @@
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts"
       ],
       "tablesTouched": [
-        "table-incident-evidence"
+        "table-incident-evidence",
+        "table-incident",
+        "table-licensee",
+        "table-organization",
+        "table-refresh-token",
+        "table-user"
       ],
       "commandsPerTable": [
         {
           "tableId": "table-incident-evidence",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-incident",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-refresh-token",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-user",
           "commands": [
             "SELECT"
           ]
@@ -4228,7 +4273,12 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-d69a9861942dabfc"
+        "access-280e03cfafc7b844",
+        "access-3d71387d758ed521",
+        "access-820aeeb206369166",
+        "access-936871980e4f8fe8",
+        "access-d69a9861942dabfc",
+        "access-fd157bc8c9480aa0"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -4241,15 +4291,50 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
+          "accessId": "access-280e03cfafc7b844",
+          "source": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:152",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_incident_evidence_file_by_storage_key"
+        },
+        {
+          "accessId": "access-3d71387d758ed521",
+          "source": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:152",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_incident_evidence_file_by_storage_key"
+        },
+        {
+          "accessId": "access-820aeeb206369166",
+          "source": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:152",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_incident_evidence_file_by_storage_key"
+        },
+        {
+          "accessId": "access-936871980e4f8fe8",
+          "source": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:152",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_incident_evidence_file_by_storage_key"
+        },
+        {
           "accessId": "access-d69a9861942dabfc",
-          "source": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:149",
+          "source": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:152",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_incident_evidence_file_by_storage_key"
+        },
+        {
+          "accessId": "access-fd157bc8c9480aa0",
+          "source": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts:152",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_get_incident_evidence_file_by_storage_key"
         }
       ],
       "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
-        "command-incident-evidence-select-00b44dd2511d"
+        "command-incident-evidence-select-00b44dd2511d",
+        "command-incident-select-00b44dd2511d",
+        "command-licensee-select-00b44dd2511d",
+        "command-organization-select-00b44dd2511d",
+        "command-refresh-token-select-00b44dd2511d",
+        "command-user-select-00b44dd2511d"
       ],
       "commandActorClasses": [
         "licensee-admin",
@@ -18531,7 +18616,7 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-6bb1da162ac5a02f"
+        "access-967370480448402c"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -18544,8 +18629,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-6bb1da162ac5a02f",
-          "source": "backend/src/services/auth/authService.ts:149",
+          "accessId": "access-967370480448402c",
+          "source": "backend/src/services/auth/authService.ts:150",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         }
@@ -18602,7 +18687,7 @@
         "No direct table fallback; exact function grants and owner must be certified."
       ],
       "currentDirectPrismaUsage": [
-        "access-7cd3ed664c36769f"
+        "access-99ee79d9c8440777"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -18615,8 +18700,8 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-7cd3ed664c36769f",
-          "source": "backend/src/services/auth/authService.ts:606",
+          "accessId": "access-99ee79d9c8440777",
+          "source": "backend/src/services/auth/authService.ts:616",
           "registration": "reachable-from-registered-entrypoint",
           "method": "update"
         }
@@ -18641,6 +18726,443 @@
         "functionId": null,
         "status": "resolved"
       }
+    },
+    {
+      "id": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
+      "name": "Refresh Session",
+      "entryPoint": "internal:refreshSession",
+      "executionSurface": "internal",
+      "authenticationStage": "authenticated",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
+      ],
+      "tablesTouched": [
+        "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
+        "table-audit-log-outbox",
+        "table-auth-mfa-challenge",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-refresh-token",
+        "table-user-backup-code",
+        "table-user-mfa-factor",
+        "table-user"
+      ],
+      "commandsPerTable": [
+        {
+          "tableId": "table-admin-mfa-credential",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-admin-web-authn-credential",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "INSERT"
+          ]
+        },
+        {
+          "tableId": "table-auth-mfa-challenge",
+          "commands": [
+            "INSERT"
+          ]
+        },
+        {
+          "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-manufacturer-licensee-link",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-refresh-token",
+          "commands": [
+            "INSERT",
+            "SELECT",
+            "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-user-backup-code",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-user-mfa-factor",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-user",
+          "commands": [
+            "SELECT"
+          ]
+        }
+      ],
+      "tenantScopeRule": "unresolved; must be approved before implementation",
+      "contextRequirements": [
+        "transaction-local canonical actor context"
+      ],
+      "contextRequirementsSource": "generated-conservative",
+      "authorizationBoundaryType": "unresolved",
+      "expectedAllowedScenarios": [
+        "Every database command matches one referenced command rule, including its actor, identity, assurance, scope, columns, lifecycle, and special boundary."
+      ],
+      "expectedDeniedScenarios": [
+        "Any command without a matching rule, or with foreign scope, missing assurance, protected-column assignment, forbidden lifecycle state, or role elevation is denied."
+      ],
+      "preAuthSystemRequirements": [],
+      "currentDirectPrismaUsage": [
+        "access-1244ac1e49986088",
+        "access-249786dc3c0f858b",
+        "access-26aa094556b67904",
+        "access-2d29cdf68e7dece8",
+        "access-33739749fc3eb464",
+        "access-504719799ec5fd94",
+        "access-5a3354d197dddb57",
+        "access-5eb14b252b70a07e",
+        "access-69cf4eb82f433f0b",
+        "access-6e803829deb5fcfa",
+        "access-826b44802b4f12d9",
+        "access-892356cb232f94b7",
+        "access-93d5f9e7ca1a4f01",
+        "access-95ca1c60c6426dbe",
+        "access-98cc36e6c903290c",
+        "access-99330396997c89a1",
+        "access-9cc14b1c24901768",
+        "access-a42250165fceda81",
+        "access-a71dcd919476b27c",
+        "access-a723b0b7d5d62e02",
+        "access-b46e505426f47a64",
+        "access-b5433c669be73649",
+        "access-b7df7e1c7ee07ea8",
+        "access-b801879e66c7efa4",
+        "access-bc31c526643fe689",
+        "access-bf9bcf9b7993f9be",
+        "access-c28b17bdca3b0ef4",
+        "access-c6bcd162e5d40a27",
+        "access-c9cd2f684d8fbc82",
+        "access-cabb0707c3ea650e",
+        "access-cb787ded84a7260d",
+        "access-cfef4a4cb59811ec",
+        "access-db510799c17fb674",
+        "access-dd0768f7ed6e6783",
+        "access-e4ce4c5fd5e01383",
+        "access-ede0d9fcac48946b",
+        "access-ee1290332e183e8b",
+        "access-f122f26d0aa8215f",
+        "access-f1e6893933d12a97",
+        "access-f6fda27403ce87bf",
+        "access-ffb0c7618d6c80e5"
+      ],
+      "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
+      "implementationStatus": "inventory-only",
+      "requiredUnitTests": [
+        "Allowed and denied command contract for this canonical workflow."
+      ],
+      "requiredDisposablePostgresqlTests": [
+        "Exact role, context, command, cross-tenant denial, and empty-context denial."
+      ],
+      "unresolvedDecisions": [],
+      "supportingEvidence": [
+        {
+          "accessId": "access-1244ac1e49986088",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:567",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.complete_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-249786dc3c0f858b",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.load_refresh_session_state"
+        },
+        {
+          "accessId": "access-26aa094556b67904",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.load_refresh_session_state"
+        },
+        {
+          "accessId": "access-2d29cdf68e7dece8",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.load_refresh_session_state"
+        },
+        {
+          "accessId": "access-33739749fc3eb464",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:352",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.create_refresh_mfa_challenge"
+        },
+        {
+          "accessId": "access-504719799ec5fd94",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:567",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.complete_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-5a3354d197dddb57",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.load_refresh_session_state"
+        },
+        {
+          "accessId": "access-5eb14b252b70a07e",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:567",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.complete_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-69cf4eb82f433f0b",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:139",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.claim_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-6e803829deb5fcfa",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:567",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.complete_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-826b44802b4f12d9",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:139",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.claim_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-892356cb232f94b7",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:352",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.create_refresh_mfa_challenge"
+        },
+        {
+          "accessId": "access-93d5f9e7ca1a4f01",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:567",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.complete_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-95ca1c60c6426dbe",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:139",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.claim_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-98cc36e6c903290c",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.load_refresh_session_state"
+        },
+        {
+          "accessId": "access-99330396997c89a1",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:352",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.create_refresh_mfa_challenge"
+        },
+        {
+          "accessId": "access-9cc14b1c24901768",
+          "source": "backend/src/services/auth/authenticatedSessionCapabilityService.ts:38",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.issue_authenticated_session_capability"
+        },
+        {
+          "accessId": "access-a42250165fceda81",
+          "source": "backend/src/services/auth/authenticatedSessionCapabilityService.ts:69",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.revoke_all_authenticated_session_capabilities"
+        },
+        {
+          "accessId": "access-a71dcd919476b27c",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.load_refresh_session_state"
+        },
+        {
+          "accessId": "access-a723b0b7d5d62e02",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:534",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.revoke_refresh_token_scope"
+        },
+        {
+          "accessId": "access-b46e505426f47a64",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.load_refresh_session_state"
+        },
+        {
+          "accessId": "access-b5433c669be73649",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:534",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.revoke_refresh_token_scope"
+        },
+        {
+          "accessId": "access-b7df7e1c7ee07ea8",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:567",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.complete_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-b801879e66c7efa4",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.load_refresh_session_state"
+        },
+        {
+          "accessId": "access-bc31c526643fe689",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:139",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.claim_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-bf9bcf9b7993f9be",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:139",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.claim_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-c28b17bdca3b0ef4",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:534",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.revoke_refresh_token_scope"
+        },
+        {
+          "accessId": "access-c6bcd162e5d40a27",
+          "source": "backend/src/services/auth/authenticatedSessionCapabilityService.ts:69",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.revoke_all_authenticated_session_capabilities"
+        },
+        {
+          "accessId": "access-c9cd2f684d8fbc82",
+          "source": "backend/src/services/auth/authenticatedSessionCapabilityService.ts:69",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.revoke_all_authenticated_session_capabilities"
+        },
+        {
+          "accessId": "access-cabb0707c3ea650e",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.load_refresh_session_state"
+        },
+        {
+          "accessId": "access-cb787ded84a7260d",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:139",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.claim_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-cfef4a4cb59811ec",
+          "source": "backend/src/services/auth/authenticatedSessionCapabilityService.ts:54",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.revoke_authenticated_session_capability"
+        },
+        {
+          "accessId": "access-db510799c17fb674",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:139",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.claim_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-dd0768f7ed6e6783",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:534",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.revoke_refresh_token_scope"
+        },
+        {
+          "accessId": "access-e4ce4c5fd5e01383",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:269",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.load_refresh_session_state"
+        },
+        {
+          "accessId": "access-ede0d9fcac48946b",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:567",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.complete_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-ee1290332e183e8b",
+          "source": "backend/src/services/auth/authenticatedSessionCapabilityService.ts:54",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.revoke_authenticated_session_capability"
+        },
+        {
+          "accessId": "access-f122f26d0aa8215f",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:567",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.complete_refresh_token_rotation"
+        },
+        {
+          "accessId": "access-f1e6893933d12a97",
+          "source": "backend/src/services/auth/authenticatedSessionCapabilityService.ts:54",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.revoke_authenticated_session_capability"
+        },
+        {
+          "accessId": "access-f6fda27403ce87bf",
+          "source": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts:352",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.create_refresh_mfa_challenge"
+        },
+        {
+          "accessId": "access-ffb0c7618d6c80e5",
+          "source": "backend/src/services/auth/authenticatedSessionCapabilityService.ts:38",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.issue_authenticated_session_capability"
+        }
+      ],
+      "commandRuleIds": [
+        "command-admin-mfa-credential-select-65b85bc0759d",
+        "command-admin-web-authn-credential-select-65b85bc0759d",
+        "command-audit-log-outbox-insert-65b85bc0759d",
+        "command-auth-mfa-challenge-insert-65b85bc0759d",
+        "command-licensee-select-65b85bc0759d",
+        "command-manufacturer-licensee-link-select-65b85bc0759d",
+        "command-organization-select-65b85bc0759d",
+        "command-refresh-token-insert-65b85bc0759d",
+        "command-refresh-token-select-65b85bc0759d",
+        "command-refresh-token-update-65b85bc0759d",
+        "command-user-backup-code-select-65b85bc0759d",
+        "command-user-mfa-factor-select-65b85bc0759d",
+        "command-user-select-65b85bc0759d"
+      ],
+      "commandActorClasses": [
+        "authenticated-user"
+      ],
+      "requiredAssurance": [
+        "mfa-verified",
+        "password-verified"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "semanticStatus": "mapped"
     },
     {
       "id": "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-consume-legacy-backup-code",
@@ -25336,15 +25858,31 @@
         "platform-admin"
       ],
       "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
       "tablesTouched": [
-        "table-compliance-pack-job"
+        "table-compliance-pack-job",
+        "table-refresh-token",
+        "table-user"
       ],
       "commandsPerTable": [
         {
           "tableId": "table-compliance-pack-job",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-refresh-token",
+          "commands": [
+            "SELECT",
+            "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-user",
           "commands": [
             "SELECT"
           ]
@@ -25370,8 +25908,11 @@
       ],
       "preAuthSystemRequirements": [],
       "currentDirectPrismaUsage": [
-        "access-55e9b0e2872a2a5c",
-        "access-5f9ebb520298ef17"
+        "access-0e63fc39eac80ef7",
+        "access-1b8c4367f53c7c6e",
+        "access-409badc604c5c0a3",
+        "access-6e4746114fcd9283",
+        "access-6f2db0640e7841c8"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -25384,21 +25925,42 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-55e9b0e2872a2a5c",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:87",
+          "accessId": "access-0e63fc39eac80ef7",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:84",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.require_authenticated_session"
+        },
+        {
+          "accessId": "access-1b8c4367f53c7c6e",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:81",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-409badc604c5c0a3",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:102",
           "registration": "reachable-from-registered-entrypoint",
           "method": "count"
         },
         {
-          "accessId": "access-5f9ebb520298ef17",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:66",
+          "accessId": "access-6e4746114fcd9283",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:84",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "$function:app_auth.require_authenticated_session"
+        },
+        {
+          "accessId": "access-6f2db0640e7841c8",
+          "source": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts:84",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_auth.require_authenticated_session"
         }
       ],
       "contextRequirementsSource": "human-reviewed",
       "commandRuleIds": [
-        "command-compliance-pack-job-select-4ef0f20c1c1d"
+        "command-compliance-pack-job-select-4ef0f20c1c1d",
+        "command-refresh-token-select-4ef0f20c1c1d",
+        "command-refresh-token-update-4ef0f20c1c1d",
+        "command-user-select-4ef0f20c1c1d"
       ],
       "commandActorClasses": [
         "platform-admin"
@@ -27744,19 +28306,14 @@
       ],
       "semanticStatus": "mapped",
       "contextBoundaryPlanningEvidence": {
-        "reviewedAt": "2026-07-16",
+        "reviewedAt": "2026-07-21",
         "registeredRootCallChainVerified": true,
-        "protectedQueryTraceComplete": false,
-        "sameTransactionFeasible": false,
-        "focusedTestsDeterministic": true
+        "protectedQueryTraceComplete": true,
+        "sameTransactionFeasible": true,
+        "focusedTestsDeterministic": true,
+        "databaseConcurrencyVerified": true
       },
-      "contextBoundaryBlockers": [
-        {
-          "code": "incomplete-root-transaction",
-          "reason": "The helper is only one protected query inside HTTP and SSE snapshot roots that still use global Prisma.",
-          "remediation": "Move every protected snapshot query for each compatible root into one canonical transaction before implementing this leaf read."
-        }
-      ],
+      "contextBoundaryBlockers": [],
       "runtimeImplementedActorClasses": [
         "licensee-admin",
         "manufacturer",
@@ -42713,34 +43270,51 @@
         "backend/src/services/compliancePackService.ts"
       ],
       "tablesTouched": [
+        "table-action-idempotency-key",
         "table-audit-log",
+        "table-audit-log-outbox",
         "table-compliance-pack-job",
         "table-evidence-retention-policy",
         "table-incident",
         "table-incident-handoff",
         "table-licensee",
+        "table-organization",
+        "table-refresh-token",
         "table-user"
       ],
       "commandsPerTable": [
         {
-          "tableId": "table-audit-log",
+          "tableId": "table-action-idempotency-key",
           "commands": [
             "INSERT",
+            "SELECT",
+            "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-audit-log",
+          "commands": [
             "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "INSERT"
           ]
         },
         {
           "tableId": "table-compliance-pack-job",
           "commands": [
             "INSERT",
+            "SELECT",
             "UPDATE"
           ]
         },
         {
           "tableId": "table-evidence-retention-policy",
           "commands": [
-            "INSERT",
-            "UPDATE"
+            "SELECT"
           ]
         },
         {
@@ -42757,6 +43331,18 @@
         },
         {
           "tableId": "table-licensee",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-refresh-token",
           "commands": [
             "SELECT"
           ]
@@ -42784,20 +43370,52 @@
         "No superuser, ownership execution, or BYPASSRLS."
       ],
       "currentDirectPrismaUsage": [
-        "access-0b28262f14200ee2",
+        "access-0b7feebd62d0fd16",
+        "access-0b8f2f998650cff9",
+        "access-0e304f16792bab31",
         "access-11030ef877e4441d",
-        "access-2f86114d1b4753ef",
+        "access-16b100fb4c7d0e79",
+        "access-17bc4d302cfd9fdf",
+        "access-1dc1a61d8cc2a5b5",
+        "access-22327b48ebb181bc",
+        "access-256d25860805431b",
+        "access-2b3722be54aca36b",
+        "access-30b55b0375fa1e0b",
+        "access-37743f6b9cb6d6c6",
         "access-396291e7927bf374",
-        "access-4366937452b33c64",
+        "access-3e8d5416546809f5",
+        "access-400c462e893c60de",
+        "access-422905fe7460e7d3",
+        "access-436d7c879698dab3",
+        "access-4e50b5601a7a7f6e",
+        "access-4e610e1fd476e916",
+        "access-52b35c096951f952",
+        "access-540f4d9e9f78a361",
+        "access-57e315a0ad72818f",
+        "access-5a0a0633cc084c36",
         "access-5d3c79304a353255",
+        "access-5e699c422aee5777",
         "access-6520016b870bdb5c",
-        "access-7ca017aa0b4eb96f",
-        "access-7ceece6d7b5c2983",
+        "access-6ac9d984809a73c4",
+        "access-78c8101a801a47da",
+        "access-7e894392c17e64b8",
         "access-8d7e7c6d1f9526e2",
+        "access-8edff37e7973681c",
+        "access-a070cc13c24d32b6",
+        "access-a227218be02802be",
+        "access-a2d5e49ac02c063e",
+        "access-a46e57c8b2d47226",
         "access-a7ea3a1e09896496",
+        "access-b118cf64e20b70eb",
+        "access-c14354c95fde525c",
+        "access-c52a91843258afac",
         "access-c6a52be655643a59",
-        "access-c852b047ed8c8c11",
-        "access-d63a2b99b62897c3"
+        "access-cca0b7f6879e2467",
+        "access-d63a2b99b62897c3",
+        "access-d94b61d55c303160",
+        "access-e2a74b529a84557e",
+        "access-f37af781e042dc5e",
+        "access-fbf35239446bd4f5"
       ],
       "currentCompatibilityStatus": "blocked-until-context-and-policy-proof",
       "implementationStatus": "inventory-only",
@@ -42810,101 +43428,298 @@
       "unresolvedDecisions": [],
       "supportingEvidence": [
         {
-          "accessId": "access-0b28262f14200ee2",
-          "source": "backend/src/services/compliancePackService.ts:424",
+          "accessId": "access-0b7feebd62d0fd16",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_start_compliance_pack_job"
+        },
+        {
+          "accessId": "access-0b8f2f998650cff9",
+          "source": "backend/src/services/compliancePackService.ts:418",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findFirst"
         },
         {
+          "accessId": "access-0e304f16792bab31",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_start_compliance_pack_job"
+        },
+        {
           "accessId": "access-11030ef877e4441d",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:26",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_start_compliance_pack_job"
         },
         {
-          "accessId": "access-2f86114d1b4753ef",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:26",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "$function:app_rls.c03_start_compliance_pack_job"
-        },
-        {
-          "accessId": "access-396291e7927bf374",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:54",
+          "accessId": "access-16b100fb4c7d0e79",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:66",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_fail_compliance_pack_job"
         },
         {
-          "accessId": "access-4366937452b33c64",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:26",
+          "accessId": "access-17bc4d302cfd9fdf",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:128",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_rebuild"
+        },
+        {
+          "accessId": "access-1dc1a61d8cc2a5b5",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_start_compliance_pack_job"
+        },
+        {
+          "accessId": "access-22327b48ebb181bc",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:128",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_rebuild"
+        },
+        {
+          "accessId": "access-256d25860805431b",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:50",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_job"
+        },
+        {
+          "accessId": "access-2b3722be54aca36b",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:66",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_fail_compliance_pack_job"
+        },
+        {
+          "accessId": "access-30b55b0375fa1e0b",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:50",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_job"
+        },
+        {
+          "accessId": "access-37743f6b9cb6d6c6",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:50",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_job"
+        },
+        {
+          "accessId": "access-396291e7927bf374",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:66",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_fail_compliance_pack_job"
+        },
+        {
+          "accessId": "access-3e8d5416546809f5",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_start_compliance_pack_job"
+        },
+        {
+          "accessId": "access-400c462e893c60de",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_start_compliance_pack_job"
+        },
+        {
+          "accessId": "access-422905fe7460e7d3",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:50",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_job"
+        },
+        {
+          "accessId": "access-436d7c879698dab3",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:128",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_rebuild"
+        },
+        {
+          "accessId": "access-4e50b5601a7a7f6e",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:113",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_compliance_pack_job"
+        },
+        {
+          "accessId": "access-4e610e1fd476e916",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:128",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_rebuild"
+        },
+        {
+          "accessId": "access-52b35c096951f952",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:66",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_fail_compliance_pack_job"
+        },
+        {
+          "accessId": "access-540f4d9e9f78a361",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:113",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_compliance_pack_job"
+        },
+        {
+          "accessId": "access-57e315a0ad72818f",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:113",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_compliance_pack_job"
+        },
+        {
+          "accessId": "access-5a0a0633cc084c36",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:50",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_job"
         },
         {
           "accessId": "access-5d3c79304a353255",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:26",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_start_compliance_pack_job"
+        },
+        {
+          "accessId": "access-5e699c422aee5777",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:113",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_compliance_pack_job"
         },
         {
           "accessId": "access-6520016b870bdb5c",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:26",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_start_compliance_pack_job"
         },
         {
-          "accessId": "access-7ca017aa0b4eb96f",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:26",
+          "accessId": "access-6ac9d984809a73c4",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:113",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "$function:app_rls.c03_start_compliance_pack_job"
+          "method": "$function:app_rls.c03_get_compliance_pack_job"
         },
         {
-          "accessId": "access-7ceece6d7b5c2983",
-          "source": "backend/src/services/compliancePackService.ts:433",
+          "accessId": "access-78c8101a801a47da",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:128",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
+          "method": "$function:app_rls.c03_complete_compliance_pack_rebuild"
+        },
+        {
+          "accessId": "access-7e894392c17e64b8",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_start_compliance_pack_job"
         },
         {
           "accessId": "access-8d7e7c6d1f9526e2",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:26",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_start_compliance_pack_job"
+        },
+        {
+          "accessId": "access-8edff37e7973681c",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:113",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_compliance_pack_job"
+        },
+        {
+          "accessId": "access-a070cc13c24d32b6",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:50",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_job"
+        },
+        {
+          "accessId": "access-a227218be02802be",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:113",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_compliance_pack_job"
+        },
+        {
+          "accessId": "access-a2d5e49ac02c063e",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:113",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_compliance_pack_job"
+        },
+        {
+          "accessId": "access-a46e57c8b2d47226",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_start_compliance_pack_job"
         },
         {
           "accessId": "access-a7ea3a1e09896496",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:26",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_start_compliance_pack_job"
+        },
+        {
+          "accessId": "access-b118cf64e20b70eb",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:128",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_rebuild"
+        },
+        {
+          "accessId": "access-c14354c95fde525c",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:66",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_fail_compliance_pack_job"
+        },
+        {
+          "accessId": "access-c52a91843258afac",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:66",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_fail_compliance_pack_job"
         },
         {
           "accessId": "access-c6a52be655643a59",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:26",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_start_compliance_pack_job"
         },
         {
-          "accessId": "access-c852b047ed8c8c11",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:26",
+          "accessId": "access-cca0b7f6879e2467",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:29",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_start_compliance_pack_job"
         },
         {
           "accessId": "access-d63a2b99b62897c3",
-          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:42",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:50",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.c03_complete_compliance_pack_job"
+        },
+        {
+          "accessId": "access-d94b61d55c303160",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:113",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_get_compliance_pack_job"
+        },
+        {
+          "accessId": "access-e2a74b529a84557e",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:66",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_fail_compliance_pack_job"
+        },
+        {
+          "accessId": "access-f37af781e042dc5e",
+          "source": "backend/src/services/compliancePackService.ts:427",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
+        },
+        {
+          "accessId": "access-fbf35239446bd4f5",
+          "source": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts:128",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "$function:app_rls.c03_complete_compliance_pack_rebuild"
         }
       ],
       "contextRequirementsSource": "generated-conservative",
       "commandRuleIds": [
-        "command-audit-log-insert-56e28c0be62e",
+        "command-action-idempotency-key-insert-56e28c0be62e",
+        "command-action-idempotency-key-select-56e28c0be62e",
+        "command-action-idempotency-key-update-56e28c0be62e",
+        "command-audit-log-outbox-insert-56e28c0be62e",
         "command-audit-log-select-56e28c0be62e",
         "command-compliance-pack-job-insert-56e28c0be62e",
+        "command-compliance-pack-job-select-56e28c0be62e",
         "command-compliance-pack-job-update-56e28c0be62e",
-        "command-evidence-retention-policy-insert-56e28c0be62e",
-        "command-evidence-retention-policy-update-56e28c0be62e",
+        "command-evidence-retention-policy-select-56e28c0be62e",
         "command-incident-handoff-select-56e28c0be62e",
         "command-incident-select-56e28c0be62e",
         "command-licensee-select-56e28c0be62e",
+        "command-organization-select-56e28c0be62e",
+        "command-refresh-token-select-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ],
       "commandActorClasses": [

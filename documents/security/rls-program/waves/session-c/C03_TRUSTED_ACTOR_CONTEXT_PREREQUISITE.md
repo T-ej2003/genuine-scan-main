@@ -2,16 +2,46 @@
 
 ## Status
 
-Blocked before production SQL implementation. This is a security-architecture
-blocker, not a missing SQL search result. The six C03 repository functions and
-the existing resource-scope helper cannot safely use the current clean-room
-actor context as their database authorization input.
+Resolved locally by the database-verifiable authenticated-session capability in
+commit `4add7de` and the capability-bearing C03 boundaries in
+`backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql`.
 
-No generated package, migration, historical production definition, PostgreSQL
-JWT verifier, signed-context verifier, or durable authenticated-session
-authority was found. The recovery report independently classifies the six
-functions as `no definition found`; it classifies the only reusable authenticated
-actor function, `app_rls.revalidate_authenticated_actor`, as fixture-only.
+The original threat analysis below is retained because it explains why the
+legacy GUC installer remains unavailable to the runtime role. The production
+path now presents the server-held `aq_db_session` capability to
+`app_auth.require_authenticated_session`; PostgreSQL derives the live user and
+scope before any C03 protected-table access. Caller-set `app.*` values are not
+authority.
+
+## Implemented contract
+
+- HTTP callers use `withC03ActorTransaction`, `withC03ResourceTransaction`, or
+  `withC03PlatformTransaction`; each requires the raw server-side capability.
+- The six public C03 repository operations reverify that capability in their
+  exact SQL boundary. `c03_revalidate_compliance_pack_job_actor_scope` is the
+  capability-derived resource revalidation boundary.
+- Internal C03 helpers are owned by the dedicated NOLOGIN auth function owner,
+  receive no runtime EXECUTE grant, and install only transaction-local values
+  derived from the verified session.
+- Exact owner column privileges, operation policies, PUBLIC revocations,
+  runtime EXECUTE grants, rollback definitions, catalog assertions and
+  checksums are generated from `named-sql-function-contracts.mjs`.
+- `c03AuthenticatedBoundariesPostgres18.test.js` and the C03 clean-room family
+  certify forged-GUC denial, direct-table denial, lifecycle concurrency,
+  rollback and function-owner invariants on PostgreSQL 18.
+
+The scheduled job path remains deliberately fail closed until the separately
+reviewed `identity-scheduled-job` durable claim boundary is implemented. It
+does not reuse or impersonate an end-user capability.
+
+## Historical prerequisite analysis
+
+Before commit `4add7de`, no generated package, migration, historical production
+definition, PostgreSQL JWT verifier, signed-context verifier, or durable
+authenticated-session authority was available. The recovery report classified
+the six functions as `no definition found`; it classified the only reusable
+authenticated actor function, `app_rls.revalidate_authenticated_actor`, as
+fixture-only.
 
 ## Evidence matrix
 
@@ -81,11 +111,10 @@ caller-controlled values.
    production schema authority; no extension, key lifecycle, or deployment
    contract exists in the repository.
 
-## Minimum decision required
+## Decision that resolved the prerequisite
 
-Approve one database-verifiable authenticated-actor proof for the shared
-authenticated runtime before C03 (and the other authenticated named-function
-families) can be implemented. The selected design must specify:
+The selected proof is the durable opaque database session capability delivered
+in the encrypted HttpOnly `aq_db_session` cookie. Its implementation supplies:
 
 1. how a verified access session is represented to PostgreSQL without trusting
    caller-set GUCs;
@@ -96,18 +125,13 @@ families) can be implemented. The selected design must specify:
 5. PostgreSQL 18 probes proving arbitrary app GUCs and forged identifiers do
    not authorize rows.
 
-Two viable design families require an explicit approval because neither exists
-today: a database-verified signed access proof with DB-managed verification-key
-rotation, or a durable opaque authenticated-session capability whose secret
-hash is stored and atomically revalidated by a dedicated NOLOGIN function
-owner. Either changes the access-token/session contract and secure deployment
-configuration. It must be chosen once for all authenticated RLS waves rather
-than invented ad hoc for C03.
+PostgreSQL JWT verification was rejected. Only the SHA-256 hash of the opaque
+capability is durable; the raw value remains in the trusted application/cookie
+boundary and is never written to reports, audit payloads or database rows.
 
 ## Consequence
 
-No C03 SQL, owner grant, FORCE-RLS policy, or contract has been added from this
-document. Doing so would create the forbidden caller-GUC authorization path.
-The completed B01 refresh functions remain valid because their first protected
-read is bound to a presented refresh bearer-token hash inside the function;
-that pre-auth proof is not available to authenticated C03 requests.
+C03 SQL, owner grants, FORCE-RLS policies and exact contracts are now generated
+from the reviewed source described above. The legacy generic installer remains
+present only as a denied catalog object for older unmigrated families; C03 code
+does not call it and the application role cannot execute it.

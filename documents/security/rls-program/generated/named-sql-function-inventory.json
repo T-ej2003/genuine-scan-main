@@ -252,52 +252,10 @@
       "line": 59
     },
     {
-      "functionName": "app_rls.c03_revalidate_platform_actor_scope",
+      "functionName": "app_auth.require_authenticated_session",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-      "sourceFunction": "revalidatePlatformActor",
-      "line": 130
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_actor_scope",
-      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-      "sourceFunction": "revalidateActorAndScope",
-      "line": 168
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_incident_actor_scope",
-      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-      "sourceFunction": "revalidateResourceActorAndScope",
-      "line": 207
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_policy_rule_actor_scope",
-      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-      "sourceFunction": "revalidateResourceActorAndScope",
-      "line": 216
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
-      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-      "sourceFunction": "revalidateResourceActorAndScope",
-      "line": 225
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_incident_evidence_actor_scope",
-      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-      "sourceFunction": "revalidateResourceActorAndScope",
-      "line": 234
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_incident_evidence_storage_actor_scope",
-      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-      "sourceFunction": "revalidateResourceActorAndScope",
-      "line": 243
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_sensitive_approval_actor_scope",
-      "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-      "sourceFunction": "revalidateResourceActorAndScope",
-      "line": 252
+      "sourceFunction": "verifyCapability",
+      "line": 84
     },
     {
       "functionName": "app_rls.c03_create_sensitive_action_approval",
@@ -324,34 +282,34 @@
       "line": 71
     },
     {
+      "functionName": "app_rls.c03_get_compliance_pack_job",
+      "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+      "sourceFunction": "loadCompliancePackJobInTransaction",
+      "line": 113
+    },
+    {
       "functionName": "app_rls.c03_complete_compliance_pack_rebuild",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
       "sourceFunction": "completeCompliancePackRebuildInTransaction",
-      "line": 106
+      "line": 128
     },
     {
       "functionName": "app_rls.c03_start_compliance_pack_job",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
       "sourceFunction": "startCompliancePackJobInTransaction",
-      "line": 26
+      "line": 29
     },
     {
       "functionName": "app_rls.c03_complete_compliance_pack_job",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
       "sourceFunction": "completeCompliancePackJobInTransaction",
-      "line": 42
+      "line": 50
     },
     {
       "functionName": "app_rls.c03_fail_compliance_pack_job",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
       "sourceFunction": "failCompliancePackJobInTransaction",
-      "line": 54
-    },
-    {
-      "functionName": "app_rls.c03_get_compliance_pack_job",
-      "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
-      "sourceFunction": "loadCompliancePackJobInTransaction",
-      "line": 94
+      "line": 66
     },
     {
       "functionName": "app_rls.c03_generate_compliance_report",
@@ -393,85 +351,85 @@
       "functionName": "app_rls.c03_list_incidents",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "listIncidentsInTransaction",
-      "line": 105
+      "line": 107
     },
     {
       "functionName": "app_rls.c03_patch_incident",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "patchIncidentInTransaction",
-      "line": 121
+      "line": 123
     },
     {
       "functionName": "app_rls.c03_add_incident_evidence",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "addIncidentEvidenceInTransaction",
-      "line": 134
+      "line": 136
     },
     {
       "functionName": "app_rls.c03_get_incident_evidence_file_by_storage_key",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "loadIncidentEvidenceFileInTransaction",
-      "line": 149
+      "line": 152
     },
     {
       "functionName": "app_rls.c03_create_ir_incident",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "createIrIncidentInTransaction",
-      "line": 161
+      "line": 166
     },
     {
       "functionName": "app_rls.c03_get_ir_incident_detail",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "getIrIncidentDetailInTransaction",
-      "line": 176
+      "line": 181
     },
     {
       "functionName": "app_rls.c03_review_incident_customer_trust",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "reviewIncidentCustomerTrustInTransaction",
-      "line": 191
+      "line": 196
     },
     {
       "functionName": "app_rls.c03_prepare_incident_communication",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "prepareIncidentCommunicationInTransaction",
-      "line": 207
+      "line": 212
     },
     {
       "functionName": "app_rls.c03_record_incident_communication_delivery",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "recordIncidentCommunicationDeliveryInTransaction",
-      "line": 224
+      "line": 229
     },
     {
       "functionName": "app_rls.c03_compute_incident_spam_signal",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "computeIncidentSpamSignalInTransaction",
-      "line": 24
+      "line": 26
     },
     {
       "functionName": "app_rls.c03_compute_incident_severity",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "computeIncidentSeverityInTransaction",
-      "line": 41
+      "line": 43
     },
     {
       "functionName": "app_rls.c03_create_public_incident_report",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "createPublicIncidentReportInTransaction",
-      "line": 64
+      "line": 66
     },
     {
       "functionName": "app_rls.c03_record_incident_event",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "recordIncidentEventInTransaction",
-      "line": 82
+      "line": 84
     },
     {
       "functionName": "app_rls.c03_get_incident_detail",
       "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
       "sourceFunction": "getIncidentDetailInTransaction",
-      "line": 94
+      "line": 96
     },
     {
       "functionName": "app_rls.c03_list_ir_alerts",
@@ -959,7 +917,7 @@
       ],
       "requiredContext": "Issues a capability only for the locked active refresh-session row after the caller presents its exact bearer-derived refresh hash; user and assurance are derived from that row.",
       "canonicalWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-create-authenticated-session-capability"
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
       ],
       "callers": [
         {
@@ -1199,6 +1157,64 @@
       ]
     },
     {
+      "functionName": "app_auth.require_authenticated_session",
+      "schema": "app_auth",
+      "name": "require_authenticated_session",
+      "signature": "text,text,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
+        "deploymentPhase": "session-b-b01"
+      },
+      "tableCommands": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "RefreshToken",
+          "UPDATE"
+        ],
+        [
+          "User",
+          "SELECT"
+        ]
+      ],
+      "requiredContext": "Hashes the opaque capability in PostgreSQL, derives live user authority from the linked active session, and overwrites transaction-local authenticated context before protected access.",
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.require_authenticated_session",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "verifyCapability",
+          "line": 84
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_auth.require_authenticated_session",
+          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+          "sourceFunction": "verifyCapability",
+          "line": 84,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
       "functionName": "app_auth.revoke_all_authenticated_session_capabilities",
       "schema": "app_auth",
       "name": "revoke_all_authenticated_session_capabilities",
@@ -1235,7 +1251,7 @@
       ],
       "requiredContext": "Verifies the opaque capability before deriving the only user whose active capabilities may be revoked.",
       "canonicalWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-sessions-for-user"
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
       ],
       "callers": [
         {
@@ -1293,7 +1309,7 @@
       ],
       "requiredContext": "Verifies the opaque capability before deriving its user and revoking only a capability row bound to that verified user.",
       "canonicalWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-session-by-refresh-token"
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
       ],
       "callers": [
         {
@@ -1720,7 +1736,7 @@
           "functionName": "app_rls.c03_add_incident_evidence",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "addIncidentEvidenceInTransaction",
-          "line": 134
+          "line": 136
         }
       ],
       "activeCallers": [
@@ -1728,7 +1744,7 @@
           "functionName": "app_rls.c03_add_incident_evidence",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "addIncidentEvidenceInTransaction",
-          "line": 134,
+          "line": 136,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -1831,13 +1847,323 @@
       "functionName": "app_rls.c03_complete_compliance_pack_job",
       "schema": "app_rls",
       "name": "c03_complete_compliance_pack_job",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text,text,text,text,jsonb",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "deploymentPhase": "session-c-c03",
+        "ownerPrivileges": [
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "expiresAt",
+              "revokedAt",
+              "sessionCapabilityHash",
+              "sessionCapabilityHashVersion",
+              "sessionCapabilityExpiresAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "startedByUserId",
+              "startedAt",
+              "finishedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "startedByUserId",
+              "startedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            [
+              "status",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "finishedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "statusCode",
+              "responsePayload",
+              "createdAt",
+              "completedAt",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            [
+              "statusCode",
+              "responsePayload",
+              "completedAt"
+            ]
+          ],
+          [
+            "Incident",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "slaDueAt",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            [
+              "id",
+              "incidentId",
+              "fileUrl",
+              "storageKey",
+              "fileType",
+              "uploadedByUserId",
+              "uploadedBy",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            [
+              "incidentId",
+              "currentStage"
+            ]
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            [
+              "licenseeId",
+              "action",
+              "createdAt"
+            ]
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            [
+              "licenseeId",
+              "retentionDays"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_licensee_id',true) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.c03_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (id=current_setting('app.c03_actor_licensee_id',true) AND \"orgId\"=current_setting('app.c03_actor_organization_id',true))))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND id IN (current_setting('app.c03_actor_organization_id',true),(SELECT l.\"orgId\" FROM public.\"Licensee\" l WHERE l.id=current_setting('app.c03_licensee_id',true)))"
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_job_id',true) OR \"licenseeId\"=current_setting('app.c03_licensee_id',true)) AND (current_setting('app.c03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='compliance-pack-start' AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND \"startedByUserId\"=current_setting('app.c03_user_id',true)"
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND current_setting('app.c03_operation',true) IN ('compliance-pack-complete','compliance-pack-fail','compliance-pack-rebuild')"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='incident-evidence-read' AND \"storageKey\"=current_setting('app.c03_storage_key',true)"
+          ],
+          [
+            "Incident",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (\"licenseeId\"=current_setting('app.c03_licensee_id',true) OR (current_setting('app.c03_licensee_id',true)='' AND id=current_setting('app.c03_incident_id',true)))"
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" i WHERE i.id=\"incidentId\" AND i.\"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND payload->>'userId'=current_setting('app.c03_user_id',true) AND payload->>'licenseeId'=current_setting('app.c03_licensee_id',true)"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "UPDATE"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Locks the capability-visible job and permits only RUNNING to COMPLETED with a validated immutable artifact result.",
       "canonicalWorkflowIds": [
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
@@ -1846,7 +2172,7 @@
           "functionName": "app_rls.c03_complete_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
           "sourceFunction": "completeCompliancePackJobInTransaction",
-          "line": 42
+          "line": 50
         }
       ],
       "activeCallers": [
@@ -1854,7 +2180,7 @@
           "functionName": "app_rls.c03_complete_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
           "sourceFunction": "completeCompliancePackJobInTransaction",
-          "line": 42,
+          "line": 50,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -1864,20 +2190,332 @@
       "functionName": "app_rls.c03_complete_compliance_pack_rebuild",
       "schema": "app_rls",
       "name": "c03_complete_compliance_pack_rebuild",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
+      "signature": "text,text,text,text,jsonb",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "deploymentPhase": "session-c-c03",
+        "ownerPrivileges": [
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "expiresAt",
+              "revokedAt",
+              "sessionCapabilityHash",
+              "sessionCapabilityHashVersion",
+              "sessionCapabilityExpiresAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "startedByUserId",
+              "startedAt",
+              "finishedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "startedByUserId",
+              "startedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            [
+              "status",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "finishedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "statusCode",
+              "responsePayload",
+              "createdAt",
+              "completedAt",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            [
+              "statusCode",
+              "responsePayload",
+              "completedAt"
+            ]
+          ],
+          [
+            "Incident",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "slaDueAt",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            [
+              "id",
+              "incidentId",
+              "fileUrl",
+              "storageKey",
+              "fileType",
+              "uploadedByUserId",
+              "uploadedBy",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            [
+              "incidentId",
+              "currentStage"
+            ]
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            [
+              "licenseeId",
+              "action",
+              "createdAt"
+            ]
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            [
+              "licenseeId",
+              "retentionDays"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_licensee_id',true) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.c03_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (id=current_setting('app.c03_actor_licensee_id',true) AND \"orgId\"=current_setting('app.c03_actor_organization_id',true))))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND id IN (current_setting('app.c03_actor_organization_id',true),(SELECT l.\"orgId\" FROM public.\"Licensee\" l WHERE l.id=current_setting('app.c03_licensee_id',true)))"
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_job_id',true) OR \"licenseeId\"=current_setting('app.c03_licensee_id',true)) AND (current_setting('app.c03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='compliance-pack-start' AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND \"startedByUserId\"=current_setting('app.c03_user_id',true)"
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND current_setting('app.c03_operation',true) IN ('compliance-pack-complete','compliance-pack-fail','compliance-pack-rebuild')"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='incident-evidence-read' AND \"storageKey\"=current_setting('app.c03_storage_key',true)"
+          ],
+          [
+            "Incident",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (\"licenseeId\"=current_setting('app.c03_licensee_id',true) OR (current_setting('app.c03_licensee_id',true)='' AND id=current_setting('app.c03_incident_id',true)))"
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" i WHERE i.id=\"incidentId\" AND i.\"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND payload->>'userId'=current_setting('app.c03_user_id',true) AND payload->>'licenseeId'=current_setting('app.c03_licensee_id',true)"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "UPDATE"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Locks a capability-visible COMPLETED job and atomically replaces only validated artifact metadata.",
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
       "callers": [
         {
           "functionName": "app_rls.c03_complete_compliance_pack_rebuild",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
           "sourceFunction": "completeCompliancePackRebuildInTransaction",
-          "line": 106
+          "line": 128
         }
       ],
       "activeCallers": [
@@ -1885,7 +2523,7 @@
           "functionName": "app_rls.c03_complete_compliance_pack_rebuild",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
           "sourceFunction": "completeCompliancePackRebuildInTransaction",
-          "line": 106,
+          "line": 128,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -1908,7 +2546,7 @@
           "functionName": "app_rls.c03_compute_incident_severity",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "computeIncidentSeverityInTransaction",
-          "line": 41
+          "line": 43
         }
       ],
       "activeCallers": [
@@ -1916,7 +2554,7 @@
           "functionName": "app_rls.c03_compute_incident_severity",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "computeIncidentSeverityInTransaction",
-          "line": 41,
+          "line": 43,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -1939,7 +2577,7 @@
           "functionName": "app_rls.c03_compute_incident_spam_signal",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "computeIncidentSpamSignalInTransaction",
-          "line": 24
+          "line": 26
         }
       ],
       "activeCallers": [
@@ -1947,7 +2585,7 @@
           "functionName": "app_rls.c03_compute_incident_spam_signal",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "computeIncidentSpamSignalInTransaction",
-          "line": 24,
+          "line": 26,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -1970,7 +2608,7 @@
           "functionName": "app_rls.c03_create_ir_incident",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "createIrIncidentInTransaction",
-          "line": 161
+          "line": 166
         }
       ],
       "activeCallers": [
@@ -1978,7 +2616,7 @@
           "functionName": "app_rls.c03_create_ir_incident",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "createIrIncidentInTransaction",
-          "line": 161,
+          "line": 166,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2034,7 +2672,7 @@
           "functionName": "app_rls.c03_create_public_incident_report",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "createPublicIncidentReportInTransaction",
-          "line": 64
+          "line": 66
         }
       ],
       "activeCallers": [
@@ -2042,7 +2680,7 @@
           "functionName": "app_rls.c03_create_public_incident_report",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "createPublicIncidentReportInTransaction",
-          "line": 64,
+          "line": 66,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2083,13 +2721,323 @@
       "functionName": "app_rls.c03_fail_compliance_pack_job",
       "schema": "app_rls",
       "name": "c03_fail_compliance_pack_job",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text,text,text,text,text",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "deploymentPhase": "session-c-c03",
+        "ownerPrivileges": [
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "expiresAt",
+              "revokedAt",
+              "sessionCapabilityHash",
+              "sessionCapabilityHashVersion",
+              "sessionCapabilityExpiresAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "startedByUserId",
+              "startedAt",
+              "finishedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "startedByUserId",
+              "startedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            [
+              "status",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "finishedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "statusCode",
+              "responsePayload",
+              "createdAt",
+              "completedAt",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            [
+              "statusCode",
+              "responsePayload",
+              "completedAt"
+            ]
+          ],
+          [
+            "Incident",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "slaDueAt",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            [
+              "id",
+              "incidentId",
+              "fileUrl",
+              "storageKey",
+              "fileType",
+              "uploadedByUserId",
+              "uploadedBy",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            [
+              "incidentId",
+              "currentStage"
+            ]
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            [
+              "licenseeId",
+              "action",
+              "createdAt"
+            ]
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            [
+              "licenseeId",
+              "retentionDays"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_licensee_id',true) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.c03_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (id=current_setting('app.c03_actor_licensee_id',true) AND \"orgId\"=current_setting('app.c03_actor_organization_id',true))))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND id IN (current_setting('app.c03_actor_organization_id',true),(SELECT l.\"orgId\" FROM public.\"Licensee\" l WHERE l.id=current_setting('app.c03_licensee_id',true)))"
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_job_id',true) OR \"licenseeId\"=current_setting('app.c03_licensee_id',true)) AND (current_setting('app.c03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='compliance-pack-start' AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND \"startedByUserId\"=current_setting('app.c03_user_id',true)"
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND current_setting('app.c03_operation',true) IN ('compliance-pack-complete','compliance-pack-fail','compliance-pack-rebuild')"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='incident-evidence-read' AND \"storageKey\"=current_setting('app.c03_storage_key',true)"
+          ],
+          [
+            "Incident",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (\"licenseeId\"=current_setting('app.c03_licensee_id',true) OR (current_setting('app.c03_licensee_id',true)='' AND id=current_setting('app.c03_incident_id',true)))"
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" i WHERE i.id=\"incidentId\" AND i.\"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND payload->>'userId'=current_setting('app.c03_user_id',true) AND payload->>'licenseeId'=current_setting('app.c03_licensee_id',true)"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "UPDATE"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Locks the capability-visible job and permits only RUNNING to FAILED with a bounded error code.",
       "canonicalWorkflowIds": [
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
@@ -2098,7 +3046,7 @@
           "functionName": "app_rls.c03_fail_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
           "sourceFunction": "failCompliancePackJobInTransaction",
-          "line": 54
+          "line": 66
         }
       ],
       "activeCallers": [
@@ -2106,7 +3054,7 @@
           "functionName": "app_rls.c03_fail_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
           "sourceFunction": "failCompliancePackJobInTransaction",
-          "line": 54,
+          "line": 66,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2147,20 +3095,340 @@
       "functionName": "app_rls.c03_get_compliance_pack_job",
       "schema": "app_rls",
       "name": "c03_get_compliance_pack_job",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
+      "signature": "text,text,text,text",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "deploymentPhase": "session-c-c03",
+        "ownerPrivileges": [
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "expiresAt",
+              "revokedAt",
+              "sessionCapabilityHash",
+              "sessionCapabilityHashVersion",
+              "sessionCapabilityExpiresAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "startedByUserId",
+              "startedAt",
+              "finishedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "startedByUserId",
+              "startedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            [
+              "status",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "finishedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "statusCode",
+              "responsePayload",
+              "createdAt",
+              "completedAt",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            [
+              "statusCode",
+              "responsePayload",
+              "completedAt"
+            ]
+          ],
+          [
+            "Incident",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "slaDueAt",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            [
+              "id",
+              "incidentId",
+              "fileUrl",
+              "storageKey",
+              "fileType",
+              "uploadedByUserId",
+              "uploadedBy",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            [
+              "incidentId",
+              "currentStage"
+            ]
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            [
+              "licenseeId",
+              "action",
+              "createdAt"
+            ]
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            [
+              "licenseeId",
+              "retentionDays"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_licensee_id',true) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.c03_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (id=current_setting('app.c03_actor_licensee_id',true) AND \"orgId\"=current_setting('app.c03_actor_organization_id',true))))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND id IN (current_setting('app.c03_actor_organization_id',true),(SELECT l.\"orgId\" FROM public.\"Licensee\" l WHERE l.id=current_setting('app.c03_licensee_id',true)))"
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_job_id',true) OR \"licenseeId\"=current_setting('app.c03_licensee_id',true)) AND (current_setting('app.c03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='compliance-pack-start' AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND \"startedByUserId\"=current_setting('app.c03_user_id',true)"
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND current_setting('app.c03_operation',true) IN ('compliance-pack-complete','compliance-pack-fail','compliance-pack-rebuild')"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='incident-evidence-read' AND \"storageKey\"=current_setting('app.c03_storage_key',true)"
+          ],
+          [
+            "Incident",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (\"licenseeId\"=current_setting('app.c03_licensee_id',true) OR (current_setting('app.c03_licensee_id',true)='' AND id=current_setting('app.c03_incident_id',true)))"
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" i WHERE i.id=\"incidentId\" AND i.\"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND payload->>'userId'=current_setting('app.c03_user_id',true) AND payload->>'licenseeId'=current_setting('app.c03_licensee_id',true)"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "SELECT"
+        ],
+        [
+          "Incident",
+          "SELECT"
+        ],
+        [
+          "IncidentHandoff",
+          "SELECT"
+        ],
+        [
+          "AuditLog",
+          "SELECT"
+        ],
+        [
+          "EvidenceRetentionPolicy",
+          "SELECT"
+        ]
+      ],
+      "requiredContext": "Capability-derived MFA actor and live scope authorize one job selector and its regenerated report.",
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
       "callers": [
         {
           "functionName": "app_rls.c03_get_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
           "sourceFunction": "loadCompliancePackJobInTransaction",
-          "line": 94
+          "line": 113
         }
       ],
       "activeCallers": [
@@ -2168,7 +3436,7 @@
           "functionName": "app_rls.c03_get_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
           "sourceFunction": "loadCompliancePackJobInTransaction",
-          "line": 94,
+          "line": 113,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2191,7 +3459,7 @@
           "functionName": "app_rls.c03_get_incident_detail",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "getIncidentDetailInTransaction",
-          "line": 94
+          "line": 96
         }
       ],
       "activeCallers": [
@@ -2199,7 +3467,7 @@
           "functionName": "app_rls.c03_get_incident_detail",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "getIncidentDetailInTransaction",
-          "line": 94,
+          "line": 96,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2209,13 +3477,319 @@
       "functionName": "app_rls.c03_get_incident_evidence_file_by_storage_key",
       "schema": "app_rls",
       "name": "c03_get_incident_evidence_file_by_storage_key",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text,text,text,text",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "deploymentPhase": "session-c-c03",
+        "ownerPrivileges": [
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "expiresAt",
+              "revokedAt",
+              "sessionCapabilityHash",
+              "sessionCapabilityHashVersion",
+              "sessionCapabilityExpiresAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "startedByUserId",
+              "startedAt",
+              "finishedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "startedByUserId",
+              "startedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            [
+              "status",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "finishedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "statusCode",
+              "responsePayload",
+              "createdAt",
+              "completedAt",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            [
+              "statusCode",
+              "responsePayload",
+              "completedAt"
+            ]
+          ],
+          [
+            "Incident",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "slaDueAt",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            [
+              "id",
+              "incidentId",
+              "fileUrl",
+              "storageKey",
+              "fileType",
+              "uploadedByUserId",
+              "uploadedBy",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            [
+              "incidentId",
+              "currentStage"
+            ]
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            [
+              "licenseeId",
+              "action",
+              "createdAt"
+            ]
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            [
+              "licenseeId",
+              "retentionDays"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_licensee_id',true) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.c03_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (id=current_setting('app.c03_actor_licensee_id',true) AND \"orgId\"=current_setting('app.c03_actor_organization_id',true))))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND id IN (current_setting('app.c03_actor_organization_id',true),(SELECT l.\"orgId\" FROM public.\"Licensee\" l WHERE l.id=current_setting('app.c03_licensee_id',true)))"
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_job_id',true) OR \"licenseeId\"=current_setting('app.c03_licensee_id',true)) AND (current_setting('app.c03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='compliance-pack-start' AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND \"startedByUserId\"=current_setting('app.c03_user_id',true)"
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND current_setting('app.c03_operation',true) IN ('compliance-pack-complete','compliance-pack-fail','compliance-pack-rebuild')"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='incident-evidence-read' AND \"storageKey\"=current_setting('app.c03_storage_key',true)"
+          ],
+          [
+            "Incident",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (\"licenseeId\"=current_setting('app.c03_licensee_id',true) OR (current_setting('app.c03_licensee_id',true)='' AND id=current_setting('app.c03_incident_id',true)))"
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" i WHERE i.id=\"incidentId\" AND i.\"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND payload->>'userId'=current_setting('app.c03_user_id',true) AND payload->>'licenseeId'=current_setting('app.c03_licensee_id',true)"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "Incident",
+          "SELECT"
+        ],
+        [
+          "IncidentEvidence",
+          "SELECT"
+        ]
+      ],
+      "requiredContext": "Reads one storage-key candidate, rejects duplicates, then derives incident tenant scope from the verified actor before returning metadata.",
       "canonicalWorkflowIds": [
         "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
       ],
@@ -2224,7 +3798,7 @@
           "functionName": "app_rls.c03_get_incident_evidence_file_by_storage_key",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "loadIncidentEvidenceFileInTransaction",
-          "line": 149
+          "line": 152
         }
       ],
       "activeCallers": [
@@ -2232,7 +3806,7 @@
           "functionName": "app_rls.c03_get_incident_evidence_file_by_storage_key",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "loadIncidentEvidenceFileInTransaction",
-          "line": 149,
+          "line": 152,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2255,7 +3829,7 @@
           "functionName": "app_rls.c03_get_ir_incident_detail",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "getIrIncidentDetailInTransaction",
-          "line": 176
+          "line": 181
         }
       ],
       "activeCallers": [
@@ -2263,7 +3837,7 @@
           "functionName": "app_rls.c03_get_ir_incident_detail",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "getIrIncidentDetailInTransaction",
-          "line": 176,
+          "line": 181,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2350,7 +3924,7 @@
           "functionName": "app_rls.c03_list_incidents",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "listIncidentsInTransaction",
-          "line": 105
+          "line": 107
         }
       ],
       "activeCallers": [
@@ -2358,7 +3932,7 @@
           "functionName": "app_rls.c03_list_incidents",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "listIncidentsInTransaction",
-          "line": 105,
+          "line": 107,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2507,7 +4081,7 @@
           "functionName": "app_rls.c03_patch_incident",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "patchIncidentInTransaction",
-          "line": 121
+          "line": 123
         }
       ],
       "activeCallers": [
@@ -2515,7 +4089,7 @@
           "functionName": "app_rls.c03_patch_incident",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "patchIncidentInTransaction",
-          "line": 121,
+          "line": 123,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2538,7 +4112,7 @@
           "functionName": "app_rls.c03_prepare_incident_communication",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "prepareIncidentCommunicationInTransaction",
-          "line": 207
+          "line": 212
         }
       ],
       "activeCallers": [
@@ -2546,7 +4120,7 @@
           "functionName": "app_rls.c03_prepare_incident_communication",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "prepareIncidentCommunicationInTransaction",
-          "line": 207,
+          "line": 212,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2569,7 +4143,7 @@
           "functionName": "app_rls.c03_record_incident_communication_delivery",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "recordIncidentCommunicationDeliveryInTransaction",
-          "line": 224
+          "line": 229
         }
       ],
       "activeCallers": [
@@ -2577,7 +4151,7 @@
           "functionName": "app_rls.c03_record_incident_communication_delivery",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "recordIncidentCommunicationDeliveryInTransaction",
-          "line": 224,
+          "line": 229,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2600,7 +4174,7 @@
           "functionName": "app_rls.c03_record_incident_event",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "recordIncidentEventInTransaction",
-          "line": 82
+          "line": 84
         }
       ],
       "activeCallers": [
@@ -2608,7 +4182,7 @@
           "functionName": "app_rls.c03_record_incident_event",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "recordIncidentEventInTransaction",
-          "line": 82,
+          "line": 84,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2646,254 +4220,6 @@
       ]
     },
     {
-      "functionName": "app_rls.c03_revalidate_actor_scope",
-      "schema": "app_rls",
-      "name": "c03_revalidate_actor_scope",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
-      "callers": [
-        {
-          "functionName": "app_rls.c03_revalidate_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateActorAndScope",
-          "line": 168
-        }
-      ],
-      "activeCallers": [
-        {
-          "functionName": "app_rls.c03_revalidate_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateActorAndScope",
-          "line": 168,
-          "sourceFileActive": true,
-          "reachability": "active-source-file"
-        }
-      ]
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
-      "schema": "app_rls",
-      "name": "c03_revalidate_compliance_pack_job_actor_scope",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
-      "callers": [
-        {
-          "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 225
-        }
-      ],
-      "activeCallers": [
-        {
-          "functionName": "app_rls.c03_revalidate_compliance_pack_job_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 225,
-          "sourceFileActive": true,
-          "reachability": "active-source-file"
-        }
-      ]
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_incident_actor_scope",
-      "schema": "app_rls",
-      "name": "c03_revalidate_incident_actor_scope",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
-      "callers": [
-        {
-          "functionName": "app_rls.c03_revalidate_incident_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 207
-        }
-      ],
-      "activeCallers": [
-        {
-          "functionName": "app_rls.c03_revalidate_incident_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 207,
-          "sourceFileActive": true,
-          "reachability": "active-source-file"
-        }
-      ]
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_incident_evidence_actor_scope",
-      "schema": "app_rls",
-      "name": "c03_revalidate_incident_evidence_actor_scope",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
-      "callers": [
-        {
-          "functionName": "app_rls.c03_revalidate_incident_evidence_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 234
-        }
-      ],
-      "activeCallers": [
-        {
-          "functionName": "app_rls.c03_revalidate_incident_evidence_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 234,
-          "sourceFileActive": true,
-          "reachability": "active-source-file"
-        }
-      ]
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_incident_evidence_storage_actor_scope",
-      "schema": "app_rls",
-      "name": "c03_revalidate_incident_evidence_storage_actor_scope",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
-      "callers": [
-        {
-          "functionName": "app_rls.c03_revalidate_incident_evidence_storage_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 243
-        }
-      ],
-      "activeCallers": [
-        {
-          "functionName": "app_rls.c03_revalidate_incident_evidence_storage_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 243,
-          "sourceFileActive": true,
-          "reachability": "active-source-file"
-        }
-      ]
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_platform_actor_scope",
-      "schema": "app_rls",
-      "name": "c03_revalidate_platform_actor_scope",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
-      "callers": [
-        {
-          "functionName": "app_rls.c03_revalidate_platform_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidatePlatformActor",
-          "line": 130
-        }
-      ],
-      "activeCallers": [
-        {
-          "functionName": "app_rls.c03_revalidate_platform_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidatePlatformActor",
-          "line": 130,
-          "sourceFileActive": true,
-          "reachability": "active-source-file"
-        }
-      ]
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_policy_rule_actor_scope",
-      "schema": "app_rls",
-      "name": "c03_revalidate_policy_rule_actor_scope",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
-      "callers": [
-        {
-          "functionName": "app_rls.c03_revalidate_policy_rule_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 216
-        }
-      ],
-      "activeCallers": [
-        {
-          "functionName": "app_rls.c03_revalidate_policy_rule_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 216,
-          "sourceFileActive": true,
-          "reachability": "active-source-file"
-        }
-      ]
-    },
-    {
-      "functionName": "app_rls.c03_revalidate_sensitive_approval_actor_scope",
-      "schema": "app_rls",
-      "name": "c03_revalidate_sensitive_approval_actor_scope",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
-      "callers": [
-        {
-          "functionName": "app_rls.c03_revalidate_sensitive_approval_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 252
-        }
-      ],
-      "activeCallers": [
-        {
-          "functionName": "app_rls.c03_revalidate_sensitive_approval_actor_scope",
-          "sourceFile": "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
-          "sourceFunction": "revalidateResourceActorAndScope",
-          "line": 252,
-          "sourceFileActive": true,
-          "reachability": "active-source-file"
-        }
-      ]
-    },
-    {
       "functionName": "app_rls.c03_review_incident_customer_trust",
       "schema": "app_rls",
       "name": "c03_review_incident_customer_trust",
@@ -2910,7 +4236,7 @@
           "functionName": "app_rls.c03_review_incident_customer_trust",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "reviewIncidentCustomerTrustInTransaction",
-          "line": 191
+          "line": 196
         }
       ],
       "activeCallers": [
@@ -2918,7 +4244,7 @@
           "functionName": "app_rls.c03_review_incident_customer_trust",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
           "sourceFunction": "reviewIncidentCustomerTrustInTransaction",
-          "line": 191,
+          "line": 196,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -2959,13 +4285,351 @@
       "functionName": "app_rls.c03_start_compliance_pack_job",
       "schema": "app_rls",
       "name": "c03_start_compliance_pack_job",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
+      "signature": "text,text,text,text,text,timestamp with time zone,timestamp with time zone",
+      "definitionLocation": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql",
+        "deploymentPhase": "session-c-c03",
+        "ownerPrivileges": [
+          [
+            "RefreshToken",
+            "SELECT",
+            [
+              "id",
+              "userId",
+              "expiresAt",
+              "revokedAt",
+              "sessionCapabilityHash",
+              "sessionCapabilityHashVersion",
+              "sessionCapabilityExpiresAt",
+              "sessionCapabilityRevokedAt"
+            ]
+          ],
+          [
+            "User",
+            "SELECT",
+            [
+              "id",
+              "role",
+              "orgId",
+              "licenseeId",
+              "status",
+              "isActive",
+              "disabledAt",
+              "deletedAt"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "startedByUserId",
+              "startedAt",
+              "finishedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "periodFrom",
+              "periodTo",
+              "startedByUserId",
+              "startedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            [
+              "status",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "finishedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "statusCode",
+              "responsePayload",
+              "createdAt",
+              "completedAt",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            [
+              "statusCode",
+              "responsePayload",
+              "completedAt"
+            ]
+          ],
+          [
+            "Incident",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "slaDueAt",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            [
+              "id",
+              "incidentId",
+              "fileUrl",
+              "storageKey",
+              "fileType",
+              "uploadedByUserId",
+              "uploadedBy",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            [
+              "incidentId",
+              "currentStage"
+            ]
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            [
+              "licenseeId",
+              "action",
+              "createdAt"
+            ]
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            [
+              "licenseeId",
+              "retentionDays"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_licensee_id',true) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.c03_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (id=current_setting('app.c03_actor_licensee_id',true) AND \"orgId\"=current_setting('app.c03_actor_organization_id',true))))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND id IN (current_setting('app.c03_actor_organization_id',true),(SELECT l.\"orgId\" FROM public.\"Licensee\" l WHERE l.id=current_setting('app.c03_licensee_id',true)))"
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_job_id',true) OR \"licenseeId\"=current_setting('app.c03_licensee_id',true)) AND (current_setting('app.c03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='compliance-pack-start' AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND \"startedByUserId\"=current_setting('app.c03_user_id',true)"
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND current_setting('app.c03_operation',true) IN ('compliance-pack-complete','compliance-pack-fail','compliance-pack-rebuild')"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "IncidentEvidence",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='incident-evidence-read' AND \"storageKey\"=current_setting('app.c03_storage_key',true)"
+          ],
+          [
+            "Incident",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (\"licenseeId\"=current_setting('app.c03_licensee_id',true) OR (current_setting('app.c03_licensee_id',true)='' AND id=current_setting('app.c03_incident_id',true)))"
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" i WHERE i.id=\"incidentId\" AND i.\"licenseeId\"=current_setting('app.c03_licensee_id',true))"
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND payload->>'userId'=current_setting('app.c03_user_id',true) AND payload->>'licenseeId'=current_setting('app.c03_licensee_id',true)"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "User",
+          "SELECT"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "INSERT"
+        ],
+        [
+          "CompliancePackJob",
+          "SELECT"
+        ],
+        [
+          "ActionIdempotencyKey",
+          "SELECT"
+        ],
+        [
+          "ActionIdempotencyKey",
+          "INSERT"
+        ],
+        [
+          "ActionIdempotencyKey",
+          "UPDATE"
+        ],
+        [
+          "Incident",
+          "SELECT"
+        ],
+        [
+          "IncidentHandoff",
+          "SELECT"
+        ],
+        [
+          "AuditLog",
+          "SELECT"
+        ],
+        [
+          "EvidenceRetentionPolicy",
+          "SELECT"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Capability-derived MFA actor and live licensee relationships authorize an idempotent manual job start; the requested licensee is selection-only.",
       "canonicalWorkflowIds": [
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
@@ -2974,7 +4638,7 @@
           "functionName": "app_rls.c03_start_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
           "sourceFunction": "startCompliancePackJobInTransaction",
-          "line": 26
+          "line": 29
         }
       ],
       "activeCallers": [
@@ -2982,7 +4646,7 @@
           "functionName": "app_rls.c03_start_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
           "sourceFunction": "startCompliancePackJobInTransaction",
-          "line": 26,
+          "line": 29,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }

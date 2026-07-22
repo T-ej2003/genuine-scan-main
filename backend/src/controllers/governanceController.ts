@@ -24,6 +24,7 @@ import {
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 import {
   C03AccessError,
+  c03DatabaseSessionCapability,
   c03RequestId,
   withC03ActorTransaction,
   withC03ResourceTransaction,
@@ -117,7 +118,7 @@ export const getFeatureFlags = async (req: AuthRequest, res: Response) => {
 
     const flags = await withC03ActorTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "governance-feature-flag-list",
         licenseeId,
@@ -182,7 +183,7 @@ export const upsertFeatureFlag = async (req: AuthRequest, res: Response) => {
       },
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
-      securityContext: { user: req.user, requestId: c03RequestId(req) },
+      securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
     });
 
     return res.status(202).json({
@@ -216,7 +217,7 @@ export const getRetentionPolicyController = async (req: AuthRequest, res: Respon
 
     const policy = await withC03ActorTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "governance-retention-policy-read",
         licenseeId,
@@ -282,7 +283,7 @@ export const patchRetentionPolicyController = async (req: AuthRequest, res: Resp
       },
       ipAddress: req.ip,
       userAgent: req.get("user-agent") || null,
-      securityContext: { user: req.user, requestId: c03RequestId(req) },
+      securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
     });
 
     return res.status(202).json({
@@ -336,7 +337,7 @@ export const runRetentionJobController = async (req: AuthRequest, res: Response)
         },
         ipAddress: req.ip,
         userAgent: req.get("user-agent") || null,
-        securityContext: { user: req.user, requestId: c03RequestId(req) },
+        securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
       });
 
       return res.status(202).json({
@@ -352,7 +353,7 @@ export const runRetentionJobController = async (req: AuthRequest, res: Response)
 
     const result = await withC03ActorTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "governance-retention-preview",
         licenseeId,
@@ -397,7 +398,7 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
 
     const snapshot = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-evidence-audit-export",
         resourceId: incidentId,
@@ -448,7 +449,7 @@ export const generateComplianceReportController = async (req: AuthRequest, res: 
 
     const report = await withC03ActorTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "governance-compliance-report",
         licenseeId,
@@ -508,7 +509,7 @@ export const runCompliancePackController = async (req: AuthRequest, res: Respons
       licenseeId,
       from,
       to,
-      securityContext: { user: req.user, requestId: c03RequestId(req) },
+      securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
     });
 
     return res.status(201).json({ success: true, data: out.job });
@@ -546,7 +547,7 @@ export const listCompliancePackJobsController = async (req: AuthRequest, res: Re
         role: req.user.role,
         licenseeId: req.user.licenseeId,
       },
-      securityContext: { user: req.user, requestId: c03RequestId(req) },
+      securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
     });
 
     return res.json({
@@ -575,7 +576,7 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
 
     const snapshot = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "compliance-pack-download",
         resourceId: paramsParsed.data.id,
@@ -584,7 +585,7 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
         requiredAssurance: compliancePackReadAssurance(req.user.role),
       },
       async (tx, context) => {
-        const result = await loadCompliancePackJobInTransaction<any>(tx, paramsParsed.data.id);
+        const result = await loadCompliancePackJobInTransaction<any>(tx, context, paramsParsed.data.id);
         await createAuditLogInTransaction(tx, context, {
           action: "COMPLIANCE_PACK_DOWNLOADED",
           entityType: "CompliancePackJob",
@@ -609,7 +610,7 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
             role: req.user.role,
             licenseeId: req.user.licenseeId || null,
           },
-          securityContext: { user: req.user, requestId: c03RequestId(req) },
+          securityContext: { databaseSessionCapability: c03DatabaseSessionCapability(req), requestId: c03RequestId(req) },
         });
         buffer = await loadCompliancePackJobBuffer(rebuilt.job.storageKey || "");
       } catch (rebuildError) {

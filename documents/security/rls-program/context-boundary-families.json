@@ -17,8 +17,8 @@
     "documents/security/rls-program/ARCHITECTURE.md",
     "backend/prisma/schema.prisma"
   ],
-  "workflowCount": 400,
-  "familyCount": 279,
+  "workflowCount": 401,
+  "familyCount": 280,
   "baselineImplementedWorkflowIds": [
     "workflow-http-backend-src-controllers-audit-controller-ts-export-logs-csv",
     "workflow-http-backend-src-controllers-audit-controller-ts-get-fraud-reports",
@@ -28013,7 +28013,7 @@
       }
     },
     {
-      "id": "family-account-and-security-mutations-c03compliancepackrepository-bbc6b90e8b",
+      "id": "family-account-and-security-mutations-c03actorboundary-1bd2375e93",
       "category": "account and security mutations",
       "workflowIds": [
         "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"
@@ -28030,7 +28030,9 @@
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts"
       ],
       "protectedTables": [
-        "table-compliance-pack-job"
+        "table-compliance-pack-job",
+        "table-refresh-token",
+        "table-user"
       ],
       "actorClasses": [
         "platform-admin"
@@ -28052,7 +28054,10 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-compliance-pack-job-select-4ef0f20c1c1d"
+        "command-compliance-pack-job-select-4ef0f20c1c1d",
+        "command-refresh-token-select-4ef0f20c1c1d",
+        "command-refresh-token-update-4ef0f20c1c1d",
+        "command-user-select-4ef0f20c1c1d"
       ],
       "tenantScopeModel": [
         "One active database-validated licensee is mandatory; status and time filters only narrow it."
@@ -28069,9 +28074,63 @@
             "status=FAILED"
           ],
           "forbidden": []
+        },
+        {
+          "commandRuleId": "command-refresh-token-select-4ef0f20c1c1d",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-refresh-token-update-4ef0f20c1c1d",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-select-4ef0f20c1c1d",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
         }
       ],
-      "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
+      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
       "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
       "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
       "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
@@ -28086,7 +28145,7 @@
           "code": "platform-read-runtime-pending",
           "reason": "The internal helper accepts optional licensee scope and global Prisma; its registered controller must own verified actor, assurance, purpose, transaction, projection, and attribution.",
           "remediation": "Implement the exact actor, assurance, selector, projection, bound, transaction and attribution contract in a focused runtime batch, then complete disposable PostgreSQL certification.",
-          "id": "blocker-family-account-and-security-mutations-c03compliancepackrepository-bbc6b90e8b-platform-read-runtime-pending"
+          "id": "blocker-family-account-and-security-mutations-c03actorboundary-1bd2375e93-platform-read-runtime-pending"
         }
       ],
       "implementationStatus": "blocked",
@@ -29474,7 +29533,12 @@
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts"
       ],
       "protectedTables": [
-        "table-incident-evidence"
+        "table-incident",
+        "table-incident-evidence",
+        "table-licensee",
+        "table-organization",
+        "table-refresh-token",
+        "table-user"
       ],
       "actorClasses": [
         "licensee-admin",
@@ -29497,12 +29561,76 @@
         "app.purpose"
       ],
       "readWriteCommandRuleIds": [
-        "command-incident-evidence-select-00b44dd2511d"
+        "command-incident-evidence-select-00b44dd2511d",
+        "command-incident-select-00b44dd2511d",
+        "command-licensee-select-00b44dd2511d",
+        "command-organization-select-00b44dd2511d",
+        "command-refresh-token-select-00b44dd2511d",
+        "command-user-select-00b44dd2511d"
       ],
       "tenantScopeModel": [
         "The requested file must join through IncidentEvidence.incidentId to one Incident whose licenseeId equals the database-validated canonical licensee. A filename or storage key is never scope authority."
       ],
-      "lifecycleStateRequirements": [],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-incident-select-00b44dd2511d",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=NEW",
+            "status=TRIAGED",
+            "status=TRIAGE",
+            "status=INVESTIGATING",
+            "status=CONTAINMENT",
+            "status=ERADICATION",
+            "status=RECOVERY",
+            "status=AWAITING_CUSTOMER",
+            "status=AWAITING_LICENSEE",
+            "status=MITIGATED",
+            "status=RESOLVED",
+            "status=CLOSED",
+            "status=REOPENED",
+            "status=REJECTED_SPAM"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-refresh-token-select-00b44dd2511d",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-00b44dd2511d",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        }
+      ],
       "transactionIsolationRequirement": "REPEATABLE READ when count/list consistency is required; otherwise one canonical transaction",
       "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
       "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
@@ -33395,6 +33523,285 @@
           "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
           "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
           "id": "blocker-family-account-and-security-mutations-publicintakecontroller-746bc99b1b-unverified-execution-path"
+        }
+      ],
+      "implementationStatus": "blocked",
+      "changeSizeGuard": {
+        "maximumProductionFiles": 15,
+        "maximumTestFiles": 10,
+        "maximumNetChangedLines": 2500
+      }
+    },
+    {
+      "id": "family-account-and-security-mutations-sessioncredentialrepository-e16221148c",
+      "category": "account and security mutations",
+      "workflowIds": [
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
+      ],
+      "reclassifiedFromFamilyIds": [],
+      "executionSurfaces": [
+        "internal"
+      ],
+      "controllerFiles": [],
+      "serviceFiles": [
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
+      ],
+      "repositoryFiles": [
+        "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts"
+      ],
+      "protectedTables": [
+        "table-admin-mfa-credential",
+        "table-admin-web-authn-credential",
+        "table-audit-log-outbox",
+        "table-auth-mfa-challenge",
+        "table-licensee",
+        "table-manufacturer-licensee-link",
+        "table-organization",
+        "table-refresh-token",
+        "table-user",
+        "table-user-backup-code",
+        "table-user-mfa-factor"
+      ],
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "pendingActorClasses": [],
+      "pendingActorBlockers": [],
+      "runtimeIdentity": "identity-authenticated-app",
+      "requiredAssurance": [
+        "mfa-verified",
+        "password-verified"
+      ],
+      "canonicalContextKeys": [
+        "app.user_id",
+        "app.role",
+        "app.organization_id",
+        "app.licensee_id",
+        "app.manufacturer_id",
+        "app.auth_assurance",
+        "app.request_id",
+        "app.purpose"
+      ],
+      "readWriteCommandRuleIds": [
+        "command-admin-mfa-credential-select-65b85bc0759d",
+        "command-admin-web-authn-credential-select-65b85bc0759d",
+        "command-audit-log-outbox-insert-65b85bc0759d",
+        "command-auth-mfa-challenge-insert-65b85bc0759d",
+        "command-licensee-select-65b85bc0759d",
+        "command-manufacturer-licensee-link-select-65b85bc0759d",
+        "command-organization-select-65b85bc0759d",
+        "command-refresh-token-insert-65b85bc0759d",
+        "command-refresh-token-select-65b85bc0759d",
+        "command-refresh-token-update-65b85bc0759d",
+        "command-user-backup-code-select-65b85bc0759d",
+        "command-user-mfa-factor-select-65b85bc0759d",
+        "command-user-select-65b85bc0759d"
+      ],
+      "tenantScopeModel": [
+        "Every non-NULL licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+        "Every non-NULL orgId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+        "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+        "approved-system boundary from tables.json; empty or forged context is denied.",
+        "table-admin-mfa-credential row must join through table-user on userId=id; no alternative parent.",
+        "table-admin-web-authn-credential row must join through table-user on userId=id; no alternative parent.",
+        "table-auth-mfa-challenge row must join through table-user on userId=id; no alternative parent.",
+        "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
+        "table-user-backup-code row must join through table-user on userId=id; no alternative parent.",
+        "table-user-mfa-factor row must join through table-user on userId=id; no alternative parent.",
+        "tenant-root boundary from tables.json; empty or forged context is denied."
+      ],
+      "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-admin-mfa-credential-select-65b85bc0759d",
+          "columns": [
+            "isEnabled",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "isEnabled=false",
+            "isEnabled=true",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-admin-web-authn-credential-select-65b85bc0759d",
+          "columns": [
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-65b85bc0759d",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-auth-mfa-challenge-insert-65b85bc0759d",
+          "columns": [
+            "consumedAt",
+            "expiresAt"
+          ],
+          "allowed": [
+            "consumedAt=NULL_OR_SERVER_INITIALIZED",
+            "expiresAt=NULL_OR_SERVER_INITIALIZED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-refresh-token-insert-65b85bc0759d",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL_OR_SERVER_INITIALIZED",
+            "lastUsedAt=NULL_OR_SERVER_INITIALIZED",
+            "revokedAt=NULL_OR_SERVER_INITIALIZED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-refresh-token-select-65b85bc0759d",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-refresh-token-update-65b85bc0759d",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        },
+        {
+          "commandRuleId": "command-user-backup-code-select-65b85bc0759d",
+          "columns": [
+            "usedAt"
+          ],
+          "allowed": [
+            "usedAt=NULL",
+            "usedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-mfa-factor-select-65b85bc0759d",
+          "columns": [
+            "disabledAt",
+            "lastUsedAt"
+          ],
+          "allowed": [
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-user-select-65b85bc0759d",
+          "columns": [
+            "deletedAt",
+            "disabledAt",
+            "status"
+          ],
+          "allowed": [
+            "deletedAt=NULL",
+            "deletedAt=SERVER_TIMESTAMP_SET",
+            "disabledAt=NULL",
+            "disabledAt=SERVER_TIMESTAMP_SET",
+            "status=INVITED",
+            "status=ACTIVE",
+            "status=DISABLED"
+          ],
+          "forbidden": []
+        }
+      ],
+      "transactionIsolationRequirement": "One atomic canonical transaction with database-enforced concurrency",
+      "expectedReusableHelper": "withCanonicalDbContext plus a transaction-client-only service",
+      "implementationStrategy": "After blocker resolution, move the exact mutation, concurrency guard and immutable attribution into one canonical transaction without changing ownership or lifecycle semantics.",
+      "testStrategy": "Exercise own/foreign/blank scope, immutable columns, lifecycle denial, database concurrency, idempotent replay, atomic attribution and global-client rejection.",
+      "riskLevel": "critical",
+      "automationEligibility": "blocked",
+      "governingBoundaryIds": [],
+      "blockers": [
+        {
+          "code": "mutation-concurrency-proof",
+          "reason": "The mutation lacks family-level database concurrency and replay proof.",
+          "remediation": "Trace lifecycle, immutable columns, idempotency and row-lock/CAS/unique-constraint behavior before implementation.",
+          "id": "blocker-family-account-and-security-mutations-sessioncredentialrepository-e16221148c-mutation-concurrency-proof"
+        },
+        {
+          "code": "named-function-prerequisite",
+          "reason": "At least one command rule requires a named function boundary.",
+          "remediation": "Implement and certify the exact approved function contract before replacing ordinary Prisma access.",
+          "id": "blocker-family-account-and-security-mutations-sessioncredentialrepository-e16221148c-named-function-prerequisite"
+        },
+        {
+          "code": "unresolved-boundary",
+          "reason": "The workflow authorization-boundary type is unresolved.",
+          "remediation": "Reconcile middleware, actor classes and command rules into one approved boundary type.",
+          "id": "blocker-family-account-and-security-mutations-sessioncredentialrepository-e16221148c-unresolved-boundary"
+        },
+        {
+          "code": "unreviewed-scope",
+          "reason": "The workflow tenant-scope rule remains generated/unreviewed.",
+          "remediation": "Trace the registered caller and record a human-reviewed tenant, actor or bounded platform scope before editing code.",
+          "id": "blocker-family-account-and-security-mutations-sessioncredentialrepository-e16221148c-unreviewed-scope"
+        },
+        {
+          "code": "unverified-execution-path",
+          "reason": "Canonical access sites exist, but protected-query coverage, same-transaction propagation and deterministic testability are not all proven.",
+          "remediation": "Trace middleware, controller, service and repository callers; record the complete query trace and add focused ordering/global-client tests.",
+          "id": "blocker-family-account-and-security-mutations-sessioncredentialrepository-e16221148c-unverified-execution-path"
+        },
+        {
+          "code": "unverified-root-call-chain",
+          "reason": "The internal function is not linked to one verified root transaction in the manifest.",
+          "remediation": "Trace every registered caller and group it with the owning HTTP/system transaction before propagating a transaction client.",
+          "id": "blocker-family-account-and-security-mutations-sessioncredentialrepository-e16221148c-unverified-root-call-chain"
         }
       ],
       "implementationStatus": "blocked",
@@ -38183,12 +38590,16 @@
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts"
       ],
       "protectedTables": [
+        "table-action-idempotency-key",
         "table-audit-log",
+        "table-audit-log-outbox",
         "table-compliance-pack-job",
         "table-evidence-retention-policy",
         "table-incident",
         "table-incident-handoff",
         "table-licensee",
+        "table-organization",
+        "table-refresh-token",
         "table-user"
       ],
       "actorClasses": [
@@ -38202,21 +38613,74 @@
       ],
       "canonicalContextKeys": [],
       "readWriteCommandRuleIds": [
-        "command-audit-log-insert-56e28c0be62e",
+        "command-action-idempotency-key-insert-56e28c0be62e",
+        "command-action-idempotency-key-select-56e28c0be62e",
+        "command-action-idempotency-key-update-56e28c0be62e",
+        "command-audit-log-outbox-insert-56e28c0be62e",
         "command-audit-log-select-56e28c0be62e",
         "command-compliance-pack-job-insert-56e28c0be62e",
+        "command-compliance-pack-job-select-56e28c0be62e",
         "command-compliance-pack-job-update-56e28c0be62e",
-        "command-evidence-retention-policy-insert-56e28c0be62e",
-        "command-evidence-retention-policy-update-56e28c0be62e",
+        "command-evidence-retention-policy-select-56e28c0be62e",
         "command-incident-handoff-select-56e28c0be62e",
         "command-incident-select-56e28c0be62e",
         "command-licensee-select-56e28c0be62e",
+        "command-organization-select-56e28c0be62e",
+        "command-refresh-token-select-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ],
       "tenantScopeModel": [
         "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope."
       ],
       "lifecycleStateRequirements": [
+        {
+          "commandRuleId": "command-action-idempotency-key-insert-56e28c0be62e",
+          "columns": [
+            "expiresAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL_OR_SERVER_INITIALIZED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
+        {
+          "commandRuleId": "command-action-idempotency-key-select-56e28c0be62e",
+          "columns": [
+            "expiresAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-action-idempotency-key-update-56e28c0be62e",
+          "columns": [
+            "expiresAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
+        },
+        {
+          "commandRuleId": "command-audit-log-outbox-insert-56e28c0be62e",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=QUEUED"
+          ],
+          "forbidden": [
+            "CLIENT_SELECTED_INITIAL_STATE"
+          ]
+        },
         {
           "commandRuleId": "command-compliance-pack-job-insert-56e28c0be62e",
           "columns": [
@@ -38228,6 +38692,18 @@
           "forbidden": [
             "CLIENT_SELECTED_INITIAL_STATE"
           ]
+        },
+        {
+          "commandRuleId": "command-compliance-pack-job-select-56e28c0be62e",
+          "columns": [
+            "status"
+          ],
+          "allowed": [
+            "status=RUNNING",
+            "status=COMPLETED",
+            "status=FAILED"
+          ],
+          "forbidden": []
         },
         {
           "commandRuleId": "command-compliance-pack-job-update-56e28c0be62e",
@@ -38244,19 +38720,7 @@
           ]
         },
         {
-          "commandRuleId": "command-evidence-retention-policy-insert-56e28c0be62e",
-          "columns": [
-            "purgeEnabled"
-          ],
-          "allowed": [
-            "purgeEnabled=false"
-          ],
-          "forbidden": [
-            "CLIENT_SELECTED_INITIAL_STATE"
-          ]
-        },
-        {
-          "commandRuleId": "command-evidence-retention-policy-update-56e28c0be62e",
+          "commandRuleId": "command-evidence-retention-policy-select-56e28c0be62e",
           "columns": [
             "purgeEnabled"
           ],
@@ -38264,9 +38728,7 @@
             "purgeEnabled=false",
             "purgeEnabled=true"
           ],
-          "forbidden": [
-            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
-          ]
+          "forbidden": []
         },
         {
           "commandRuleId": "command-incident-handoff-select-56e28c0be62e",
@@ -38303,6 +38765,23 @@
             "status=CLOSED",
             "status=REOPENED",
             "status=REJECTED_SPAM"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-refresh-token-select-56e28c0be62e",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": []
         },

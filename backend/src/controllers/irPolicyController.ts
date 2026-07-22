@@ -7,6 +7,7 @@ import type { CanonicalDbContext } from "../lib/canonicalDbContext";
 import { createAuditLogInTransaction } from "../services/auditService";
 import {
   C03AccessError,
+  c03DatabaseSessionCapability,
   c03RequestId,
   withC03ActorTransaction,
   withC03PlatformTransaction,
@@ -94,7 +95,7 @@ export const listIrPolicies = async (req: AuthRequest, res: Response) => {
       return data;
     };
     const boundary = {
-      user: req.user,
+      databaseSessionCapability: c03DatabaseSessionCapability(req),
       requestId: c03RequestId(req),
       purpose: "incident-response-policy-list",
       allowedRoles: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN],
@@ -133,7 +134,7 @@ export const createIrPolicy = async (req: AuthRequest, res: Response) => {
     if (!licenseeId) return res.status(400).json({ success: false, error: "licenseeId is required" });
     const created = await withC03ActorTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-response-policy-create",
         licenseeId,
@@ -202,7 +203,7 @@ export const patchIrPolicy = async (req: AuthRequest, res: Response) => {
 
     const updated = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-response-policy-update",
         resourceId: id,

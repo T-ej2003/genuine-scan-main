@@ -1,6 +1,5 @@
 import { UserRole } from "@prisma/client";
 
-import { AuthenticatedSessionClaims } from "../types";
 import { hashIp, hashToken, normalizeUserAgent } from "../utils/security";
 import {
   C03AccessError,
@@ -34,7 +33,7 @@ type ApprovalActor = {
 };
 
 type SecurityContext = {
-  user: AuthenticatedSessionClaims;
+  databaseSessionCapability: string;
   requestId: string;
 };
 
@@ -59,18 +58,10 @@ const approvalStatuses = new Set(["PENDING", "APPROVED", "REJECTED", "EXECUTED",
 
 const requireSecurityContext = (actor: ApprovalActor, context?: SecurityContext) => {
   const requestId = String(context?.requestId || "").trim();
-  const user = context?.user;
-  if (!user || !requestId) throw new C03AccessError("Canonical sensitive-approval actor context is required", 401);
+  const databaseSessionCapability = String(context?.databaseSessionCapability || "").trim();
+  if (!databaseSessionCapability || !requestId) throw new C03AccessError("Canonical sensitive-approval actor context is required", 401);
   if (!uuidPattern.test(requestId)) throw new C03AccessError("Canonical sensitive-approval request id is invalid", 400);
-  if (
-    user.userId !== actor.userId ||
-    user.role !== actor.role ||
-    String(user.orgId || "") !== String(actor.orgId || "") ||
-    String(user.licenseeId || "") !== String(actor.licenseeId || "")
-  ) {
-    throw new C03AccessError("Sensitive-approval actor context is inconsistent");
-  }
-  return { user, requestId };
+  return { databaseSessionCapability, requestId };
 };
 
 const requireLicenseeScope = (input: { licenseeId?: string | null; actor: ApprovalActor }) => {
@@ -123,7 +114,7 @@ export const createSensitiveActionApproval = async (input: CreateApprovalInput) 
   }
   return withC03ActorTransaction(
     {
-      user: security.user,
+      databaseSessionCapability: security.databaseSessionCapability,
       requestId: security.requestId,
       purpose: "sensitive-action-approval-request",
       licenseeId,
@@ -158,7 +149,7 @@ export const listSensitiveActionApprovals = async (input: {
   const status = approvalStatus(input.status);
   return withC03ActorTransaction(
     {
-      user: security.user,
+      databaseSessionCapability: security.databaseSessionCapability,
       requestId: security.requestId,
       purpose: "sensitive-action-approval-list",
       licenseeId,
@@ -185,7 +176,7 @@ export const approveSensitiveActionApproval = async (input: {
   const note = reviewNote(input.reviewNote);
   return withC03ResourceTransaction(
     {
-      user: security.user,
+      databaseSessionCapability: security.databaseSessionCapability,
       requestId: security.requestId,
       purpose: "sensitive-action-approval-approve",
       resourceId: input.approvalId,
@@ -209,7 +200,7 @@ export const rejectSensitiveActionApproval = async (input: {
   const note = reviewNote(input.reviewNote);
   return withC03ResourceTransaction(
     {
-      user: security.user,
+      databaseSessionCapability: security.databaseSessionCapability,
       requestId: security.requestId,
       purpose: "sensitive-action-approval-reject",
       resourceId: input.approvalId,

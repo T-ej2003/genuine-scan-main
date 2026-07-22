@@ -2,9 +2,8 @@ const assert = require("assert");
 const path = require("path");
 
 const distRoot = path.resolve(__dirname, "../../../dist");
-const resolved = (relativePath) => require.resolve(path.join(distRoot, relativePath));
 const mockModule = (relativePath, exportsValue) => {
-  const filename = resolved(relativePath);
+  const filename = require.resolve(path.join(distRoot, relativePath));
   require.cache[filename] = { id: filename, filename, loaded: true, exports: exportsValue };
 };
 
@@ -13,31 +12,23 @@ const ids = {
   licensee: "00000000-0000-4000-8000-000000000201",
   foreignLicensee: "00000000-0000-4000-8000-000000000202",
   actor: "00000000-0000-4000-8000-000000000301",
-  incident: "00000000-0000-4000-8000-000000000401",
-  request: "00000000-0000-4000-8000-000000000501",
+  session: "00000000-0000-4000-8000-000000000401",
+  resource: "00000000-0000-4000-8000-000000000501",
+  request: "00000000-0000-4000-8000-000000000601",
+  capability: "A".repeat(43),
 };
 
 let queryResult = [];
 let queryError = null;
 let lastQuery = "";
-let executeCount = 0;
 const tx = {
-  $executeRaw: async () => {
-    executeCount += 1;
-    return 1;
-  },
   $queryRaw: async (strings) => {
     lastQuery = Array.from(strings).join("?");
     if (queryError) throw queryError;
     return queryResult;
   },
 };
-const database = {
-  $transaction: async (callback) => callback(tx),
-};
-
-mockModule("config/database.js", { __esModule: true, default: database });
-mockModule("services/auth/authService.js", { getAdminStepUpWindowMinutes: () => 15 });
+mockModule("config/database.js", { __esModule: true, default: { $transaction: async (callback) => callback(tx) } });
 
 const {
   C03AccessError,
@@ -45,106 +36,81 @@ const {
   withC03ResourceTransaction,
 } = require("../../../dist/rls-waves/session-c/c03/c03ActorBoundary");
 
-const platform = (overrides = {}) => ({
-  userId: ids.actor,
-  role: "PLATFORM_SUPER_ADMIN",
-  orgId: null,
-  licenseeId: null,
-  sessionStage: "ACTIVE",
-  authAssurance: "ADMIN_MFA",
-  mfaVerifiedAt: new Date(),
-  ...overrides,
-});
-
 const actorRow = (overrides = {}) => ({
+  sessionId: ids.session,
   userId: ids.actor,
-  role: "PLATFORM_SUPER_ADMIN",
+  role: "LICENSEE_ADMIN",
   organizationId: ids.org,
   licenseeId: ids.licensee,
+  assurance: "ADMIN_MFA",
   ...overrides,
 });
 
-const selectorBoundary = (overrides = {}) => ({
-  user: platform(),
+const boundary = (overrides = {}) => ({
+  databaseSessionCapability: ids.capability,
   requestId: ids.request,
-  purpose: "incident-response-policy-list",
+  purpose: "compliance-pack-start",
   licenseeId: ids.licensee,
-  allowedRoles: ["SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"],
+  allowedRoles: ["LICENSEE_ADMIN"],
   requiredAssurance: "mfa-verified",
   ...overrides,
 });
 
 const run = async () => {
   queryResult = [actorRow()];
-  executeCount = 0;
-  const selector = await withC03ActorTransaction(selectorBoundary(), async (_db, context) => context);
-  assert.equal(selector.licenseeId, ids.licensee);
-  assert.match(lastQuery, /c03_revalidate_actor_scope/);
-  assert.equal(executeCount, 1, "canonical context must be installed exactly once");
+  const context = await withC03ActorTransaction(boundary(), async (_db, verified) => verified);
+  assert.equal(context.userId, ids.actor);
+  assert.equal(context.licenseeId, ids.licensee);
+  assert.equal(context.databaseSessionCapability, ids.capability);
+  assert.match(lastQuery, /app_auth\.require_authenticated_session/);
+  assert.doesNotMatch(lastQuery, /install_actor_context|c03_revalidate_actor_scope/);
 
   await assert.rejects(
-    () => withC03ActorTransaction(selectorBoundary({ user: platform({ role: "MANUFACTURER" }) }), async () => null),
-    (error) => error instanceof C03AccessError && error.statusCode === 403
-  );
-  await assert.rejects(
-    () => withC03ActorTransaction(selectorBoundary({ user: platform({ authAssurance: "PASSWORD", mfaVerifiedAt: null }) }), async () => null),
-    /Fresh administrator MFA/
-  );
-  await assert.rejects(
-    () => withC03ActorTransaction(selectorBoundary({ user: platform({ sessionStage: "MFA_PENDING" }) }), async () => null),
+    () => withC03ActorTransaction(boundary({ databaseSessionCapability: "forged" }), async () => null),
     (error) => error instanceof C03AccessError && error.statusCode === 401
   );
-
-  const tenantUser = platform({
-    role: "LICENSEE_ADMIN",
-    orgId: ids.org,
-    licenseeId: ids.licensee,
-  });
   await assert.rejects(
-    () => withC03ActorTransaction(selectorBoundary({
-      user: tenantUser,
-      licenseeId: ids.foreignLicensee,
-      allowedRoles: ["LICENSEE_ADMIN"],
-    }), async () => null),
+    () => withC03ActorTransaction(boundary({ licenseeId: ids.foreignLicensee }), async () => null),
     /Access denied to this licensee/
   );
 
+  queryResult = [actorRow({ role: "MANUFACTURER" })];
+  await assert.rejects(
+    () => withC03ActorTransaction(boundary(), async () => null),
+    /Access denied/
+  );
+  queryResult = [actorRow({ assurance: "PASSWORD" })];
+  await assert.rejects(
+    () => withC03ActorTransaction(boundary(), async () => null),
+    /Fresh administrator MFA/
+  );
   queryResult = [];
   await assert.rejects(
-    () => withC03ActorTransaction(selectorBoundary(), async () => null),
-    /no longer authorized/
+    () => withC03ActorTransaction(boundary(), async () => null),
+    (error) => error instanceof C03AccessError && error.statusCode === 401
   );
 
   queryResult = [actorRow()];
-  executeCount = 0;
   const resource = await withC03ResourceTransaction({
-    user: platform(),
-    requestId: ids.request,
-    purpose: "incident-response-detail",
-    resourceId: ids.incident,
-    resourceType: "incident",
-    allowedRoles: ["PLATFORM_SUPER_ADMIN"],
-    requiredAssurance: "step-up-verified",
-  }, async (_db, context) => context);
-  assert.equal(resource.licenseeId, ids.licensee);
-  assert.match(lastQuery, /c03_revalidate_incident_actor_scope/);
-  assert.equal(executeCount, 1, "resource context must be installed exactly once");
+    ...boundary(),
+    purpose: "compliance-pack-download",
+    resourceId: ids.resource,
+    resourceType: "compliancePackJob",
+  }, async (_db, verified) => verified);
+  assert.equal(resource.sessionId, ids.session);
+  assert.match(lastQuery, /app_auth\.require_authenticated_session/);
 
-  queryError = new Error("function app_rls.c03_revalidate_incident_actor_scope does not exist");
+  queryError = new Error("AUTHENTICATED_SESSION_REVOKED");
   await assert.rejects(
     () => withC03ResourceTransaction({
-      user: platform(),
-      requestId: ids.request,
-      purpose: "incident-response-detail",
-      resourceId: ids.incident,
-      resourceType: "incident",
-      allowedRoles: ["PLATFORM_SUPER_ADMIN"],
-      requiredAssurance: "step-up-verified",
+      ...boundary(),
+      resourceId: ids.resource,
+      resourceType: "compliancePackJob",
     }, async () => null),
-    /does not exist/
+    /AUTHENTICATED_SESSION_REVOKED/
   );
 
-  console.log("C03 actor and resource boundary tests passed");
+  console.log("C03 capability transaction boundary tests passed");
 };
 
 run().catch((error) => {

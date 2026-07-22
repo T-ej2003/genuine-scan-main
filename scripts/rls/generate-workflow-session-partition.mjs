@@ -10,7 +10,10 @@ const workflows = JSON.parse(fs.readFileSync(path.join(programRoot, "workflows.j
 const coordinationBaseCommit = "33cbe7ff019efefad242f654f0aa96c44c5b963c";
 // Reviewed after the Session B repository handoff was merged into this
 // integration branch. A changed set must still fail before artefacts are made.
-const originalSessionBWorkflowSetSha256 = "68253ee6e26f76b6cc23ec27d020eb13d6da1f2afafd6ecf2bc7e975c3b74ab6";
+// Explicit integration-owner handoff: the reviewed B01 SQL contract restored
+// authService.refreshSession to the production inventory. No other Session B
+// workflow ownership changes are accepted by this digest.
+const originalSessionBWorkflowSetSha256 = "078751379c2b3cb9addc46318901bb9af6ccdc56b56748d7d305c84a785ae18f";
 const workflowSetSha256 = (ids) => crypto.createHash("sha256").update(`${[...ids].sort().join("\n")}\n`).digest("hex");
 
 const waves = [

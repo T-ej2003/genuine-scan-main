@@ -1236,6 +1236,72 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-action-idempotency-key-insert-56e28c0be62e",
+      "tableId": "table-action-idempotency-key",
+      "command": "INSERT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "action",
+        "completedAt",
+        "scope"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "expiresAt",
+        "id",
+        "keyHash",
+        "requestHash",
+        "responsePayload",
+        "statusCode"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL_OR_SERVER_INITIALIZED"
+      ],
+      "forbiddenLifecycleStates": [
+        "CLIENT_SELECTED_INITIAL_STATE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt"
+      ],
+      "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
+    },
+    {
       "id": "command-action-idempotency-key-insert-75f1f70d84fe",
       "tableId": "table-action-idempotency-key",
       "command": "INSERT",
@@ -1298,6 +1364,78 @@
       ],
       "confidence": "medium",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-action-idempotency-key-select-56e28c0be62e",
+      "tableId": "table-action-idempotency-key",
+      "command": "SELECT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "action",
+        "completedAt",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "keyHash",
+        "requestHash",
+        "responsePayload",
+        "scope",
+        "statusCode"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "expiresAt",
+        "id",
+        "keyHash",
+        "requestHash",
+        "responsePayload",
+        "statusCode"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
     },
     {
       "id": "command-action-idempotency-key-select-af982a9464b8",
@@ -1368,6 +1506,73 @@
       ],
       "confidence": "medium",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-action-idempotency-key-update-56e28c0be62e",
+      "tableId": "table-action-idempotency-key",
+      "command": "UPDATE",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "action",
+        "completedAt",
+        "scope"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "expiresAt",
+        "id",
+        "keyHash",
+        "requestHash",
+        "responsePayload",
+        "statusCode"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt"
+      ],
+      "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
     },
     {
       "id": "command-action-idempotency-key-update-774327f512ea",
@@ -1983,7 +2188,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -2985,7 +3191,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -4699,6 +4906,77 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-audit-log-insert-worker-boundary-audit-outbox-delivery",
+      "tableId": "table-audit-log",
+      "command": "INSERT",
+      "actorClasses": [
+        "worker"
+      ],
+      "runtimeIdentities": [
+        "identity-worker"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "password-verified",
+        "manufacturer": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "Load the durable row by job ID, verify its canonical payload digest, re-resolve the initiating actor and tenant relationship, and reject any payload/row mismatch before installing context.",
+      "allowedColumns": [
+        "action",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "licenseeId",
+        "orgId",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "details",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "New row preserves Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "worker-fn-consume-audit-outbox",
+      "namedFunctionSignatures": [
+        "app_rls.batch_reservable_qr_summaries(text,text,text,text,text,text[])"
+      ],
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
+      "supportingEvidence": [
+        "backend/src/worker.ts -> startAuditLogOutboxWorker -> flushAuditLogOutbox",
+        "Transitive worker contract in documents/security/rls-program/worker-boundaries.json"
+      ],
+      "allowScenarios": [
+        "worker-boundary-audit-outbox-delivery uses identity-worker at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-audit-outbox-delivery"
+    },
+    {
       "id": "command-audit-log-outbox-delete-prohibited",
       "tableId": "table-audit-log-outbox",
       "command": "DELETE",
@@ -4944,6 +5222,71 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-audit-log-outbox-insert-56e28c0be62e",
+      "tableId": "table-audit-log-outbox",
+      "command": "INSERT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "attempts",
+        "flushedAuditLogId",
+        "lastError",
+        "nextAttemptAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "payload",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=QUEUED"
+      ],
+      "forbiddenLifecycleStates": [
+        "CLIENT_SELECTED_INITIAL_STATE"
+      ],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
+    },
+    {
       "id": "command-audit-log-outbox-insert-62fc51366420",
       "tableId": "table-audit-log-outbox",
       "command": "INSERT",
@@ -5059,7 +5402,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -5144,7 +5488,7 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
+      "minimumAssurance": "mfa-bootstrap",
       "minimumAssuranceByActorClass": {
         "authenticated-user": "password-verified"
       },
@@ -5189,13 +5533,19 @@
         "backend/src/services/auth/mfaAdapter.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at mfa-bootstrap performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
       "confidence": "medium",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-audit-log-outbox-insert-c4febf718039",
@@ -5270,7 +5620,7 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
+      "minimumAssurance": "mfa-bootstrap",
       "minimumAssuranceByActorClass": {
         "authenticated-user": "password-verified"
       },
@@ -5315,13 +5665,19 @@
         "backend/src/services/auth/mfaAdapter.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at mfa-bootstrap performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
       "confidence": "medium",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-audit-log-outbox-insert-f3dffb308a5e",
@@ -5400,7 +5756,7 @@
       "minimumAssuranceByActorClass": {
         "worker": "system-verified"
       },
-      "scopeRule": "Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative.",
+      "scopeRule": "Load the durable row by job ID, verify its canonical payload digest, re-resolve the initiating actor and tenant relationship, and reject any payload/row mismatch before installing context.",
       "allowedColumns": [
         "attempts",
         "createdAt",
@@ -5446,13 +5802,14 @@
         "backend/src/services/auditLogOutboxService.ts"
       ],
       "allowScenarios": [
-        "worker using identity-worker at system-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "worker-boundary-audit-outbox-delivery uses identity-worker at system-verified with a fresh verified durable job, exact context and command."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-audit-outbox-delivery"
     },
     {
       "id": "command-audit-log-outbox-update-bbebad8a8023",
@@ -5468,7 +5825,7 @@
       "minimumAssuranceByActorClass": {
         "worker": "system-verified"
       },
-      "scopeRule": "Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative.",
+      "scopeRule": "Load the durable row by job ID, verify its canonical payload digest, re-resolve the initiating actor and tenant relationship, and reject any payload/row mismatch before installing context.",
       "allowedColumns": [
         "attempts",
         "flushedAuditLogId",
@@ -5511,13 +5868,14 @@
         "backend/src/services/auditLogOutboxService.ts"
       ],
       "allowScenarios": [
-        "worker using identity-worker at system-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "worker-boundary-audit-outbox-delivery uses identity-worker at system-verified with a fresh verified durable job, exact context and command."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-audit-outbox-delivery"
     },
     {
       "id": "command-audit-log-select-07fec99a574c",
@@ -5811,6 +6169,76 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-audit-log-select-56e28c0be62e",
+      "tableId": "table-audit-log",
+      "command": "SELECT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "action",
+        "createdAt",
+        "details",
+        "entityId",
+        "entityType",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "details",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
+    },
+    {
       "id": "command-audit-log-select-5998dbf5eb0a",
       "tableId": "table-audit-log",
       "command": "SELECT",
@@ -5876,7 +6304,11 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "operatorBoundaryIds": [
+        "operator-boundary-prohibited-audit-browser"
+      ],
+      "operatorBoundaryStatus": "resolved"
     },
     {
       "id": "command-audit-log-select-7691bd31cd81",
@@ -7034,7 +7466,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -13089,6 +13522,79 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-compliance-pack-job-insert-56e28c0be62e",
+      "tableId": "table-compliance-pack-job",
+      "command": "INSERT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "errorMessage",
+        "fileName",
+        "finishedAt",
+        "periodFrom",
+        "periodTo",
+        "signatureAlgorithm",
+        "startedAt",
+        "startedByUserId",
+        "storageKey",
+        "summary",
+        "triggerType"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "integrityHash",
+        "licenseeId",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=RUNNING"
+      ],
+      "forbiddenLifecycleStates": [
+        "CLIENT_SELECTED_INITIAL_STATE"
+      ],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
+    },
+    {
       "id": "command-compliance-pack-job-select-4ef0f20c1c1d",
       "tableId": "table-compliance-pack-job",
       "command": "SELECT",
@@ -13136,13 +13642,13 @@
         "status"
       ],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "ordinary-rls",
+      "authorizationBoundary": "named-function",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -13150,6 +13656,7 @@
         "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
@@ -13167,6 +13674,160 @@
       "platformReadScopeClass": "licensee-bounded-read",
       "confidence": "high",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-compliance-pack-job-select-56e28c0be62e",
+      "tableId": "table-compliance-pack-job",
+      "command": "SELECT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "createdAt",
+        "errorMessage",
+        "fileName",
+        "finishedAt",
+        "id",
+        "integrityHash",
+        "licenseeId",
+        "periodFrom",
+        "periodTo",
+        "signatureAlgorithm",
+        "startedAt",
+        "startedByUserId",
+        "status",
+        "storageKey",
+        "summary",
+        "triggerType",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "integrityHash",
+        "licenseeId",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=RUNNING",
+        "status=COMPLETED",
+        "status=FAILED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
+    },
+    {
+      "id": "command-compliance-pack-job-update-56e28c0be62e",
+      "tableId": "table-compliance-pack-job",
+      "command": "UPDATE",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "errorMessage",
+        "fileName",
+        "finishedAt",
+        "periodFrom",
+        "periodTo",
+        "signatureAlgorithm",
+        "startedAt",
+        "startedByUserId",
+        "storageKey",
+        "summary",
+        "triggerType"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "integrityHash",
+        "licenseeId",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=RUNNING",
+        "status=COMPLETED",
+        "status=FAILED"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
     },
     {
       "id": "command-customer-trust-credential-delete-prohibited",
@@ -17556,7 +18217,14 @@
       "publicAccessClass": "email-link-verification",
       "publicFunctionId": "preauth-fn-consume-email-verification",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
     },
     {
       "id": "command-email-verification-token-update-e1561aa306f2",
@@ -17642,7 +18310,14 @@
       "publicAccessClass": "email-link-verification",
       "publicFunctionId": "preauth-fn-consume-email-verification",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
     },
     {
       "id": "command-evidence-retention-job-delete-prohibited",
@@ -17748,6 +18423,75 @@
       ],
       "confidence": "high",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-evidence-retention-policy-select-56e28c0be62e",
+      "tableId": "table-evidence-retention-policy",
+      "command": "SELECT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "createdAt",
+        "exportBeforePurge",
+        "id",
+        "legalHoldTags",
+        "licenseeId",
+        "purgeEnabled",
+        "retentionDays",
+        "updatedAt",
+        "updatedByUserId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "licenseeId",
+        "purgeEnabled",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "purgeEnabled=false",
+        "purgeEnabled=true"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "purgeEnabled"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
     },
     {
       "id": "command-forensic-event-chain-delete-prohibited",
@@ -19024,6 +19768,82 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-incident-handoff-select-56e28c0be62e",
+      "tableId": "table-incident-handoff",
+      "command": "SELECT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "completedAt",
+        "containmentAt",
+        "createdAt",
+        "currentStage",
+        "documentationAt",
+        "id",
+        "incidentId",
+        "intakeAt",
+        "resolutionAt",
+        "reviewAt",
+        "slaDueAt",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "currentStage",
+        "id",
+        "incidentId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "currentStage=INTAKE",
+        "currentStage=REVIEW",
+        "currentStage=CONTAINMENT",
+        "currentStage=DOCUMENTATION",
+        "currentStage=RESOLUTION",
+        "currentStage=COMPLETE"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "currentStage"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
+    },
+    {
       "id": "command-incident-handoff-update-85d2ed0982fd",
       "tableId": "table-incident-handoff",
       "command": "UPDATE",
@@ -19539,6 +20359,99 @@
       "publicReadContractBoundaryId": "public-read-contract-v1",
       "publicAccessClass": "public-feedback-submission",
       "publicFunctionId": "public-fn-submit-public-incident",
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-incident-select-00b44dd2511d",
+      "tableId": "table-incident",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The requested file must join through IncidentEvidence.incidentId to one Incident whose licenseeId equals the database-validated canonical licensee. A filename or storage key is never scope authority.",
+      "allowedColumns": [],
+      "protectedColumns": [
+        "createdAt",
+        "customerEmail",
+        "customerPhone",
+        "deviceFingerprintHash",
+        "id",
+        "internalNotes",
+        "ipHash",
+        "licenseeId",
+        "locationCity",
+        "locationCountry",
+        "locationLat",
+        "locationLng",
+        "locationName",
+        "locationRegion",
+        "photos",
+        "qrCodeValue",
+        "status",
+        "updatedAt",
+        "userAgentHash"
+      ],
+      "allowedLifecycleStates": [
+        "status=NEW",
+        "status=TRIAGED",
+        "status=TRIAGE",
+        "status=INVESTIGATING",
+        "status=CONTAINMENT",
+        "status=ERADICATION",
+        "status=RECOVERY",
+        "status=AWAITING_CUSTOMER",
+        "status=AWAITING_LICENSEE",
+        "status=MITIGATED",
+        "status=RESOLVED",
+        "status=CLOSED",
+        "status=REOPENED",
+        "status=REJECTED_SPAM"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
+      ],
+      "supportingEvidence": [
+        "backend/src/controllers/incidentController.ts",
+        "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+        "backend/src/routes/index.ts:2260 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+      ],
+      "allowScenarios": [
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
+      ],
+      "denyScenarios": [
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "tenant-bounded-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -20098,6 +21011,118 @@
       "platformReadScopeClass": "licensee-bounded-read",
       "confidence": "high",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-incident-select-56e28c0be62e",
+      "tableId": "table-incident",
+      "command": "SELECT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "assignedToUserId",
+        "consentToContact",
+        "createdAt",
+        "customerCountry",
+        "customerName",
+        "description",
+        "id",
+        "incidentType",
+        "licenseeId",
+        "preferredContactMethod",
+        "priority",
+        "productBatchNo",
+        "purchaseDate",
+        "purchasePlace",
+        "qrCodeId",
+        "qrCodeValue",
+        "reportedBy",
+        "resolutionOutcome",
+        "resolutionSummary",
+        "scanEventId",
+        "severity",
+        "severityOverridden",
+        "slaDueAt",
+        "status",
+        "tags",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "customerEmail",
+        "customerPhone",
+        "deviceFingerprintHash",
+        "id",
+        "internalNotes",
+        "ipHash",
+        "licenseeId",
+        "locationCity",
+        "locationCountry",
+        "locationLat",
+        "locationLng",
+        "locationName",
+        "locationRegion",
+        "photos",
+        "qrCodeValue",
+        "status",
+        "updatedAt",
+        "userAgentHash"
+      ],
+      "allowedLifecycleStates": [
+        "status=NEW",
+        "status=TRIAGED",
+        "status=TRIAGE",
+        "status=INVESTIGATING",
+        "status=CONTAINMENT",
+        "status=ERADICATION",
+        "status=RECOVERY",
+        "status=AWAITING_CUSTOMER",
+        "status=AWAITING_LICENSEE",
+        "status=MITIGATED",
+        "status=RESOLVED",
+        "status=CLOSED",
+        "status=REOPENED",
+        "status=REJECTED_SPAM"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
     },
     {
       "id": "command-incident-select-5966ae6fe6ec",
@@ -21916,7 +22941,14 @@
       "publicAccessClass": "one-time-token-consumption",
       "publicFunctionId": "preauth-fn-consume-invitation",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
     },
     {
       "id": "command-invite-select-d113603cb7d4",
@@ -22007,7 +23039,14 @@
       "publicAccessClass": "pre-auth-security-function",
       "publicFunctionId": "preauth-fn-lookup-invitation",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link lookup",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-lookup-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-lookup-invitation"
     },
     {
       "id": "command-invite-update-93fe5e2f9580",
@@ -22093,7 +23132,14 @@
       "publicAccessClass": "one-time-token-consumption",
       "publicFunctionId": "preauth-fn-consume-invitation",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
     },
     {
       "id": "command-licensee-delete-prohibited",
@@ -22148,6 +23194,71 @@
       "denyScenarios": [
         "Every direct or cascaded DELETE lacking a separate exact command rule is denied."
       ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-licensee-select-00b44dd2511d",
+      "tableId": "table-licensee",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The requested file must join through IncidentEvidence.incidentId to one Incident whose licenseeId equals the database-validated canonical licensee. A filename or storage key is never scope authority.",
+      "allowedColumns": [],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "location",
+        "metadata",
+        "orgId",
+        "supportEmail",
+        "supportPhone",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
+      ],
+      "supportingEvidence": [
+        "backend/src/controllers/incidentController.ts",
+        "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+        "backend/src/routes/index.ts:2260 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+      ],
+      "allowScenarios": [
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
+      ],
+      "denyScenarios": [
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "tenant-bounded-read",
       "confidence": "high",
       "status": "architecture-resolved"
     },
@@ -22457,7 +23568,7 @@
       "minimumAssuranceByActorClass": {
         "scheduled-job": "system-verified"
       },
-      "scopeRule": "Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative.",
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
       "allowedColumns": [
         "brandName",
         "createdAt",
@@ -22490,8 +23601,8 @@
       "forbiddenLifecycleStates": [],
       "lifecycleColumns": [],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "worker-fn-claim-compliance-pack-slice",
       "requiresRestrictedWorkerBoundary": true,
       "requiresAuditEvent": false,
       "requiresApproval": false,
@@ -22504,16 +23615,19 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
       "allowScenarios": [
-        "scheduled-job using identity-scheduled-job at system-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs",
+      "workerAccessDisposition": "replace-direct-enumeration-with-exact-function"
     },
     {
       "id": "command-licensee-select-58fa2fc9edab",
@@ -22722,7 +23836,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -24325,7 +25440,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -25238,7 +26354,7 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "mfa-bootstrap",
       "minimumAssuranceByActorClass": {
         "authenticated-user": "mfa-verified"
       },
@@ -25275,13 +26391,13 @@
         "expiresAt"
       ],
       "withCheckRule": "New row preserves table-mfa-login-challenge row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "authenticated-security-repository-function",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -25292,13 +26408,19 @@
         "backend/src/services/auth/mfaAdapter.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at mfa-bootstrap performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
       "confidence": "medium",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-mfa-login-challenge-select-986a6bc31b69",
@@ -25310,7 +26432,7 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "password-verified",
+      "minimumAssurance": "mfa-bootstrap",
       "minimumAssuranceByActorClass": {
         "authenticated-user": "password-verified"
       },
@@ -25353,13 +26475,13 @@
         "expiresAt"
       ],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "authenticated-security-repository-function",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": false,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -25370,13 +26492,19 @@
         "backend/src/services/auth/mfaAdapter.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at mfa-bootstrap performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
       "confidence": "medium",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-mfa-login-challenge-update-986a6bc31b69",
@@ -25388,7 +26516,7 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "mfa-bootstrap",
       "minimumAssuranceByActorClass": {
         "authenticated-user": "mfa-verified"
       },
@@ -25427,13 +26555,13 @@
         "expiresAt"
       ],
       "withCheckRule": "New row preserves table-mfa-login-challenge row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "authenticated-security-repository-function",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -25444,13 +26572,19 @@
         "backend/src/services/auth/mfaAdapter.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at mfa-bootstrap performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
       "confidence": "medium",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-notification-delete-prohibited",
@@ -26055,6 +27189,66 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-organization-select-00b44dd2511d",
+      "tableId": "table-organization",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The requested file must join through IncidentEvidence.incidentId to one Incident whose licenseeId equals the database-validated canonical licensee. A filename or storage key is never scope authority.",
+      "allowedColumns": [],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
+      ],
+      "supportingEvidence": [
+        "backend/src/controllers/incidentController.ts",
+        "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+        "backend/src/routes/index.ts:2260 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+      ],
+      "allowScenarios": [
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
+      ],
+      "denyScenarios": [
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "tenant-bounded-read",
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-organization-select-07fec99a574c",
       "tableId": "table-organization",
       "command": "SELECT",
@@ -26190,6 +27384,64 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-organization-select-56e28c0be62e",
+      "tableId": "table-organization",
+      "command": "SELECT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "createdAt",
+        "id",
+        "isActive",
+        "name",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
+    },
+    {
       "id": "command-organization-select-65b85bc0759d",
       "tableId": "table-organization",
       "command": "SELECT",
@@ -26235,7 +27487,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -29482,7 +30735,14 @@
       "publicAccessClass": "pre-auth-security-function",
       "publicFunctionId": "preauth-fn-request-password-reset",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset request",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-request-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-request-password-reset"
     },
     {
       "id": "command-password-reset-select-963323294162",
@@ -29568,7 +30828,14 @@
       "publicAccessClass": "one-time-token-consumption",
       "publicFunctionId": "preauth-fn-consume-password-reset",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
     },
     {
       "id": "command-password-reset-update-963323294162",
@@ -29651,7 +30918,14 @@
       "publicAccessClass": "one-time-token-consumption",
       "publicFunctionId": "preauth-fn-consume-password-reset",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
     },
     {
       "id": "command-policy-alert-delete-prohibited",
@@ -64842,7 +66116,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at mfa-verified performs INSERT within the recorded scope, column set, lifecycle, and boundary."
@@ -64852,6 +66127,241 @@
       ],
       "confidence": "medium",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-refresh-token-select-00b44dd2511d",
+      "tableId": "table-refresh-token",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The requested file must join through IncidentEvidence.incidentId to one Incident whose licenseeId equals the database-validated canonical licensee. A filename or storage key is never scope authority.",
+      "allowedColumns": [],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
+      ],
+      "supportingEvidence": [
+        "backend/src/controllers/incidentController.ts",
+        "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+        "backend/src/routes/index.ts:2260 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+      ],
+      "allowScenarios": [
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
+      ],
+      "denyScenarios": [
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "tenant-bounded-read",
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-refresh-token-select-4ef0f20c1c1d",
+      "tableId": "table-refresh-token",
+      "command": "SELECT",
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "One active database-validated licensee is mandatory; status and time filters only narrow it.",
+      "allowedColumns": [],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
+      ],
+      "denyScenarios": [
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-refresh-token-select-56e28c0be62e",
+      "tableId": "table-refresh-token",
+      "command": "SELECT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "authenticatedAt",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedAt",
+        "revokedReason",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
     },
     {
       "id": "command-refresh-token-select-5e5eeb444a02",
@@ -65001,243 +66511,7 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
-      ],
-      "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
-      ],
-      "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
-      ],
-      "confidence": "medium",
-      "status": "architecture-resolved"
-    },
-    {
-      "id": "command-refresh-token-select-6f4f15166829",
-      "tableId": "table-refresh-token",
-      "command": "SELECT",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "minimumAssurance": "password-verified",
-      "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
-      },
-      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
-      "allowedColumns": [
-        "authenticatedAt",
-        "createdAt",
-        "expiresAt",
-        "id",
-        "lastUsedAt",
-        "mfaVerifiedAt",
-        "orgId",
-        "revokedAt",
-        "revokedReason",
-        "userId"
-      ],
-      "protectedColumns": [
-        "createdAt",
-        "createdIpHash",
-        "createdUserAgent",
-        "expiresAt",
-        "id",
-        "lastUsedAt",
-        "replacedByTokenHash",
-        "revokedAt",
-        "tokenHash",
-        "userId"
-      ],
-      "allowedLifecycleStates": [
-        "expiresAt=NULL",
-        "expiresAt=SERVER_TIMESTAMP_SET",
-        "lastUsedAt=NULL",
-        "lastUsedAt=SERVER_TIMESTAMP_SET",
-        "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
-      ],
-      "forbiddenLifecycleStates": [],
-      "lifecycleColumns": [
-        "expiresAt",
-        "lastUsedAt",
-        "revokedAt"
-      ],
-      "withCheckRule": "not-applicable",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "exact-reviewed-query-function",
-      "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "named-function",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-sessions-for-user"
-      ],
-      "supportingEvidence": [
-        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
-      ],
-      "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
-      ],
-      "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
-      ],
-      "confidence": "medium",
-      "status": "architecture-resolved"
-    },
-    {
-      "id": "command-refresh-token-select-aef6258afbf3",
-      "tableId": "table-refresh-token",
-      "command": "SELECT",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "minimumAssurance": "password-verified",
-      "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
-      },
-      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
-      "allowedColumns": [
-        "authenticatedAt",
-        "createdAt",
-        "expiresAt",
-        "id",
-        "lastUsedAt",
-        "mfaVerifiedAt",
-        "orgId",
-        "revokedAt",
-        "revokedReason",
-        "userId"
-      ],
-      "protectedColumns": [
-        "createdAt",
-        "createdIpHash",
-        "createdUserAgent",
-        "expiresAt",
-        "id",
-        "lastUsedAt",
-        "replacedByTokenHash",
-        "revokedAt",
-        "tokenHash",
-        "userId"
-      ],
-      "allowedLifecycleStates": [
-        "expiresAt=NULL",
-        "expiresAt=SERVER_TIMESTAMP_SET",
-        "lastUsedAt=NULL",
-        "lastUsedAt=SERVER_TIMESTAMP_SET",
-        "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
-      ],
-      "forbiddenLifecycleStates": [],
-      "lifecycleColumns": [
-        "expiresAt",
-        "lastUsedAt",
-        "revokedAt"
-      ],
-      "withCheckRule": "not-applicable",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "exact-reviewed-query-function",
-      "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "named-function",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-create-authenticated-session-capability"
-      ],
-      "supportingEvidence": [
-        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
-      ],
-      "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
-      ],
-      "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
-      ],
-      "confidence": "medium",
-      "status": "architecture-resolved"
-    },
-    {
-      "id": "command-refresh-token-select-ceadeb06dd3b",
-      "tableId": "table-refresh-token",
-      "command": "SELECT",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "minimumAssurance": "password-verified",
-      "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
-      },
-      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
-      "allowedColumns": [
-        "authenticatedAt",
-        "createdAt",
-        "expiresAt",
-        "id",
-        "lastUsedAt",
-        "mfaVerifiedAt",
-        "orgId",
-        "revokedAt",
-        "revokedReason",
-        "userId"
-      ],
-      "protectedColumns": [
-        "createdAt",
-        "createdIpHash",
-        "createdUserAgent",
-        "expiresAt",
-        "id",
-        "lastUsedAt",
-        "replacedByTokenHash",
-        "revokedAt",
-        "tokenHash",
-        "userId"
-      ],
-      "allowedLifecycleStates": [
-        "expiresAt=NULL",
-        "expiresAt=SERVER_TIMESTAMP_SET",
-        "lastUsedAt=NULL",
-        "lastUsedAt=SERVER_TIMESTAMP_SET",
-        "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
-      ],
-      "forbiddenLifecycleStates": [],
-      "lifecycleColumns": [
-        "expiresAt",
-        "lastUsedAt",
-        "revokedAt"
-      ],
-      "withCheckRule": "not-applicable",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "exact-reviewed-query-function",
-      "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "named-function",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-session-by-refresh-token"
-      ],
-      "supportingEvidence": [
+        "backend/src/services/auth/authService.ts",
         "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
@@ -65329,6 +66603,89 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-refresh-token-update-4ef0f20c1c1d",
+      "tableId": "table-refresh-token",
+      "command": "UPDATE",
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "One active database-validated licensee is mandatory; status and time filters only narrow it.",
+      "allowedColumns": [
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedReason"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
+      ],
+      "denyScenarios": [
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-refresh-token-update-65b85bc0759d",
       "tableId": "table-refresh-token",
       "command": "UPDATE",
@@ -65393,231 +66750,7 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
-      ],
-      "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
-      ],
-      "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
-      ],
-      "confidence": "medium",
-      "status": "architecture-resolved"
-    },
-    {
-      "id": "command-refresh-token-update-6f4f15166829",
-      "tableId": "table-refresh-token",
-      "command": "UPDATE",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "minimumAssurance": "mfa-verified",
-      "minimumAssuranceByActorClass": {
-        "authenticated-user": "mfa-verified"
-      },
-      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
-      "allowedColumns": [
-        "authenticatedAt",
-        "mfaVerifiedAt",
-        "orgId",
-        "revokedReason"
-      ],
-      "protectedColumns": [
-        "createdAt",
-        "createdIpHash",
-        "createdUserAgent",
-        "expiresAt",
-        "id",
-        "lastUsedAt",
-        "replacedByTokenHash",
-        "revokedAt",
-        "tokenHash",
-        "userId"
-      ],
-      "allowedLifecycleStates": [
-        "expiresAt=NULL",
-        "expiresAt=SERVER_TIMESTAMP_SET",
-        "lastUsedAt=NULL",
-        "lastUsedAt=SERVER_TIMESTAMP_SET",
-        "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
-      ],
-      "forbiddenLifecycleStates": [
-        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
-      ],
-      "lifecycleColumns": [
-        "expiresAt",
-        "lastUsedAt",
-        "revokedAt"
-      ],
-      "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "exact-reviewed-query-function",
-      "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "named-function",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-sessions-for-user"
-      ],
-      "supportingEvidence": [
-        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
-      ],
-      "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
-      ],
-      "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
-      ],
-      "confidence": "medium",
-      "status": "architecture-resolved"
-    },
-    {
-      "id": "command-refresh-token-update-aef6258afbf3",
-      "tableId": "table-refresh-token",
-      "command": "UPDATE",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "minimumAssurance": "mfa-verified",
-      "minimumAssuranceByActorClass": {
-        "authenticated-user": "mfa-verified"
-      },
-      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
-      "allowedColumns": [
-        "authenticatedAt",
-        "mfaVerifiedAt",
-        "orgId",
-        "revokedReason"
-      ],
-      "protectedColumns": [
-        "createdAt",
-        "createdIpHash",
-        "createdUserAgent",
-        "expiresAt",
-        "id",
-        "lastUsedAt",
-        "replacedByTokenHash",
-        "revokedAt",
-        "tokenHash",
-        "userId"
-      ],
-      "allowedLifecycleStates": [
-        "expiresAt=NULL",
-        "expiresAt=SERVER_TIMESTAMP_SET",
-        "lastUsedAt=NULL",
-        "lastUsedAt=SERVER_TIMESTAMP_SET",
-        "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
-      ],
-      "forbiddenLifecycleStates": [
-        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
-      ],
-      "lifecycleColumns": [
-        "expiresAt",
-        "lastUsedAt",
-        "revokedAt"
-      ],
-      "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "exact-reviewed-query-function",
-      "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "named-function",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-create-authenticated-session-capability"
-      ],
-      "supportingEvidence": [
-        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
-      ],
-      "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
-      ],
-      "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
-      ],
-      "confidence": "medium",
-      "status": "architecture-resolved"
-    },
-    {
-      "id": "command-refresh-token-update-ceadeb06dd3b",
-      "tableId": "table-refresh-token",
-      "command": "UPDATE",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "minimumAssurance": "mfa-verified",
-      "minimumAssuranceByActorClass": {
-        "authenticated-user": "mfa-verified"
-      },
-      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
-      "allowedColumns": [
-        "authenticatedAt",
-        "mfaVerifiedAt",
-        "orgId",
-        "revokedReason"
-      ],
-      "protectedColumns": [
-        "createdAt",
-        "createdIpHash",
-        "createdUserAgent",
-        "expiresAt",
-        "id",
-        "lastUsedAt",
-        "replacedByTokenHash",
-        "revokedAt",
-        "tokenHash",
-        "userId"
-      ],
-      "allowedLifecycleStates": [
-        "expiresAt=NULL",
-        "expiresAt=SERVER_TIMESTAMP_SET",
-        "lastUsedAt=NULL",
-        "lastUsedAt=SERVER_TIMESTAMP_SET",
-        "revokedAt=NULL",
-        "revokedAt=SERVER_TIMESTAMP_SET"
-      ],
-      "forbiddenLifecycleStates": [
-        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
-      ],
-      "lifecycleColumns": [
-        "expiresAt",
-        "lastUsedAt",
-        "revokedAt"
-      ],
-      "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "exact-reviewed-query-function",
-      "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": true,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "named-function",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-session-by-refresh-token"
-      ],
-      "supportingEvidence": [
+        "backend/src/services/auth/authService.ts",
         "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
@@ -67372,7 +68505,7 @@
       "minimumAssuranceByActorClass": {
         "worker": "system-verified"
       },
-      "scopeRule": "The identity-worker runtime may claim only an allowlisted durable SecurityEventOutbox row under worker-boundary-siem-outbox-delivery; JSON scope never establishes tenant or human authority.",
+      "scopeRule": "Load the durable outbox row, validate its allowlisted event type and canonical digest, and resolve any tenant/actor references from authoritative tables; JSON claims never grant authority.",
       "allowedColumns": [
         "id",
         "eventType",
@@ -67416,24 +68549,16 @@
         "backend/src/services/siemOutboxService.ts"
       ],
       "allowScenarios": [
-        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
-        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
-        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
-        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
-        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
+        "worker-boundary-siem-outbox-delivery uses identity-worker at system-verified with a fresh verified durable job, exact context and command."
       ],
       "denyScenarios": [
-        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
-        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
-        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
-        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
-        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
-        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
       ],
       "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
       "policyAlertClass": "worker-alert-delivery",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-siem-outbox-delivery"
     },
     {
       "id": "command-security-event-outbox-update-76e162f16ff9",
@@ -67449,7 +68574,7 @@
       "minimumAssuranceByActorClass": {
         "worker": "system-verified"
       },
-      "scopeRule": "The identity-worker runtime may claim only an allowlisted durable SecurityEventOutbox row under worker-boundary-siem-outbox-delivery; JSON scope never establishes tenant or human authority.",
+      "scopeRule": "Load the durable outbox row, validate its allowlisted event type and canonical digest, and resolve any tenant/actor references from authoritative tables; JSON claims never grant authority.",
       "allowedColumns": [
         "status",
         "attempts",
@@ -67494,24 +68619,16 @@
         "backend/src/services/siemOutboxService.ts"
       ],
       "allowScenarios": [
-        "A database-verified active licensee administrator with fresh MFA, request ID, tenant-alert-review purpose, and canonical licensee reads at most 100 projected alerts for that licensee in one attributed transaction.",
-        "A database-verified active licensee administrator acknowledges one unacknowledged alert in their licensee through a one-row CAS and same-transaction immutable attribution.",
-        "A platform incident responder with step-up assurance and an active unexpired incident authorization reads only projected alerts bound to that incident and licensee.",
-        "An incident responder links one unlinked alert to one same-licensee incident through a one-row CAS, reason, idempotency key, immutable attribution, and approved outbox.",
-        "The identity-worker runtime delivers one allowlisted durable outbox event through worker-boundary-siem-outbox-delivery without installing human context."
+        "worker-boundary-siem-outbox-delivery uses identity-worker at system-verified with a fresh verified durable job, exact context and command."
       ],
       "denyScenarios": [
-        "Generic admin, role text alone, password-only sensitive administration, missing purpose/request ID, blank or foreign scope, NULL or conflicting parents, stale assurance, or platform-wide fallback is denied.",
-        "A manufacturer cannot read all alerts for a linked licensee; no current workflow is approved for manufacturer alert details.",
-        "Assignment, PolicyAlert resolution, suppression, unacknowledgement, incident unlinking, incident reassignment, mixed acknowledgement/escalation patch, or protected ownership changes are denied.",
-        "Raw details, secret indicators, personal data, full network/device fingerprints, raw audit data, SIEM credentials, or unrelated tenant identifiers are denied.",
-        "Public access is denied; no alert ID, tenant reference, signed QR reference, or notification token currently proves a public alert disclosure.",
-        "Workers cannot impersonate humans and operators cannot replace exact procedures with direct alert-table access."
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
       ],
       "policyAlertActorCeilingBoundaryId": "policy-alert-actor-ceiling-v1",
       "policyAlertClass": "worker-alert-delivery",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-siem-outbox-delivery"
     },
     {
       "id": "command-security-policy-delete-prohibited",
@@ -72552,7 +73669,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -73442,7 +74560,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -74394,6 +75513,91 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-user-select-00b44dd2511d",
+      "tableId": "table-user",
+      "command": "SELECT",
+      "actorClasses": [
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "licensee-admin": "mfa-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "The requested file must join through IncidentEvidence.incidentId to one Incident whose licenseeId equals the database-validated canonical licensee. A filename or storage key is never scope authority.",
+      "allowedColumns": [],
+      "protectedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "email",
+        "emailVerifiedAt",
+        "id",
+        "licenseeId",
+        "location",
+        "metadata",
+        "orgId",
+        "passwordHash",
+        "pendingEmail",
+        "pendingEmailRequestedAt",
+        "role",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "deletedAt=NULL",
+        "deletedAt=SERVER_TIMESTAMP_SET",
+        "disabledAt=NULL",
+        "disabledAt=SERVER_TIMESTAMP_SET",
+        "status=INVITED",
+        "status=ACTIVE",
+        "status=DISABLED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "deletedAt",
+        "disabledAt",
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file"
+      ],
+      "supportingEvidence": [
+        "backend/src/controllers/incidentController.ts",
+        "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
+        "backend/src/routes/index.ts:2260 guards=authenticate,requireAnyAdmin,enforceTenantIsolation"
+      ],
+      "allowScenarios": [
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
+      ],
+      "denyScenarios": [
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "tenant-bounded-read",
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-user-select-07fec99a574c",
       "tableId": "table-user",
       "command": "SELECT",
@@ -75041,6 +76245,89 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-user-select-4ef0f20c1c1d",
+      "tableId": "table-user",
+      "command": "SELECT",
+      "actorClasses": [
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "One active database-validated licensee is mandatory; status and time filters only narrow it.",
+      "allowedColumns": [],
+      "protectedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "email",
+        "emailVerifiedAt",
+        "id",
+        "licenseeId",
+        "location",
+        "metadata",
+        "orgId",
+        "passwordHash",
+        "pendingEmail",
+        "pendingEmailRequestedAt",
+        "role",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "deletedAt=NULL",
+        "deletedAt=SERVER_TIMESTAMP_SET",
+        "disabledAt=NULL",
+        "disabledAt=SERVER_TIMESTAMP_SET",
+        "status=INVITED",
+        "status=ACTIVE",
+        "status=DISABLED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "deletedAt",
+        "disabledAt",
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "A database-verified active platform administrator with fresh required assurance, request ID, one allowlisted purpose, and an exact database-validated selector reads only the approved projection and bounds in one attributed transaction.",
+        "The telemetry workflow returns only its 31-day, 20-dimension dedicated aggregate without tenant identities or raw rows.",
+        "An exact operator diagnostic runs only through its mapped operator boundary with operator-approved assurance and expiry."
+      ],
+      "denyScenarios": [
+        "Role string alone, password-only assurance, blank scope, foreign or conflicting selectors, unrestricted purpose, missing request attribution, stale MFA, secret projection, raw global rows, or an unsupported selector combination is denied.",
+        "Incident-response reads without an active incident ID, tenant ceiling, step-up assurance, immutable record, and unexpired authorization are denied.",
+        "Licensee CSV export and ordinary application access to catalog, grant, role, ownership, policy, readiness, or migration diagnostics are denied."
+      ],
+      "platformReadScopeBoundaryId": "platform-read-scope-v1",
+      "platformReadScopeClass": "licensee-bounded-read",
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-user-select-509547f03abe",
       "tableId": "table-user",
       "command": "SELECT",
@@ -75154,7 +76441,7 @@
       "minimumAssuranceByActorClass": {
         "scheduled-job": "system-verified"
       },
-      "scopeRule": "Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative.",
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
       "allowedColumns": [
         "createdAt",
         "deletedAt",
@@ -75208,7 +76495,7 @@
       ],
       "withCheckRule": "not-applicable",
       "requiresNamedFunction": true,
-      "namedFunctionClass": "authenticated-security-repository-function",
+      "namedFunctionClass": "exact-reviewed-query-function",
       "requiresRestrictedWorkerBoundary": true,
       "requiresAuditEvent": false,
       "requiresApproval": false,
@@ -75221,16 +76508,19 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
       ],
       "allowScenarios": [
-        "scheduled-job using identity-scheduled-job at system-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs",
+      "workerAccessDisposition": "remove-before-activation; no human impersonation"
     },
     {
       "id": "command-user-select-58fa2fc9edab",
@@ -75407,7 +76697,8 @@
       ],
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
-        "backend/src/services/auth/authService.ts"
+        "backend/src/services/auth/authService.ts",
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
@@ -75511,98 +76802,6 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
-      "status": "architecture-resolved"
-    },
-    {
-      "id": "command-user-select-6f4f15166829",
-      "tableId": "table-user",
-      "command": "SELECT",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "minimumAssurance": "password-verified",
-      "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
-      },
-      "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-      "allowedColumns": [
-        "createdAt",
-        "deletedAt",
-        "disabledAt",
-        "disabledReason",
-        "failedLoginAttempts",
-        "id",
-        "isActive",
-        "lastLoginAt",
-        "licenseeId",
-        "lockedUntil",
-        "name",
-        "orgId",
-        "role",
-        "status",
-        "updatedAt",
-        "website"
-      ],
-      "protectedColumns": [
-        "createdAt",
-        "deletedAt",
-        "disabledAt",
-        "email",
-        "emailVerifiedAt",
-        "id",
-        "licenseeId",
-        "location",
-        "metadata",
-        "orgId",
-        "passwordHash",
-        "pendingEmail",
-        "pendingEmailRequestedAt",
-        "role",
-        "status",
-        "updatedAt"
-      ],
-      "allowedLifecycleStates": [
-        "deletedAt=NULL",
-        "deletedAt=SERVER_TIMESTAMP_SET",
-        "disabledAt=NULL",
-        "disabledAt=SERVER_TIMESTAMP_SET",
-        "status=INVITED",
-        "status=ACTIVE",
-        "status=DISABLED"
-      ],
-      "forbiddenLifecycleStates": [],
-      "lifecycleColumns": [
-        "deletedAt",
-        "disabledAt",
-        "status"
-      ],
-      "withCheckRule": "not-applicable",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "exact-reviewed-query-function",
-      "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "named-function",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-sessions-for-user"
-      ],
-      "supportingEvidence": [
-        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
-      ],
-      "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
-      ],
-      "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
-      ],
-      "confidence": "medium",
       "status": "architecture-resolved"
     },
     {
@@ -76188,7 +77387,14 @@
       "publicAccessClass": "pre-auth-security-function",
       "publicFunctionId": "preauth-fn-lookup-password-user",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-login lookup",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-lookup-password-user",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-lookup-password-user"
     },
     {
       "id": "command-user-select-92ebfd6a1d0d",
@@ -77142,98 +78348,6 @@
       "status": "architecture-resolved"
     },
     {
-      "id": "command-user-select-ceadeb06dd3b",
-      "tableId": "table-user",
-      "command": "SELECT",
-      "actorClasses": [
-        "authenticated-user"
-      ],
-      "runtimeIdentities": [
-        "identity-authenticated-app"
-      ],
-      "minimumAssurance": "password-verified",
-      "minimumAssuranceByActorClass": {
-        "authenticated-user": "password-verified"
-      },
-      "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
-      "allowedColumns": [
-        "createdAt",
-        "deletedAt",
-        "disabledAt",
-        "disabledReason",
-        "failedLoginAttempts",
-        "id",
-        "isActive",
-        "lastLoginAt",
-        "licenseeId",
-        "lockedUntil",
-        "name",
-        "orgId",
-        "role",
-        "status",
-        "updatedAt",
-        "website"
-      ],
-      "protectedColumns": [
-        "createdAt",
-        "deletedAt",
-        "disabledAt",
-        "email",
-        "emailVerifiedAt",
-        "id",
-        "licenseeId",
-        "location",
-        "metadata",
-        "orgId",
-        "passwordHash",
-        "pendingEmail",
-        "pendingEmailRequestedAt",
-        "role",
-        "status",
-        "updatedAt"
-      ],
-      "allowedLifecycleStates": [
-        "deletedAt=NULL",
-        "deletedAt=SERVER_TIMESTAMP_SET",
-        "disabledAt=NULL",
-        "disabledAt=SERVER_TIMESTAMP_SET",
-        "status=INVITED",
-        "status=ACTIVE",
-        "status=DISABLED"
-      ],
-      "forbiddenLifecycleStates": [],
-      "lifecycleColumns": [
-        "deletedAt",
-        "disabledAt",
-        "status"
-      ],
-      "withCheckRule": "not-applicable",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "exact-reviewed-query-function",
-      "requiresRestrictedWorkerBoundary": false,
-      "requiresAuditEvent": false,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "named-function",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-session-by-refresh-token"
-      ],
-      "supportingEvidence": [
-        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
-      ],
-      "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
-      ],
-      "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
-      ],
-      "confidence": "medium",
-      "status": "architecture-resolved"
-    },
-    {
       "id": "command-user-select-d113603cb7d4",
       "tableId": "table-user",
       "command": "SELECT",
@@ -77339,7 +78453,14 @@
       "publicAccessClass": "pre-auth-security-function",
       "publicFunctionId": "preauth-fn-lookup-invitation",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link lookup",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-lookup-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-lookup-invitation"
     },
     {
       "id": "command-user-select-def90113be13",
@@ -77724,7 +78845,14 @@
       "publicAccessClass": "pre-auth-security-function",
       "publicFunctionId": "preauth-fn-request-password-reset",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset request",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-request-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-request-password-reset"
     },
     {
       "id": "command-user-select-f64d10600903",
@@ -78097,7 +79225,14 @@
       "publicAccessClass": "pre-auth-security-function",
       "publicFunctionId": "preauth-fn-record-password-failure",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "failed-login recording",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-record-password-failure",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-record-password-failure"
     },
     {
       "id": "command-user-update-93fe5e2f9580",
@@ -78198,7 +79333,14 @@
       "publicAccessClass": "one-time-token-consumption",
       "publicFunctionId": "preauth-fn-consume-invitation",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "invitation/setup-link consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-invitation",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-invitation"
     },
     {
       "id": "command-user-update-963323294162",
@@ -78299,7 +79441,14 @@
       "publicAccessClass": "one-time-token-consumption",
       "publicFunctionId": "preauth-fn-consume-password-reset",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "password-reset completion",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-password-reset",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-password-reset"
     },
     {
       "id": "command-user-update-97a7383cb700",
@@ -78311,7 +79460,7 @@
       "runtimeIdentities": [
         "identity-authenticated-app"
       ],
-      "minimumAssurance": "mfa-verified",
+      "minimumAssurance": "password-verified",
       "minimumAssuranceByActorClass": {
         "authenticated-user": "mfa-verified"
       },
@@ -78361,13 +79510,13 @@
         "status"
       ],
       "withCheckRule": "New row preserves Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "authenticated-security-repository-function",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "named-function",
+      "authorizationBoundary": "ordinary-rls",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -78378,13 +79527,19 @@
         "backend/src/services/auth/authService.ts"
       ],
       "allowScenarios": [
-        "authenticated-user using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+        "Resolved actor using identity-authenticated-app at password-verified performs the command only after canonical transaction context is installed."
       ],
       "denyScenarios": [
-        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+        "Pre-auth runtime, anonymous caller, missing/mismatched actor context, lower assurance, or direct contextless table access is denied."
       ],
       "confidence": "medium",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "not actually pre-auth and must move behind canonical actor context",
+        "boundaryMode": "ordinary-authenticated-context",
+        "functionId": null,
+        "status": "resolved"
+      }
     },
     {
       "id": "command-user-update-e1561aa306f2",
@@ -78485,7 +79640,14 @@
       "publicAccessClass": "email-link-verification",
       "publicFunctionId": "preauth-fn-consume-email-verification",
       "confidence": "high",
-      "status": "architecture-resolved"
+      "status": "architecture-resolved",
+      "preAuthBoundary": {
+        "workflowGroup": "email-verification consumption",
+        "boundaryMode": "exact-security-definer-function",
+        "functionId": "preauth-fn-consume-email-verification",
+        "status": "resolved"
+      },
+      "preAuthFunctionId": "preauth-fn-consume-email-verification"
     },
     {
       "id": "command-verification-decision-delete-prohibited",

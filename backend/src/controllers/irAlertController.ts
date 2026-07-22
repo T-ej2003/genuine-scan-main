@@ -7,6 +7,7 @@ import { createAuditLogInTransaction } from "../services/auditService";
 import { createRoleNotifications } from "../services/notificationService";
 import {
   C03AccessError,
+  c03DatabaseSessionCapability,
   c03RequestId,
   withC03ResourceTransaction,
 } from "../rls-waves/session-c/c03/c03ActorBoundary";
@@ -74,7 +75,7 @@ export const listIrAlerts = async (req: AuthRequest, res: Response) => {
 
     const result = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-response-alert-triage",
         resourceId: incidentId,
@@ -151,7 +152,7 @@ export const patchIrAlert = async (req: AuthRequest, res: Response) => {
 
     const updated = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "alert-escalation",
         resourceId: parsed.data.incidentId,

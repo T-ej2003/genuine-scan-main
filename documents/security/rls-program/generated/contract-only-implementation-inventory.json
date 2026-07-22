@@ -337,15 +337,20 @@
         "boundaryClass": "worker/scheduled workflows",
         "implementationStatus": "contract-ready",
         "sourceCommandRuleIds": [
-          "command-audit-log-insert-56e28c0be62e",
+          "command-action-idempotency-key-insert-56e28c0be62e",
+          "command-action-idempotency-key-select-56e28c0be62e",
+          "command-action-idempotency-key-update-56e28c0be62e",
+          "command-audit-log-outbox-insert-56e28c0be62e",
           "command-audit-log-select-56e28c0be62e",
           "command-compliance-pack-job-insert-56e28c0be62e",
+          "command-compliance-pack-job-select-56e28c0be62e",
           "command-compliance-pack-job-update-56e28c0be62e",
-          "command-evidence-retention-policy-insert-56e28c0be62e",
-          "command-evidence-retention-policy-update-56e28c0be62e",
+          "command-evidence-retention-policy-select-56e28c0be62e",
           "command-incident-handoff-select-56e28c0be62e",
           "command-incident-select-56e28c0be62e",
           "command-licensee-select-56e28c0be62e",
+          "command-organization-select-56e28c0be62e",
+          "command-refresh-token-select-56e28c0be62e",
           "command-user-select-56e28c0be62e"
         ]
       },
@@ -634,15 +639,20 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "sourceCommandRuleIds": [
-        "command-audit-log-insert-56e28c0be62e",
+        "command-action-idempotency-key-insert-56e28c0be62e",
+        "command-action-idempotency-key-select-56e28c0be62e",
+        "command-action-idempotency-key-update-56e28c0be62e",
+        "command-audit-log-outbox-insert-56e28c0be62e",
         "command-audit-log-select-56e28c0be62e",
         "command-compliance-pack-job-insert-56e28c0be62e",
+        "command-compliance-pack-job-select-56e28c0be62e",
         "command-compliance-pack-job-update-56e28c0be62e",
-        "command-evidence-retention-policy-insert-56e28c0be62e",
-        "command-evidence-retention-policy-update-56e28c0be62e",
+        "command-evidence-retention-policy-select-56e28c0be62e",
         "command-incident-handoff-select-56e28c0be62e",
         "command-incident-select-56e28c0be62e",
         "command-licensee-select-56e28c0be62e",
+        "command-organization-select-56e28c0be62e",
+        "command-refresh-token-select-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ]
     },

@@ -519,6 +519,377 @@
         "b01-load-refresh-session-state",
         "b01-revoke-refresh-token-scope"
       ]
+    },
+    {
+      "table": "RefreshToken",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "userId",
+        "expiresAt",
+        "revokedAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityRevokedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "User",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "role",
+        "orgId",
+        "licenseeId",
+        "status",
+        "isActive",
+        "disabledAt",
+        "deletedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "isActive",
+        "suspendedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "CompliancePackJob",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "status",
+        "triggerType",
+        "periodFrom",
+        "periodTo",
+        "fileName",
+        "storageKey",
+        "integrityHash",
+        "signatureAlgorithm",
+        "summary",
+        "errorMessage",
+        "startedByUserId",
+        "startedAt",
+        "finishedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "CompliancePackJob",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "status",
+        "triggerType",
+        "periodFrom",
+        "periodTo",
+        "startedByUserId",
+        "startedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "CompliancePackJob",
+      "command": "UPDATE",
+      "columns": [
+        "status",
+        "fileName",
+        "storageKey",
+        "integrityHash",
+        "signatureAlgorithm",
+        "summary",
+        "errorMessage",
+        "finishedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "ActionIdempotencyKey",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "keyHash",
+        "action",
+        "scope",
+        "requestHash",
+        "statusCode",
+        "responsePayload",
+        "createdAt",
+        "completedAt",
+        "expiresAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "ActionIdempotencyKey",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "keyHash",
+        "action",
+        "scope",
+        "requestHash",
+        "expiresAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "ActionIdempotencyKey",
+      "command": "UPDATE",
+      "columns": [
+        "statusCode",
+        "responsePayload",
+        "completedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "Incident",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "status",
+        "slaDueAt",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "IncidentEvidence",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "incidentId",
+        "fileUrl",
+        "storageKey",
+        "fileType",
+        "uploadedByUserId",
+        "uploadedBy",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "IncidentHandoff",
+      "command": "SELECT",
+      "columns": [
+        "incidentId",
+        "currentStage"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "AuditLog",
+      "command": "SELECT",
+      "columns": [
+        "licenseeId",
+        "action",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "EvidenceRetentionPolicy",
+      "command": "SELECT",
+      "columns": [
+        "licenseeId",
+        "retentionDays"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
+    },
+    {
+      "table": "AuditLogOutbox",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "payload",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "c03-complete-compliance-pack-job",
+        "c03-complete-compliance-pack-rebuild",
+        "c03-fail-compliance-pack-job",
+        "c03-get-compliance-pack-job",
+        "c03-get-incident-evidence-file",
+        "c03-revalidate-compliance-pack-job-actor",
+        "c03-start-compliance-pack-job"
+      ]
     }
   ]
 }

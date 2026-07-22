@@ -608,6 +608,7 @@
         "workflow-internal-backend-src-services-auth-auth-email-service-ts-get-primary-superadmin-email",
         "workflow-internal-backend-src-services-auth-auth-service-ts-load-active-session-state",
         "workflow-internal-backend-src-services-auth-auth-service-ts-login-with-password",
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
         "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-consume-legacy-backup-code",
         "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-consume-user-backup-code",
         "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-replace-user-backup-codes-with-client",
@@ -930,9 +931,9 @@
       "resolvedAt": "2026-07-16",
       "resolution": {
         "authority": "documents/security/rls-program/command-semantics.json",
-        "rules": 946,
+        "rules": 972,
         "forceRlsTables": 75,
-        "workflowsMapped": 400,
+        "workflowsMapped": 401,
         "commandVocabulary": [
           "SELECT",
           "INSERT",
@@ -1171,6 +1172,7 @@
         "workflow-internal-backend-src-services-auth-auth-email-service-ts-get-primary-superadmin-email",
         "workflow-internal-backend-src-services-auth-auth-service-ts-load-active-session-state",
         "workflow-internal-backend-src-services-auth-auth-service-ts-login-with-password",
+        "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
         "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-consume-legacy-backup-code",
         "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-consume-user-backup-code",
         "workflow-internal-backend-src-services-auth-backup-code-mfa-provider-ts-replace-user-backup-codes-with-client",
@@ -1627,6 +1629,7 @@
         "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
       ],
       "affectedTables": [
+        "table-action-idempotency-key",
         "table-audit-log",
         "table-audit-log-outbox",
         "table-compliance-pack-job",
@@ -1634,8 +1637,7 @@
         "table-incident",
         "table-incident-handoff",
         "table-licensee",
-        "table-security-event-outbox",
-        "table-user"
+        "table-security-event-outbox"
       ],
       "question": "How does each worker and scheduled job obtain independently verifiable tenant scope and least-privilege database authority?",
       "securityConsequence": "Trusting only a queue payload creates a confused-deputy path; a global system role defeats tenant isolation.",

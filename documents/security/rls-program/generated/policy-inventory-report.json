@@ -1,7 +1,76 @@
 {
   "schemaVersion": 1,
-  "count": 58,
+  "count": 72,
   "rows": [
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
+      "policyName": "c03_capability_actionidempotencykey_insert",
+      "command": "INSERT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-insert-56e28c0be62e"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
+      "policyName": "c03_capability_actionidempotencykey_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-select-56e28c0be62e"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
+      "policyName": "c03_capability_actionidempotencykey_update",
+      "command": "UPDATE",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND action='c03-compliance-start' AND scope=current_setting('app.c03_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-update-56e28c0be62e"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
     {
       "tableId": "table-admin-mfa-credential",
       "table": "AdminMfaCredential",
@@ -45,6 +114,29 @@
       ],
       "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
       "route": "POST /auth/refresh",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "c03_capability_auditlog_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-select-07fec99a574c"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -357,6 +449,29 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "c03_capability_auditlogoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND payload->>'userId'=current_setting('app.c03_user_id',true) AND payload->>'licenseeId'=current_setting('app.c03_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-0b4b95c51d1e"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-auth-mfa-challenge",
       "table": "AuthMfaChallenge",
       "policyName": "b01_authmfachallenge_insert",
@@ -502,6 +617,121 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-compliance-pack-job",
+      "table": "CompliancePackJob",
+      "policyName": "c03_capability_compliancepackjob_insert",
+      "command": "INSERT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='compliance-pack-start' AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND \"startedByUserId\"=current_setting('app.c03_user_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-compliance-pack-job-insert-56e28c0be62e"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-compliance-pack-job",
+      "table": "CompliancePackJob",
+      "policyName": "c03_capability_compliancepackjob_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_job_id',true) OR \"licenseeId\"=current_setting('app.c03_licensee_id',true)) AND (current_setting('app.c03_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.c03_licensee_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-compliance-pack-job-select-4ef0f20c1c1d"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-compliance-pack-job",
+      "table": "CompliancePackJob",
+      "policyName": "c03_capability_compliancepackjob_update",
+      "command": "UPDATE",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND id=current_setting('app.c03_job_id',true) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true) AND current_setting('app.c03_operation',true) IN ('compliance-pack-complete','compliance-pack-fail','compliance-pack-rebuild')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-compliance-pack-job-update-56e28c0be62e"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-evidence-retention-policy",
+      "table": "EvidenceRetentionPolicy",
+      "policyName": "c03_capability_evidenceretentionpolicy_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.c03_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-evidence-retention-policy-select-56e28c0be62e"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-incident",
+      "table": "Incident",
+      "policyName": "c03_capability_incident_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (\"licenseeId\"=current_setting('app.c03_licensee_id',true) OR (current_setting('app.c03_licensee_id',true)='' AND id=current_setting('app.c03_incident_id',true)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-incident-select-00b44dd2511d"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-incident",
       "table": "Incident",
       "policyName": "full_rls_incident_select_sql_profile_risk_analytics__5b7afba446",
@@ -552,6 +782,52 @@
       "route": "GET /api/analytics/risk-scores",
       "certificationStatus": "pending",
       "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-incident-evidence",
+      "table": "IncidentEvidence",
+      "policyName": "c03_capability_incidentevidence_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.c03_operation',true)='incident-evidence-read' AND \"storageKey\"=current_setting('app.c03_storage_key',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-incident-evidence-select-00b44dd2511d"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-incident-handoff",
+      "table": "IncidentHandoff",
+      "policyName": "c03_capability_incidenthandoff_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" i WHERE i.id=\"incidentId\" AND i.\"licenseeId\"=current_setting('app.c03_licensee_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-incident-handoff-select-56e28c0be62e"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-inventory-status-rollup",
@@ -624,6 +900,29 @@
       ],
       "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
       "route": "POST /auth/refresh",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "policyName": "c03_capability_licensee_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND (id=current_setting('app.c03_licensee_id',true) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.c03_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (id=current_setting('app.c03_actor_licensee_id',true) AND \"orgId\"=current_setting('app.c03_actor_organization_id',true))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-licensee-select-00b44dd2511d"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -906,6 +1205,29 @@
       ],
       "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
       "route": "POST /auth/refresh",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
+      "policyName": "c03_capability_organization_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "c03-reviewed-boundary"
+      ],
+      "scopeType": "security-definer-owner-capability-and-resource-derived-context",
+      "scopePredicate": "(current_user={{AUTH_OWNER}} AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.c03_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.c03_user_id',true)=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" c03_session WHERE c03_session.id=current_setting('app.c03_session_id',true) AND c03_session.\"userId\"=current_setting('app.c03_user_id',true) AND c03_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND c03_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND c03_session.\"sessionCapabilityRevokedAt\" IS NULL AND c03_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND c03_session.\"revokedAt\" IS NULL AND c03_session.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND id IN (current_setting('app.c03_actor_organization_id',true),(SELECT l.\"orgId\" FROM public.\"Licensee\" l WHERE l.id=current_setting('app.c03_licensee_id',true)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-organization-select-00b44dd2511d"
+      ],
+      "workflowId": null,
+      "route": "C03 exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },

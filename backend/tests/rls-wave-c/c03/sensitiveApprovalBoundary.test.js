@@ -64,6 +64,7 @@ const user = (overrides = {}) => ({
   ...overrides,
 });
 const actor = { userId: ids.actor, role: "PLATFORM_SUPER_ADMIN", orgId: null, licenseeId: null };
+const databaseSessionCapability = "A".repeat(43);
 
 const create = (overrides = {}) => service.createSensitiveActionApproval({
   actionKey: service.SENSITIVE_ACTION_KEYS.QR_BLOCK,
@@ -72,7 +73,7 @@ const create = (overrides = {}) => service.createSensitiveActionApproval({
   entityType: "QRCode",
   entityId: ids.approval,
   payload: { qrId: ids.approval },
-  securityContext: { user: user(), requestId: ids.request },
+  securityContext: { databaseSessionCapability, requestId: ids.request },
   ...overrides,
 });
 
@@ -82,11 +83,6 @@ const run = async () => {
     (error) => error instanceof C03AccessError && error.statusCode === 401
   );
   assert.equal(actorBoundary, null, "missing caller context must fail before database boundary");
-
-  await assert.rejects(
-    () => create({ securityContext: { user: user({ userId: ids.approval }), requestId: ids.request } }),
-    /inconsistent/
-  );
 
   actorBoundary = null;
   await assert.rejects(
@@ -100,7 +96,7 @@ const run = async () => {
       actor,
       licenseeId: ids.licensee,
       limit: Number.NaN,
-      securityContext: { user: user(), requestId: ids.request },
+      securityContext: { databaseSessionCapability, requestId: ids.request },
     }),
     /pagination is invalid/
   );
@@ -108,6 +104,7 @@ const run = async () => {
   const created = await create();
   assert.equal(created.status, "PENDING");
   assert.equal(actorBoundary.purpose, "sensitive-action-approval-request");
+  assert.equal(actorBoundary.databaseSessionCapability, databaseSessionCapability);
   assert.equal(actorBoundary.licenseeId, ids.licensee);
   assert.equal(actorBoundary.requiredAssurance, "password-verified");
   assert(!("userId" in createInput), "database input must derive requester attribution from canonical context");
@@ -118,7 +115,7 @@ const run = async () => {
     approvalId: ids.approval,
     actor,
     reviewNote: "  reviewed  ",
-    securityContext: { user: user(), requestId: ids.request },
+    securityContext: { databaseSessionCapability, requestId: ids.request },
   });
   assert.equal(resourceBoundary.resourceType, "sensitiveActionApproval");
   assert.equal(resourceBoundary.resourceId, ids.approval);
@@ -131,7 +128,7 @@ const run = async () => {
       approvalId: ids.approval,
       actor,
       reviewNote: "x".repeat(501),
-      securityContext: { user: user(), requestId: ids.request },
+      securityContext: { databaseSessionCapability, requestId: ids.request },
     }),
     /review note is too long/
   );

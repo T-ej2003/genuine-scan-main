@@ -25,6 +25,7 @@ import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExist
 import { buildPublicIncidentReportResponse } from "./incidents/publicIncidentResponse";
 import {
   C03AccessError,
+  c03DatabaseSessionCapability,
   c03RequestId,
   withC03ActorTransaction,
   withC03ResourceTransaction,
@@ -311,7 +312,7 @@ export const listIncidents = async (req: AuthRequest, res: Response) => {
 
     const result = await withC03ActorTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-list",
         licenseeId,
@@ -372,7 +373,7 @@ export const getIncident = async (req: AuthRequest, res: Response) => {
 
     const incident = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-detail",
         resourceId: incidentId,
@@ -422,7 +423,7 @@ export const patchIncident = async (req: AuthRequest, res: Response) => {
 
     const result = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-update",
         resourceId: incidentId,
@@ -463,7 +464,7 @@ export const addIncidentEventNote = async (req: AuthRequest, res: Response) => {
 
     const evt = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-note-add",
         resourceId: incidentId,
@@ -523,7 +524,7 @@ export const addIncidentEvidence = async (req: AuthRequest, res: Response) => {
     const mapped = mapFileToStorageRecord(file);
     const result = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-evidence-add",
         resourceId: incidentId,
@@ -578,7 +579,7 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
 
     const incident = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-customer-notification-read",
         resourceId: incidentId,
@@ -666,7 +667,7 @@ export const exportIncidentPdfHook = async (req: AuthRequest, res: Response) => 
 
     const incident = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-pdf-export",
         resourceId: incidentId,
@@ -721,7 +722,7 @@ export const serveIncidentEvidenceFile = async (req: AuthRequest, res: Response)
 
     const evidence = await withC03ResourceTransaction(
       {
-        user: req.user,
+        databaseSessionCapability: c03DatabaseSessionCapability(req),
         requestId: c03RequestId(req),
         purpose: "incident-evidence-file-read",
         resourceId: fileName,
@@ -730,7 +731,7 @@ export const serveIncidentEvidenceFile = async (req: AuthRequest, res: Response)
         requiredAssurance: "mfa-verified",
       },
       async (tx, context) => {
-        const row = await loadIncidentEvidenceFileInTransaction<any>(tx, fileName);
+        const row = await loadIncidentEvidenceFileInTransaction<any>(tx, context, fileName);
         await createAuditLogInTransaction(tx, context, {
           action: "INCIDENT_EVIDENCE_FILE_READ",
           entityType: "IncidentEvidence",

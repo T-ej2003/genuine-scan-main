@@ -19,11 +19,28 @@ class C03AccessError extends Error {
 }
 mockModule("rls-waves/session-c/c03/c03ActorBoundary.js", {
   C03AccessError,
-  withC03ActorTransaction: async (_boundary, callback) => callback({}),
-  withC03ResourceTransaction: async (_boundary, callback) => callback({}),
+  withC03ActorTransaction: async (boundary, callback) => callback({}, {
+    ...boundary,
+    userId: ids.actor,
+    role: UserRole.PLATFORM_SUPER_ADMIN,
+    organizationId: null,
+    manufacturerId: null,
+    authAssurance: "mfa-verified",
+    sessionId: "00000000-0000-4000-8000-000000000901",
+  }),
+  withC03ResourceTransaction: async (boundary, callback) => callback({}, {
+    ...boundary,
+    userId: ids.actor,
+    role: UserRole.PLATFORM_SUPER_ADMIN,
+    organizationId: null,
+    licenseeId: ids.licensee,
+    manufacturerId: null,
+    authAssurance: "mfa-verified",
+    sessionId: "00000000-0000-4000-8000-000000000901",
+  }),
 });
 mockModule("rls-waves/session-c/c03/c03CompliancePackRepository.js", {
-  startCompliancePackJobInTransaction: async (_tx, input) => {
+  startCompliancePackJobInTransaction: async (_tx, _authority, input) => {
     startInput = input;
     return {
       job: {
@@ -36,7 +53,7 @@ mockModule("rls-waves/session-c/c03/c03CompliancePackRepository.js", {
       },
     };
   },
-  completeCompliancePackJobInTransaction: async (_tx, jobId, input) => {
+  completeCompliancePackJobInTransaction: async (_tx, _authority, jobId, input) => {
     completeInput = input;
     return { id: jobId, status: "COMPLETED", ...input };
   },
@@ -95,7 +112,7 @@ const run = async () => {
       licenseeId: ids.licensee,
       from: new Date("2026-03-01T00:00:00.000Z"),
       to: new Date("2026-03-02T00:00:00.000Z"),
-      securityContext: { user, requestId: ids.request },
+      securityContext: { databaseSessionCapability: "A".repeat(43), requestId: ids.request },
     });
     filePath = result.filePath;
     assert.equal(startInput.triggerType, "MANUAL");

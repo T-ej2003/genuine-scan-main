@@ -53,12 +53,12 @@ test("session ownership is exhaustive and editable production and test files nev
   assert.equal(sessionA.coordinationBaseCommit, partition.coordinationBaseCommit);
   assert.equal(sessionB.coordinationBaseCommit, partition.coordinationBaseCommit);
   assert.equal(sessionC.coordinationBaseCommit, partition.coordinationBaseCommit);
-  assert.equal(sessionA.workflowIds.length, 177);
-  assert.equal(sessionB.workflowIds.length, 144);
-  assert.equal(sessionC.workflowIds.length, 107);
-  assert.equal(sessionA.productionFileCount, 52);
+  assert.equal(sessionA.workflowIds.length, 176);
+  assert.equal(sessionB.workflowIds.length, 181);
+  assert.equal(sessionC.workflowIds.length, 44);
+  assert.equal(sessionA.productionFileCount, 61);
   assert.equal(sessionB.productionFileCount, 76);
-  assert.equal(sessionC.productionFileCount, 39);
+  assert.equal(sessionC.productionFileCount, 28);
   assert.equal(sessionB.existingTestFileCount, 47);
   assert.equal(sessionC.existingTestFileCount, 21);
   assert.equal(new Set([...sessionA.workflowIds, ...sessionB.workflowIds, ...sessionC.workflowIds]).size, EXPECTED_WORKFLOW_COUNT);
@@ -97,7 +97,7 @@ test("Session B is isolated from global generation, certification and staging st
   for (const file of sessionB.integrationOwnerOnlyFiles) assert.ok(sessionA.productionFiles.includes(file) || sessionC.productionFiles.includes(file));
   for (const file of sessionB.existingTestFiles) assert.ok(fs.existsSync(path.join(repoRoot, file)), file);
   assert.equal(partition.validationSummary.sessionBWorkflowOwnershipPreserved, true);
-  assert.equal(partition.validationSummary.sessionBWorkflowSetSha256, "116815209a0a591ff122a0a7bac9a5958cfa4182742c8483d039261c7ba4e79a");
+  assert.equal(partition.validationSummary.sessionBWorkflowSetSha256, "078751379c2b3cb9addc46318901bb9af6ccdc56b56748d7d305c84a785ae18f");
 });
 
 test("Session C owns exact administration, governance and operator families and remains isolated", () => {
@@ -109,7 +109,7 @@ test("Session C owns exact administration, governance and operator families and 
     "c-03-governance-policies-incidents-compliance",
     "c-04-operator-recovery-startup-migration-cli",
   ]);
-  assert.deepEqual(sessionC.workflowFamilies.map((family) => family.workflowIds.length), [8, 17, 55, 27]);
+  assert.deepEqual(sessionC.workflowFamilies.map((family) => family.workflowIds.length), [1, 18, 25, 0]);
   for (const requiredBoundary of [
     "documents/security/rls-program/generated/**",
     "scripts/rls/generate-*.mjs",

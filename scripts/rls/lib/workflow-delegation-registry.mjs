@@ -44,6 +44,20 @@ export const WORKFLOW_DELEGATIONS = Object.freeze([
     canonical: { executionSurface: "internal", sourceFile: "backend/src/services/auth/authService.ts", function: "refreshSession" },
     reason: "The auth service owns the registered refresh-session workflow; the B01 repository supplies its exact pre-auth SQL implementation.",
   })),
+  ...[
+    "createAuthenticatedSessionCapability",
+    "revokeAuthenticatedSessionByRefreshToken",
+    "revokeAuthenticatedSessionsForUser",
+  ].map((functionName) => ({
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/services/auth/authenticatedSessionCapabilityService.ts", function: functionName },
+    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/auth/authService.ts", function: "refreshSession" },
+    reason: "The auth service owns the reviewed session-credential lifecycle; this helper only implements capability issue or revocation through exact app_auth boundaries.",
+  })),
+  {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts", function: "verifyCapability" },
+    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/compliancePackService.ts", function: "listCompliancePackJobs" },
+    reason: "Capability verification is shared C03 transaction bootstrap evidence; it is not a separately registered business workflow.",
+  },
   {
     delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts", function: "loadIncidentEvidenceFileInTransaction" },
     canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/incidentController.ts", function: "serveIncidentEvidenceFile" },
@@ -89,6 +103,14 @@ export const WORKFLOW_DELEGATIONS = Object.freeze([
     canonical: { executionSurface: "scheduled", sourceFile: "backend/src/services/compliancePackService.ts", function: "startCompliancePackScheduler" },
     reason: "The scheduled service owns durable failure handling; the C03 repository performs its transaction-bound state transition.",
   },
+  ...[
+    "loadCompliancePackJobInTransaction",
+    "completeCompliancePackRebuildInTransaction",
+  ].map((functionName) => ({
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts", function: functionName },
+    canonical: { executionSurface: "scheduled", sourceFile: "backend/src/services/compliancePackService.ts", function: "startCompliancePackScheduler" },
+    reason: "The scheduled service owns the compliance-pack lifecycle; the repository helper contributes read or rebuild implementation evidence to that canonical workflow.",
+  })),
   {
     delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts", function: "listTenantFeatureFlagsInTransaction" },
     canonical: { executionSurface: "internal", sourceFile: "backend/src/services/governanceService.ts", function: "listTenantFeatureFlags" },

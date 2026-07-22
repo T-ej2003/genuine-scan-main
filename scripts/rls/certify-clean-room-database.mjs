@@ -46,6 +46,7 @@ const riskAnalyticsUserColumns = ["deletedAt", "disabledAt", "id", "isActive", "
 const prohibitedRiskAnalyticsUserColumns = ["createdAt", "disabledReason", "email", "emailVerifiedAt", "failedLoginAttempts", "lastLoginAt", "location", "lockedUntil", "metadata", "passwordHash", "pendingEmail", "pendingEmailRequestedAt", "updatedAt", "website"];
 let runCounter = 0;
 const activeDatabases = new Set();
+const semanticCapabilities = new Map();
 
 export class FullRlsCertificationSafetyError extends Error {}
 
@@ -101,7 +102,10 @@ const dropCertificationAdministrator = (url) => runPsql(url, ["-q", "-c", `DROP 
 const contextSql = ({ user, org, licensee, actorClass = "licensee-admin", assurance = "password-verified", purpose = "tenant-risk-analytics" }) => {
   const manufacturer = actorClass === "manufacturer";
   const role = manufacturer ? "MANUFACTURER" : actorClass === "platform-admin" ? "PLATFORM_SUPER_ADMIN" : "LICENSEE_ADMIN";
-  return `SELECT app_rls.install_actor_context(${lit(user)},${lit(role)},${lit(org)},${lit(licensee)},${lit(manufacturer ? user : "")},${lit(assurance)},'full-rls-cert-request',${lit(purpose)});`;
+  const capability = semanticCapabilities.get(`${user}:${assurance === "password-verified" ? "PASSWORD" : "ADMIN_MFA"}`);
+  if (!capability) throw new Error(`Certification capability is missing for ${user}`);
+  return `SELECT * FROM app_auth.require_authenticated_session(${lit(capability)},${lit(purpose)},'full-rls-cert-request');
+SELECT set_config('app.role',${lit(role)},true),set_config('app.organization_id',${lit(org)},true),set_config('app.licensee_id',${lit(licensee)},true),set_config('app.manufacturer_id',${lit(manufacturer ? user : "")},true);`;
 };
 const appScalar = (appUrl, context, sql, label) => scalar(appUrl, `BEGIN; ${contextSql(context)} ${sql}; ROLLBACK;`, label);
 const denial = (appUrl, context, sql, label) => runPsql(appUrl, ["-q", "-c", `BEGIN; ${contextSql(context)} ${sql}; ROLLBACK;`], label, true);
@@ -121,7 +125,9 @@ const runBackendBuild = (env) => {
   });
   if (result.status !== 0) throw new Error(`Backend build failed before application-path certification: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
 };
-const runApplicationPathCertifications = (connections, env) => applicationPathCertificationFamilies.map((family) => {
+const runApplicationPathCertifications = (connections, env) => applicationPathCertificationFamilies
+  .filter((family) => !env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY || family.id === env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY)
+  .map((family) => {
   const familyEnv = { ...env, NODE_ENV: "test", [family.enable[0]]: family.enable[1], [family.confirm[0]]: family.confirm[1] };
   for (const [name, connection] of Object.entries(family.connections)) familyEnv[name] = connections[connection];
   const result = spawnSync(process.execPath, [path.join(root, family.testFile)], {
@@ -141,6 +147,26 @@ const runApplicationPathCertifications = (connections, env) => applicationPathCe
     testFile: family.testFile,
   };
 });
+const runC03AuthenticatedCertification = (connections, env) => {
+  if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY !== "c03-authenticated-boundaries") return null;
+  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/rls-wave-c/c03/c03AuthenticatedBoundariesPostgres18.test.js")], {
+    cwd: root,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      DATABASE_URL: connections.app,
+      MSCQR_C03_BOOTSTRAP_URL: connections.bootstrap,
+      MSCQR_C03_PREAUTH_URL: connections.preauth,
+      MSCQR_C03_AUTHENTICATED_POSTGRES18_TEST: "true",
+      MSCQR_C03_AUTHENTICATED_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_C03_AUTHENTICATED_POSTGRES18_TEST",
+    },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`C03 authenticated certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/C03 authenticated boundaries application-path proof passed/.test(result.stdout || "")) throw new Error("C03 authenticated certification did not emit its success marker");
+  return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-c/c03/c03AuthenticatedBoundariesPostgres18.test.js" };
+};
 const injectBeforeCommit = (file, label) => {
   const source = fs.readFileSync(path.join(sqlRoot, file), "utf8");
   const index = source.lastIndexOf("\nCOMMIT;");
@@ -381,6 +407,25 @@ const certifyB01RefreshRotation = ({ bootstrap, preauth, app }, manifest) => {
   return { predecessorReplayRejected: true, rollbackClaimCleared: true, successorHashPersisted: true, capabilityVerified: true, forgedGucDenied: true, capabilityRevocationEnforced: true };
 };
 
+const issueSemanticCapabilities = ({ bootstrap, preauth }) => {
+  semanticCapabilities.clear();
+  const actors = [ids.adminA, ids.adminB, ids.manufacturerA, ids.manufacturerB, ids.platformA];
+  let sequence = 0;
+  for (const userId of actors) {
+    const orgId = userId === ids.adminA || userId === ids.manufacturerA ? ids.orgA
+      : userId === ids.adminB || userId === ids.manufacturerB ? ids.orgB : null;
+    for (const assurance of ["PASSWORD", "ADMIN_MFA"]) {
+      sequence += 1;
+      const sessionId = `00000000-0000-4000-8000-${String(1400 + sequence).padStart(12, "0")}`;
+      const refreshHash = crypto.createHash("sha256").update(`semantic-refresh-${sequence}`).digest("hex");
+      const capability = crypto.randomBytes(32).toString("base64url");
+      runPsql(bootstrap, ["-q", "-c", `INSERT INTO public."RefreshToken" (id,"orgId","userId","tokenHash","expiresAt","authenticatedAt","mfaVerifiedAt") VALUES (${lit(sessionId)},${orgId ? lit(orgId) : "NULL"},${lit(userId)},${lit(refreshHash)},transaction_timestamp()+interval '1 day',transaction_timestamp(),${assurance === "ADMIN_MFA" ? "transaction_timestamp()" : "NULL"})`], "create semantic capability session");
+      runPsql(preauth, ["-q", "-c", `SELECT * FROM app_auth.issue_authenticated_session_capability(${lit(sessionId)},${lit(refreshHash)},${lit(capability)},${lit(assurance)},(transaction_timestamp()+interval '12 hours')::timestamp)`], "issue semantic capability");
+      semanticCapabilities.set(`${userId}:${assurance}`, capability);
+    }
+  }
+};
+
 const certifySemantics = (bootstrapUrl, appUrl) => {
   const tenantRisk = { user: ids.adminA, org: ids.orgA, licensee: ids.licenseeA };
   const manufacturerParentCount = Number(appScalar(appUrl, tenantRisk, `SELECT count("id") FROM public."User" WHERE "id"=${lit(ids.manufacturerA)} AND "role" IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND "isActive"=TRUE AND "status"='ACTIVE' AND "deletedAt" IS NULL AND "disabledAt" IS NULL`, "risk analytics manufacturer parent validation"));
@@ -436,7 +481,10 @@ const certifySemantics = (bootstrapUrl, appUrl) => {
     () => requireDenial(denial(appUrl, manufacturer, auditInsert(ids.manufacturerA, ids.orgA, ids.licenseeA), "inactive organization"), "inactive organization"),
     `UPDATE public."Organization" SET "isActive"=true WHERE "id"=${lit(ids.orgA)}`);
   temporarily(`UPDATE public."User" SET "isActive"=false WHERE "id"=${lit(ids.adminA)}`,
-    () => { if (Number(appScalar(appUrl, tenantRisk, `SELECT count("id") FROM public."PolicyAlert"`, "disabled tenant actor denial")) !== 0) throw new Error("Disabled tenant actor retained RLS authority"); },
+    () => {
+      const output = runPsql(appUrl, ["-q", "-c", `BEGIN; ${contextSql(tenantRisk)} SELECT count("id") FROM public."PolicyAlert"; ROLLBACK;`], "disabled tenant actor denial", true);
+      if (!/AUTH_SESSION_CAPABILITY_DENIED/.test(output)) throw new Error("Disabled tenant actor did not fail at capability verification");
+    },
     `UPDATE public."User" SET "isActive"=true WHERE "id"=${lit(ids.adminA)}`);
   temporarily(`UPDATE public."User" SET "licenseeId"=${lit(ids.licenseeB)},"orgId"=${lit(ids.orgB)} WHERE "id"=${lit(ids.adminA)}`,
     () => { if (Number(appScalar(appUrl, tenantRisk, `SELECT count("id") FROM public."PolicyAlert"`, "stale tenant membership denial")) !== 0) throw new Error("Stale tenant membership retained RLS authority"); },
@@ -448,10 +496,10 @@ const certifySemantics = (bootstrapUrl, appUrl) => {
     },
     `UPDATE public."Licensee" SET "isActive"=true WHERE "id"=${lit(ids.licenseeA)}`);
 
-  const secondInstall = runPsql(appUrl, ["-q", "-c", `BEGIN; ${contextSql(tenantRisk)} ${contextSql(tenantRisk)} ROLLBACK;`], "same-transaction context switch", true);
-  if (!/already installed/i.test(secondInstall)) throw new Error("Second canonical context installation was not denied");
+  const secondVerification = scalar(appUrl, `BEGIN; ${contextSql(tenantRisk)} SELECT set_config('app.user_id','${ids.adminB}',true); ${contextSql(tenantRisk)} SELECT current_setting('app.user_id',true); ROLLBACK;`, "same-transaction capability re-verification");
+  if (secondVerification !== ids.adminA) throw new Error("Capability re-verification did not overwrite forged actor context");
   const malformed = runPsql(appUrl, ["-q", "-c", "BEGIN; SELECT app_rls.install_actor_context('not-a-uuid','LICENSEE_ADMIN','','','','password-verified','request','purpose'); ROLLBACK;"], "malformed context", true);
-  if (!/invalid actor identifier/i.test(malformed)) throw new Error("Malformed context did not fail closed");
+  if (!/permission denied/i.test(malformed)) throw new Error("Generic context installer remained runtime-executable");
 };
 
 const installationSteps = [
@@ -700,13 +748,18 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     runSqlFile(urls.administrator, "verification.sql", "run exact verification entrypoint");
     const catalogTamperResults = certifyCatalogTamperDetection(urls.administrator, manifest, policies);
     const b01Certification = certifyB01RefreshRotation(urls, manifest);
+    issueSemanticCapabilities(urls);
     const tablesCertified = certifyTablesAndColumns(urls.administrator, urls.app, manifest, policies, privileges);
     certifySemantics(urls.bootstrap, urls.app);
     const fixtureRows = Number(scalar(urls.bootstrap, "SELECT sum(row_count) FROM (SELECT (xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM public.%I',c.relname),false,true,'')))[1]::text::bigint AS row_count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_prisma_migrations') counts", "count disposable certification fixture rows"));
     if (!fixtureRows) throw new Error("Final semantic certification did not load its declared disposable fixtures");
-    const applicationPathResults = runApplicationPathCertifications({ app: urls.app, bootstrap: urls.bootstrap }, env);
+    const connections = { app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth };
+    const c03Certification = runC03AuthenticatedCertification(connections, env);
+    const applicationPathResults = env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "c03-authenticated-boundaries"
+      ? []
+      : runApplicationPathCertifications(connections, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, c03Certification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -812,6 +865,7 @@ export const runCertification = (adminUrl, env = process.env) => {
       : "pending-application-path-certification";
     result.catalogTamperResults = finalRun.catalogTamperResults;
     result.b01Certification = finalRun.b01Certification;
+    result.c03Certification = finalRun.c03Certification;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
     result.generatedPoliciesCertified = policies.count;
     result.columnPrivilegeCellsCertified = privileges.cells;

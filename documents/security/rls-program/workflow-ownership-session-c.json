@@ -128,6 +128,7 @@
     "backend/src/controllers/irIncidentController.ts",
     "backend/src/controllers/tracePolicyController.ts",
     "backend/src/rls-waves/session-c/c02/auditTraceRepository.ts",
+    "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
     "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
     "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts",
     "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
@@ -207,6 +208,6 @@
   "requiredBaseAncestor": "33cbe7ff019efefad242f654f0aa96c44c5b963c",
   "workflowCount": 44,
   "workflowFamilyCount": 4,
-  "productionFileCount": 27,
+  "productionFileCount": 28,
   "existingTestFileCount": 21
 }

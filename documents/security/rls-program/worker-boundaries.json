@@ -226,8 +226,8 @@
       ],
       "tablesRead": [
         "table-licensee",
-        "table-user",
         "table-compliance-pack-job",
+        "table-action-idempotency-key",
         "table-incident",
         "table-incident-handoff",
         "table-audit-log",
@@ -235,8 +235,8 @@
       ],
       "tablesWritten": [
         "table-compliance-pack-job",
-        "table-audit-log",
-        "table-evidence-retention-policy"
+        "table-action-idempotency-key",
+        "table-audit-log-outbox"
       ],
       "tableCommands": [
         {
@@ -247,15 +247,16 @@
           "authority": "worker-fn-claim-compliance-pack-slice"
         },
         {
-          "tableId": "table-user",
-          "commands": [
-            "SELECT"
-          ],
-          "disposition": "remove-before-activation; system jobs must not impersonate a platform user"
-        },
-        {
           "tableId": "table-compliance-pack-job",
           "commands": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        {
+          "tableId": "table-action-idempotency-key",
+          "commands": [
+            "SELECT",
             "INSERT",
             "UPDATE"
           ]
@@ -275,15 +276,19 @@
         {
           "tableId": "table-audit-log",
           "commands": [
-            "SELECT",
-            "INSERT"
+            "SELECT"
           ]
         },
         {
           "tableId": "table-evidence-retention-policy",
           "commands": [
-            "INSERT",
-            "UPDATE"
+            "SELECT"
+          ]
+        },
+        {
+          "tableId": "table-audit-log-outbox",
+          "commands": [
+            "INSERT"
           ]
         }
       ],
@@ -366,15 +371,20 @@
         "platformAdminContextAllowed": false
       },
       "exactCommandRuleIds": [
-        "command-audit-log-insert-56e28c0be62e",
+        "command-action-idempotency-key-insert-56e28c0be62e",
+        "command-action-idempotency-key-select-56e28c0be62e",
+        "command-action-idempotency-key-update-56e28c0be62e",
+        "command-audit-log-outbox-insert-56e28c0be62e",
         "command-audit-log-select-56e28c0be62e",
         "command-compliance-pack-job-insert-56e28c0be62e",
+        "command-compliance-pack-job-select-56e28c0be62e",
         "command-compliance-pack-job-update-56e28c0be62e",
-        "command-evidence-retention-policy-insert-56e28c0be62e",
-        "command-evidence-retention-policy-update-56e28c0be62e",
+        "command-evidence-retention-policy-select-56e28c0be62e",
         "command-incident-handoff-select-56e28c0be62e",
         "command-incident-select-56e28c0be62e",
         "command-licensee-select-56e28c0be62e",
+        "command-organization-select-56e28c0be62e",
+        "command-refresh-token-select-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ],
       "auditEventRequirement": {

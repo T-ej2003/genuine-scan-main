@@ -4,11 +4,10 @@ Coordination SHA: `22bfdb0cfd19d7b435b1390611b452a419923f9f`
 
 This document records the global SQL and integration-owner work that C03 cannot own. The C03 application code fails closed when a required function or caller context is absent. Session A must review these contracts, install the functions in the generated GREEN package, and update the named integration call sites before merging Session C.
 
-> **Security prerequisite:** the current clean-room context helper accepts
-> caller-provided actor fields and writes `app.*` GUCs. It is not a
-> database-verifiable authenticated-actor proof and must not authorize new C03
-> function-owner policies. The repository-backed analysis and required shared
-> decision are recorded in
+> **Security prerequisite resolved:** commit `4add7de` supplies the durable
+> opaque authenticated-session proof. The capability-bearing C03 boundaries
+> reverify it with `app_auth.require_authenticated_session`; generic caller GUCs
+> are no longer C03 authority. The original threat analysis is retained in
 > [`C03_TRUSTED_ACTOR_CONTEXT_PREREQUISITE.md`](./C03_TRUSTED_ACTOR_CONTEXT_PREREQUISITE.md).
 
 ## Authenticated actor and resource scope
@@ -88,11 +87,12 @@ The evidence snapshot function joins from the authorized Incident and returns on
 Compliance pack state uses explicit two-phase database transitions around external artifact construction:
 
 ```sql
-app_rls.c03_start_compliance_pack_job(trigger_type text, from_at timestamptz, to_at timestamptz) RETURNS jsonb
-app_rls.c03_complete_compliance_pack_job(job_id text, result jsonb) RETURNS jsonb
-app_rls.c03_fail_compliance_pack_job(job_id text, error_code text) RETURNS jsonb
-app_rls.c03_get_compliance_pack_job(job_id text) RETURNS jsonb
-app_rls.c03_complete_compliance_pack_rebuild(job_id text, result jsonb) RETURNS jsonb
+app_rls.c03_start_compliance_pack_job(capability text, purpose text, request_id text, licensee_id text, trigger_type text, from_at timestamptz, to_at timestamptz) RETURNS jsonb
+app_rls.c03_complete_compliance_pack_job(capability text, purpose text, request_id text, job_id text, result jsonb) RETURNS jsonb
+app_rls.c03_fail_compliance_pack_job(capability text, purpose text, request_id text, job_id text, error_code text) RETURNS jsonb
+app_rls.c03_get_compliance_pack_job(capability text, purpose text, request_id text, job_id text) RETURNS jsonb
+app_rls.c03_complete_compliance_pack_rebuild(capability text, purpose text, request_id text, job_id text, result jsonb) RETURNS jsonb
+app_rls.c03_get_incident_evidence_file_by_storage_key(capability text, purpose text, request_id text, storage_key text) RETURNS jsonb
 ```
 
 Start returns the locked job plus its canonical report snapshot. Artifact signing and storage occur after that commit. Complete and fail derive the job scope, lock it and compare-and-set `RUNNING` to one terminal state with audit and outbox. Rebuild reads a canonical job/report snapshot and compare-and-sets the final artifact metadata. Raw exception text is not persisted. A restricted scheduled-worker claim function is still required from the integration owner; the human application identity cannot run scheduled jobs.

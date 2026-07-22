@@ -13,7 +13,10 @@ const run = (command, args) => {
   const result = spawnSync(command, args, { cwd: repoRoot, encoding: "utf8" });
   return result.status === 0 ? result.stdout.trim() : "";
 };
-const trackedFiles = () => run("git", ["ls-files"]).split("\n").filter((file) => /\.(?:sql|psql|ts|js|mjs|md|json)$/i.test(file));
+const trackedFiles = () => run("git", ["ls-files", "--cached", "--others", "--exclude-standard"])
+  .split("\n")
+  .filter((file) => /\.(?:sql|psql|ts|js|mjs|md|json)$/i.test(file))
+  .sort();
 const source = (file) => fs.readFileSync(path.join(repoRoot, file), "utf8");
 const definitionPattern = (functionName) => new RegExp(`CREATE\\s+OR\\s+REPLACE\\s+FUNCTION\\s+${functionName.replace(".", "\\.")}\\s*\\(`, "i");
 const isFixture = (file) => /(?:^|\/)(?:test|tests|fixture)(?:\/|\.|-)/i.test(file);

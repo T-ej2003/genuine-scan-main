@@ -9,7 +9,6 @@ import prisma from "../config/database";
 import { logger } from "../utils/logger";
 import { getQrSigningHmacSecret } from "../utils/secretConfig";
 import { downloadObjectBuffer, isObjectStorageConfigured, uploadObjectBuffer } from "./objectStorageService";
-import { AuthenticatedSessionClaims } from "../types";
 import {
   C03AccessError,
   withC03ActorTransaction,
@@ -60,7 +59,7 @@ const parseBool = (value: unknown, fallback = false) => {
 };
 
 type ComplianceSecurityContext = {
-  user: AuthenticatedSessionClaims;
+  databaseSessionCapability: string;
   requestId: string;
 };
 
@@ -71,17 +70,12 @@ const requireComplianceActorSecurity = (
   actor: { userId: string; role: UserRole; licenseeId?: string | null },
   security?: ComplianceSecurityContext
 ) => {
-  if (!security?.user || !String(security.requestId || "").trim()) {
+  const databaseSessionCapability = String(security?.databaseSessionCapability || "").trim();
+  const requestId = String(security?.requestId || "").trim();
+  if (!databaseSessionCapability || !requestId) {
     throw new C03AccessError("Canonical compliance actor context is required", 401);
   }
-  if (
-    security.user.userId !== actor.userId ||
-    security.user.role !== actor.role ||
-    String(security.user.licenseeId || "") !== String(actor.licenseeId || "")
-  ) {
-    throw new C03AccessError("Compliance actor context is inconsistent");
-  }
-  return security;
+  return { databaseSessionCapability, requestId };
 };
 
 const requireComplianceSecurity = (
@@ -233,14 +227,14 @@ export const runCompliancePackJob = async (params: {
   const security = requireComplianceSecurity(params.actor, params.licenseeId, params.securityContext);
   const started = await withC03ActorTransaction(
     {
-      user: security.user,
+      databaseSessionCapability: security.databaseSessionCapability,
       requestId: security.requestId,
       purpose: "compliance-pack-start",
       licenseeId: security.licenseeId,
       allowedRoles: complianceRoles,
       requiredAssurance: "mfa-verified",
     },
-    (tx) => startCompliancePackJobInTransaction(tx, {
+    (tx, context) => startCompliancePackJobInTransaction(tx, context, {
       triggerType: params.triggerType,
       from: params.from,
       to: params.to,
@@ -260,7 +254,7 @@ export const runCompliancePackJob = async (params: {
     const persisted = await persistCompliancePackBuffer(storageKey, pack.buffer);
     const updated = await withC03ResourceTransaction(
       {
-        user: security.user,
+        databaseSessionCapability: security.databaseSessionCapability,
         requestId: security.requestId,
         purpose: "compliance-pack-complete",
         resourceId: started.job.id,
@@ -268,7 +262,7 @@ export const runCompliancePackJob = async (params: {
         allowedRoles: complianceRoles,
         requiredAssurance: "mfa-verified",
       },
-      (tx) => completeCompliancePackJobInTransaction<any>(tx, started.job.id, {
+      (tx, context) => completeCompliancePackJobInTransaction<any>(tx, context, started.job.id, {
         fileName: pack.fileName,
         storageKey: persisted.storageKey,
         integrityHash: pack.metadata.integrityHash,
@@ -286,7 +280,7 @@ export const runCompliancePackJob = async (params: {
   } catch (error) {
     await withC03ResourceTransaction(
       {
-        user: security.user,
+        databaseSessionCapability: security.databaseSessionCapability,
         requestId: security.requestId,
         purpose: "compliance-pack-fail",
         resourceId: started.job.id,
@@ -294,7 +288,7 @@ export const runCompliancePackJob = async (params: {
         allowedRoles: complianceRoles,
         requiredAssurance: "mfa-verified",
       },
-      (tx) => failCompliancePackJobInTransaction(tx, started.job.id, "COMPLIANCE_PACK_BUILD_FAILED")
+      (tx, context) => failCompliancePackJobInTransaction(tx, context, started.job.id, "COMPLIANCE_PACK_BUILD_FAILED")
     ).catch(() => undefined);
     throw error;
   }
@@ -311,7 +305,7 @@ export const listCompliancePackJobs = async (params: {
   const security = requireComplianceSecurity(params.actor, params.licenseeId, params.securityContext);
   return withC03ActorTransaction(
     {
-      user: security.user,
+      databaseSessionCapability: security.databaseSessionCapability,
       requestId: security.requestId,
       purpose: "compliance-pack-list",
       licenseeId: security.licenseeId,
@@ -343,7 +337,7 @@ export const rebuildCompliancePackArtifactForJob = async (params: {
   const security = requireComplianceActorSecurity(params.actor, params.securityContext);
   const snapshot = await withC03ResourceTransaction(
     {
-      user: security.user,
+      databaseSessionCapability: security.databaseSessionCapability,
       requestId: security.requestId,
       purpose: "compliance-pack-rebuild-read",
       resourceId: params.jobId,
@@ -351,7 +345,7 @@ export const rebuildCompliancePackArtifactForJob = async (params: {
       allowedRoles: complianceRoles,
       requiredAssurance: "mfa-verified",
     },
-    (tx) => loadCompliancePackJobInTransaction<any>(tx, params.jobId)
+    (tx, context) => loadCompliancePackJobInTransaction<any>(tx, context, params.jobId)
   );
   const job = snapshot.job;
 
@@ -368,7 +362,7 @@ export const rebuildCompliancePackArtifactForJob = async (params: {
 
   const updated = await withC03ResourceTransaction(
     {
-      user: security.user,
+      databaseSessionCapability: security.databaseSessionCapability,
       requestId: security.requestId,
       purpose: "compliance-pack-rebuild-complete",
       resourceId: job.id,
@@ -376,7 +370,7 @@ export const rebuildCompliancePackArtifactForJob = async (params: {
       allowedRoles: complianceRoles,
       requiredAssurance: "mfa-verified",
     },
-    (tx) => completeCompliancePackRebuildInTransaction<any>(tx, job.id, {
+    (tx, context) => completeCompliancePackRebuildInTransaction<any>(tx, context, job.id, {
       fileName: pack.fileName,
       storageKey: persisted.storageKey,
       integrityHash: pack.metadata.integrityHash,
