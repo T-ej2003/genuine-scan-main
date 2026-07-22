@@ -20,68 +20,90 @@
       "canonicalWorkflowIds": [
         "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
       ],
-      "classification": "fixture-only definition",
-      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
-      "originatingCommit": "45961044fde6b0c887154b9e07c2dd582c129fa6",
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "originatingCommit": "7df2e5ae07987e509ca74b715b9a51305726b2bf",
       "historyCommits": [
+        "7df2e5ae07987e509ca74b715b9a51305726b2bf",
         "45961044fde6b0c887154b9e07c2dd582c129fa6"
       ],
-      "deployable": false,
-      "definitionChecksum": "dfe52951efe6ce00cdbc8577122d8c81429cfcf231137de39503d71ee88d5dd0",
-      "returnType": "TABLE( \"disposition\" text, \"tokenId\" text, \"userId\" text, \"role\" text, \"organizationId\" text, \"licenseeId\" text, \"manufacturerId\" text, \"authAssurance\" text, \"expiresAt\" timestamp without time zone, \"authenticatedAt\" timestamp without time zone, \"mfaVerifiedAt\" timestamp without time zone )",
+      "deployable": true,
+      "definitionChecksum": "dae3bc76ef1421d254964c99e2808f2e03c5bb8c10bedade5f374efeb311fbd4",
+      "returnType": "TABLE(\"disposition\" text,\"tokenId\" text,\"userId\" text,\"role\" text,\"organizationId\" text, \"licenseeId\" text,\"manufacturerId\" text,\"authAssurance\" text,\"expiresAt\" timestamp without time zone, \"authenticatedAt\" timestamp without time zone,\"mfaVerifiedAt\" timestamp without time zone)",
       "matchesCurrentPrismaSchema": null,
       "signatureMatchesRepositoryCall": null,
       "securityMetadata": {
         "securityMode": "SECURITY DEFINER",
         "safeSearchPath": true,
-        "publicRevoked": false,
-        "grantsPresent": false
+        "publicRevoked": true,
+        "grantsPresent": true
       },
-      "requiresAdaptation": true,
+      "requiresAdaptation": false,
       "candidateLocations": [
-        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
       ],
-      "grantLocations": [],
-      "revokeLocations": []
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
     },
     {
       "functionName": "app_auth.complete_refresh_token_rotation",
-      "signature": "text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone",
+      "signature": "text,text[],text,text,text,timestamp without time zone,text,text,timestamp without time zone,timestamp without time zone,timestamp without time zone,text",
       "callers": [
         {
           "functionName": "app_auth.complete_refresh_token_rotation",
           "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
           "sourceFunction": "completeRefreshTokenRotation",
-          "line": 564
+          "line": 567
         }
       ],
       "canonicalWorkflowIds": [
         "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
       ],
-      "classification": "fixture-only definition",
-      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
-      "originatingCommit": "62b73a98b6e0f960e0d326df9addd310324c9740",
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "originatingCommit": "7df2e5ae07987e509ca74b715b9a51305726b2bf",
       "historyCommits": [
+        "7df2e5ae07987e509ca74b715b9a51305726b2bf",
         "62b73a98b6e0f960e0d326df9addd310324c9740",
         "45961044fde6b0c887154b9e07c2dd582c129fa6"
       ],
-      "deployable": false,
-      "definitionChecksum": "b6c448074fe3f22a0c53d5630225ee27c2458ad8aef8201467ee9b1b624077bd",
-      "returnType": "TABLE(\"id\" text, \"expiresAt\" timestamp without time zone)",
+      "deployable": true,
+      "definitionChecksum": "96505f54e796fdfae8ea5803f08fa275772f1e964675ce58af1239c23461df84",
+      "returnType": "TABLE(\"id\" text,\"expiresAt\" timestamp without time zone)",
       "matchesCurrentPrismaSchema": null,
       "signatureMatchesRepositoryCall": null,
       "securityMetadata": {
         "securityMode": "SECURITY DEFINER",
         "safeSearchPath": true,
-        "publicRevoked": false,
-        "grantsPresent": false
+        "publicRevoked": true,
+        "grantsPresent": true
       },
-      "requiresAdaptation": true,
+      "requiresAdaptation": false,
       "candidateLocations": [
-        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
       ],
-      "grantLocations": [],
-      "revokeLocations": []
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
     },
     {
       "functionName": "app_auth.consume_email_verification_token",
@@ -193,29 +215,40 @@
       "canonicalWorkflowIds": [
         "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
       ],
-      "classification": "fixture-only definition",
-      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
-      "originatingCommit": "45961044fde6b0c887154b9e07c2dd582c129fa6",
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "originatingCommit": "7df2e5ae07987e509ca74b715b9a51305726b2bf",
       "historyCommits": [
+        "7df2e5ae07987e509ca74b715b9a51305726b2bf",
         "45961044fde6b0c887154b9e07c2dd582c129fa6"
       ],
-      "deployable": false,
-      "definitionChecksum": "07aa9984b569250ed679aa1b52cc370901da6486630d12164a79b7dfe9337f86",
-      "returnType": "TABLE(\"challengeId\" text, \"created\" boolean)",
+      "deployable": true,
+      "definitionChecksum": "797071fc29cbd2e83a0ca2d75da04b7fdc689f153bc4d2d0d8aad31f6dfe93dd",
+      "returnType": "TABLE(\"challengeId\" text,\"created\" boolean)",
       "matchesCurrentPrismaSchema": null,
       "signatureMatchesRepositoryCall": null,
       "securityMetadata": {
         "securityMode": "SECURITY DEFINER",
         "safeSearchPath": true,
-        "publicRevoked": false,
-        "grantsPresent": false
+        "publicRevoked": true,
+        "grantsPresent": true
       },
-      "requiresAdaptation": true,
+      "requiresAdaptation": false,
       "candidateLocations": [
-        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
       ],
-      "grantLocations": [],
-      "revokeLocations": []
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
     },
     {
       "functionName": "app_auth.load_refresh_session_state",
@@ -231,29 +264,40 @@
       "canonicalWorkflowIds": [
         "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
       ],
-      "classification": "fixture-only definition",
-      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
-      "originatingCommit": "45961044fde6b0c887154b9e07c2dd582c129fa6",
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "originatingCommit": "7df2e5ae07987e509ca74b715b9a51305726b2bf",
       "historyCommits": [
+        "7df2e5ae07987e509ca74b715b9a51305726b2bf",
         "45961044fde6b0c887154b9e07c2dd582c129fa6"
       ],
-      "deployable": false,
-      "definitionChecksum": "f6d55587b6e6f8ac81ed3547131e9ae5bf2bc95d2481cad326103dff4058a7c6",
-      "returnType": "TABLE( \"userId\" text, \"email\" text, \"name\" text, \"role\" text, \"legacyLicenseeId\" text, \"legacyOrganizationId\" text, \"emailVerifiedAt\" timestamp without time zone, \"sessionLicenseeId\" text, \"sessionOrganizationId\" text, \"scopeVersion\" text, \"selectedLicenseeId\" text, \"selectedLicenseeName\" text, \"selectedLicenseePrefix\" text, \"selectedLicenseeBrandName\" text, \"selectedLicenseeOrganizationId\" text, \"linkedLicensees\" jsonb, \"mfaRequired\" boolean, \"mfaEnabled\" boolean, \"mfaEnrolled\" boolean, \"mfaLastUsedAt\" timestamp without time zone, \"mfaMethods\" text[], \"mfaPreferredMethod\" text )",
+      "deployable": true,
+      "definitionChecksum": "bcdd0bf9579370921f270fed6ac0816de9797abea32986c24832e3b1dc4d466f",
+      "returnType": "TABLE(\"userId\" text,\"email\" text,\"name\" text,\"role\" text,\"legacyLicenseeId\" text,\"legacyOrganizationId\" text,\"emailVerifiedAt\" timestamp without time zone,\"sessionLicenseeId\" text,\"sessionOrganizationId\" text,\"scopeVersion\" text,\"selectedLicenseeId\" text,\"selectedLicenseeName\" text,\"selectedLicenseePrefix\" text,\"selectedLicenseeBrandName\" text,\"selectedLicenseeOrganizationId\" text,\"linkedLicensees\" jsonb,\"mfaRequired\" boolean,\"mfaEnabled\" boolean,\"mfaEnrolled\" boolean,\"mfaLastUsedAt\" timestamp without time zone,\"mfaMethods\" text[],\"mfaPreferredMethod\" text)",
       "matchesCurrentPrismaSchema": null,
       "signatureMatchesRepositoryCall": null,
       "securityMetadata": {
         "securityMode": "SECURITY DEFINER",
         "safeSearchPath": true,
-        "publicRevoked": false,
-        "grantsPresent": false
+        "publicRevoked": true,
+        "grantsPresent": true
       },
-      "requiresAdaptation": true,
+      "requiresAdaptation": false,
       "candidateLocations": [
-        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
       ],
-      "grantLocations": [],
-      "revokeLocations": []
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
     },
     {
       "functionName": "app_auth.lookup_invitation_token",
@@ -424,42 +468,53 @@
     },
     {
       "functionName": "app_auth.revoke_refresh_token_scope",
-      "signature": "text,text[],text,text,text,timestamp without time zone",
+      "signature": "text,text[],text,text,text,timestamp without time zone,text",
       "callers": [
         {
           "functionName": "app_auth.revoke_refresh_token_scope",
           "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
           "sourceFunction": "revokeRefreshTokenRotationScope",
-          "line": 533
+          "line": 534
         }
       ],
       "canonicalWorkflowIds": [
         "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session"
       ],
-      "classification": "fixture-only definition",
-      "definitionLocation": "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
-      "originatingCommit": "62b73a98b6e0f960e0d326df9addd310324c9740",
+      "classification": "production definition recovered",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+      "originatingCommit": "7df2e5ae07987e509ca74b715b9a51305726b2bf",
       "historyCommits": [
+        "7df2e5ae07987e509ca74b715b9a51305726b2bf",
         "62b73a98b6e0f960e0d326df9addd310324c9740",
         "45961044fde6b0c887154b9e07c2dd582c129fa6"
       ],
-      "deployable": false,
-      "definitionChecksum": "6fc1a20f8abe946e07e96ff050c6b6af8cdaa593c8254ab758ae9e3287482124",
+      "deployable": true,
+      "definitionChecksum": "27764e842703c2877230ffda86ac0e02e92bf8c40a33a5385c877d2a0da0a342",
       "returnType": "TABLE(\"revokedCount\" integer)",
       "matchesCurrentPrismaSchema": null,
       "signatureMatchesRepositoryCall": null,
       "securityMetadata": {
         "securityMode": "SECURITY DEFINER",
         "safeSearchPath": true,
-        "publicRevoked": false,
-        "grantsPresent": false
+        "publicRevoked": true,
+        "grantsPresent": true
       },
-      "requiresAdaptation": true,
+      "requiresAdaptation": false,
       "candidateLocations": [
-        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql"
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+        "backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
       ],
-      "grantLocations": [],
-      "revokeLocations": []
+      "grantLocations": [
+        "scripts/rls/sql/generated/20-context-helpers.sql",
+        "scripts/rls/sql/generated/21-runtime-grants.sql"
+      ],
+      "revokeLocations": [
+        "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
+        "scripts/rls/sql/generated/20-context-helpers.sql"
+      ]
     },
     {
       "functionName": "app_rls.batch_inventory_rollups",

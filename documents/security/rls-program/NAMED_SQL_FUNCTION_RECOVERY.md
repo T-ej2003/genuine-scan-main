@@ -3,24 +3,24 @@
 Generated from tracked source and all local Git refs. Fixture SQL is evidence only and is never deployable production SQL.
 
 - external migration reference recovered: 2
-- fixture-only definition: 19
+- fixture-only definition: 14
 - no definition found: 47
-- production definition recovered: 28
+- production definition recovered: 33
 
 | Function | Classification | Definition | Commit | Deployable |
 |---|---|---|---|---|
-| `app_auth.claim_refresh_token_rotation` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
-| `app_auth.complete_refresh_token_rotation` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 62b73a98b6e0 | no |
+| `app_auth.claim_refresh_token_rotation` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 7df2e5ae0798 | yes |
+| `app_auth.complete_refresh_token_rotation` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 7df2e5ae0798 | yes |
 | `app_auth.consume_email_verification_token` | no definition found | none | none | no |
 | `app_auth.consume_invitation_token` | fixture-only definition | backend/tests/rls-wave-b/b01/invitationPostgres18.fixture.sql | 62b73a98b6e0 | no |
 | `app_auth.consume_password_reset_token` | no definition found | none | none | no |
-| `app_auth.create_refresh_mfa_challenge` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
-| `app_auth.load_refresh_session_state` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
+| `app_auth.create_refresh_mfa_challenge` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 7df2e5ae0798 | yes |
+| `app_auth.load_refresh_session_state` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 7df2e5ae0798 | yes |
 | `app_auth.lookup_invitation_token` | fixture-only definition | backend/tests/rls-wave-b/b01/invitationPostgres18.fixture.sql | 62b73a98b6e0 | no |
 | `app_auth.lookup_password_user` | external migration reference recovered | documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql | 3fbcf1402d34 | no |
 | `app_auth.record_password_failure` | external migration reference recovered | documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql | 3fbcf1402d34 | no |
 | `app_auth.request_password_reset` | no definition found | none | none | no |
-| `app_auth.revoke_refresh_token_scope` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 62b73a98b6e0 | no |
+| `app_auth.revoke_refresh_token_scope` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 7df2e5ae0798 | yes |
 | `app_rls.batch_inventory_rollups` | no definition found | none | none | no |
 | `app_rls.batch_operational_rows` | no definition found | none | none | no |
 | `app_rls.batch_operational_scope` | no definition found | none | none | no |
