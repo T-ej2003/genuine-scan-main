@@ -4,6 +4,7 @@ import { z } from "zod";
 import prisma from "../config/database";
 import {
   ACCESS_TOKEN_COOKIE,
+  AUTHENTICATED_SESSION_CAPABILITY_COOKIE,
   CSRF_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
   getAccessTokenTtlMinutes,
@@ -228,6 +229,7 @@ export type CookieBackedAuthResponse = {
   refreshTokenExpiresAt: Date | null;
   user: any;
   auth: any;
+  databaseSessionCapability?: string | null;
 };
 
 export const authResponseData = (session: CookieBackedAuthResponse) => ({
@@ -243,6 +245,7 @@ export const getRefreshTokenFromRequest = (req: Request) => {
 export const clearAuthCookies = (res: Response) => {
   res.clearCookie(ACCESS_TOKEN_COOKIE, authCookieOptions());
   res.clearCookie(REFRESH_TOKEN_COOKIE, authCookieOptions());
+  res.clearCookie(AUTHENTICATED_SESSION_CAPABILITY_COOKIE, authCookieOptions());
   res.clearCookie(CSRF_TOKEN_COOKIE, csrfCookieOptions());
 };
 
@@ -263,6 +266,15 @@ export const setAuthCookies = (res: Response, session: CookieBackedAuthResponse)
     });
   } else {
     res.clearCookie(REFRESH_TOKEN_COOKIE, authCookieOptions());
+  }
+
+  if (session.databaseSessionCapability) {
+    res.cookie(AUTHENTICATED_SESSION_CAPABILITY_COOKIE, sealCookieToken(session.databaseSessionCapability, "auth.database-session"), {
+      ...authCookieOptions(),
+      maxAge: accessTtlMs,
+    });
+  } else {
+    res.clearCookie(AUTHENTICATED_SESSION_CAPABILITY_COOKIE, authCookieOptions());
   }
 
   res.cookie(CSRF_TOKEN_COOKIE, csrfToken, {

@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { randomUUID } from "crypto";
 import { AuthenticatedSessionClaims } from "../types";
 import { UserRole } from "@prisma/client";
-import { ACCESS_TOKEN_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
+import { ACCESS_TOKEN_COOKIE, AUTHENTICATED_SESSION_CAPABILITY_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
 import { openCookieToken } from "../services/auth/cookieTokenProtectionService";
 import {
   isLicenseeAdminRole,
@@ -33,6 +33,7 @@ import {
 export interface AuthRequest extends Request {
   user?: AuthenticatedSessionClaims;
   authMode?: "bearer" | "cookie";
+  databaseSessionCapability?: string | null;
 }
 
 const getBearerToken = (req: Request) => {
@@ -44,6 +45,11 @@ const getBearerToken = (req: Request) => {
 const getCookieAccessToken = (req: Request) => {
   const token = readCookie(req, ACCESS_TOKEN_COOKIE) || "";
   return token ? openCookieToken(token, "auth.access") : null;
+};
+
+const getDatabaseSessionCapability = (req: Request) => {
+  const token = readCookie(req, AUTHENTICATED_SESSION_CAPABILITY_COOKIE) || "";
+  return token ? openCookieToken(token, "auth.database-session") : null;
 };
 
 const requestIdFor = (req: Request) =>
@@ -176,6 +182,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     const decoded = verifyAccessToken(token);
     req.user = await hydrateTenantIfNeeded(decoded, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
+    req.databaseSessionCapability = getDatabaseSessionCapability(req);
     return next();
   } catch {
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
@@ -191,6 +198,7 @@ export const authenticateAnySession = async (req: AuthRequest, res: Response, ne
   try {
     req.user = await parseAnySessionToken(token, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
+    req.databaseSessionCapability = getDatabaseSessionCapability(req);
     return next();
   } catch {
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
@@ -207,6 +215,7 @@ export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextF
     const decoded = verifyAccessToken(token);
     req.user = await hydrateTenantIfNeeded(decoded, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
+    req.databaseSessionCapability = getDatabaseSessionCapability(req);
   } catch {
     // ignore
   }

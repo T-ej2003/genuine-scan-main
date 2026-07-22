@@ -201,7 +201,14 @@ BEGIN
   successor_id:=gen_random_uuid()::text;
   PERFORM set_config('app.b01_successor_id',successor_id,true);
   INSERT INTO public."RefreshToken" (id,"orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt") VALUES (successor_id,t."orgId",t."userId",p_token_hash,p_expires_at,p_rotated_at,p_ip_hash,p_user_agent,coalesce(t."authenticatedAt",p_rotated_at),t."mfaVerifiedAt",p_rotated_at);
-  UPDATE public."RefreshToken" rt SET "revokedAt"=p_rotated_at,"revokedReason"='ROTATED',"replacedByTokenHash"=p_token_hash,"rotationCompletedAt"=p_rotated_at,"lastUsedAt"=p_rotated_at WHERE rt.id=t.id AND rt."revokedAt" IS NULL;
+  -- The refresh predecessor and its database-verifiable authenticated session
+  -- are one security lineage.  Revoking both here keeps rotation atomic and
+  -- avoids a runtime-side capability mutation between predecessor and
+  -- successor writes.
+  UPDATE public."RefreshToken" rt SET "revokedAt"=p_rotated_at,"revokedReason"='ROTATED',"replacedByTokenHash"=p_token_hash,"rotationCompletedAt"=p_rotated_at,"lastUsedAt"=p_rotated_at,
+    "sessionCapabilityRevokedAt"=CASE WHEN rt."sessionCapabilityHash" IS NULL THEN rt."sessionCapabilityRevokedAt" ELSE p_rotated_at END,
+    "sessionCapabilityRevokedReason"=CASE WHEN rt."sessionCapabilityHash" IS NULL THEN rt."sessionCapabilityRevokedReason" ELSE 'REFRESH_ROTATED' END
+    WHERE rt.id=t.id AND rt."revokedAt" IS NULL;
   GET DIAGNOSTICS changed=ROW_COUNT; IF changed<>1 THEN RAISE EXCEPTION 'REFRESH_TOKEN_ROTATION_LOST' USING ERRCODE='40001'; END IF;
   PERFORM app_auth.b01_audit('AUTH_REFRESH_ROTATED',t.id,p_rotated_at); RETURN QUERY SELECT successor_id,p_expires_at;
 END

@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b'
+    AND source_contract_sha256='62b184295889964b25539a5a71288bcf0b1c60990f390ed36a02ef10d308a241'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:62b184295889964b25539a5a71288bcf0b1c60990f390ed36a02ef10d308a241'
     AND administrator_role='certification-administrator'
     AND phase='runtime-grants-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'policy package lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:62b184295889964b25539a5a71288bcf0b1c60990f390ed36a02ef10d308a241')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -34,8 +34,8 @@ DO $$ BEGIN
 END $$;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;
-  EXECUTE format('SET LOCAL ROLE %I','mscqr_rls_cert_owner');
 END $$;
+SET ROLE "mscqr_rls_cert_owner";
 ALTER TABLE public."ActionIdempotencyKey" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public."ActionIdempotencyKey" FORCE ROW LEVEL SECURITY;
 ALTER TABLE public."AdminMfaCredential" ENABLE ROW LEVEL SECURITY;
@@ -415,6 +415,10 @@ CREATE POLICY "b01_authmfachallenge_insert" ON public."AuthMfaChallenge" AS PERM
 COMMENT ON POLICY "b01_authmfachallenge_insert" ON public."AuthMfaChallenge" IS '{"boundary":"b01-refresh-rotation","ownerIdentity":"identity-auth-function-owner","scope":"transaction-local bearer-derived context"}';
 CREATE POLICY "b01_auditlogoutbox_insert" ON public."AuditLogOutbox" AS PERMISSIVE FOR INSERT TO "mscqr_rls_cert_auth_owner" WITH CHECK (current_user='mscqr_rls_cert_auth_owner' AND current_setting('app.b01_predecessor_id',true)<>'' AND payload->>'userId'=current_setting('app.b01_user_id',true) AND payload->'details'->>'requestId'=current_setting('app.b01_request_id',true) AND payload->>'action' IN ('AUTH_REFRESH_DISABLED_DENIED','AUTH_REFRESH_REUSE_DETECTED','AUTH_REFRESH_EXPIRED','AUTH_REFRESH_STALE_MEMBERSHIP_DENIED','MANUFACTURER_SCOPE_SWITCH','AUTH_REFRESH_MFA_CHALLENGE_REQUIRED','AUTH_REFRESH_REVOKED','AUTH_REFRESH_ROTATED'));
 COMMENT ON POLICY "b01_auditlogoutbox_insert" ON public."AuditLogOutbox" IS '{"boundary":"b01-refresh-rotation","ownerIdentity":"identity-auth-function-owner","scope":"transaction-local bearer-derived context"}';
+CREATE POLICY "authenticated_session_refreshtoken_select_update" ON public."RefreshToken" AS PERMISSIVE FOR ALL TO "mscqr_rls_cert_auth_owner" USING (current_setting('app.auth_session_operation',true)='verify' AND "sessionCapabilityHash"=current_setting('app.auth_session_hash',true) OR current_setting('app.auth_session_operation',true)='issue' AND id=current_setting('app.auth_session_id',true) AND "tokenHash"=current_setting('app.auth_session_refresh_hash',true) OR current_setting('app.auth_session_operation',true)='revoke-one' AND "userId"=current_setting('app.user_id',true) AND id=current_setting('app.auth_session_target_id',true) OR current_setting('app.auth_session_operation',true)='revoke-user' AND "userId"=current_setting('app.user_id',true)) WITH CHECK (current_setting('app.auth_session_operation',true)='verify' AND "sessionCapabilityHash"=current_setting('app.auth_session_hash',true) OR current_setting('app.auth_session_operation',true)='issue' AND id=current_setting('app.auth_session_id',true) AND "tokenHash"=current_setting('app.auth_session_refresh_hash',true) OR current_setting('app.auth_session_operation',true)='revoke-one' AND "userId"=current_setting('app.user_id',true) AND id=current_setting('app.auth_session_target_id',true) OR current_setting('app.auth_session_operation',true)='revoke-user' AND "userId"=current_setting('app.user_id',true));
+COMMENT ON POLICY "authenticated_session_refreshtoken_select_update" ON public."RefreshToken" IS '{"boundary":"authenticated-session-capability","ownerIdentity":"identity-auth-function-owner","scope":"capability hash installed by security definer before protected read"}';
+CREATE POLICY "authenticated_session_user_select" ON public."User" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_setting('app.auth_session_operation',true)='verify' AND public."User".id=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public."RefreshToken" s WHERE s."userId"=public."User".id AND s."sessionCapabilityHash"=current_setting('app.auth_session_hash',true) AND s."sessionCapabilityHashVersion"='sha256-v1' AND s."sessionCapabilityRevokedAt" IS NULL AND s."sessionCapabilityExpiresAt">clock_timestamp() AND s."revokedAt" IS NULL AND s."expiresAt">clock_timestamp()));
+COMMENT ON POLICY "authenticated_session_user_select" ON public."User" IS '{"boundary":"authenticated-session-capability","ownerIdentity":"identity-auth-function-owner","scope":"locked capability-bound refresh row derives the sole user selector"}';
 RESET ROLE;
 INSERT INTO mscqr_rls_install.expected_policy(
   schema_name,table_name,policy_name,permissive,command_name,role_names,using_tree,with_check_tree,policy_comment

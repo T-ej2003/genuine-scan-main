@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b'
+    AND source_contract_sha256='62b184295889964b25539a5a71288bcf0b1c60990f390ed36a02ef10d308a241'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:62b184295889964b25539a5a71288bcf0b1c60990f390ed36a02ef10d308a241'
     AND administrator_role='certification-administrator'
     AND phase='ownership-installed'
     AND NOT traffic_enabled) THEN RAISE EXCEPTION 'context helpers lacks the exact clean-room package marker'; END IF;
@@ -23,7 +23,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:62b184295889964b25539a5a71288bcf0b1c60990f390ed36a02ef10d308a241')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF (SELECT count(*) FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid WHERE parent.rolname IN ('mscqr_rls_cert_owner', 'mscqr_rls_cert_auth_owner', 'mscqr_rls_cert_app', 'mscqr_rls_cert_read', 'mscqr_rls_cert_preauth', 'mscqr_rls_cert_worker', 'mscqr_rls_cert_scheduled', 'mscqr_rls_cert_operator', 'mscqr_rls_cert_migration'))<>18
@@ -34,8 +34,8 @@ DO $$ BEGIN
 END $$;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;
-  EXECUTE format('SET LOCAL ROLE %I','mscqr_rls_cert_owner');
 END $$;
+SET ROLE "mscqr_rls_cert_owner";
 CREATE FUNCTION app_rls.setting(setting_name text) RETURNS text LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog AS $$ SELECT NULLIF(btrim(current_setting(setting_name,true)),'') $$;
 CREATE FUNCTION app_rls.uuid_setting(setting_name text) RETURNS text LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog AS $$ SELECT CASE WHEN app_rls.setting(setting_name) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN lower(app_rls.setting(setting_name)) ELSE NULL END $$;
 CREATE FUNCTION app_rls.current_user_id() RETURNS text LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog AS $$ SELECT app_rls.uuid_setting('app.user_id') $$;
@@ -679,17 +679,35 @@ BEGIN
 END
 $function$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_rls FROM PUBLIC;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app_rls TO "mscqr_rls_cert_app";
-REVOKE EXECUTE ON FUNCTION app_rls.dashboard_scope_fingerprint(text) FROM "mscqr_rls_cert_app";
-REVOKE EXECUTE ON FUNCTION app_rls.authorize_dashboard_snapshot(text,text,text) FROM "mscqr_rls_cert_app";
-REVOKE EXECUTE ON FUNCTION app_rls.batch_scope_fingerprint(text,text,text) FROM "mscqr_rls_cert_app";
-REVOKE EXECUTE ON FUNCTION app_rls.batch_operational_batch_allowed(text,text) FROM "mscqr_rls_cert_app";
-REVOKE EXECUTE ON FUNCTION app_rls.authorize_batch_operational_read(text,text,text,text) FROM "mscqr_rls_cert_app";
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_rls FROM "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.setting(text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.uuid_setting(text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.current_user_id() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.current_organization_id() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.current_licensee_id() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.current_manufacturer_id() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.current_role() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.current_assurance() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.current_request_id() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.current_purpose() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.attributed_request() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.manufacturer_scope_valid(text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.actor_scope_valid() TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.dashboard_snapshot_scope(text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.dashboard_snapshot_data(text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.batch_operational_scope(text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.batch_operational_rows(text,text,text,text,text,integer,integer) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.batch_operational_total(text,text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.batch_inventory_rollups(text,text,text,text,text,text[]) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.batch_unassigned_ranges(text,text,text,text,text,text[]) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.batch_status_fallback(text,text,text,text,text,text[]) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.batch_reservable_qr_summaries(text,text,text,text,text,text[]) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.platform_audit_log_details(text[]) TO "mscqr_rls_cert_app";
 RESET ROLE;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_auth_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_auth_owner'; END IF;
-  EXECUTE format('SET LOCAL ROLE %I','mscqr_rls_cert_auth_owner');
 END $$;
+SET ROLE "mscqr_rls_cert_auth_owner";
 -- Reviewed production B01 refresh boundary.  The caller only supplies bearer
 -- hash candidates; every other scope is derived from the locked predecessor.
 -- "mscqr_rls_cert_auth_owner" is substituted by the clean-room package generator.
@@ -893,7 +911,14 @@ BEGIN
   successor_id:=gen_random_uuid()::text;
   PERFORM set_config('app.b01_successor_id',successor_id,true);
   INSERT INTO public."RefreshToken" (id,"orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt") VALUES (successor_id,t."orgId",t."userId",p_token_hash,p_expires_at,p_rotated_at,p_ip_hash,p_user_agent,coalesce(t."authenticatedAt",p_rotated_at),t."mfaVerifiedAt",p_rotated_at);
-  UPDATE public."RefreshToken" rt SET "revokedAt"=p_rotated_at,"revokedReason"='ROTATED',"replacedByTokenHash"=p_token_hash,"rotationCompletedAt"=p_rotated_at,"lastUsedAt"=p_rotated_at WHERE rt.id=t.id AND rt."revokedAt" IS NULL;
+  -- The refresh predecessor and its database-verifiable authenticated session
+  -- are one security lineage.  Revoking both here keeps rotation atomic and
+  -- avoids a runtime-side capability mutation between predecessor and
+  -- successor writes.
+  UPDATE public."RefreshToken" rt SET "revokedAt"=p_rotated_at,"revokedReason"='ROTATED',"replacedByTokenHash"=p_token_hash,"rotationCompletedAt"=p_rotated_at,"lastUsedAt"=p_rotated_at,
+    "sessionCapabilityRevokedAt"=CASE WHEN rt."sessionCapabilityHash" IS NULL THEN rt."sessionCapabilityRevokedAt" ELSE p_rotated_at END,
+    "sessionCapabilityRevokedReason"=CASE WHEN rt."sessionCapabilityHash" IS NULL THEN rt."sessionCapabilityRevokedReason" ELSE 'REFRESH_ROTATED' END
+    WHERE rt.id=t.id AND rt."revokedAt" IS NULL;
   GET DIAGNOSTICS changed=ROW_COUNT; IF changed<>1 THEN RAISE EXCEPTION 'REFRESH_TOKEN_ROTATION_LOST' USING ERRCODE='40001'; END IF;
   PERFORM app_auth.b01_audit('AUTH_REFRESH_ROTATED',t.id,p_rotated_at); RETURN QUERY SELECT successor_id,p_expires_at;
 END
@@ -913,6 +938,210 @@ GRANT EXECUTE ON FUNCTION app_auth.complete_refresh_token_rotation(text,text[],t
 GRANT EXECUTE ON FUNCTION app_auth.create_refresh_mfa_challenge(text,text[],text,text,text,integer,text,text[],text,text,integer,timestamp without time zone,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_auth.load_refresh_session_state(text,text[],text,text,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
 GRANT EXECUTE ON FUNCTION app_auth.revoke_refresh_token_scope(text,text[],text,text,text,timestamp without time zone,text) TO "mscqr_rls_cert_preauth";
+RESET ROLE;
+DO $$ BEGIN
+  IF NOT pg_has_role(session_user,'mscqr_rls_cert_auth_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_auth_owner'; END IF;
+END $$;
+SET ROLE "mscqr_rls_cert_auth_owner";
+-- Database-verifiable authenticated session capability. "mscqr_rls_cert_auth_owner" is
+-- substituted only by the clean-room generator. Raw capabilities are accepted
+-- only by the exact issue/verify/revocation boundaries and are never persisted
+-- or returned by PostgreSQL.
+
+CREATE OR REPLACE FUNCTION app_auth.auth_session_prepare(
+  p_capability text,
+  p_purpose text,
+  p_request_id text
+) RETURNS text
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE capability_hash text;
+BEGIN
+  IF p_capability !~ '^[A-Za-z0-9_-]{43}$'
+     OR p_purpose IS NULL OR length(btrim(p_purpose)) NOT BETWEEN 1 AND 240
+     OR p_request_id IS NULL OR length(btrim(p_request_id)) NOT BETWEEN 1 AND 128
+  THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
+
+  -- This deliberately overwrites all values that can influence an authenticated
+  -- policy before the first protected read. Runtime callers may set app.* but
+  -- cannot retain it through this reviewed function boundary.
+  capability_hash := encode(sha256(convert_to(p_capability,'UTF8')),'hex');
+  PERFORM set_config('app.auth_session_hash',capability_hash,true),
+          set_config('app.auth_session_id','',true),
+          set_config('app.user_id','',true), set_config('app.role','',true),
+          set_config('app.organization_id','',true), set_config('app.licensee_id','',true),
+          set_config('app.manufacturer_id','',true), set_config('app.auth_assurance','',true),
+          set_config('app.request_id',p_request_id,true), set_config('app.purpose',p_purpose,true),
+          set_config('app.auth_session_verified','',true), set_config('app.auth_session_operation','verify',true),
+          set_config('app.auth_session_target_id','',true);
+  RETURN capability_hash;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_auth.issue_authenticated_session_capability(
+  p_refresh_token_id text,
+  p_refresh_token_hash text,
+  p_capability text,
+  p_assurance text,
+  p_expires_at timestamp without time zone
+) RETURNS TABLE("id" text,"expiresAt" timestamp without time zone)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE session_row public."RefreshToken"%ROWTYPE; capability_hash text;
+BEGIN
+  IF p_refresh_token_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR p_refresh_token_hash !~ '^([0-9a-f]{12}:)?[a-f0-9]{64}$'
+     OR p_capability !~ '^[A-Za-z0-9_-]{43}$' OR p_assurance NOT IN ('PASSWORD','ADMIN_MFA')
+     OR p_expires_at IS NULL THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
+  -- Reuse the reviewed B01 bearer binder before the first protected read.
+  -- The identifier stays a selector; the existing refresh bearer hash is the
+  -- only pre-auth proof that can make that selector visible.
+  PERFORM app_auth.b01_bind_bearer(ARRAY[p_refresh_token_hash], 'auth-session-issue');
+  capability_hash := encode(sha256(convert_to(p_capability,'UTF8')),'hex');
+  PERFORM set_config('app.auth_session_hash',capability_hash,true), set_config('app.auth_session_id',p_refresh_token_id,true),
+          set_config('app.auth_session_refresh_hash',p_refresh_token_hash,true), set_config('app.b01_token_hashes',p_refresh_token_hash,true),
+          set_config('app.auth_session_operation','issue',true), set_config('app.auth_session_verified','',true);
+  -- Lock the bearer-bound refresh row using an innocuous, reviewed lifecycle
+  -- update.  The lock lives for this transaction; validation failures roll it
+  -- back.  This avoids a second, user-scoped lookup and serializes competing
+  -- issuers for the same refresh credential.
+  UPDATE public."RefreshToken" rt
+     SET "sessionCapabilityLastUsedAt"=clock_timestamp()
+   WHERE rt.id=p_refresh_token_id
+     AND rt."tokenHash"=p_refresh_token_hash
+     AND rt."revokedAt" IS NULL
+     AND rt."expiresAt">clock_timestamp()
+  RETURNING rt.* INTO session_row;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_SESSION' USING ERRCODE='42501';
+  END IF;
+  IF session_row."sessionCapabilityHash" IS NOT NULL
+     OR p_expires_at<=clock_timestamp() OR p_expires_at>session_row."expiresAt"
+     OR (p_assurance='ADMIN_MFA') IS DISTINCT FROM (session_row."mfaVerifiedAt" IS NOT NULL) THEN
+    RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_LIFECYCLE' USING ERRCODE='42501';
+  END IF;
+  UPDATE public."RefreshToken" rt SET "sessionCapabilityHash"=capability_hash,
+    "sessionCapabilityHashVersion"='sha256-v1',"sessionCapabilityAssurance"=p_assurance,
+    "sessionCapabilityExpiresAt"=p_expires_at,"sessionCapabilityLastUsedAt"=clock_timestamp(),
+    "sessionCapabilityRevokedAt"=NULL,"sessionCapabilityRevokedReason"=NULL
+    WHERE rt.id=session_row.id AND rt."sessionCapabilityHash" IS NULL;
+  IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED_SESSION' USING ERRCODE='42501'; END IF;
+  RETURN QUERY SELECT session_row.id::text,session_row."expiresAt";
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_auth.require_authenticated_session(
+  p_capability text,
+  p_purpose text,
+  p_request_id text
+) RETURNS TABLE("sessionId" text,"userId" text,"role" text,"organizationId" text,"licenseeId" text,"assurance" text)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE session_row record; actor_row record; capability_hash text;
+BEGIN
+  -- auth_session_prepare performs input validation.  Its SET LOCAL values are
+  -- intentionally not relied on across a nested SECURITY DEFINER boundary;
+  -- install every security-relevant setting again in this outer boundary so
+  -- the protected query below is bound to this exact invocation.
+  capability_hash := app_auth.auth_session_prepare(p_capability,p_purpose,p_request_id);
+  PERFORM set_config('app.auth_session_hash',capability_hash,true),
+          set_config('app.auth_session_id','',true),
+          set_config('app.user_id','',true), set_config('app.role','',true),
+          set_config('app.organization_id','',true), set_config('app.licensee_id','',true),
+          set_config('app.manufacturer_id','',true), set_config('app.auth_assurance','',true),
+          set_config('app.request_id',p_request_id,true), set_config('app.purpose',p_purpose,true),
+          set_config('app.auth_session_verified','',true), set_config('app.auth_session_operation','verify',true),
+          set_config('app.auth_session_target_id','',true);
+  SELECT s.id,s."userId",s."sessionCapabilityAssurance" AS assurance
+    INTO session_row
+    FROM public."RefreshToken" s
+   WHERE s."sessionCapabilityHash"=current_setting('app.auth_session_hash',true)
+     AND s."sessionCapabilityHashVersion"='sha256-v1'
+     AND s."sessionCapabilityRevokedAt" IS NULL AND s."sessionCapabilityExpiresAt">clock_timestamp()
+     AND s."revokedAt" IS NULL AND s."expiresAt">clock_timestamp()
+   FOR UPDATE OF s;
+  IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
+
+  -- The user selector is derived from the locked, capability-bound refresh
+  -- row.  It is never a caller-provided authority value.
+  PERFORM set_config('app.user_id',session_row."userId",true);
+  SELECT u.id,u.role::text AS role,u."orgId",u."licenseeId"
+    INTO actor_row
+    FROM public."User" u
+   WHERE u.id=session_row."userId" AND u."isActive"
+     AND u.status='ACTIVE'::public."UserStatus"
+     AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL;
+  IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
+
+  UPDATE public."RefreshToken" SET "sessionCapabilityLastUsedAt"=clock_timestamp() WHERE id=session_row.id;
+  PERFORM set_config('app.auth_session_id',session_row.id,true),
+          set_config('app.user_id',actor_row.id,true), set_config('app.role',actor_row.role,true),
+          set_config('app.organization_id',coalesce(actor_row."orgId",''),true),
+          set_config('app.licensee_id',coalesce(actor_row."licenseeId",''),true),
+          set_config('app.auth_assurance',CASE session_row.assurance WHEN 'ADMIN_MFA' THEN 'mfa-verified' WHEN 'PASSWORD' THEN 'password-verified' ELSE '' END,true),
+          set_config('app.auth_session_verified','1',true);
+  IF current_setting('app.auth_assurance',true)='' THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
+  RETURN QUERY SELECT session_row.id::text,actor_row.id::text,actor_row.role::text,
+    actor_row."orgId"::text,actor_row."licenseeId"::text,session_row.assurance::text;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_auth.revoke_authenticated_session_capability(
+  p_capability text,
+  p_target_refresh_token_id text,
+  p_reason text,
+  p_request_id text
+) RETURNS TABLE("revoked" boolean)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor_row record; changed integer;
+BEGIN
+  IF p_target_refresh_token_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR p_reason !~ '^[A-Z0-9_:-]{1,128}$' THEN
+    RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor_row FROM app_auth.require_authenticated_session(p_capability,'auth-session-revoke',p_request_id);
+  IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
+  PERFORM set_config('app.auth_session_operation','revoke-one',true), set_config('app.auth_session_target_id',p_target_refresh_token_id,true);
+  UPDATE public."RefreshToken" rt
+     SET "sessionCapabilityRevokedAt"=clock_timestamp(),"sessionCapabilityRevokedReason"=p_reason
+   WHERE rt.id=p_target_refresh_token_id AND rt."userId"=actor_row."userId"
+     AND rt."sessionCapabilityHash" IS NOT NULL AND rt."sessionCapabilityRevokedAt" IS NULL;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  RETURN QUERY SELECT changed=1;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_auth.revoke_all_authenticated_session_capabilities(
+  p_capability text,
+  p_reason text,
+  p_request_id text
+) RETURNS TABLE("revokedCount" integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor_row record; changed integer;
+BEGIN
+  IF p_reason !~ '^[A-Z0-9_:-]{1,128}$' THEN
+    RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor_row FROM app_auth.require_authenticated_session(p_capability,'auth-session-revoke-all',p_request_id);
+  IF NOT FOUND THEN RAISE EXCEPTION 'AUTH_SESSION_CAPABILITY_DENIED' USING ERRCODE='42501'; END IF;
+  PERFORM set_config('app.auth_session_operation','revoke-user',true);
+  UPDATE public."RefreshToken" rt
+     SET "sessionCapabilityRevokedAt"=clock_timestamp(),"sessionCapabilityRevokedReason"=p_reason
+   WHERE rt."userId"=actor_row."userId" AND rt."sessionCapabilityHash" IS NOT NULL
+     AND rt."sessionCapabilityRevokedAt" IS NULL;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  RETURN QUERY SELECT changed;
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_auth.auth_session_prepare(text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.issue_authenticated_session_capability(text,text,text,text,timestamp without time zone) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.require_authenticated_session(text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.revoke_authenticated_session_capability(text,text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_auth.revoke_all_authenticated_session_capabilities(text,text,text) FROM PUBLIC;
+
+GRANT USAGE ON SCHEMA app_auth TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_auth.issue_authenticated_session_capability(text,text,text,text,timestamp without time zone) TO "mscqr_rls_cert_preauth";
+GRANT EXECUTE ON FUNCTION app_auth.require_authenticated_session(text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_auth.revoke_all_authenticated_session_capabilities(text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_auth.revoke_authenticated_session_capability(text,text,text,text) TO "mscqr_rls_cert_app";
 RESET ROLE;
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,

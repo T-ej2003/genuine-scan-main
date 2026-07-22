@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b",
+  "sourceContractSha256": "62b184295889964b25539a5a71288bcf0b1c60990f390ed36a02ef10d308a241",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -27,7 +27,7 @@
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "cf37ca7993b192e400cc38bf1846f7fe0c8b34943df5b8b6858dc8159ff45870"
+      "sha256": "34aa9e86039e6019e46c1a8d9b972b8635db12711b4d85855a4b559de0216e70"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -51,7 +51,7 @@
     },
     {
       "path": "backend/prisma/schema.prisma",
-      "sha256": "1c820b8307263f70084c16a5a8cb060cfcc14c03b7e7f20c329cdb3d86005cdf"
+      "sha256": "d8a88ee364ac42d5f8aa1c4d9b5be7fabfd6b9137e917cfbb9b4fa95cabcc98d"
     },
     {
       "path": "scripts/rls/generate-full-rls-sql.mjs",
@@ -59,7 +59,7 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "e22f97f6246aecc8e0d0104a0c1599be3f9821bc895c4af1593d906afbb44cdc"
+      "sha256": "908452ed3d472cc0cd29a5f22c7098965a50caaac18192b41314c89fd8890ea0"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
@@ -67,11 +67,11 @@
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
-      "sha256": "96aed5990cd4e6a43fb183fbac2cc59ae7e4eff61bd276fcd0d7cb7588dfffba"
+      "sha256": "62a84bd222806a04455fcd6d8f98f988e32981d33d51e1ef8467afb2c67c22e2"
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "339454a835c9747e00f3211302ca127d55c59b81a3fb167a2e138480ebd62448"
+      "sha256": "d8e5b3b00da7dd2beb345207eccb1ad7ccd36361921ff8c60f077fe12f7d5e4b"
     },
     {
       "path": "scripts/rls/lib/application-path-certifications.mjs",
@@ -79,15 +79,23 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "78dc90a0a0d274a8fd418403f274714f24793faee2930dc76a1aa2c57c688eb5"
+      "sha256": "527f32985e61c762cee7ef31ad2912af556ab603380e1928a20f7640abc72c16"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
-      "sha256": "62d18bebe3e447edb3d927198f252b03d6d35abc908b94ee175e36fd2ee74816"
+      "sha256": "2bae86a5b295725f8309bcabb2ccd44286d203564f2d8e4263ac87af3f454c0d"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
       "sha256": "aa56cd6220367bb27b72eabcab9e5f2a93245df1a2cbc9e6bf2bbdb7e7bad1dd"
+    },
+    {
+      "path": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+      "sha256": "2f5434c3ad57d4633c0ec422a959f84e371dc433a9dd1bf428ca024e486f529a"
+    },
+    {
+      "path": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
+      "sha256": "77e59f8ec15003feeee419d532acbf0252d7b792fdf259d5c62db0bc7c8b6fbc"
     },
     {
       "path": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
@@ -109,9 +117,9 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 31,
-    "generatedPolicies": 56,
+    "generatedPolicies": 58,
     "columnPrivilegeCells": 78,
-    "prismaMigrations": 49,
+    "prismaMigrations": 50,
     "prismaEnums": 58,
     "registeredWorkflowCallPaths": 400,
     "applicationPathCertifiedWorkflows": 10
@@ -127,7 +135,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:62b184295889964b25539a5a71288bcf0b1c60990f390ed36a02ef10d308a241",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
@@ -348,6 +356,10 @@
     {
       "name": "20260721140000_add_refresh_rotation_claim",
       "sha256": "418d6e006649cb17edbe52127d83b60f7b2bbf17e52d6e05b014a4b3adb95759"
+    },
+    {
+      "name": "20260722120000_add_authenticated_session_capability",
+      "sha256": "908d9b05ed63c11361704d4500e37129a7e52f953552fe63dca8d64ac5c06c59"
     }
   ],
   "prohibitions": [

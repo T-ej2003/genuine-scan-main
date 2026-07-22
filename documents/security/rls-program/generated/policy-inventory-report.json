@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 56,
+  "count": 58,
   "rows": [
     {
       "tableId": "table-admin-mfa-credential",
@@ -1441,6 +1441,30 @@
     {
       "tableId": "table-refresh-token",
       "table": "RefreshToken",
+      "policyName": "authenticated_session_refreshtoken_select_update",
+      "command": "ALL",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "capability-verified"
+      ],
+      "scopeType": "security-definer-owner-and-capability-hash-derived-transaction-context",
+      "scopePredicate": "(current_setting('app.auth_session_operation',true)='verify' AND \"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) OR current_setting('app.auth_session_operation',true)='issue' AND id=current_setting('app.auth_session_id',true) AND \"tokenHash\"=current_setting('app.auth_session_refresh_hash',true) OR current_setting('app.auth_session_operation',true)='revoke-one' AND \"userId\"=current_setting('app.user_id',true) AND id=current_setting('app.auth_session_target_id',true) OR current_setting('app.auth_session_operation',true)='revoke-user' AND \"userId\"=current_setting('app.user_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-refresh-token-select-65b85bc0759d",
+        "command-refresh-token-update-65b85bc0759d"
+      ],
+      "workflowId": null,
+      "route": "authenticated session capability",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-refresh-token",
+      "table": "RefreshToken",
       "policyName": "b01_refreshtoken_insert",
       "command": "INSERT",
       "actors": [
@@ -1630,6 +1654,29 @@
       "route": "GET /api/trace/timeline",
       "certificationStatus": "pending",
       "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
+      "policyName": "authenticated_session_user_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-user"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "capability-verified"
+      ],
+      "scopeType": "security-definer-owner-and-capability-bound-user-derived-transaction-context",
+      "scopePredicate": "(current_setting('app.auth_session_operation',true)='verify' AND public.\"User\".id=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" s WHERE s.\"userId\"=public.\"User\".id AND s.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND s.\"sessionCapabilityHashVersion\"='sha256-v1' AND s.\"sessionCapabilityRevokedAt\" IS NULL AND s.\"sessionCapabilityExpiresAt\">clock_timestamp() AND s.\"revokedAt\" IS NULL AND s.\"expiresAt\">clock_timestamp()))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-user-select-65b85bc0759d"
+      ],
+      "workflowId": null,
+      "route": "authenticated session capability",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-user",

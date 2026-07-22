@@ -152,7 +152,7 @@ export const revokeRefreshTokenById = async (input: {
   return result.revoked;
 };
 
-export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRotated>(input: {
+export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRotated, TRotation = undefined>(input: {
   rawToken: string;
   ipHash: string | null;
   userAgent: string | null;
@@ -164,6 +164,12 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
     tokenHashCandidates: string[];
     now: Date;
   }) => Promise<RefreshRotationDecision<TRotated, TConsumed>>;
+  afterRotate?: (input: {
+    tx: Prisma.TransactionClient;
+    predecessor: RefreshRotationToken;
+    successor: { id: string; expiresAt: Date; tokenHash: string };
+    now: Date;
+  }) => Promise<TRotation>;
 }): Promise<
   | {
       ok: true;
@@ -172,10 +178,12 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
       orgId: string | null;
       newRawToken: string;
       newTokenId: string;
+      newTokenHash: string;
       newExpiresAt: Date;
       authenticatedAt: Date | null;
       mfaVerifiedAt: Date | null;
       value: TRotated;
+      rotation: TRotation;
     }
   | {
       ok: true;
@@ -270,6 +278,9 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
       rotatedAt: now,
       requestId: input.requestId,
     });
+    const rotation = input.afterRotate
+      ? await input.afterRotate({ tx, predecessor: tokenRow, successor: { ...successor, tokenHash: newHash }, now })
+      : undefined as TRotation;
 
     return {
       ok: true,
@@ -278,10 +289,12 @@ export async function rotateRefreshToken<TRotated = undefined, TConsumed = TRota
       orgId: decision.orgId,
       newRawToken,
       newTokenId: successor.id,
+      newTokenHash: newHash,
       newExpiresAt: successor.expiresAt,
       authenticatedAt: decision.authenticatedAt,
       mfaVerifiedAt: decision.mfaVerifiedAt,
       value: decision.value,
+      rotation,
     } as const;
   });
 }

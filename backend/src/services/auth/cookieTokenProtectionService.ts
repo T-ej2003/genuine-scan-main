@@ -5,6 +5,7 @@ import { getJwtSecret } from "../../utils/security";
 type CookieTokenPurpose =
   | "auth.access"
   | "auth.refresh"
+  | "auth.database-session"
   | "customer-verify.session";
 
 const COOKIE_TOKEN_VERSION = "v1";

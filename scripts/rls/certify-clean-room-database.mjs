@@ -327,7 +327,7 @@ const certifyTablesAndColumns = (dbUrl, appUrl, manifest, policies, privileges) 
   return forceCount;
 };
 
-const certifyB01RefreshRotation = ({ bootstrap, preauth }, manifest) => {
+const certifyB01RefreshRotation = ({ bootstrap, preauth, app }, manifest) => {
   const oldHash = "a".repeat(64);
   const rollbackHash = "b".repeat(64);
   const successorHash = "c".repeat(64);
@@ -344,10 +344,41 @@ const certifyB01RefreshRotation = ({ bootstrap, preauth }, manifest) => {
   runPsql(preauth, ["-q", "-c", rotationSql], "B01 committed refresh rotation");
   if (scalar(bootstrap, `SELECT "revokedReason" || ':' || coalesce("replacedByTokenHash",'') || ':' || ("rotationCompletedAt" IS NOT NULL)::text FROM public."RefreshToken" WHERE id='${ids.refreshA}'`, "B01 predecessor lineage") !== `ROTATED:${successorHash}:true`) throw new Error("B01 rotation did not atomically revoke and link its predecessor");
   if (scalar(bootstrap, `SELECT count(*) FROM public."RefreshToken" WHERE "tokenHash"='${successorHash}'`, "B01 successor count") !== "1") throw new Error("B01 rotation created an invalid successor count");
-  if (scalar(preauth, `SELECT disposition FROM app_auth.claim_refresh_token_rotation(ARRAY['${oldHash}']::text[],transaction_timestamp()::timestamp,'${requestId}')`, "B01 committed predecessor replay") !== "REUSE_DETECTED") throw new Error("B01 committed predecessor replay was not rejected");
   runPsql(preauth, ["-q", "-c", `BEGIN; SELECT disposition FROM app_auth.claim_refresh_token_rotation(ARRAY['${rollbackHash}']::text[],transaction_timestamp()::timestamp,'b01-cert-rollback'); ROLLBACK;`], "B01 rollback refresh claim");
   if (scalar(bootstrap, `SELECT coalesce("rotationRequestId",'') FROM public."RefreshToken" WHERE id='${ids.refreshRollback}'`, "B01 rollback claim residue") !== "") throw new Error("B01 rollback left a durable claim");
-  return { predecessorReplayRejected: true, rollbackClaimCleared: true, successorHashPersisted: true };
+  const capability = crypto.randomBytes(32).toString("base64url");
+  const capabilityHash = crypto.createHash("sha256").update(capability, "utf8").digest("hex");
+  // The replay probe intentionally revokes every active refresh token for the
+  // user.  Exercise issuance first against the independent rollback fixture,
+  // then execute the replay probe below.
+  const capabilitySessionId = ids.refreshRollback;
+  const capabilityRefreshHash = rollbackHash;
+  const capabilityExpiry = scalar(bootstrap, `SELECT to_char("expiresAt" AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS') FROM public."RefreshToken" WHERE id='${capabilitySessionId}'`, "load capability session expiry");
+  if (scalar(bootstrap, `SELECT r.rolname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_roles r ON r.oid=p.proowner WHERE n.nspname='app_auth' AND p.proname='issue_authenticated_session_capability' AND pg_get_function_identity_arguments(p.oid)='p_refresh_token_id text, p_refresh_token_hash text, p_capability text, p_assurance text, p_expires_at timestamp without time zone'`, "authenticated session issue function owner") !== manifest.roles.authOwner) throw new Error("authenticated session issue function owner drifted");
+  const issuePolicyVisible = scalar(bootstrap, `BEGIN;
+    SET LOCAL ROLE ${quote(manifest.roles.authOwner)};
+    SELECT app_auth.b01_bind_bearer(ARRAY['${capabilityRefreshHash}']::text[],'auth-session-issue');
+    SELECT set_config('app.auth_session_operation','issue',true),set_config('app.auth_session_id','${capabilitySessionId}',true),set_config('app.auth_session_refresh_hash','${capabilityRefreshHash}',true);
+    SELECT count(*) FROM public."RefreshToken" WHERE id='${capabilitySessionId}' AND "tokenHash"='${capabilityRefreshHash}';
+    ROLLBACK;`, "authenticated session issue owner-policy visibility");
+  if (issuePolicyVisible !== "1") throw new Error("authenticated session issue owner policy cannot see its reviewed bearer-bound refresh row");
+  runPsql(preauth, ["-q", "-c", `SELECT * FROM app_auth.issue_authenticated_session_capability('${capabilitySessionId}','${capabilityRefreshHash}','${capability}','PASSWORD','${capabilityExpiry}'::timestamp)`], "issue database-verifiable session capability");
+  const verifiedUserVisible = scalar(bootstrap, `BEGIN;
+    SET LOCAL ROLE ${quote(manifest.roles.authOwner)};
+    SELECT set_config('app.auth_session_operation','verify',true),set_config('app.auth_session_hash','${capabilityHash}',true),set_config('app.user_id','${ids.adminA}',true);
+    SELECT count(*) FROM public."User" WHERE id='${ids.adminA}';
+    ROLLBACK;`, "authenticated session verified-user owner-policy visibility");
+  if (verifiedUserVisible !== "1") throw new Error("authenticated session verified-user policy cannot see the capability-derived actor");
+  requireDenial(runPsql(preauth, ["-q", "-c", `SELECT app_auth.auth_session_prepare('${capability}','forged','request')`], "pre-auth capability helper execution", true), "pre-auth capability helper execution");
+  requireDenial(runPsql(app, ["-q", "-c", `BEGIN; SELECT set_config('app.user_id','${ids.adminB}',true),set_config('app.auth_session_verified','1',true); SELECT * FROM public."RefreshToken"; ROLLBACK;`], "forged authenticated GUC direct RefreshToken access", true), "forged authenticated GUC direct RefreshToken access");
+  if (scalar(app, `SELECT "userId" FROM app_auth.require_authenticated_session('${capability}','certified-session-read','capability-cert-request')`, "verify database-verifiable session capability") !== ids.adminA) throw new Error("authenticated session capability did not derive the authoritative actor");
+  const randomCapabilityOutput = runPsql(app, ["-q", "-c", `SELECT * FROM app_auth.require_authenticated_session('${crypto.randomBytes(32).toString("base64url")}','certified-session-read','capability-cert-invalid')`], "random authenticated capability", true);
+  if (!/AUTH_SESSION_CAPABILITY_DENIED/.test(randomCapabilityOutput)) throw new Error("random authenticated capability did not fail closed");
+  if (scalar(app, `SELECT "revoked"::text FROM app_auth.revoke_authenticated_session_capability('${capability}','${capabilitySessionId}','LOGOUT','capability-cert-revoke')`, "revoke database-verifiable session capability") !== "true") throw new Error("authenticated session capability revocation did not affect the verified session");
+  const revokedCapabilityOutput = runPsql(app, ["-q", "-c", `SELECT * FROM app_auth.require_authenticated_session('${capability}','certified-session-read','capability-cert-replay')`], "revoked authenticated capability replay", true);
+  if (!/AUTH_SESSION_CAPABILITY_DENIED/.test(revokedCapabilityOutput)) throw new Error("revoked authenticated capability replay did not fail closed");
+  if (scalar(preauth, `SELECT disposition FROM app_auth.claim_refresh_token_rotation(ARRAY['${oldHash}']::text[],transaction_timestamp()::timestamp,'${requestId}')`, "B01 committed predecessor replay") !== "REUSE_DETECTED") throw new Error("B01 committed predecessor replay was not rejected");
+  return { predecessorReplayRejected: true, rollbackClaimCleared: true, successorHashPersisted: true, capabilityVerified: true, forgedGucDenied: true, capabilityRevocationEnforced: true };
 };
 
 const certifySemantics = (bootstrapUrl, appUrl) => {
@@ -642,7 +673,7 @@ const certifyCatalogTamperDetection = (administratorUrl, manifest, policies) => 
     { id: "policy-definition", sql: `${setOwner} ALTER POLICY ${quote(policy.policyName)} ON public.${quote(policy.table)} TO PUBLIC USING (true); ${resetOwner}`, expected: /policy definition differs from the sealed generated contract/i },
     { id: "routine-definition", sql: `${setOwner} CREATE OR REPLACE FUNCTION app_rls.current_purpose() RETURNS text LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog AS $$ SELECT 'tampered'::text $$; ${resetOwner}`, expected: /routine definition or privilege inventory differs/i },
     { id: "routine-acl", sql: `${setOwner} GRANT EXECUTE ON FUNCTION app_rls.current_purpose() TO PUBLIC; ${resetOwner}`, expected: /routine definition or privilege inventory differs/i },
-    { id: "schema-acl", sql: `SET LOCAL ROLE ${quote(manifest.roles.authOwner)}; GRANT USAGE ON SCHEMA app_auth TO ${quote(manifest.roles.app)}; RESET ROLE;`, expected: /schema privilege inventory differs/i },
+    { id: "schema-acl", sql: `SET LOCAL ROLE ${quote(manifest.roles.authOwner)}; GRANT CREATE ON SCHEMA app_auth TO ${quote(manifest.roles.app)}; RESET ROLE;`, expected: /schema privilege inventory differs/i },
     { id: "table-acl", sql: `${setOwner} GRANT DELETE ON TABLE public."AuditLog" TO ${quote(manifest.roles.app)}; ${resetOwner}`, expected: /table privilege inventory differs/i },
     { id: "column-acl", sql: `${setOwner} GRANT SELECT ("email") ON TABLE public."User" TO ${quote(manifest.roles.app)}; ${resetOwner}`, expected: /column privilege inventory differs/i },
     { id: "type-acl", sql: `${setOwner} DO $$ DECLARE type_name text; BEGIN SELECT t.typname INTO type_name FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typtype='e' ORDER BY t.typname LIMIT 1; EXECUTE format('GRANT USAGE ON TYPE public.%I TO %I',type_name,${lit(manifest.roles.read)}); END $$; ${resetOwner}`, expected: /type privilege inventory differs/i },
@@ -668,8 +699,8 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     runSqlFile(urls.administrator, "runtime-policy.sql", "run exact runtime policy entrypoint");
     runSqlFile(urls.administrator, "verification.sql", "run exact verification entrypoint");
     const catalogTamperResults = certifyCatalogTamperDetection(urls.administrator, manifest, policies);
-    const tablesCertified = certifyTablesAndColumns(urls.administrator, urls.app, manifest, policies, privileges);
     const b01Certification = certifyB01RefreshRotation(urls, manifest);
+    const tablesCertified = certifyTablesAndColumns(urls.administrator, urls.app, manifest, policies, privileges);
     certifySemantics(urls.bootstrap, urls.app);
     const fixtureRows = Number(scalar(urls.bootstrap, "SELECT sum(row_count) FROM (SELECT (xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM public.%I',c.relname),false,true,'')))[1]::text::bigint AS row_count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_prisma_migrations') counts", "count disposable certification fixture rows"));
     if (!fixtureRows) throw new Error("Final semantic certification did not load its declared disposable fixtures");

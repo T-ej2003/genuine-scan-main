@@ -9,7 +9,9 @@ const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const source = fs.readFileSync(path.join(root, "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql"), "utf8");
 
 test("B01 production refresh functions use the reviewed owner-and-bearer FORCE-RLS contract", () => {
-  const contracts = validateNamedSqlFunctionContracts().filter((contract) => contract.id.startsWith("b01-"));
+  const contracts = validateNamedSqlFunctionContracts().filter((contract) =>
+    contract.definitionLocation.endsWith("b01RefreshRotationFunctions.sql")
+  );
   assert.equal(contracts.length, 5);
   assert(contracts.every((contract) => contract.security.ownerIdentity === "identity-auth-function-owner"));
   assert(contracts.every((contract) => contract.security.publicExecute === "revoked"));

@@ -65013,6 +65013,243 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-refresh-token-select-6f4f15166829",
+      "tableId": "table-refresh-token",
+      "command": "SELECT",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "authenticated-user": "password-verified"
+      },
+      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
+      "allowedColumns": [
+        "authenticatedAt",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedAt",
+        "revokedReason",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-sessions-for-user"
+      ],
+      "supportingEvidence": [
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
+      ],
+      "allowScenarios": [
+        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-refresh-token-select-aef6258afbf3",
+      "tableId": "table-refresh-token",
+      "command": "SELECT",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "authenticated-user": "password-verified"
+      },
+      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
+      "allowedColumns": [
+        "authenticatedAt",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedAt",
+        "revokedReason",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-create-authenticated-session-capability"
+      ],
+      "supportingEvidence": [
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
+      ],
+      "allowScenarios": [
+        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-refresh-token-select-ceadeb06dd3b",
+      "tableId": "table-refresh-token",
+      "command": "SELECT",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "authenticated-user": "password-verified"
+      },
+      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
+      "allowedColumns": [
+        "authenticatedAt",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedAt",
+        "revokedReason",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-session-by-refresh-token"
+      ],
+      "supportingEvidence": [
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
+      ],
+      "allowScenarios": [
+        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-refresh-token-update-0c71149cc376",
       "tableId": "table-refresh-token",
       "command": "UPDATE",
@@ -65157,6 +65394,231 @@
       "supportingEvidence": [
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
         "backend/src/services/auth/authService.ts"
+      ],
+      "allowScenarios": [
+        "authenticated-user using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-refresh-token-update-6f4f15166829",
+      "tableId": "table-refresh-token",
+      "command": "UPDATE",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "authenticated-user": "mfa-verified"
+      },
+      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
+      "allowedColumns": [
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedReason"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-sessions-for-user"
+      ],
+      "supportingEvidence": [
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
+      ],
+      "allowScenarios": [
+        "authenticated-user using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-refresh-token-update-aef6258afbf3",
+      "tableId": "table-refresh-token",
+      "command": "UPDATE",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "authenticated-user": "mfa-verified"
+      },
+      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
+      "allowedColumns": [
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedReason"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-create-authenticated-session-capability"
+      ],
+      "supportingEvidence": [
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
+      ],
+      "allowScenarios": [
+        "authenticated-user using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-refresh-token-update-ceadeb06dd3b",
+      "tableId": "table-refresh-token",
+      "command": "UPDATE",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "mfa-verified",
+      "minimumAssuranceByActorClass": {
+        "authenticated-user": "mfa-verified"
+      },
+      "scopeRule": "table-refresh-token row must join through table-user on userId=id; no alternative parent.",
+      "allowedColumns": [
+        "authenticatedAt",
+        "mfaVerifiedAt",
+        "orgId",
+        "revokedReason"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "createdIpHash",
+        "createdUserAgent",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "replacedByTokenHash",
+        "revokedAt",
+        "tokenHash",
+        "userId"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "New row preserves table-refresh-token row must join through table-user on userId=id; no alternative parent. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-session-by-refresh-token"
+      ],
+      "supportingEvidence": [
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
       ],
       "allowScenarios": [
         "authenticated-user using identity-authenticated-app at mfa-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
@@ -75052,6 +75514,98 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-user-select-6f4f15166829",
+      "tableId": "table-user",
+      "command": "SELECT",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "authenticated-user": "password-verified"
+      },
+      "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "allowedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "disabledReason",
+        "failedLoginAttempts",
+        "id",
+        "isActive",
+        "lastLoginAt",
+        "licenseeId",
+        "lockedUntil",
+        "name",
+        "orgId",
+        "role",
+        "status",
+        "updatedAt",
+        "website"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "email",
+        "emailVerifiedAt",
+        "id",
+        "licenseeId",
+        "location",
+        "metadata",
+        "orgId",
+        "passwordHash",
+        "pendingEmail",
+        "pendingEmailRequestedAt",
+        "role",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "deletedAt=NULL",
+        "deletedAt=SERVER_TIMESTAMP_SET",
+        "disabledAt=NULL",
+        "disabledAt=SERVER_TIMESTAMP_SET",
+        "status=INVITED",
+        "status=ACTIVE",
+        "status=DISABLED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "deletedAt",
+        "disabledAt",
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-sessions-for-user"
+      ],
+      "supportingEvidence": [
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
+      ],
+      "allowScenarios": [
+        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-user-select-7331cc8183dd",
       "tableId": "table-user",
       "command": "SELECT",
@@ -76585,6 +77139,98 @@
         "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
       ],
       "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-user-select-ceadeb06dd3b",
+      "tableId": "table-user",
+      "command": "SELECT",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "authenticated-user": "password-verified"
+      },
+      "scopeRule": "Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global.",
+      "allowedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "disabledReason",
+        "failedLoginAttempts",
+        "id",
+        "isActive",
+        "lastLoginAt",
+        "licenseeId",
+        "lockedUntil",
+        "name",
+        "orgId",
+        "role",
+        "status",
+        "updatedAt",
+        "website"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "deletedAt",
+        "disabledAt",
+        "email",
+        "emailVerifiedAt",
+        "id",
+        "licenseeId",
+        "location",
+        "metadata",
+        "orgId",
+        "passwordHash",
+        "pendingEmail",
+        "pendingEmailRequestedAt",
+        "role",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "deletedAt=NULL",
+        "deletedAt=SERVER_TIMESTAMP_SET",
+        "disabledAt=NULL",
+        "disabledAt=SERVER_TIMESTAMP_SET",
+        "status=INVITED",
+        "status=ACTIVE",
+        "status=DISABLED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "deletedAt",
+        "disabledAt",
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-session-by-refresh-token"
+      ],
+      "supportingEvidence": [
+        "backend/src/services/auth/authenticatedSessionCapabilityService.ts"
+      ],
+      "allowScenarios": [
+        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
       "status": "architecture-resolved"
     },
     {

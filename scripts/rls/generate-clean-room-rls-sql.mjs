@@ -158,15 +158,55 @@ const candidateDatabasePatterns = {
 };
 const candidateDatabasePattern = candidateDatabasePatterns[targetEnvironment];
 const roleMarker = `mscqr-full-rls-clean-room:${targetEnvironment}:${sourceContractSha256}`;
-const b01Contracts = validateNamedSqlFunctionContracts().filter((contract) => contract.id.startsWith("b01-"));
+const b01Contracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.definitionLocation === "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql"
+    && contract.security.runtimeExecuteGrantees.includes("preauth")
+);
+const authenticatedSessionContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  ["b01-issue-authenticated-session", "b01-require-authenticated-session", "b01-revoke-authenticated-session", "b01-revoke-all-authenticated-sessions"].includes(contract.id)
+);
 const b01FunctionSource = b01Contracts.length
   ? fs.readFileSync(path.join(repoRoot, b01Contracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
   : "";
 const b01FunctionSignatures = b01Contracts.map((contract) => `app_auth.${contract.name}(${contract.signature})`);
+const authenticatedSessionFunctionSource = authenticatedSessionContracts.length
+  ? fs.readFileSync(path.join(repoRoot, authenticatedSessionContracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
+  : "";
+const authenticatedSessionFunctionSignatures = authenticatedSessionContracts.map((contract) => `app_auth.${contract.name}(${contract.signature})`);
+const authenticatedSessionPreauthSignatures = authenticatedSessionContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("preauth")).map((contract) => `app_auth.${contract.name}(${contract.signature})`);
+const authenticatedSessionAppSignatures = authenticatedSessionContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_auth.${contract.name}(${contract.signature})`);
+// This is deliberately an exact runtime execution allowlist.  The functions
+// are the only app_rls public boundaries emitted by this clean-room package;
+// context setters and authorization helpers stay internal to their owner.
+const appRuntimeFunctionSignatures = [
+  "app_rls.setting(text)",
+  "app_rls.uuid_setting(text)",
+  "app_rls.current_user_id()",
+  "app_rls.current_organization_id()",
+  "app_rls.current_licensee_id()",
+  "app_rls.current_manufacturer_id()",
+  "app_rls.current_role()",
+  "app_rls.current_assurance()",
+  "app_rls.current_request_id()",
+  "app_rls.current_purpose()",
+  "app_rls.attributed_request()",
+  "app_rls.manufacturer_scope_valid(text)",
+  "app_rls.actor_scope_valid()",
+  "app_rls.dashboard_snapshot_scope(text,text,text)",
+  "app_rls.dashboard_snapshot_data(text,text,text,text)",
+  "app_rls.batch_operational_scope(text,text,text,text)",
+  "app_rls.batch_operational_rows(text,text,text,text,text,integer,integer)",
+  "app_rls.batch_operational_total(text,text,text,text,text)",
+  "app_rls.batch_inventory_rollups(text,text,text,text,text,text[])",
+  "app_rls.batch_unassigned_ranges(text,text,text,text,text,text[])",
+  "app_rls.batch_status_fallback(text,text,text,text,text,text[])",
+  "app_rls.batch_reservable_qr_summaries(text,text,text,text,text,text[])",
+  "app_rls.platform_audit_log_details(text[])",
+];
 const b01FunctionOwnerGrants = [
-  ["RefreshToken", "SELECT", ["id","orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt","revokedAt","revokedReason","replacedByTokenHash","rotationRequestId","rotationClaimedAt","rotationCompletedAt"]],
+  ["RefreshToken", "SELECT", ["id","orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt","revokedAt","revokedReason","replacedByTokenHash","rotationRequestId","rotationClaimedAt","rotationCompletedAt","sessionCapabilityHash","sessionCapabilityHashVersion","sessionCapabilityAssurance","sessionCapabilityExpiresAt","sessionCapabilityLastUsedAt","sessionCapabilityRevokedAt","sessionCapabilityRevokedReason"]],
   ["RefreshToken", "INSERT", ["id","orgId","userId","tokenHash","expiresAt","createdAt","createdIpHash","createdUserAgent","authenticatedAt","mfaVerifiedAt","lastUsedAt"]],
-  ["RefreshToken", "UPDATE", ["revokedAt","revokedReason","lastUsedAt","replacedByTokenHash","rotationRequestId","rotationClaimedAt","rotationCompletedAt"]],
+  ["RefreshToken", "UPDATE", ["revokedAt","revokedReason","lastUsedAt","replacedByTokenHash","rotationRequestId","rotationClaimedAt","rotationCompletedAt","sessionCapabilityHash","sessionCapabilityHashVersion","sessionCapabilityAssurance","sessionCapabilityExpiresAt","sessionCapabilityLastUsedAt","sessionCapabilityRevokedAt","sessionCapabilityRevokedReason"]],
   ["User", "SELECT", ["id","email","name","role","orgId","licenseeId","status","isActive","disabledAt","deletedAt","emailVerifiedAt"]],
   ["ManufacturerLicenseeLink", "SELECT", ["manufacturerId","licenseeId","isPrimary","createdAt","updatedAt"]],
   ["Licensee", "SELECT", ["id","orgId","name","prefix","brandName","isActive","suspendedAt"]],
@@ -205,6 +245,8 @@ const b01TablePolicies = [
   ["AuthMfaChallenge", "INSERT", `(${b01PolicyOwner} AND ${b01Operation}='create-mfa' AND "userId"=${b01User} AND purpose='admin_login' AND "consumedAt" IS NULL AND "supersededAt" IS NULL)`],
   ["AuditLogOutbox", "INSERT", `(${b01PolicyOwner} AND ${b01Predecessor}<>'' AND payload->>'userId'=${b01User} AND payload->'details'->>'requestId'=current_setting('app.b01_request_id',true) AND payload->>'action' IN ('AUTH_REFRESH_DISABLED_DENIED','AUTH_REFRESH_REUSE_DETECTED','AUTH_REFRESH_EXPIRED','AUTH_REFRESH_STALE_MEMBERSHIP_DENIED','MANUFACTURER_SCOPE_SWITCH','AUTH_REFRESH_MFA_CHALLENGE_REQUIRED','AUTH_REFRESH_REVOKED','AUTH_REFRESH_ROTATED'))`],
 ];
+const authenticatedSessionPolicy = `(current_setting('app.auth_session_operation',true)='verify' AND "sessionCapabilityHash"=current_setting('app.auth_session_hash',true) OR current_setting('app.auth_session_operation',true)='issue' AND id=current_setting('app.auth_session_id',true) AND "tokenHash"=current_setting('app.auth_session_refresh_hash',true) OR current_setting('app.auth_session_operation',true)='revoke-one' AND "userId"=current_setting('app.user_id',true) AND id=current_setting('app.auth_session_target_id',true) OR current_setting('app.auth_session_operation',true)='revoke-user' AND "userId"=current_setting('app.user_id',true))`;
+const authenticatedSessionUserPolicy = `(current_setting('app.auth_session_operation',true)='verify' AND public."User".id=current_setting('app.user_id',true) AND EXISTS (SELECT 1 FROM public."RefreshToken" s WHERE s."userId"=public."User".id AND s."sessionCapabilityHash"=current_setting('app.auth_session_hash',true) AND s."sessionCapabilityHashVersion"='sha256-v1' AND s."sessionCapabilityRevokedAt" IS NULL AND s."sessionCapabilityExpiresAt">clock_timestamp() AND s."revokedAt" IS NULL AND s."expiresAt">clock_timestamp()))`;
 const b01SourceRuleIds = new Map([
   ["RefreshToken:SELECT", "command-refresh-token-select-65b85bc0759d"], ["RefreshToken:INSERT", "command-refresh-token-insert-65b85bc0759d"], ["RefreshToken:UPDATE", "command-refresh-token-update-65b85bc0759d"],
   ["User:SELECT", "command-user-select-65b85bc0759d"], ["ManufacturerLicenseeLink:SELECT", "command-manufacturer-licensee-link-select-65b85bc0759d"], ["Licensee:SELECT", "command-licensee-select-65b85bc0759d"], ["Organization:SELECT", "command-organization-select-65b85bc0759d"],
@@ -295,10 +337,15 @@ const dispositions = tables.map((table) => {
   };
 });
 
+// This is emitted as a psql script, where each top-level statement is its own
+// transaction unless the caller explicitly starts one.  SET LOCAL inside the
+// validation DO block would therefore expire before the protected statements
+// that follow.  Validate first, then keep the reviewed role for the script
+// section until the paired RESET ROLE.
 const setRole = (role) => `DO $$ BEGIN
   IF NOT pg_has_role(session_user,${lit(role)},'SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for ${role}'; END IF;
-  EXECUTE format('SET LOCAL ROLE %I',${lit(role)});
-END $$;`;
+END $$;
+SET ROLE ${q(role)};`;
 const resetRole = `RESET ROLE;`;
 const targetTableList = tables.map((table) => lit(table.physicalTable)).join(", ");
 const expectedMigrationTableList = [...tables.map((table) => table.physicalTable), "_prisma_migrations"].sort();
@@ -1189,16 +1236,18 @@ ${batchOperationalAuthorizationFunctionsSql}
 ${batchOperationalRowFunctionsSql}
 ${batchOperationalSummaryFunctionsSql}
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_rls FROM PUBLIC;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app_rls TO ${q(roleNames.app)};
-REVOKE EXECUTE ON FUNCTION app_rls.dashboard_scope_fingerprint(text) FROM ${q(roleNames.app)};
-REVOKE EXECUTE ON FUNCTION app_rls.authorize_dashboard_snapshot(text,text,text) FROM ${q(roleNames.app)};
-REVOKE EXECUTE ON FUNCTION app_rls.batch_scope_fingerprint(text,text,text) FROM ${q(roleNames.app)};
-REVOKE EXECUTE ON FUNCTION app_rls.batch_operational_batch_allowed(text,text) FROM ${q(roleNames.app)};
-REVOKE EXECUTE ON FUNCTION app_rls.authorize_batch_operational_read(text,text,text,text) FROM ${q(roleNames.app)};
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_rls FROM ${q(roleNames.app)};
+${appRuntimeFunctionSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
 ${resetRole}
 ${b01FunctionSource ? `${setRole(roleNames.authOwner)}
 ${b01FunctionSource}
 ${b01FunctionSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
+${resetRole}` : ""}
+${authenticatedSessionFunctionSource ? `${setRole(roleNames.authOwner)}
+${authenticatedSessionFunctionSource}
+GRANT USAGE ON SCHEMA app_auth TO ${q(roleNames.app)};
+${authenticatedSessionPreauthSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.preauth)};`).join("\n")}
+${authenticatedSessionAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
 ${resetRole}` : ""}
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
@@ -1516,6 +1565,14 @@ for (const [table, command, predicate] of b01TablePolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b01-refresh-rotation", ownerIdentity: "identity-auth-function-owner", scope: "transaction-local bearer-derived context" }))};`);
 }
+if (authenticatedSessionContracts.length) {
+  const policyName = shortName("authenticated_session", "RefreshToken", "SELECT_UPDATE");
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q("RefreshToken")} AS PERMISSIVE FOR ALL TO ${q(roleNames.authOwner)} USING ${authenticatedSessionPolicy} WITH CHECK ${authenticatedSessionPolicy};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q("RefreshToken")} IS ${lit(JSON.stringify({ boundary: "authenticated-session-capability", ownerIdentity: "identity-auth-function-owner", scope: "capability hash installed by security definer before protected read" }))};`);
+  const userPolicyName = shortName("authenticated_session", "User", "SELECT");
+  policyStatements.push(`CREATE POLICY ${q(userPolicyName)} ON public.${q("User")} AS PERMISSIVE FOR SELECT TO ${q(roleNames.authOwner)} USING ${authenticatedSessionUserPolicy};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(userPolicyName)} ON public.${q("User")} IS ${lit(JSON.stringify({ boundary: "authenticated-session-capability", ownerIdentity: "identity-auth-function-owner", scope: "locked capability-bound refresh row derives the sole user selector" }))};`);
+}
 const policiesSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
 ${requirePackagePhaseSql("runtime-grants-installed", "policy package")}
@@ -1595,7 +1652,8 @@ const expectedRoutineIdentities = [
   ["app_auth", "b01_audit", "p_action text, p_token_id text, p_at timestamp without time zone"],
   ["app_auth", "b01_bind_bearer", "p_hashes text[], p_request_id text"],
   ["app_auth", "b01_bind_predecessor", "p_token_id text, p_user_id text, p_organization_id text, p_operation text"],
-  ...b01Contracts.map((contract) => [contract.schema, contract.name, contract.identityArguments]),
+  ["app_auth", "auth_session_prepare", "p_capability text, p_purpose text, p_request_id text"],
+  ...[...b01Contracts, ...authenticatedSessionContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
@@ -1640,6 +1698,17 @@ const policyInventory = [
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),
+  ...(authenticatedSessionContracts.length ? [{
+    tableId: "table-refresh-token", table: "RefreshToken", policyName: shortName("authenticated_session", "RefreshToken", "SELECT_UPDATE"), command: "ALL",
+    actors: ["authenticated-user"], assurance: "source-rule-specific", purpose: ["capability-verified"],
+    scopeType: "security-definer-owner-and-capability-hash-derived-transaction-context", scopePredicate: authenticatedSessionPolicy,
+    columns: [], sourceCommandRuleIds: [b01SourceRuleIds.get("RefreshToken:SELECT"), b01SourceRuleIds.get("RefreshToken:UPDATE")], workflowId: null, route: "authenticated session capability", certificationStatus: "pending", internalHelperOnly: true,
+  }, {
+    tableId: "table-user", table: "User", policyName: shortName("authenticated_session", "User", "SELECT"), command: "SELECT",
+    actors: ["authenticated-user"], assurance: "source-rule-specific", purpose: ["capability-verified"],
+    scopeType: "security-definer-owner-and-capability-bound-user-derived-transaction-context", scopePredicate: authenticatedSessionUserPolicy,
+    columns: [], sourceCommandRuleIds: [b01SourceRuleIds.get("User:SELECT")], workflowId: null, route: "authenticated session capability", certificationStatus: "pending", internalHelperOnly: true,
+  }] : []),
 ].sort((left, right) => `${left.table}:${left.policyName}`.localeCompare(`${right.table}:${right.policyName}`));
 const expectedPolicyValues = policyInventory.map((policy) => `(${lit(policy.table)},${lit(policy.policyName)},${lit(policy.command)})`).join(",");
 const expectedSchemaAclRows = [
@@ -1647,6 +1716,7 @@ const expectedSchemaAclRows = [
   ["public", roleNames.authOwner, roleNames.owner, "USAGE", false],
   ...[roleNames.app, roleNames.read, roleNames.worker, roleNames.scheduled].map((grantee) => ["app_rls", grantee, roleNames.owner, "USAGE", false]),
   ["app_auth", roleNames.preauth, roleNames.authOwner, "USAGE", false],
+  ["app_auth", roleNames.app, roleNames.authOwner, "USAGE", false],
 ];
 const schemaAclColumns = aclColumns.filter(({ name }) => name !== "object_name");
 const expectedSchemaAclSelect = expectedRowsSelect(expectedSchemaAclRows, schemaAclColumns);

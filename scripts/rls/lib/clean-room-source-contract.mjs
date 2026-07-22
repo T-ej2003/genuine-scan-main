@@ -24,6 +24,8 @@ export const cleanRoomSourcePaths = [...new Set([
   "scripts/rls/lib/named-sql-function-contracts.mjs",
   "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
   "backend/src/rls-waves/session-b/b01/b01RefreshRotationRollback.sql",
+  "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+  "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
   ...applicationPathCertificationFamilies.map((family) => family.testFile),
 ])];
 

@@ -234,6 +234,7 @@ export const logout = async (req: Request, res: Response) => {
         licenseeId: context.licenseeId ?? null,
         manufacturerId: context.manufacturerId ?? null,
         actorRole: context.role,
+        databaseSessionCapability: String((req as Request & { databaseSessionCapability?: unknown }).databaseSessionCapability || "") || null,
       }, tx)
     );
 

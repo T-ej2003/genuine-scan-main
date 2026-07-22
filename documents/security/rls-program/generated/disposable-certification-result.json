@@ -3,79 +3,22 @@
   "environment": "local-disposable-only",
   "deploymentModel": "clean-room-blue-green",
   "postgresqlMajor": 18,
-  "sourceContractSha256": "493195168a173db0e38b838bf4fad1a23098583ddaa98de5e6384618d0b9bf6b",
+  "sourceContractSha256": "e7825b725f24597b66629d9ef2b50d0cfcc1df219b145f7ef028f952bf938045",
   "tablesExpected": 77,
   "forceRlsTargetsExpected": 75,
-  "tablesCertified": 75,
-  "generatedPoliciesCertified": 56,
-  "columnPrivilegeCellsCertified": 78,
+  "tablesCertified": 0,
+  "generatedPoliciesCertified": 0,
+  "columnPrivilegeCellsCertified": 0,
   "workflowCertificationStatus": "pending-application-path-certification",
-  "workflowsApplicationPathCertified": 10,
-  "applicationPathCertifiedWorkflowIds": [
-    "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics",
-    "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
-    "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate",
-    "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
-    "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
-    "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
-    "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups",
-    "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
-    "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges",
-    "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries"
-  ],
-  "applicationPathResults": [
-    {
-      "familyId": "risk-analytics",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"
-      ],
-      "registeredRoots": [
-        "GET /api/analytics/risk-scores"
-      ],
-      "status": "application-path-certified",
-      "postgresqlMajor": 18,
-      "testFile": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js"
-    },
-    {
-      "familyId": "dashboard-snapshot",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-compute-dashboard-snapshot",
-        "workflow-internal-backend-src-services-dashboard-snapshot-service-ts-load-inventory-aggregate"
-      ],
-      "registeredRoots": [
-        "GET /api/dashboard/stats",
-        "GET /api/events/dashboard"
-      ],
-      "status": "application-path-certified",
-      "postgresqlMajor": 18,
-      "testFile": "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js"
-    },
-    {
-      "familyId": "batch-operational-read",
-      "workflowIds": [
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-build-count-maps",
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-get-batch-allocation-map",
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-batches",
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-rollups",
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-total",
-        "workflow-internal-backend-src-services-batch-allocation-service-ts-read-unassigned-ranges",
-        "workflow-internal-backend-src-services-print-reservation-service-ts-list-reservable-qr-code-summaries"
-      ],
-      "registeredRoots": [
-        "GET /api/qr/batches",
-        "GET /api/qr/batches/:id/allocation-map"
-      ],
-      "status": "application-path-certified",
-      "postgresqlMajor": 18,
-      "testFile": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js"
-    }
-  ],
+  "workflowsApplicationPathCertified": 0,
+  "applicationPathCertifiedWorkflowIds": [],
+  "applicationPathResults": [],
   "workflowsProductProhibited": 1,
   "cleanRoomPreflightCertified": true,
-  "migrationsFromZeroCertified": true,
-  "managedRolesCreatedByPackage": true,
+  "migrationsFromZeroCertified": false,
+  "managedRolesCreatedByPackage": false,
   "nonSuperuserAdministrativeExecutorCertification": true,
-  "phaseEntrypointCertification": true,
+  "phaseEntrypointCertification": false,
   "phaseTransactionAtomicityCertification": true,
   "failureInjectionExpectedStages": [
     "database-created",
@@ -292,67 +235,16 @@
       "blueFingerprintUnchanged": true
     }
   ],
-  "catalogTamperResults": [
-    {
-      "dimension": "policy-definition",
-      "status": "exact-drift-refused",
-      "expectedFailure": "policy definition differs from the sealed generated contract"
-    },
-    {
-      "dimension": "routine-definition",
-      "status": "exact-drift-refused",
-      "expectedFailure": "routine definition or privilege inventory differs"
-    },
-    {
-      "dimension": "routine-acl",
-      "status": "exact-drift-refused",
-      "expectedFailure": "routine definition or privilege inventory differs"
-    },
-    {
-      "dimension": "schema-acl",
-      "status": "exact-drift-refused",
-      "expectedFailure": "schema privilege inventory differs"
-    },
-    {
-      "dimension": "table-acl",
-      "status": "exact-drift-refused",
-      "expectedFailure": "table privilege inventory differs"
-    },
-    {
-      "dimension": "column-acl",
-      "status": "exact-drift-refused",
-      "expectedFailure": "column privilege inventory differs"
-    },
-    {
-      "dimension": "type-acl",
-      "status": "exact-drift-refused",
-      "expectedFailure": "type privilege inventory differs"
-    },
-    {
-      "dimension": "database-acl",
-      "status": "exact-drift-refused",
-      "expectedFailure": "database privilege inventory differs"
-    },
-    {
-      "dimension": "default-acl",
-      "status": "exact-drift-refused",
-      "expectedFailure": "default privilege definition differs"
-    }
-  ],
-  "greenDatabaseResidueCount": 0,
-  "managedRoleResidueCount": 0,
-  "blueFingerprintUnchanged": true,
-  "rollbackVerified": true,
-  "policySemanticPreservation": true,
-  "columnPrivilegeCertification": true,
-  "exactCatalogTamperCertification": true,
-  "routeShutdownTemplateTests": true,
-  "packageChecksumsSha256": "ae09647cd46de0b5189cf50d4d5e6b19d2b7ea986b2a86df15433c9da20bca59",
-  "status": "clean-room-full-table-enforcement-certified-workflows-pending",
-  "b01Certification": {
-    "predecessorReplayRejected": true,
-    "rollbackClaimCleared": true,
-    "successorHashPersisted": true
-  },
-  "disposableCertificationFixtureRows": 41
+  "catalogTamperResults": [],
+  "greenDatabaseResidueCount": null,
+  "managedRoleResidueCount": null,
+  "blueFingerprintUnchanged": false,
+  "rollbackVerified": false,
+  "policySemanticPreservation": false,
+  "columnPrivilegeCertification": false,
+  "exactCatalogTamperCertification": false,
+  "routeShutdownTemplateTests": false,
+  "packageChecksumsSha256": "6bb72223147c136f3332c53e4cad54eae42bd5091b8bddb091534db8c8aa5e14",
+  "status": "failed-cleanup-required",
+  "failure": "AuditLog own context failed: ERROR:  permission denied for function install_actor_context"
 }

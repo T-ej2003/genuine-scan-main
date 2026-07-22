@@ -522,6 +522,24 @@
       "line": 167
     },
     {
+      "functionName": "app_auth.issue_authenticated_session_capability",
+      "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+      "sourceFunction": "createAuthenticatedSessionCapability",
+      "line": 38
+    },
+    {
+      "functionName": "app_auth.revoke_authenticated_session_capability",
+      "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+      "sourceFunction": "revokeAuthenticatedSessionByRefreshToken",
+      "line": 54
+    },
+    {
+      "functionName": "app_auth.revoke_all_authenticated_session_capabilities",
+      "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+      "sourceFunction": "revokeAuthenticatedSessionsForUser",
+      "line": 69
+    },
+    {
       "functionName": "app_rls.batch_inventory_rollups",
       "sourceFile": "backend/src/services/batchAllocationService.ts",
       "sourceFunction": "readRollups",
@@ -909,6 +927,60 @@
       ]
     },
     {
+      "functionName": "app_auth.issue_authenticated_session_capability",
+      "schema": "app_auth",
+      "name": "issue_authenticated_session_capability",
+      "signature": "text,text,text,text,timestamp without time zone",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "preauth"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
+        "deploymentPhase": "session-b-b01"
+      },
+      "tableCommands": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "RefreshToken",
+          "UPDATE"
+        ]
+      ],
+      "requiredContext": "Issues a capability only for the locked active refresh-session row after the caller presents its exact bearer-derived refresh hash; user and assurance are derived from that row.",
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-create-authenticated-session-capability"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.issue_authenticated_session_capability",
+          "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+          "sourceFunction": "createAuthenticatedSessionCapability",
+          "line": 38
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_auth.issue_authenticated_session_capability",
+          "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+          "sourceFunction": "createAuthenticatedSessionCapability",
+          "line": 38,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
       "functionName": "app_auth.load_refresh_session_state",
       "schema": "app_auth",
       "name": "load_refresh_session_state",
@@ -1121,6 +1193,122 @@
           "sourceFile": "backend/src/rls-waves/session-b/b01/preAuthRepository.ts",
           "sourceFunction": "requestPasswordResetBoundary",
           "line": 146,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.revoke_all_authenticated_session_capabilities",
+      "schema": "app_auth",
+      "name": "revoke_all_authenticated_session_capabilities",
+      "signature": "text,text,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
+        "deploymentPhase": "session-b-b01"
+      },
+      "tableCommands": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "RefreshToken",
+          "UPDATE"
+        ],
+        [
+          "User",
+          "SELECT"
+        ]
+      ],
+      "requiredContext": "Verifies the opaque capability before deriving the only user whose active capabilities may be revoked.",
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-sessions-for-user"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.revoke_all_authenticated_session_capabilities",
+          "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+          "sourceFunction": "revokeAuthenticatedSessionsForUser",
+          "line": 69
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_auth.revoke_all_authenticated_session_capabilities",
+          "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+          "sourceFunction": "revokeAuthenticatedSessionsForUser",
+          "line": 69,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_auth.revoke_authenticated_session_capability",
+      "schema": "app_auth",
+      "name": "revoke_authenticated_session_capability",
+      "signature": "text,text,text,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityRollback.sql",
+        "deploymentPhase": "session-b-b01"
+      },
+      "tableCommands": [
+        [
+          "RefreshToken",
+          "SELECT"
+        ],
+        [
+          "RefreshToken",
+          "UPDATE"
+        ],
+        [
+          "User",
+          "SELECT"
+        ]
+      ],
+      "requiredContext": "Verifies the opaque capability before deriving its user and revoking only a capability row bound to that verified user.",
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-auth-authenticated-session-capability-service-ts-revoke-authenticated-session-by-refresh-token"
+      ],
+      "callers": [
+        {
+          "functionName": "app_auth.revoke_authenticated_session_capability",
+          "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+          "sourceFunction": "revokeAuthenticatedSessionByRefreshToken",
+          "line": 54
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_auth.revoke_authenticated_session_capability",
+          "sourceFile": "backend/src/services/auth/authenticatedSessionCapabilityService.ts",
+          "sourceFunction": "revokeAuthenticatedSessionByRefreshToken",
+          "line": 54,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }

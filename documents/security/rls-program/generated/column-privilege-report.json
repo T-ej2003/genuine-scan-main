@@ -243,7 +243,14 @@
         "replacedByTokenHash",
         "rotationRequestId",
         "rotationClaimedAt",
-        "rotationCompletedAt"
+        "rotationCompletedAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
@@ -291,7 +298,14 @@
         "replacedByTokenHash",
         "rotationRequestId",
         "rotationClaimedAt",
-        "rotationCompletedAt"
+        "rotationCompletedAt",
+        "sessionCapabilityHash",
+        "sessionCapabilityHashVersion",
+        "sessionCapabilityAssurance",
+        "sessionCapabilityExpiresAt",
+        "sessionCapabilityLastUsedAt",
+        "sessionCapabilityRevokedAt",
+        "sessionCapabilityRevokedReason"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",

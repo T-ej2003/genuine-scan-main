@@ -29,6 +29,7 @@ import {
   type RefreshSessionState,
 } from "../../rls-waves/session-b/b01/sessionCredentialRepository";
 import { getB01AuthenticatedPrisma } from "../../rls-waves/session-b/b01/runtimeClients";
+import { createAuthenticatedSessionCapability, revokeAuthenticatedSessionByRefreshToken } from "./authenticatedSessionCapabilityService";
 
 const parseIntEnv = (key: string, fallback: number) => {
   const raw = String(process.env[key] || "").trim();
@@ -273,7 +274,8 @@ const buildActiveSessionResponse = (
     authenticatedAt: Date;
     mfaVerifiedAt: Date | null;
   },
-  refresh: { rawToken: string; id: string; expiresAt: Date }
+  refresh: { rawToken: string; id: string; expiresAt: Date },
+  databaseSessionCapability?: string | null
 ) => {
   const { user, linkedScope, mfaRequired, mfaStatus, primaryLicensee, sessionLicenseeId, sessionOrgId, scopeVersion } = state;
   const accessToken = signAccessToken(buildJwtPayloadForUser({
@@ -295,6 +297,7 @@ const buildActiveSessionResponse = (
     accessToken,
     refreshToken: refresh.rawToken,
     refreshTokenExpiresAt: refresh.expiresAt,
+    databaseSessionCapability: databaseSessionCapability || null,
     sessionId: refresh.id,
     user: {
       id: user.id,
@@ -358,11 +361,18 @@ export const issueSessionForUser = async (input: {
     mfaVerifiedAt,
     now,
   }, db);
+  const authenticatedSession = await createAuthenticatedSessionCapability(db, {
+    refreshTokenId: created.row.id,
+    refreshTokenHash: created.tokenHash,
+    assurance: authAssurance,
+    expiresAt: created.expiresAt,
+    now,
+  });
   return buildActiveSessionResponse(state, { authAssurance, authenticatedAt, mfaVerifiedAt }, {
     rawToken: refreshToken,
     id: created.row.id,
     expiresAt: created.expiresAt,
-  });
+  }, authenticatedSession.rawCapability);
 };
 
 type SessionIssueResult = Awaited<ReturnType<typeof issueSessionForUser>>;
@@ -800,7 +810,7 @@ export const refreshSession = async (input: {
   };
   type BootstrapRefreshPreparation = { kind: "bootstrap"; session: BootstrapSessionResult };
 
-  const rotated = await rotateRefreshToken<ActiveRefreshPreparation, BootstrapRefreshPreparation>({
+  const rotated = await rotateRefreshToken<ActiveRefreshPreparation, BootstrapRefreshPreparation, string>({
     rawToken: input.rawRefreshToken,
     ipHash: input.ipHash,
     userAgent: input.userAgent,
@@ -864,6 +874,16 @@ export const refreshSession = async (input: {
         mfaVerifiedAt: token.mfaVerifiedAt,
       };
     },
+    afterRotate: async ({ tx, predecessor, successor, now }) => {
+      const capability = await createAuthenticatedSessionCapability(tx, {
+        refreshTokenId: successor.id,
+        refreshTokenHash: successor.tokenHash,
+        assurance: predecessor.mfaVerifiedAt ? "ADMIN_MFA" : "PASSWORD",
+        expiresAt: successor.expiresAt,
+        now,
+      });
+      return capability.rawCapability;
+    },
   });
 
   if (!rotated.ok) {
@@ -884,7 +904,7 @@ export const refreshSession = async (input: {
     rawToken: rotated.newRawToken,
     id: rotated.newTokenId,
     expiresAt: rotated.newExpiresAt,
-  });
+  }, rotated.rotation);
   return { ok: true as const, ...session };
 };
 
@@ -898,7 +918,19 @@ export const logoutSession = async (input: {
   licenseeId: string | null;
   manufacturerId: string | null;
   actorRole: string;
+  databaseSessionCapability?: string | null;
 }, db: AuthDbClient) => {
+  if (input.databaseSessionCapability) {
+    await revokeAuthenticatedSessionByRefreshToken(db, {
+      capability: input.databaseSessionCapability,
+      refreshTokenId: input.sessionId,
+      reason: "LOGOUT",
+      requestId: input.requestId,
+    });
+  }
+  // The reviewed capability boundary verifies the still-active refresh row.
+  // Revoke it first, then revoke the bearer in the existing lifecycle path;
+  // both mutations remain within the caller's auth transaction boundary.
   await revokeRefreshTokenById({
     sessionId: input.sessionId,
     userId: input.userId,

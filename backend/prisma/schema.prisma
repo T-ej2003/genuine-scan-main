@@ -1855,12 +1855,20 @@ model RefreshToken {
   rotationRequestId String?
   rotationClaimedAt DateTime?
   rotationCompletedAt DateTime?
+  sessionCapabilityHash String? @unique
+  sessionCapabilityHashVersion String?
+  sessionCapabilityAssurance String?
+  sessionCapabilityExpiresAt DateTime?
+  sessionCapabilityLastUsedAt DateTime?
+  sessionCapabilityRevokedAt DateTime?
+  sessionCapabilityRevokedReason String?
 
   @@index([userId])
   @@index([orgId])
   @@index([expiresAt])
   @@index([revokedAt])
   @@index([rotationRequestId])
+  @@index([sessionCapabilityExpiresAt])
 }
 
 model AdminMfaCredential {
