@@ -1730,6 +1730,18 @@ model AuditLogOutbox {
   id String @id @default(uuid())
 
   payload Json
+  jobType String @default("AUDIT_LOG_RECOVERY")
+  requestId String?
+  payloadDigest String?
+  idempotencyKey String? @unique
+  organizationId String?
+  licenseeId String?
+  manufacturerId String?
+  initiatingUserId String?
+  initiatingActorRoleSnapshot String?
+  expiresAt DateTime?
+  claimedAt DateTime?
+  claimLeaseExpiresAt DateTime?
   status AuditLogOutboxStatus @default(QUEUED)
   attempts Int @default(0)
   nextAttemptAt DateTime @default(now())
@@ -1740,6 +1752,8 @@ model AuditLogOutbox {
   updatedAt DateTime @updatedAt
 
   @@index([status, nextAttemptAt])
+  @@index([jobType, status, nextAttemptAt])
+  @@index([claimLeaseExpiresAt])
   @@index([createdAt])
 }
 
@@ -2104,6 +2118,18 @@ model SecurityEventOutbox {
 
   eventType String
   payload Json
+  jobType String?
+  requestId String?
+  payloadDigest String?
+  idempotencyKey String? @unique
+  organizationId String?
+  licenseeId String?
+  manufacturerId String?
+  initiatingUserId String?
+  expiresAt DateTime?
+  claimedAt DateTime?
+  claimLeaseExpiresAt DateTime?
+  sinkEventId String?
   status SecurityEventDeliveryStatus @default(QUEUED)
   attempts Int @default(0)
   nextAttemptAt DateTime @default(now())
@@ -2114,6 +2140,8 @@ model SecurityEventOutbox {
   updatedAt DateTime @updatedAt
 
   @@index([status, nextAttemptAt])
+  @@index([jobType, status, nextAttemptAt])
+  @@index([claimLeaseExpiresAt])
   @@index([createdAt])
   @@index([updatedAt])
 }

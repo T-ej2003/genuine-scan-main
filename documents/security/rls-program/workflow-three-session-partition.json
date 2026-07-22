@@ -2419,6 +2419,7 @@
       "executionSurface": "internal",
       "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
       "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/auditLogOutboxService.ts"
       ]
     },
@@ -5296,6 +5297,7 @@
       "executionSurface": "internal",
       "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
       "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/siemOutboxService.ts"
       ]
     },
@@ -5576,6 +5578,7 @@
       "executionSurface": "worker",
       "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
       "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/auditLogOutboxService.ts"
       ]
     },
@@ -5589,6 +5592,7 @@
       "executionSurface": "worker",
       "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
       "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/siemOutboxService.ts"
       ]
     }

@@ -1,19 +1,19 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95",
+  "sourceContractSha256": "89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
-      "sha256": "6a2d22fe867d5d2806fb4f767b0ff5ca40f342cd64645194f9482aa27f301980"
+      "sha256": "c03258259afb2465d1b9d657ff6ccc2415d5c3dffbe4aa33ca06697eaf1f641a"
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "da40ea55e7312165d9c886c8a45dfdc8dfa10484628cab41753e42cb5ed79fe7"
+      "sha256": "19cf6e902ecee59853dd9702d702db77a09d0ca8f7dd62c04b1872867070c287"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "a3ec9ea2e28e6aff4ef51c475d81a63e4f10e9c13570e3deb2ad22d17ff0ffec"
+      "sha256": "7826d94607f1f9a3415786a51b9e747888a946352e3ccb41ccc839418e51466a"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -33,11 +33,11 @@
     },
     {
       "path": "documents/security/rls-program/workflow-three-session-partition.json",
-      "sha256": "92e54a3354a3878c703901f10927f30eed032494d464f60ea0a0f9e33153936b"
+      "sha256": "f1f01d22e7b02cde698db67b9ea388d5c336d6eb2413a1580d1d240c107b4cb8"
     },
     {
       "path": "backend/prisma/schema.prisma",
-      "sha256": "7d99f10edd8d8100c5b0c415754139d6687141810d59c84b41349a69771c4212"
+      "sha256": "2562788861f6e5c217f0279ff12c27f49bf98122b7a81cd0b7c43551861904b3"
     },
     {
       "path": "scripts/rls/generate-full-rls-sql.mjs",
@@ -45,7 +45,7 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "ec8dbc98bf7f7aa2adc33a8464deb1163db1e0d8e8d6977a5856534ede004cee"
+      "sha256": "1fd85f58d6fc9ea63dcd6f99002d6b7f5bec751b5f63bde527368622a0248be8"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
@@ -53,7 +53,7 @@
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
-      "sha256": "6bc04e6673f3e2c1b8dddfbc9a2ccb404c553dc42b472d7bf92260ca01132e2e"
+      "sha256": "e4f60b4d9ac79c03bd2f9349490dcd747d6176de946d75f9b916c50789d9c571"
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
@@ -61,11 +61,11 @@
     },
     {
       "path": "scripts/rls/lib/application-path-certifications.mjs",
-      "sha256": "bc0d4e5a4c6013f1f3e02f7eab050336c79bc074df39b16b25d120a7c0be6b55"
+      "sha256": "d704bf7fc0e91b44fcf7a20577b5027758726907cafd8ddc6740788fec5565ae"
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "b7293eb001d29c89b228709f16315f94ddc32267710ff8ed102fafecb605ec6d"
+      "sha256": "681f7eed93e3de63c27a611dbfd53438ce1e3ac75f7c7d336eaaf85270a52d36"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -689,6 +689,10 @@
     {
       "name": "20260722120000_add_authenticated_session_capability",
       "sha256": "908d9b05ed63c11361704d4500e37129a7e52f953552fe63dca8d64ac5c06c59"
+    },
+    {
+      "name": "20260722143000_add_b03_outbox_authority",
+      "sha256": "0690f98e7ed9ff514a55cea5ca0eeefeaf0c7ec2c24b42de9ea6d0cb6107d568"
     },
     {
       "name": "20260722150000_add_scheduled_job_credential",
@@ -1341,6 +1345,46 @@
     {
       "tableId": "table-audit-log",
       "table": "AuditLog",
+      "policyName": "b03_outbox_auditlog_insert",
+      "command": "INSERT",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id IS NOT NULL AND \"userId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND \"orgId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-07fec99a574c",
+        "command-audit-log-insert-1103920917c2",
+        "command-audit-log-insert-1cb20d8a0e56",
+        "command-audit-log-insert-509547f03abe",
+        "command-audit-log-insert-7c30e2368afb",
+        "command-audit-log-insert-92ebfd6a1d0d",
+        "command-audit-log-insert-a9a52392104e",
+        "command-audit-log-insert-aa566e98f219",
+        "command-audit-log-insert-afd12473687a",
+        "command-audit-log-insert-ba667bcc5353",
+        "command-audit-log-insert-bbebad8a8023",
+        "command-audit-log-insert-bdf8789ff300",
+        "command-audit-log-insert-c32d179b670c",
+        "command-audit-log-insert-c63bbcb4a31f",
+        "command-audit-log-insert-e3ba477495b1",
+        "command-audit-log-insert-f64d10600903",
+        "command-audit-log-insert-f6a24dac1201",
+        "command-audit-log-insert-fb13a554f472"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
       "policyName": "c03_capability_auditlog_select",
       "command": "SELECT",
       "actors": [
@@ -1745,6 +1789,90 @@
       ],
       "workflowId": null,
       "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "b03_outbox_auditlogoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-0b4b95c51d1e",
+        "command-audit-log-outbox-insert-0c52b3004f35",
+        "command-audit-log-outbox-insert-2d0779382f94",
+        "command-audit-log-outbox-insert-56e28c0be62e",
+        "command-audit-log-outbox-insert-62fc51366420",
+        "command-audit-log-outbox-insert-65b85bc0759d",
+        "command-audit-log-outbox-insert-88bea5f1af06",
+        "command-audit-log-outbox-insert-93fe5e2f9580",
+        "command-audit-log-outbox-insert-963323294162",
+        "command-audit-log-outbox-insert-986a6bc31b69",
+        "command-audit-log-outbox-insert-c4febf718039",
+        "command-audit-log-outbox-insert-ce5627f3ff70",
+        "command-audit-log-outbox-insert-e1561aa306f2",
+        "command-audit-log-outbox-insert-e45d5f48ae3c",
+        "command-audit-log-outbox-insert-f3dffb308a5e"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "b03_outbox_auditlogoutbox_select",
+      "command": "SELECT",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND ((session_user='mscqr_rls_cert_app' AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true) LIKE 'audit-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-select-0c52b3004f35",
+        "command-audit-log-outbox-select-bbebad8a8023"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "b03_outbox_auditlogoutbox_update",
+      "command": "UPDATE",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true) IN ('audit-claim','audit-consume','audit-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-update-bbebad8a8023"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -3812,6 +3940,79 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-security-event-outbox",
+      "table": "SecurityEventOutbox",
+      "policyName": "b03_outbox_securityeventoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND ((session_user='mscqr_rls_cert_app' AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)) OR (session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_security_outbox_digest',true) AND \"eventType\"='AUDIT_LOG'))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-security-event-outbox-insert-1eae14f8fc5b",
+        "command-security-event-outbox-insert-92ebfd6a1d0d",
+        "command-security-event-outbox-insert-bbebad8a8023",
+        "command-security-event-outbox-insert-c32d179b670c"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-security-event-outbox",
+      "table": "SecurityEventOutbox",
+      "policyName": "b03_outbox_securityeventoutbox_select",
+      "command": "SELECT",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND ((session_user='mscqr_rls_cert_app' AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true) LIKE 'security-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-security-event-outbox-select-1eae14f8fc5b",
+        "command-security-event-outbox-select-76e162f16ff9"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-security-event-outbox",
+      "table": "SecurityEventOutbox",
+      "policyName": "b03_outbox_securityeventoutbox_update",
+      "command": "UPDATE",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true) IN ('security-claim','security-complete','security-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-security-event-outbox-update-76e162f16ff9"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-security-policy",
       "table": "SecurityPolicy",
       "policyName": "full_rls_securitypolicy_select_sql_profile_risk_anal_532f30156f",
@@ -4311,55 +4512,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95"
+      "marker": "mscqr-full-rls-clean-room:certification:89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95"
+      "marker": "mscqr-full-rls-clean-room:certification:89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95"
+      "marker": "mscqr-full-rls-clean-room:certification:89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95"
+      "marker": "mscqr-full-rls-clean-room:certification:89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95"
+      "marker": "mscqr-full-rls-clean-room:certification:89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95"
+      "marker": "mscqr-full-rls-clean-room:certification:89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95"
+      "marker": "mscqr-full-rls-clean-room:certification:89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95"
+      "marker": "mscqr-full-rls-clean-room:certification:89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95"
+      "marker": "mscqr-full-rls-clean-room:certification:89cab0990c518ebab0e09f809cf327d1bd9bc5edb986fae9be90572b2ad9dcda"
     }
   ]
 }

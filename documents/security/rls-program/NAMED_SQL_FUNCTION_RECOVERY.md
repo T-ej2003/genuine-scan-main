@@ -2,9 +2,9 @@
 
 Generated from tracked source and all local Git refs. Fixture SQL is evidence only and is never deployable production SQL.
 
-- fixture-only definition: 13
-- no definition found: 48
-- production definition recovered: 46
+- fixture-only definition: 12
+- no definition found: 41
+- production definition recovered: 54
 - repository contract only: 9
 
 | Function | Classification | Definition | Commit | Deployable |
@@ -84,18 +84,18 @@ Generated from tracked source and all local Git refs. Fixture SQL is evidence on
 | `app_rls.c03_update_retention_policy` | production definition recovered | backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql | fb555a0315ba | yes |
 | `app_rls.c03_upsert_tenant_feature_flag` | production definition recovered | backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql | fb555a0315ba | yes |
 | `app_rls.change_authenticated_password` | no definition found | none | none | no |
-| `app_rls.claim_audit_log_outbox_slice` | no definition found | none | none | no |
-| `app_rls.claim_compliance_pack_slice` | production definition recovered | backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql | none | yes |
-| `app_rls.claim_security_event_outbox_slice` | no definition found | none | none | no |
-| `app_rls.complete_security_event_outbox` | no definition found | none | none | no |
-| `app_rls.consume_audit_log_outbox` | no definition found | none | none | no |
+| `app_rls.claim_audit_log_outbox_slice` | production definition recovered | backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql | none | yes |
+| `app_rls.claim_compliance_pack_slice` | production definition recovered | backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql | be0d672c8f3c | yes |
+| `app_rls.claim_security_event_outbox_slice` | production definition recovered | backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql | none | yes |
+| `app_rls.complete_security_event_outbox` | production definition recovered | backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql | none | yes |
+| `app_rls.consume_audit_log_outbox` | production definition recovered | backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql | none | yes |
 | `app_rls.create_refresh_token` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 62b73a98b6e0 | no |
 | `app_rls.dashboard_snapshot_data` | repository contract only | none | 4add7dec147d | no |
 | `app_rls.dashboard_snapshot_scope` | repository contract only | none | 4add7dec147d | no |
-| `app_rls.enqueue_audit_log_outbox` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 62b73a98b6e0 | no |
-| `app_rls.enqueue_security_event_outbox` | no definition found | none | none | no |
-| `app_rls.fail_audit_log_outbox` | no definition found | none | none | no |
-| `app_rls.fail_security_event_outbox` | no definition found | none | none | no |
+| `app_rls.enqueue_audit_log_outbox` | production definition recovered | backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql | 62b73a98b6e0 | yes |
+| `app_rls.enqueue_security_event_outbox` | production definition recovered | backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql | none | yes |
+| `app_rls.fail_audit_log_outbox` | production definition recovered | backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql | none | yes |
+| `app_rls.fail_security_event_outbox` | production definition recovered | backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql | none | yes |
 | `app_rls.find_refresh_token_by_hashes` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
 | `app_rls.find_refresh_token_by_id` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
 | `app_rls.list_active_refresh_tokens` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
@@ -114,8 +114,8 @@ Generated from tracked source and all local Git refs. Fixture SQL is evidence on
 | `app_rls.revoke_password_only_refresh_tokens` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
 | `app_rls.revoke_refresh_token_by_hashes` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
 | `app_rls.revoke_refresh_token_by_id` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 62b73a98b6e0 | no |
-| `app_rls.scheduled_complete_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql | none | yes |
-| `app_rls.scheduled_fail_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql | none | yes |
+| `app_rls.scheduled_complete_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql | be0d672c8f3c | yes |
+| `app_rls.scheduled_fail_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql | be0d672c8f3c | yes |
 | `app_rls.session_c_create_licensee` | production definition recovered | backend/src/rls-waves/session-c/c01/administration.sql | 3bcba7fb4749 | yes |
 | `app_rls.session_c_create_user` | production definition recovered | backend/src/rls-waves/session-c/c01/administration.sql | 3bcba7fb4749 | yes |
 | `app_rls.session_c_delete_licensee` | production definition recovered | backend/src/rls-waves/session-c/c01/administration.sql | 3bcba7fb4749 | yes |

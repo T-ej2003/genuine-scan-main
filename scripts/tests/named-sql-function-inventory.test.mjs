@@ -20,6 +20,6 @@ test("named SQL inventory is deterministic, accepts reviewed B01 and C03 contrac
   assert.equal(scheduled.contractStatus, "reviewed");
   assert.equal(scheduled.signature, "text,text,timestamp without time zone,integer");
   assert(scheduled.callers.some((caller) => caller.sourceFile === "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts"));
-  assert(first.functions.some((item) => item.functionName === "app_rls.claim_audit_log_outbox"), "Prisma.sql-wrapped named calls must remain inventoried");
+  assert(first.functions.some((item) => item.functionName === "app_rls.claim_audit_log_outbox_slice"), "Prisma.sql-wrapped named calls must remain inventoried with their exact production name");
   assert.throws(() => assertNamedSqlFunctionContracts(first), /named SQL function contracts missing/);
 });

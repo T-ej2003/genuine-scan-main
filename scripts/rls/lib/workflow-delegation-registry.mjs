@@ -130,6 +130,34 @@ export const WORKFLOW_DELEGATIONS = Object.freeze([
     reason: "The scheduled compliance service owns the registered workflow; B03 contributes its database-verifiable claim and terminal transition boundaries.",
   })),
   {
+    delegated: { executionSurface: "worker", sourceFile: "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts", function: "enqueueAuditLogOutbox" },
+    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/auditLogOutboxService.ts", function: "queueAuditLogOutbox" },
+    reason: "The audit outbox service owns durable enqueue; the B03 repository supplies its exact SQL implementation and is reachable through the registered worker module.",
+  },
+  {
+    delegated: { executionSurface: "worker", sourceFile: "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts", function: "enqueueSecurityEventOutbox" },
+    canonical: { executionSurface: "internal", sourceFile: "backend/src/services/siemOutboxService.ts", function: "queueSecurityEvent" },
+    reason: "The SIEM outbox service owns durable enqueue; the B03 repository supplies its exact SQL implementation and is reachable through the registered worker module.",
+  },
+  ...[
+    "claimAuditLogOutboxSlice",
+    "consumeAuditLogOutbox",
+    "failAuditLogOutbox",
+  ].map((functionName) => ({
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts", function: functionName },
+    canonical: { executionSurface: "worker", sourceFile: "backend/src/services/auditLogOutboxService.ts", function: "flushAuditLogOutbox" },
+    reason: "The registered audit recovery worker owns claim and terminal delivery; the B03 repository contributes exact digest-bound SQL implementation evidence.",
+  })),
+  ...[
+    "claimSecurityEventOutboxSlice",
+    "completeSecurityEventOutbox",
+    "failSecurityEventOutbox",
+  ].map((functionName) => ({
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts", function: functionName },
+    canonical: { executionSurface: "worker", sourceFile: "backend/src/services/siemOutboxService.ts", function: "flushSecurityEventOutbox" },
+    reason: "The registered SIEM worker owns claim and terminal delivery; the B03 repository contributes exact digest-bound SQL implementation evidence.",
+  })),
+  {
     delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts", function: "listTenantFeatureFlagsInTransaction" },
     canonical: { executionSurface: "internal", sourceFile: "backend/src/services/governanceService.ts", function: "listTenantFeatureFlags" },
     reason: "The service owns the internal feature-flag workflow; the C03 repository implements its scoped read.",

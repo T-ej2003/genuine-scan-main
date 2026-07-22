@@ -4426,6 +4426,68 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-audit-log-insert-bbebad8a8023",
+      "tableId": "table-audit-log",
+      "command": "INSERT",
+      "actorClasses": [
+        "worker"
+      ],
+      "runtimeIdentities": [
+        "identity-worker"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "worker": "system-verified"
+      },
+      "scopeRule": "Load the durable row by job ID, verify its canonical payload digest, re-resolve the initiating actor and tenant relationship, and reject any payload/row mismatch before installing context.",
+      "allowedColumns": [
+        "action",
+        "entityId",
+        "entityType",
+        "userId"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "details",
+        "id",
+        "ipAddress",
+        "ipHash",
+        "licenseeId",
+        "orgId",
+        "userAgent"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [],
+      "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "worker-fn-consume-audit-outbox",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+        "backend/src/services/auditLogOutboxService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-audit-outbox-delivery uses identity-worker at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-audit-outbox-delivery"
+    },
+    {
       "id": "command-audit-log-insert-bdf8789ff300",
       "tableId": "table-audit-log",
       "command": "INSERT",
@@ -4912,77 +4974,6 @@
       "status": "architecture-resolved"
     },
     {
-      "id": "command-audit-log-insert-worker-boundary-audit-outbox-delivery",
-      "tableId": "table-audit-log",
-      "command": "INSERT",
-      "actorClasses": [
-        "worker"
-      ],
-      "runtimeIdentities": [
-        "identity-worker"
-      ],
-      "minimumAssurance": "system-verified",
-      "minimumAssuranceByActorClass": {
-        "licensee-admin": "password-verified",
-        "manufacturer": "mfa-verified",
-        "platform-admin": "mfa-verified"
-      },
-      "scopeRule": "Load the durable row by job ID, verify its canonical payload digest, re-resolve the initiating actor and tenant relationship, and reject any payload/row mismatch before installing context.",
-      "allowedColumns": [
-        "action",
-        "details",
-        "entityId",
-        "entityType",
-        "id",
-        "licenseeId",
-        "orgId",
-        "userId"
-      ],
-      "protectedColumns": [
-        "createdAt",
-        "details",
-        "id",
-        "ipAddress",
-        "ipHash",
-        "licenseeId",
-        "orgId",
-        "userAgent"
-      ],
-      "allowedLifecycleStates": [],
-      "forbiddenLifecycleStates": [],
-      "lifecycleColumns": [],
-      "withCheckRule": "New row preserves Every non-NULL orgId/licenseeId must equal trusted transaction tenant context; NULL semantics follow tables.json and never mean global. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": true,
-      "namedFunctionClass": "worker-fn-consume-audit-outbox",
-      "namedFunctionSignatures": [
-        "app_rls.batch_reservable_qr_summaries(text,text,text,text,text,text[])"
-      ],
-      "requiresRestrictedWorkerBoundary": true,
-      "requiresAuditEvent": true,
-      "requiresApproval": false,
-      "approvalClass": "none",
-      "authorizationBoundary": "restricted-worker",
-      "hardDeleteSemantics": "not-applicable",
-      "dependentDataBehavior": "not-applicable",
-      "retentionLegalConsequences": "not-applicable",
-      "supportingWorkflowIds": [
-        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
-      ],
-      "supportingEvidence": [
-        "backend/src/worker.ts -> startAuditLogOutboxWorker -> flushAuditLogOutbox",
-        "Transitive worker contract in documents/security/rls-program/worker-boundaries.json"
-      ],
-      "allowScenarios": [
-        "worker-boundary-audit-outbox-delivery uses identity-worker at system-verified with a fresh verified durable job, exact context and command."
-      ],
-      "denyScenarios": [
-        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
-      ],
-      "confidence": "high",
-      "status": "architecture-resolved",
-      "workerBoundaryId": "worker-boundary-audit-outbox-delivery"
-    },
-    {
       "id": "command-audit-log-outbox-delete-prohibited",
       "tableId": "table-audit-log-outbox",
       "command": "DELETE",
@@ -5139,13 +5130,13 @@
         "status"
       ],
       "withCheckRule": "New row preserves approved-system boundary from tables.json; empty or forged context is denied. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "ordinary-rls",
+      "authorizationBoundary": "named-function",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -5153,6 +5144,7 @@
         "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/auditLogOutboxService.ts"
       ],
       "allowScenarios": [
@@ -6095,6 +6087,79 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-audit-log-outbox-select-0c52b3004f35",
+      "tableId": "table-audit-log-outbox",
+      "command": "SELECT",
+      "actorClasses": [
+        "operator",
+        "licensee-admin",
+        "platform-admin"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "operator": "password-verified",
+        "licensee-admin": "password-verified",
+        "platform-admin": "mfa-verified"
+      },
+      "scopeRule": "approved-system boundary from tables.json; empty or forged context is denied.",
+      "allowedColumns": [
+        "attempts",
+        "createdAt",
+        "flushedAuditLogId",
+        "id",
+        "lastError",
+        "nextAttemptAt",
+        "payload",
+        "status",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "payload",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=QUEUED",
+        "status=SENT",
+        "status=FAILED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+        "backend/src/services/auditLogOutboxService.ts"
+      ],
+      "allowScenarios": [
+        "operator or licensee-admin or platform-admin using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-audit-log-outbox-select-bbebad8a8023",
       "tableId": "table-audit-log-outbox",
       "command": "SELECT",
@@ -6137,8 +6202,8 @@
         "status"
       ],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
       "requiresRestrictedWorkerBoundary": true,
       "requiresAuditEvent": false,
       "requiresApproval": false,
@@ -6151,6 +6216,7 @@
         "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/auditLogOutboxService.ts"
       ],
       "allowScenarios": [
@@ -6203,8 +6269,8 @@
         "status"
       ],
       "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
       "requiresRestrictedWorkerBoundary": true,
       "requiresAuditEvent": true,
       "requiresApproval": false,
@@ -6217,6 +6283,7 @@
         "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/auditLogOutboxService.ts"
       ],
       "allowScenarios": [
@@ -70317,13 +70384,13 @@
         "status"
       ],
       "withCheckRule": "New row preserves approved-system boundary from tables.json; empty or forged context is denied. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
       "requiresRestrictedWorkerBoundary": false,
       "requiresAuditEvent": true,
       "requiresApproval": false,
       "approvalClass": "none",
-      "authorizationBoundary": "ordinary-rls",
+      "authorizationBoundary": "named-function",
       "hardDeleteSemantics": "not-applicable",
       "dependentDataBehavior": "not-applicable",
       "retentionLegalConsequences": "not-applicable",
@@ -70331,6 +70398,7 @@
         "workflow-internal-backend-src-services-siem-outbox-service-ts-queue-security-event"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/siemOutboxService.ts"
       ],
       "allowScenarios": [
@@ -70409,6 +70477,72 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-security-event-outbox-insert-bbebad8a8023",
+      "tableId": "table-security-event-outbox",
+      "command": "INSERT",
+      "actorClasses": [
+        "worker"
+      ],
+      "runtimeIdentities": [
+        "identity-worker"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "worker": "system-verified"
+      },
+      "scopeRule": "Load the durable row by job ID, verify its canonical payload digest, re-resolve the initiating actor and tenant relationship, and reject any payload/row mismatch before installing context.",
+      "allowedColumns": [
+        "attempts",
+        "eventType",
+        "lastError",
+        "nextAttemptAt",
+        "sentAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "payload",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=QUEUED"
+      ],
+      "forbiddenLifecycleStates": [
+        "CLIENT_SELECTED_INITIAL_STATE"
+      ],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+        "backend/src/services/auditLogOutboxService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-audit-outbox-delivery uses identity-worker at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-audit-outbox-delivery"
+    },
+    {
       "id": "command-security-event-outbox-insert-c32d179b670c",
       "tableId": "table-security-event-outbox",
       "command": "INSERT",
@@ -70477,6 +70611,76 @@
       "status": "architecture-resolved"
     },
     {
+      "id": "command-security-event-outbox-select-1eae14f8fc5b",
+      "tableId": "table-security-event-outbox",
+      "command": "SELECT",
+      "actorClasses": [
+        "authenticated-user"
+      ],
+      "runtimeIdentities": [
+        "identity-authenticated-app"
+      ],
+      "minimumAssurance": "password-verified",
+      "minimumAssuranceByActorClass": {
+        "authenticated-user": "password-verified"
+      },
+      "scopeRule": "approved-system boundary from tables.json; empty or forged context is denied.",
+      "allowedColumns": [
+        "attempts",
+        "createdAt",
+        "eventType",
+        "id",
+        "lastError",
+        "nextAttemptAt",
+        "payload",
+        "sentAt",
+        "status",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "createdAt",
+        "id",
+        "payload",
+        "status",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "status=QUEUED",
+        "status=SENT",
+        "status=FAILED"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "status"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-internal-backend-src-services-siem-outbox-service-ts-queue-security-event"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+        "backend/src/services/siemOutboxService.ts"
+      ],
+      "allowScenarios": [
+        "authenticated-user using identity-authenticated-app at password-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "medium",
+      "status": "architecture-resolved"
+    },
+    {
       "id": "command-security-event-outbox-select-76e162f16ff9",
       "tableId": "table-security-event-outbox",
       "command": "SELECT",
@@ -70517,8 +70721,8 @@
         "status"
       ],
       "withCheckRule": "not-applicable",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
       "requiresRestrictedWorkerBoundary": true,
       "requiresAuditEvent": true,
       "requiresApproval": false,
@@ -70531,6 +70735,7 @@
         "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/siemOutboxService.ts"
       ],
       "allowScenarios": [
@@ -70587,8 +70792,8 @@
         "status"
       ],
       "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
-      "requiresNamedFunction": false,
-      "namedFunctionClass": "none",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-reviewed-query-function",
       "requiresRestrictedWorkerBoundary": true,
       "requiresAuditEvent": true,
       "requiresApproval": false,
@@ -70601,6 +70806,7 @@
         "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/services/siemOutboxService.ts"
       ],
       "allowScenarios": [

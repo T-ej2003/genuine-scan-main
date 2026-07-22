@@ -117,11 +117,11 @@ Tables: 7; resolved: 7; unresolved: 0; dependency edges: 0; confidence high/medi
 | Table | Category | Row scope | Parent | FORCE RLS | Readers | Writers | Confidence | Blocker |
 |---|---|---|---|---:|---|---|---|---|
 | ActionIdempotencyKey | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-authenticated-app, identity-scheduled-job | identity-authenticated-app, identity-scheduled-job | medium | none |
-| AuditLogOutbox | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-worker | identity-authenticated-app, identity-pre-auth-app, identity-scheduled-job, identity-worker | medium | none |
+| AuditLogOutbox | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-authenticated-app, identity-worker | identity-authenticated-app, identity-pre-auth-app, identity-scheduled-job, identity-worker | medium | none |
 | CompliancePackJob | operational-system | Restricted worker/scheduled coordination scoped by licenseeId; no platform-global bypass. | — | yes | identity-authenticated-app, identity-scheduled-job | identity-scheduled-job | medium | none |
 | EvidenceRetentionJob | operational-system | Restricted worker/scheduled coordination scoped by licenseeId; no platform-global bypass. | — | yes | none | none | medium | none |
 | RouteTransitionMetric | append-only-audit | Append-only evidence is scoped directly by licenseeId; NULL/platform events require the restricted audit boundary. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
-| SecurityEventOutbox | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-worker | identity-authenticated-app, identity-worker | medium | none |
+| SecurityEventOutbox | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-authenticated-app, identity-worker | identity-authenticated-app, identity-worker | medium | none |
 | SystemCheckpoint | operational-system | Restricted system coordination boundary with no human broad-table access. | — | yes | identity-authenticated-app | identity-authenticated-app | medium | none |
 
 ## Group G — Reference and remaining

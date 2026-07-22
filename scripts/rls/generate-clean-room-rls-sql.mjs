@@ -176,6 +176,9 @@ const c03Contracts = validateNamedSqlFunctionContracts().filter((contract) =>
 const scheduledContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-b-b03-scheduled"
 );
+const outboxContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "session-b-b03-outbox"
+);
 const b01FunctionSource = b01Contracts.length
   ? fs.readFileSync(path.join(repoRoot, b01Contracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
   : "";
@@ -208,6 +211,16 @@ const scheduledSignatures = scheduledContracts.filter((contract) => contract.sec
 const scheduledOperatorSignatures = scheduledContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("operator")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const scheduledOwnerPrivileges = [...new Map(scheduledContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const scheduledOwnerPolicies = [...new Map(scheduledContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const outboxFunctionSource = outboxContracts.length
+  ? fs.readFileSync(path.join(repoRoot, outboxContracts[0].definitionLocation), "utf8")
+      .replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
+      .replaceAll("{{APP_ROLE}}", lit(roleNames.app))
+      .replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker))
+  : "";
+const outboxAppSignatures = outboxContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const outboxWorkerSignatures = outboxContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const outboxOwnerPrivileges = [...new Map(outboxContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const outboxOwnerPolicies = [...new Map(outboxContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 // This is deliberately an exact runtime execution allowlist.  The functions
 // are the only app_rls public boundaries emitted by this clean-room package;
 // context setters and authorization helpers stay internal to their owner.
@@ -255,11 +268,13 @@ const b01OwnerGrantSql = b01FunctionOwnerGrants.map(([table, command, columns]) 
 const preAuthOwnerGrantSql = preAuthOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const c03OwnerGrantSql = c03OwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const scheduledOwnerGrantSql = scheduledOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const outboxOwnerGrantSql = outboxOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const functionOwnerRows = [
   ...b01FunctionOwnerGrants.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: b01Contracts.map((contract) => contract.id) })),
   ...preAuthOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: preAuthContracts.map((contract) => contract.id) })),
   ...c03OwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: c03Contracts.map((contract) => contract.id) })),
   ...scheduledOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: scheduledContracts.map((contract) => contract.id) })),
+  ...outboxOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: outboxContracts.map((contract) => contract.id) })),
 ];
 const b01PolicyOwner = `current_user=${lit(roleNames.authOwner)}`;
 const b01User = `current_setting('app.b01_user_id',true)`;
@@ -641,6 +656,7 @@ ${b01OwnerGrantSql}
 ${preAuthOwnerGrantSql}
 ${c03OwnerGrantSql}
 ${scheduledOwnerGrantSql}
+${outboxOwnerGrantSql}
 GRANT USAGE ON SCHEMA public TO ${q(roleNames.authOwner)};
 ${resetRole}
 ${setRole(roleNames.authOwner)}
@@ -1319,6 +1335,17 @@ ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
 ${resetRole}` : ""}
+${outboxFunctionSource ? `${setRole(roleNames.owner)}
+GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
+${resetRole}
+${setRole(roleNames.authOwner)}
+${outboxFunctionSource}
+${outboxAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${outboxWorkerSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.worker)};`).join("\n")}
+${resetRole}
+${setRole(roleNames.owner)}
+REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
+${resetRole}` : ""}
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
   security_definer,leakproof,strict,parallel_mode,configuration,source_body,acl_rows
@@ -1667,6 +1694,16 @@ for (const [table, command, rawPredicate] of scheduledOwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "scheduled-job-capability", ownerIdentity: "identity-auth-function-owner", scope: "verified scheduled credential plus operation-specific selector" }))};`);
 }
+for (const [table, command, rawPredicate] of outboxOwnerPolicies) {
+  const predicate = rawPredicate
+    .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
+    .replaceAll("{{APP_ROLE}}", lit(roleNames.app))
+    .replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker));
+  const policyName = shortName("b03_outbox", table, command);
+  const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "b03-durable-outbox", ownerIdentity: "identity-auth-function-owner", scope: "exact worker identity plus immutable row digest" }))};`);
+}
 const policiesSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
 ${requirePackagePhaseSql("runtime-grants-installed", "policy package")}
@@ -1710,6 +1747,7 @@ const expectedColumnAclSelect = expectedRowsSelect([
   ...preAuthOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...c03OwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...scheduledOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...outboxOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
 ], columnAclColumns);
 const expectedTypeAclSelect = expectedRowsSelect(appTypeGrantNames.map((type) => ["public", type, roleNames.app, roleNames.owner, "USAGE", false]), aclColumns);
 const expectedDatabaseAclSelect = expectedRowsSelect([
@@ -1759,8 +1797,9 @@ const expectedRoutineIdentities = [
   ["app_rls", "c03_build_compliance_report", "p_licensee_id text, p_from timestamp with time zone, p_to timestamp with time zone"],
   ["app_rls", "scheduled_job_prepare", "p_capability text, p_schedule_id text, p_operation text, p_request_id text"],
   ["app_rls", "scheduled_job_queue_audit", "p_action text, p_job_id text, p_licensee_id text, p_details jsonb"],
+  ["app_rls", "b03_bind_outbox_operation", "p_operation text, p_row_id text, p_payload_digest text"],
   ["app_auth", "b01_preauth_audit", "p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb"],
-  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...c03Contracts, ...scheduledContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
+  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...c03Contracts, ...scheduledContracts, ...outboxContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
@@ -1876,6 +1915,23 @@ const policyInventory = [
     ).map((rule) => rule.id).sort(),
     workflowId: scheduledComplianceWorkflow,
     route: "scheduled compliance exact SQL boundary",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
+  ...outboxOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("b03_outbox", table, command),
+    command,
+    actors: ["worker"],
+    assurance: "source-rule-specific",
+    purpose: ["durable-outbox-delivery"],
+    scopeType: "security-definer-owner-exact-worker-and-immutable-digest",
+    scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app)).replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker)),
+    columns: [],
+    sourceCommandRuleIds: commandSemantics.rules.filter((rule) => rule.tableId === tables.find((entry) => entry.physicalTable === table)?.id && rule.command === command && rule.authorizationBoundary !== "prohibited").map((rule) => rule.id).sort(),
+    workflowId: null,
+    route: "B03 durable outbox exact SQL boundary",
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 102,
+  "count": 109,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -186,6 +186,46 @@
       ],
       "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
       "route": "POST /auth/refresh",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "b03_outbox_auditlog_insert",
+      "command": "INSERT",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id IS NOT NULL AND \"userId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND \"orgId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-insert-07fec99a574c",
+        "command-audit-log-insert-1103920917c2",
+        "command-audit-log-insert-1cb20d8a0e56",
+        "command-audit-log-insert-509547f03abe",
+        "command-audit-log-insert-7c30e2368afb",
+        "command-audit-log-insert-92ebfd6a1d0d",
+        "command-audit-log-insert-a9a52392104e",
+        "command-audit-log-insert-aa566e98f219",
+        "command-audit-log-insert-afd12473687a",
+        "command-audit-log-insert-ba667bcc5353",
+        "command-audit-log-insert-bbebad8a8023",
+        "command-audit-log-insert-bdf8789ff300",
+        "command-audit-log-insert-c32d179b670c",
+        "command-audit-log-insert-c63bbcb4a31f",
+        "command-audit-log-insert-e3ba477495b1",
+        "command-audit-log-insert-f64d10600903",
+        "command-audit-log-insert-f6a24dac1201",
+        "command-audit-log-insert-fb13a554f472"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -596,6 +636,90 @@
       ],
       "workflowId": null,
       "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "b03_outbox_auditlogoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-0b4b95c51d1e",
+        "command-audit-log-outbox-insert-0c52b3004f35",
+        "command-audit-log-outbox-insert-2d0779382f94",
+        "command-audit-log-outbox-insert-56e28c0be62e",
+        "command-audit-log-outbox-insert-62fc51366420",
+        "command-audit-log-outbox-insert-65b85bc0759d",
+        "command-audit-log-outbox-insert-88bea5f1af06",
+        "command-audit-log-outbox-insert-93fe5e2f9580",
+        "command-audit-log-outbox-insert-963323294162",
+        "command-audit-log-outbox-insert-986a6bc31b69",
+        "command-audit-log-outbox-insert-c4febf718039",
+        "command-audit-log-outbox-insert-ce5627f3ff70",
+        "command-audit-log-outbox-insert-e1561aa306f2",
+        "command-audit-log-outbox-insert-e45d5f48ae3c",
+        "command-audit-log-outbox-insert-f3dffb308a5e"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "b03_outbox_auditlogoutbox_select",
+      "command": "SELECT",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND ((session_user='mscqr_rls_cert_app' AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true) LIKE 'audit-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-select-0c52b3004f35",
+        "command-audit-log-outbox-select-bbebad8a8023"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "b03_outbox_auditlogoutbox_update",
+      "command": "UPDATE",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true) IN ('audit-claim','audit-consume','audit-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-update-bbebad8a8023"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -2659,6 +2783,79 @@
       ],
       "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
       "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-security-event-outbox",
+      "table": "SecurityEventOutbox",
+      "policyName": "b03_outbox_securityeventoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND ((session_user='mscqr_rls_cert_app' AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)) OR (session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_security_outbox_digest',true) AND \"eventType\"='AUDIT_LOG'))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-security-event-outbox-insert-1eae14f8fc5b",
+        "command-security-event-outbox-insert-92ebfd6a1d0d",
+        "command-security-event-outbox-insert-bbebad8a8023",
+        "command-security-event-outbox-insert-c32d179b670c"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-security-event-outbox",
+      "table": "SecurityEventOutbox",
+      "policyName": "b03_outbox_securityeventoutbox_select",
+      "command": "SELECT",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND ((session_user='mscqr_rls_cert_app' AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true) LIKE 'security-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-security-event-outbox-select-1eae14f8fc5b",
+        "command-security-event-outbox-select-76e162f16ff9"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-security-event-outbox",
+      "table": "SecurityEventOutbox",
+      "policyName": "b03_outbox_securityeventoutbox_update",
+      "command": "UPDATE",
+      "actors": [
+        "worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "durable-outbox-delivery"
+      ],
+      "scopeType": "security-definer-owner-exact-worker-and-immutable-digest",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.b03_outbox_operation',true) IN ('security-claim','security-complete','security-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-security-event-outbox-update-76e162f16ff9"
+      ],
+      "workflowId": null,
+      "route": "B03 durable outbox exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },

@@ -156,9 +156,10 @@
         "platformAdminContextAllowed": false
       },
       "exactCommandRuleIds": [
-        "command-audit-log-insert-worker-boundary-audit-outbox-delivery",
+        "command-audit-log-insert-bbebad8a8023",
         "command-audit-log-outbox-select-bbebad8a8023",
-        "command-audit-log-outbox-update-bbebad8a8023"
+        "command-audit-log-outbox-update-bbebad8a8023",
+        "command-security-event-outbox-insert-bbebad8a8023"
       ],
       "auditEventRequirement": {
         "required": true,

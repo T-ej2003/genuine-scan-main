@@ -219,121 +219,121 @@
       "functionName": "app_rls.consume_audit_log_outbox",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "consumeAuditLogOutbox",
-      "line": 283
+      "line": 285
     },
     {
       "functionName": "app_rls.fail_audit_log_outbox",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "failAuditLogOutbox",
-      "line": 293
+      "line": 296
     },
     {
       "functionName": "app_rls.claim_security_event_outbox_slice",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "claimSecurityEventOutboxSlice",
-      "line": 308
+      "line": 312
     },
     {
       "functionName": "app_rls.complete_security_event_outbox",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "completeSecurityEventOutbox",
-      "line": 328
+      "line": 333
     },
     {
       "functionName": "app_rls.fail_security_event_outbox",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "failSecurityEventOutbox",
-      "line": 339
+      "line": 345
     },
     {
       "functionName": "app_rls.claim_compliance_pack_slice",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "claimCompliancePackSlice",
-      "line": 353
+      "line": 360
     },
     {
       "functionName": "app_rls.scheduled_complete_compliance_pack_job",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "completeScheduledCompliancePackJob",
-      "line": 380
+      "line": 387
     },
     {
       "functionName": "app_rls.scheduled_fail_compliance_pack_job",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "failScheduledCompliancePackJob",
-      "line": 390
+      "line": 397
     },
     {
       "functionName": "app_rls.b03_primary_superadmin_email",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "getPrimarySuperadminEmail",
-      "line": 398
+      "line": 405
     },
     {
       "functionName": "app_rls.b03_superadmin_alert_emails",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "getSuperadminAlertEmails",
-      "line": 406
+      "line": 413
     },
     {
       "functionName": "app_rls.b03_resolve_incident_email_actor",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "resolveIncidentEmailActor",
-      "line": 415
+      "line": 422
     },
     {
       "functionName": "app_rls.b03_create_role_notifications",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "createRoleNotifications",
-      "line": 436
+      "line": 443
     },
     {
       "functionName": "app_rls.b03_create_user_notification",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "createUserNotification",
-      "line": 463
+      "line": 470
     },
     {
       "functionName": "app_rls.b03_mark_notification_emailed",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "markNotificationEmailed",
-      "line": 490
+      "line": 497
     },
     {
       "functionName": "app_rls.b03_list_notifications_for_user",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "listNotificationsForUser",
-      "line": 503
+      "line": 510
     },
     {
       "functionName": "app_rls.b03_mark_notification_read",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "markNotificationRead",
-      "line": 526
+      "line": 533
     },
     {
       "functionName": "app_rls.b03_mark_all_notifications_read",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "markAllNotificationsRead",
-      "line": 541
+      "line": 548
     },
     {
       "functionName": "app_rls.b03_resolve_incident_notification_scope",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "resolveIncidentNotificationScope",
-      "line": 552
+      "line": 559
     },
     {
       "functionName": "app_rls.b03_claim_incident_email_delivery",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "claimIncidentEmailDelivery",
-      "line": 566
+      "line": 573
     },
     {
       "functionName": "app_rls.b03_complete_incident_email_delivery",
       "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
       "sourceFunction": "completeIncidentEmailDelivery",
-      "line": 604
+      "line": 611
     },
     {
       "functionName": "app_rls.session_c_create_licensee",
@@ -3441,7 +3441,7 @@
           "functionName": "app_rls.b03_claim_incident_email_delivery",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "claimIncidentEmailDelivery",
-          "line": 566
+          "line": 573
         }
       ],
       "activeCallers": [
@@ -3449,7 +3449,7 @@
           "functionName": "app_rls.b03_claim_incident_email_delivery",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "claimIncidentEmailDelivery",
-          "line": 566,
+          "line": 573,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3472,7 +3472,7 @@
           "functionName": "app_rls.b03_complete_incident_email_delivery",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "completeIncidentEmailDelivery",
-          "line": 604
+          "line": 611
         }
       ],
       "activeCallers": [
@@ -3480,7 +3480,7 @@
           "functionName": "app_rls.b03_complete_incident_email_delivery",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "completeIncidentEmailDelivery",
-          "line": 604,
+          "line": 611,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3503,7 +3503,7 @@
           "functionName": "app_rls.b03_create_role_notifications",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "createRoleNotifications",
-          "line": 436
+          "line": 443
         }
       ],
       "activeCallers": [
@@ -3511,7 +3511,7 @@
           "functionName": "app_rls.b03_create_role_notifications",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "createRoleNotifications",
-          "line": 436,
+          "line": 443,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3534,7 +3534,7 @@
           "functionName": "app_rls.b03_create_user_notification",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "createUserNotification",
-          "line": 463
+          "line": 470
         }
       ],
       "activeCallers": [
@@ -3542,7 +3542,7 @@
           "functionName": "app_rls.b03_create_user_notification",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "createUserNotification",
-          "line": 463,
+          "line": 470,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3565,7 +3565,7 @@
           "functionName": "app_rls.b03_list_notifications_for_user",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "listNotificationsForUser",
-          "line": 503
+          "line": 510
         }
       ],
       "activeCallers": [
@@ -3573,7 +3573,7 @@
           "functionName": "app_rls.b03_list_notifications_for_user",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "listNotificationsForUser",
-          "line": 503,
+          "line": 510,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3596,7 +3596,7 @@
           "functionName": "app_rls.b03_mark_all_notifications_read",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "markAllNotificationsRead",
-          "line": 541
+          "line": 548
         }
       ],
       "activeCallers": [
@@ -3604,7 +3604,7 @@
           "functionName": "app_rls.b03_mark_all_notifications_read",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "markAllNotificationsRead",
-          "line": 541,
+          "line": 548,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3627,7 +3627,7 @@
           "functionName": "app_rls.b03_mark_notification_emailed",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "markNotificationEmailed",
-          "line": 490
+          "line": 497
         }
       ],
       "activeCallers": [
@@ -3635,7 +3635,7 @@
           "functionName": "app_rls.b03_mark_notification_emailed",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "markNotificationEmailed",
-          "line": 490,
+          "line": 497,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3658,7 +3658,7 @@
           "functionName": "app_rls.b03_mark_notification_read",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "markNotificationRead",
-          "line": 526
+          "line": 533
         }
       ],
       "activeCallers": [
@@ -3666,7 +3666,7 @@
           "functionName": "app_rls.b03_mark_notification_read",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "markNotificationRead",
-          "line": 526,
+          "line": 533,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3689,7 +3689,7 @@
           "functionName": "app_rls.b03_primary_superadmin_email",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "getPrimarySuperadminEmail",
-          "line": 398
+          "line": 405
         }
       ],
       "activeCallers": [
@@ -3697,7 +3697,7 @@
           "functionName": "app_rls.b03_primary_superadmin_email",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "getPrimarySuperadminEmail",
-          "line": 398,
+          "line": 405,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3720,7 +3720,7 @@
           "functionName": "app_rls.b03_resolve_incident_email_actor",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "resolveIncidentEmailActor",
-          "line": 415
+          "line": 422
         }
       ],
       "activeCallers": [
@@ -3728,7 +3728,7 @@
           "functionName": "app_rls.b03_resolve_incident_email_actor",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "resolveIncidentEmailActor",
-          "line": 415,
+          "line": 422,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3751,7 +3751,7 @@
           "functionName": "app_rls.b03_resolve_incident_notification_scope",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "resolveIncidentNotificationScope",
-          "line": 552
+          "line": 559
         }
       ],
       "activeCallers": [
@@ -3759,7 +3759,7 @@
           "functionName": "app_rls.b03_resolve_incident_notification_scope",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "resolveIncidentNotificationScope",
-          "line": 552,
+          "line": 559,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -3782,7 +3782,7 @@
           "functionName": "app_rls.b03_superadmin_alert_emails",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "getSuperadminAlertEmails",
-          "line": 406
+          "line": 413
         }
       ],
       "activeCallers": [
@@ -3790,7 +3790,7 @@
           "functionName": "app_rls.b03_superadmin_alert_emails",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "getSuperadminAlertEmails",
-          "line": 406,
+          "line": 413,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -7542,14 +7542,216 @@
       "functionName": "app_rls.claim_audit_log_outbox_slice",
       "schema": "app_rls",
       "name": "claim_audit_log_outbox_slice",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
+      "signature": "timestamp without time zone,integer",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "worker"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "deploymentPhase": "session-b-b03-outbox",
+        "ownerPrivileges": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "lastError",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            [
+              "id",
+              "userId",
+              "orgId",
+              "licenseeId",
+              "action",
+              "entityType",
+              "entityId",
+              "details",
+              "ipAddress",
+              "ipHash",
+              "userAgent"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'audit-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('audit-claim','audit-consume','audit-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'security-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_security_outbox_digest',true) AND \"eventType\"='AUDIT_LOG'))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('security-claim','security-complete','security-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id IS NOT NULL AND \"userId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND \"orgId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "AuditLogOutbox",
+          "SELECT"
+        ],
+        [
+          "AuditLogOutbox",
+          "UPDATE"
+        ]
+      ],
+      "requiredContext": "The exact worker role uses SKIP LOCKED and a five-minute lease to claim bounded, unexpired recovery records once per attempt.",
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
       "callers": [
         {
           "functionName": "app_rls.claim_audit_log_outbox_slice",
@@ -7940,7 +8142,7 @@
           "functionName": "app_rls.claim_compliance_pack_slice",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "claimCompliancePackSlice",
-          "line": 353
+          "line": 360
         }
       ],
       "activeCallers": [
@@ -7948,7 +8150,7 @@
           "functionName": "app_rls.claim_compliance_pack_slice",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "claimCompliancePackSlice",
-          "line": 353,
+          "line": 360,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -7958,20 +8160,222 @@
       "functionName": "app_rls.claim_security_event_outbox_slice",
       "schema": "app_rls",
       "name": "claim_security_event_outbox_slice",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
+      "signature": "timestamp without time zone,integer,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "worker"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "deploymentPhase": "session-b-b03-outbox",
+        "ownerPrivileges": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "lastError",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            [
+              "id",
+              "userId",
+              "orgId",
+              "licenseeId",
+              "action",
+              "entityType",
+              "entityId",
+              "details",
+              "ipAddress",
+              "ipHash",
+              "userAgent"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'audit-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('audit-claim','audit-consume','audit-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'security-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_security_outbox_digest',true) AND \"eventType\"='AUDIT_LOG'))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('security-claim','security-complete','security-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id IS NOT NULL AND \"userId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND \"orgId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "SecurityEventOutbox",
+          "SELECT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "UPDATE"
+        ]
+      ],
+      "requiredContext": "The exact worker role claims one allowlisted event family using SKIP LOCKED and a bounded lease.",
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
+      ],
       "callers": [
         {
           "functionName": "app_rls.claim_security_event_outbox_slice",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "claimSecurityEventOutboxSlice",
-          "line": 308
+          "line": 312
         }
       ],
       "activeCallers": [
@@ -7979,7 +8383,7 @@
           "functionName": "app_rls.claim_security_event_outbox_slice",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "claimSecurityEventOutboxSlice",
-          "line": 308,
+          "line": 312,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -7989,20 +8393,222 @@
       "functionName": "app_rls.complete_security_event_outbox",
       "schema": "app_rls",
       "name": "complete_security_event_outbox",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
+      "signature": "text,text,timestamp without time zone,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "worker"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "deploymentPhase": "session-b-b03-outbox",
+        "ownerPrivileges": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "lastError",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            [
+              "id",
+              "userId",
+              "orgId",
+              "licenseeId",
+              "action",
+              "entityType",
+              "entityId",
+              "details",
+              "ipAddress",
+              "ipHash",
+              "userAgent"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'audit-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('audit-claim','audit-consume','audit-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'security-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_security_outbox_digest',true) AND \"eventType\"='AUDIT_LOG'))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('security-claim','security-complete','security-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id IS NOT NULL AND \"userId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND \"orgId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "SecurityEventOutbox",
+          "SELECT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "UPDATE"
+        ]
+      ],
+      "requiredContext": "Locks the leased row, records one bounded external sink identifier and makes SENT replay-safe and terminal.",
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
+      ],
       "callers": [
         {
           "functionName": "app_rls.complete_security_event_outbox",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "completeSecurityEventOutbox",
-          "line": 328
+          "line": 333
         }
       ],
       "activeCallers": [
@@ -8010,7 +8616,7 @@
           "functionName": "app_rls.complete_security_event_outbox",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "completeSecurityEventOutbox",
-          "line": 328,
+          "line": 333,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -8020,20 +8626,230 @@
       "functionName": "app_rls.consume_audit_log_outbox",
       "schema": "app_rls",
       "name": "consume_audit_log_outbox",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
+      "signature": "text,text,timestamp without time zone",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "worker"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "deploymentPhase": "session-b-b03-outbox",
+        "ownerPrivileges": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "lastError",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            [
+              "id",
+              "userId",
+              "orgId",
+              "licenseeId",
+              "action",
+              "entityType",
+              "entityId",
+              "details",
+              "ipAddress",
+              "ipHash",
+              "userAgent"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'audit-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('audit-claim','audit-consume','audit-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'security-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_security_outbox_digest',true) AND \"eventType\"='AUDIT_LOG'))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('security-claim','security-complete','security-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id IS NOT NULL AND \"userId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND \"orgId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "AuditLogOutbox",
+          "SELECT"
+        ],
+        [
+          "AuditLogOutbox",
+          "UPDATE"
+        ],
+        [
+          "AuditLog",
+          "INSERT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Locks the leased row, reconstructs only reviewed audit columns, atomically queues the matching SIEM projection and makes SENT terminal and replay-safe.",
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
       "callers": [
         {
           "functionName": "app_rls.consume_audit_log_outbox",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "consumeAuditLogOutbox",
-          "line": 283
+          "line": 285
         }
       ],
       "activeCallers": [
@@ -8041,7 +8857,7 @@
           "functionName": "app_rls.consume_audit_log_outbox",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "consumeAuditLogOutbox",
-          "line": 283,
+          "line": 285,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -8148,14 +8964,216 @@
       "functionName": "app_rls.enqueue_audit_log_outbox",
       "schema": "app_rls",
       "name": "enqueue_audit_log_outbox",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
+      "signature": "jsonb,text,text,text,text,text,text,text,text,timestamp without time zone,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "deploymentPhase": "session-b-b03-outbox",
+        "ownerPrivileges": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "lastError",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            [
+              "id",
+              "userId",
+              "orgId",
+              "licenseeId",
+              "action",
+              "entityType",
+              "entityId",
+              "details",
+              "ipAddress",
+              "ipHash",
+              "userAgent"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'audit-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('audit-claim','audit-consume','audit-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'security-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_security_outbox_digest',true) AND \"eventType\"='AUDIT_LOG'))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('security-claim','security-complete','security-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id IS NOT NULL AND \"userId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND \"orgId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "AuditLogOutbox",
+          "SELECT"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Requires an already verified authenticated-session binding, freezes actor and tenant authority outside JSON and enqueues one digest-bound recovery record.",
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-audit-log-outbox-service-ts-queue-audit-log-outbox"
+      ],
       "callers": [
         {
           "functionName": "app_rls.enqueue_audit_log_outbox",
@@ -8179,14 +9197,216 @@
       "functionName": "app_rls.enqueue_security_event_outbox",
       "schema": "app_rls",
       "name": "enqueue_security_event_outbox",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
+      "signature": "text,jsonb,text,text,text,text,text,text,text,timestamp without time zone",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "app"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "deploymentPhase": "session-b-b03-outbox",
+        "ownerPrivileges": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "lastError",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            [
+              "id",
+              "userId",
+              "orgId",
+              "licenseeId",
+              "action",
+              "entityType",
+              "entityId",
+              "details",
+              "ipAddress",
+              "ipHash",
+              "userAgent"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'audit-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('audit-claim','audit-consume','audit-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'security-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_security_outbox_digest',true) AND \"eventType\"='AUDIT_LOG'))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('security-claim','security-complete','security-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id IS NOT NULL AND \"userId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND \"orgId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "SecurityEventOutbox",
+          "SELECT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Requires verified authenticated-session authority and enqueues only AUDIT_LOG or CSP_VIOLATION with immutable digest and tenant columns.",
+      "canonicalWorkflowIds": [
+        "workflow-internal-backend-src-services-siem-outbox-service-ts-queue-security-event"
+      ],
       "callers": [
         {
           "functionName": "app_rls.enqueue_security_event_outbox",
@@ -8210,20 +9430,222 @@
       "functionName": "app_rls.fail_audit_log_outbox",
       "schema": "app_rls",
       "name": "fail_audit_log_outbox",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
+      "signature": "text,text,timestamp without time zone,integer,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "worker"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "deploymentPhase": "session-b-b03-outbox",
+        "ownerPrivileges": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "lastError",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            [
+              "id",
+              "userId",
+              "orgId",
+              "licenseeId",
+              "action",
+              "entityType",
+              "entityId",
+              "details",
+              "ipAddress",
+              "ipHash",
+              "userAgent"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'audit-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('audit-claim','audit-consume','audit-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'security-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_security_outbox_digest',true) AND \"eventType\"='AUDIT_LOG'))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('security-claim','security-complete','security-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id IS NOT NULL AND \"userId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND \"orgId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "AuditLogOutbox",
+          "SELECT"
+        ],
+        [
+          "AuditLogOutbox",
+          "UPDATE"
+        ]
+      ],
+      "requiredContext": "Compare-and-sets the exact claimed attempt to bounded retry or terminal failure without mutating SENT rows.",
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-audit-log-outbox-service-ts-flush-audit-log-outbox"
+      ],
       "callers": [
         {
           "functionName": "app_rls.fail_audit_log_outbox",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "failAuditLogOutbox",
-          "line": 293
+          "line": 296
         }
       ],
       "activeCallers": [
@@ -8231,7 +9653,7 @@
           "functionName": "app_rls.fail_audit_log_outbox",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "failAuditLogOutbox",
-          "line": 293,
+          "line": 296,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -8241,20 +9663,222 @@
       "functionName": "app_rls.fail_security_event_outbox",
       "schema": "app_rls",
       "name": "fail_security_event_outbox",
-      "signature": null,
-      "definitionLocation": null,
-      "definitionKind": null,
-      "contractStatus": "missing",
-      "security": null,
-      "tableCommands": [],
-      "requiredContext": null,
-      "canonicalWorkflowIds": [],
+      "signature": "text,text,timestamp without time zone,integer,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "worker"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
+        "deploymentPhase": "session-b-b03-outbox",
+        "ownerPrivileges": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "initiatingActorRoleSnapshot",
+              "expiresAt",
+              "lastError",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "flushedAuditLogId",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            [
+              "id",
+              "eventType",
+              "payload",
+              "jobType",
+              "requestId",
+              "payloadDigest",
+              "idempotencyKey",
+              "organizationId",
+              "licenseeId",
+              "manufacturerId",
+              "initiatingUserId",
+              "expiresAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            [
+              "status",
+              "attempts",
+              "nextAttemptAt",
+              "lastError",
+              "sentAt",
+              "claimedAt",
+              "claimLeaseExpiresAt",
+              "sinkEventId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            [
+              "id",
+              "userId",
+              "orgId",
+              "licenseeId",
+              "action",
+              "entityType",
+              "entityId",
+              "details",
+              "ipAddress",
+              "ipHash",
+              "userAgent"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "AuditLogOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'audit-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('audit-claim','audit-consume','audit-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "SELECT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND (id=current_setting('app.b03_outbox_id',true) OR \"idempotencyKey\"=current_setting('app.b03_outbox_idempotency_key',true))) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) LIKE 'security-%' AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND ((session_user={{APP_ROLE}} AND current_setting('app.b03_outbox_operation',true)='security-enqueue' AND id=current_setting('app.b03_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_outbox_digest',true)) OR (session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id=current_setting('app.b03_security_outbox_id',true) AND \"payloadDigest\"=current_setting('app.b03_security_outbox_digest',true) AND \"eventType\"='AUDIT_LOG'))"
+          ],
+          [
+            "SecurityEventOutbox",
+            "UPDATE",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true) IN ('security-claim','security-complete','security-fail') AND (current_setting('app.b03_outbox_id',true)='' OR id=current_setting('app.b03_outbox_id',true)) AND (current_setting('app.b03_outbox_digest',true)=repeat('0',64) OR \"payloadDigest\"=current_setting('app.b03_outbox_digest',true))"
+          ],
+          [
+            "AuditLog",
+            "INSERT",
+            "current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.b03_outbox_operation',true)='audit-consume' AND id IS NOT NULL AND \"userId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND \"orgId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "SecurityEventOutbox",
+          "SELECT"
+        ],
+        [
+          "SecurityEventOutbox",
+          "UPDATE"
+        ]
+      ],
+      "requiredContext": "Compare-and-sets the exact claimed delivery attempt to bounded retry or terminal failure without reopening SENT rows.",
+      "canonicalWorkflowIds": [
+        "workflow-worker-backend-src-services-siem-outbox-service-ts-flush-security-event-outbox"
+      ],
       "callers": [
         {
           "functionName": "app_rls.fail_security_event_outbox",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "failSecurityEventOutbox",
-          "line": 339
+          "line": 345
         }
       ],
       "activeCallers": [
@@ -8262,7 +9886,7 @@
           "functionName": "app_rls.fail_security_event_outbox",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "failSecurityEventOutbox",
-          "line": 339,
+          "line": 345,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -9163,7 +10787,7 @@
           "functionName": "app_rls.scheduled_complete_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "completeScheduledCompliancePackJob",
-          "line": 380
+          "line": 387
         }
       ],
       "activeCallers": [
@@ -9171,7 +10795,7 @@
           "functionName": "app_rls.scheduled_complete_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "completeScheduledCompliancePackJob",
-          "line": 380,
+          "line": 387,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -9512,7 +11136,7 @@
           "functionName": "app_rls.scheduled_fail_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "failScheduledCompliancePackJob",
-          "line": 390
+          "line": 397
         }
       ],
       "activeCallers": [
@@ -9520,7 +11144,7 @@
           "functionName": "app_rls.scheduled_fail_compliance_pack_job",
           "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
           "sourceFunction": "failScheduledCompliancePackJob",
-          "line": 390,
+          "line": 397,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }

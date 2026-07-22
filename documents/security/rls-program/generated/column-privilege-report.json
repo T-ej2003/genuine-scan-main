@@ -1569,6 +1569,230 @@
         "b03-fail-scheduled-compliance-pack",
         "b03-get-scheduled-compliance-pack"
       ]
+    },
+    {
+      "table": "AuditLogOutbox",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "payload",
+        "jobType",
+        "requestId",
+        "payloadDigest",
+        "idempotencyKey",
+        "organizationId",
+        "licenseeId",
+        "manufacturerId",
+        "initiatingUserId",
+        "initiatingActorRoleSnapshot",
+        "expiresAt",
+        "claimedAt",
+        "claimLeaseExpiresAt",
+        "status",
+        "attempts",
+        "nextAttemptAt",
+        "lastError",
+        "flushedAuditLogId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-claim-audit-outbox",
+        "b03-claim-security-outbox",
+        "b03-complete-security-outbox",
+        "b03-consume-audit-outbox",
+        "b03-enqueue-audit-outbox",
+        "b03-enqueue-security-outbox",
+        "b03-fail-audit-outbox",
+        "b03-fail-security-outbox"
+      ]
+    },
+    {
+      "table": "AuditLogOutbox",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "payload",
+        "jobType",
+        "requestId",
+        "payloadDigest",
+        "idempotencyKey",
+        "organizationId",
+        "licenseeId",
+        "manufacturerId",
+        "initiatingUserId",
+        "initiatingActorRoleSnapshot",
+        "expiresAt",
+        "lastError",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-claim-audit-outbox",
+        "b03-claim-security-outbox",
+        "b03-complete-security-outbox",
+        "b03-consume-audit-outbox",
+        "b03-enqueue-audit-outbox",
+        "b03-enqueue-security-outbox",
+        "b03-fail-audit-outbox",
+        "b03-fail-security-outbox"
+      ]
+    },
+    {
+      "table": "AuditLogOutbox",
+      "command": "UPDATE",
+      "columns": [
+        "status",
+        "attempts",
+        "nextAttemptAt",
+        "lastError",
+        "flushedAuditLogId",
+        "claimedAt",
+        "claimLeaseExpiresAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-claim-audit-outbox",
+        "b03-claim-security-outbox",
+        "b03-complete-security-outbox",
+        "b03-consume-audit-outbox",
+        "b03-enqueue-audit-outbox",
+        "b03-enqueue-security-outbox",
+        "b03-fail-audit-outbox",
+        "b03-fail-security-outbox"
+      ]
+    },
+    {
+      "table": "SecurityEventOutbox",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "eventType",
+        "payload",
+        "jobType",
+        "requestId",
+        "payloadDigest",
+        "idempotencyKey",
+        "organizationId",
+        "licenseeId",
+        "manufacturerId",
+        "initiatingUserId",
+        "expiresAt",
+        "claimedAt",
+        "claimLeaseExpiresAt",
+        "sinkEventId",
+        "status",
+        "attempts",
+        "nextAttemptAt",
+        "lastError",
+        "sentAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-claim-audit-outbox",
+        "b03-claim-security-outbox",
+        "b03-complete-security-outbox",
+        "b03-consume-audit-outbox",
+        "b03-enqueue-audit-outbox",
+        "b03-enqueue-security-outbox",
+        "b03-fail-audit-outbox",
+        "b03-fail-security-outbox"
+      ]
+    },
+    {
+      "table": "SecurityEventOutbox",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "eventType",
+        "payload",
+        "jobType",
+        "requestId",
+        "payloadDigest",
+        "idempotencyKey",
+        "organizationId",
+        "licenseeId",
+        "manufacturerId",
+        "initiatingUserId",
+        "expiresAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-claim-audit-outbox",
+        "b03-claim-security-outbox",
+        "b03-complete-security-outbox",
+        "b03-consume-audit-outbox",
+        "b03-enqueue-audit-outbox",
+        "b03-enqueue-security-outbox",
+        "b03-fail-audit-outbox",
+        "b03-fail-security-outbox"
+      ]
+    },
+    {
+      "table": "SecurityEventOutbox",
+      "command": "UPDATE",
+      "columns": [
+        "status",
+        "attempts",
+        "nextAttemptAt",
+        "lastError",
+        "sentAt",
+        "claimedAt",
+        "claimLeaseExpiresAt",
+        "sinkEventId",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-claim-audit-outbox",
+        "b03-claim-security-outbox",
+        "b03-complete-security-outbox",
+        "b03-consume-audit-outbox",
+        "b03-enqueue-audit-outbox",
+        "b03-enqueue-security-outbox",
+        "b03-fail-audit-outbox",
+        "b03-fail-security-outbox"
+      ]
+    },
+    {
+      "table": "AuditLog",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "userId",
+        "orgId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "details",
+        "ipAddress",
+        "ipHash",
+        "userAgent"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-claim-audit-outbox",
+        "b03-claim-security-outbox",
+        "b03-complete-security-outbox",
+        "b03-consume-audit-outbox",
+        "b03-enqueue-audit-outbox",
+        "b03-enqueue-security-outbox",
+        "b03-fail-audit-outbox",
+        "b03-fail-security-outbox"
+      ]
     }
   ]
 }

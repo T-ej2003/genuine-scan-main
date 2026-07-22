@@ -207,6 +207,27 @@ const runScheduledJobIdentityCertification = (connections, env) => {
   if (!/scheduled-job identity application-path proof passed/.test(result.stdout || "")) throw new Error("Scheduled-job identity certification did not emit its success marker");
   return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-b/b03/scheduledJobIdentityPostgres18.test.js" };
 };
+const runB03OutboxCertification = (connections, env) => {
+  if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY !== "b03-durable-outbox") return null;
+  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/rls-wave-b/b03/outboxPostgres18.test.js")], {
+    cwd: root,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      DATABASE_URL: connections.worker,
+      MSCQR_B03_OUTBOX_APP_URL: connections.app,
+      MSCQR_B03_OUTBOX_BOOTSTRAP_URL: connections.bootstrap,
+      MSCQR_B03_OUTBOX_PREAUTH_URL: connections.preauth,
+      MSCQR_B03_OUTBOX_POSTGRES18_TEST: "true",
+      MSCQR_B03_OUTBOX_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_B03_OUTBOX_POSTGRES18_TEST",
+    },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`B03 durable outbox certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/B03 durable outbox application-path proof passed/.test(result.stdout || "")) throw new Error("B03 durable outbox certification did not emit its success marker");
+  return { status: "postgresql-contract-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-b/b03/outboxPostgres18.test.js" };
+};
 const injectBeforeCommit = (file, label) => {
   const source = fs.readFileSync(path.join(sqlRoot, file), "utf8");
   const index = source.lastIndexOf("\nCOMMIT;");
@@ -562,6 +583,7 @@ const createUrls = (adminUrl, maintenanceDatabase, database, manifest) => ({
   maintenance: databaseUrlFor(adminUrl, maintenanceDatabase, certificationAdministrator),
   app: databaseUrlFor(adminUrl, database, manifest.roles.app),
   preauth: databaseUrlFor(adminUrl, database, manifest.roles.preauth),
+  worker: databaseUrlFor(adminUrl, database, manifest.roles.worker),
   scheduled: databaseUrlFor(adminUrl, database, manifest.roles.scheduled),
   operator: databaseUrlFor(adminUrl, database, manifest.roles.operator),
 });
@@ -796,14 +818,15 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     certifySemantics(urls.bootstrap, urls.app);
     const fixtureRows = Number(scalar(urls.bootstrap, "SELECT sum(row_count) FROM (SELECT (xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM public.%I',c.relname),false,true,'')))[1]::text::bigint AS row_count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_prisma_migrations') counts", "count disposable certification fixture rows"));
     if (!fixtureRows) throw new Error("Final semantic certification did not load its declared disposable fixtures");
-    const connections = { app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth, scheduled: urls.scheduled, operator: urls.operator };
+    const connections = { app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth, worker: urls.worker, scheduled: urls.scheduled, operator: urls.operator };
     const scheduledJobIdentityCertification = runScheduledJobIdentityCertification(connections, env);
+    const b03OutboxCertification = runB03OutboxCertification(connections, env);
     const c03Certification = runC03AuthenticatedCertification(connections, env);
     const applicationPathResults = env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "c03-authenticated-boundaries"
       ? []
       : runApplicationPathCertifications(connections, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, c03Certification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -853,6 +876,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     applicationPathResults: [],
     b01PreAuthCertification: null,
     scheduledJobIdentityCertification: null,
+    b03OutboxCertification: null,
     workflowsProductProhibited: workflowEvidence.summary.frozenProductProhibited,
     cleanRoomPreflightCertified: false,
     migrationsFromZeroCertified: false,
@@ -913,6 +937,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     result.b01Certification = finalRun.b01Certification;
     result.b01PreAuthCertification = finalRun.b01PreAuthCertification;
     result.scheduledJobIdentityCertification = finalRun.scheduledJobIdentityCertification;
+    result.b03OutboxCertification = finalRun.b03OutboxCertification;
     result.c03Certification = finalRun.c03Certification;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
     result.generatedPoliciesCertified = policies.count;

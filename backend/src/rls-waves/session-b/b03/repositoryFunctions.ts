@@ -252,12 +252,12 @@ export const enqueueSecurityEventOutbox = async (db: B03FunctionClient, input: B
   exactlyOne(await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     SELECT result."id"
     FROM app_rls.enqueue_security_event_outbox(
-      ${exactEnum(input.eventType, "eventType", ["AUDIT_LOG", "CSP_VIOLATION"])},
-      CAST(${json(input.payload)} AS jsonb), ${digest(input.payloadDigest)},
-      ${text(input.idempotencyKey, "idempotencyKey", 255)}, ${uuid(input.requestId)},
-      ${optional(input.organizationId, "organizationId")}, ${optional(input.licenseeId, "licenseeId")},
-      ${optional(input.manufacturerId, "manufacturerId")}, ${optional(input.initiatingUserId, "initiatingUserId")},
-      ${timestamp(input.expiresAt, "expiresAt")}
+      ${exactEnum(input.eventType, "eventType", ["AUDIT_LOG", "CSP_VIOLATION"])}::text,
+      CAST(${json(input.payload)} AS jsonb), ${digest(input.payloadDigest)}::text,
+      ${text(input.idempotencyKey, "idempotencyKey", 255)}::text, ${uuid(input.requestId)}::text,
+      ${optional(input.organizationId, "organizationId")}::text, ${optional(input.licenseeId, "licenseeId")}::text,
+      ${optional(input.manufacturerId, "manufacturerId")}::text, ${optional(input.initiatingUserId, "initiatingUserId")}::text,
+      CAST(${timestamp(input.expiresAt, "expiresAt")} AS timestamp without time zone)
     ) AS result
   `), "app_rls.enqueue_security_event_outbox");
 
@@ -271,7 +271,9 @@ export const claimAuditLogOutboxSlice = async (
     SELECT claim."id", claim."jobType", claim."requestId", claim."payloadDigest",
       claim."idempotencyKey", claim."organizationId", claim."licenseeId",
       claim."manufacturerId", claim."initiatingUserId", claim."expiresAt", claim."attempt"
-    FROM app_rls.claim_audit_log_outbox_slice(${attemptedAt}, ${batchSize}) AS claim
+    FROM app_rls.claim_audit_log_outbox_slice(
+      CAST(${attemptedAt} AS timestamp without time zone), CAST(${batchSize} AS integer)
+    ) AS claim
   `);
   return boundedRows(rows, batchSize, "app_rls.claim_audit_log_outbox_slice")
     .map((row) => validateClaim(row, ["AUDIT_LOG_RECOVERY"]));
@@ -283,7 +285,8 @@ export const consumeAuditLogOutbox = async (
 ) => exactlyOne(await db.$queryRaw<Array<{ auditLogId: string; replayed: boolean }>>(Prisma.sql`
   SELECT result."auditLogId", result."replayed"
   FROM app_rls.consume_audit_log_outbox(
-    ${id(input.jobId, "jobId")}, ${digest(input.payloadDigest)}, ${timestamp(input.attemptedAt, "attemptedAt")}
+    ${id(input.jobId, "jobId")}::text, ${digest(input.payloadDigest)}::text,
+    CAST(${timestamp(input.attemptedAt, "attemptedAt")} AS timestamp without time zone)
   ) AS result
 `), "app_rls.consume_audit_log_outbox");
 
@@ -293,9 +296,10 @@ export const failAuditLogOutbox = async (
 ) => exactlyOne(await db.$queryRaw<Array<{ terminal: boolean; nextAttemptAt: Date | null }>>(Prisma.sql`
   SELECT result."terminal", result."nextAttemptAt"
   FROM app_rls.fail_audit_log_outbox(
-    ${id(input.jobId, "jobId")}, ${digest(input.payloadDigest)},
-    ${timestamp(input.attemptedAt, "attemptedAt")}, ${integer(input.attempt, "attempt", 1, 10)},
-    ${text(input.errorCode, "errorCode", 128)}
+    ${id(input.jobId, "jobId")}::text, ${digest(input.payloadDigest)}::text,
+    CAST(${timestamp(input.attemptedAt, "attemptedAt")} AS timestamp without time zone),
+    CAST(${integer(input.attempt, "attempt", 1, 10)} AS integer),
+    ${text(input.errorCode, "errorCode", 128)}::text
   ) AS result
 `), "app_rls.fail_audit_log_outbox");
 
@@ -311,7 +315,8 @@ export const claimSecurityEventOutboxSlice = async (
       claim."manufacturerId", claim."initiatingUserId", claim."expiresAt", claim."attempt",
       claim."eventType", claim."eventPayload", claim."createdAt"
     FROM app_rls.claim_security_event_outbox_slice(
-      ${attemptedAt}, ${batchSize}, ${exactEnum(input.jobType, "jobType", ["AUDIT_LOG", "CSP_VIOLATION"])}
+      CAST(${attemptedAt} AS timestamp without time zone), CAST(${batchSize} AS integer),
+      ${exactEnum(input.jobType, "jobType", ["AUDIT_LOG", "CSP_VIOLATION"])}::text
     ) AS claim
   `);
   return boundedRows(rows, batchSize, "app_rls.claim_security_event_outbox_slice").map((row) => {
@@ -328,8 +333,9 @@ export const completeSecurityEventOutbox = async (
 ) => exactlyOne(await db.$queryRaw<Array<{ completed: boolean; replayed: boolean }>>(Prisma.sql`
   SELECT result."completed", result."replayed"
   FROM app_rls.complete_security_event_outbox(
-    ${id(input.jobId, "jobId")}, ${digest(input.payloadDigest)},
-    ${timestamp(input.attemptedAt, "attemptedAt")}, ${id(input.sinkEventId, "sinkEventId")}
+    ${id(input.jobId, "jobId")}::text, ${digest(input.payloadDigest)}::text,
+    CAST(${timestamp(input.attemptedAt, "attemptedAt")} AS timestamp without time zone),
+    ${id(input.sinkEventId, "sinkEventId")}::text
   ) AS result
 `), "app_rls.complete_security_event_outbox");
 
@@ -339,9 +345,10 @@ export const failSecurityEventOutbox = async (
 ) => exactlyOne(await db.$queryRaw<Array<{ terminal: boolean; nextAttemptAt: Date | null }>>(Prisma.sql`
   SELECT result."terminal", result."nextAttemptAt"
   FROM app_rls.fail_security_event_outbox(
-    ${id(input.jobId, "jobId")}, ${digest(input.payloadDigest)},
-    ${timestamp(input.attemptedAt, "attemptedAt")}, ${integer(input.attempt, "attempt", 1, 10)},
-    ${text(input.errorCode, "errorCode", 128)}
+    ${id(input.jobId, "jobId")}::text, ${digest(input.payloadDigest)}::text,
+    CAST(${timestamp(input.attemptedAt, "attemptedAt")} AS timestamp without time zone),
+    CAST(${integer(input.attempt, "attempt", 1, 10)} AS integer),
+    ${text(input.errorCode, "errorCode", 128)}::text
   ) AS result
 `), "app_rls.fail_security_event_outbox");
 
