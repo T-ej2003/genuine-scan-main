@@ -38,7 +38,7 @@
         "inherit": false
       },
       "owns": [
-        "all 77 Prisma tables",
+        "all 78 Prisma tables",
         "application sequences",
         "public and app_rls schemas",
         "table-bound objects",
@@ -64,12 +64,12 @@
       },
       "owns": [
         "app_auth schema",
-        "the seven exact pre-auth function signatures"
+        "approved app_auth and app_rls SECURITY DEFINER boundaries"
       ],
       "forbiddenOwnership": [
         "application tables",
         "application sequences",
-        "app_rls",
+        "app_rls schema",
         "non-approved functions"
       ],
       "forbiddenMemberships": "No runtime role and no standing migration membership."
@@ -537,11 +537,12 @@
         "name": "claim_compliance_pack_slice",
         "argumentTypes": [
           "text",
+          "text",
           "timestamp without time zone",
           "integer"
         ],
-        "owner": "identity-table-owner",
-        "securityMode": "INVOKER"
+        "owner": "identity-auth-function-owner",
+        "securityMode": "DEFINER"
       }
     ]
   },

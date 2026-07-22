@@ -1288,6 +1288,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -1425,6 +1426,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -1563,6 +1565,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -5276,6 +5279,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -6573,6 +6577,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -13830,6 +13835,7 @@
         "licenseeId",
         "periodFrom",
         "periodTo",
+        "scheduledScheduleId",
         "signatureAlgorithm",
         "startedAt",
         "startedByUserId",
@@ -13891,6 +13897,7 @@
         "finishedAt",
         "periodFrom",
         "periodTo",
+        "scheduledScheduleId",
         "signatureAlgorithm",
         "startedAt",
         "startedByUserId",
@@ -13930,6 +13937,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -14050,6 +14058,7 @@
         "licenseeId",
         "periodFrom",
         "periodTo",
+        "scheduledScheduleId",
         "signatureAlgorithm",
         "startedAt",
         "startedByUserId",
@@ -14091,6 +14100,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -14126,6 +14136,7 @@
         "finishedAt",
         "periodFrom",
         "periodTo",
+        "scheduledScheduleId",
         "signatureAlgorithm",
         "startedAt",
         "startedByUserId",
@@ -14167,6 +14178,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -18832,6 +18844,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -20183,6 +20196,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -21465,6 +21479,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -23970,6 +23985,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -27961,7 +27977,7 @@
       "lifecycleColumns": [],
       "withCheckRule": "not-applicable",
       "requiresNamedFunction": true,
-      "namedFunctionClass": "exact-reviewed-query-function",
+      "namedFunctionClass": "worker-fn-claim-compliance-pack-slice",
       "requiresRestrictedWorkerBoundary": true,
       "requiresAuditEvent": false,
       "requiresApproval": false,
@@ -27974,6 +27990,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -67134,6 +67151,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"
@@ -69608,6 +69626,605 @@
       ],
       "confidence": "medium",
       "status": "architecture-resolved"
+    },
+    {
+      "id": "command-scheduled-job-credential-delete-prohibited",
+      "tableId": "table-scheduled-job-credential",
+      "command": "DELETE",
+      "actorClasses": [],
+      "runtimeIdentities": [],
+      "minimumAssurance": "none",
+      "scopeRule": "No general hard-delete scope exists.",
+      "allowedColumns": [],
+      "protectedColumns": [
+        "capabilityHash",
+        "capabilityHashVersion",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "identityName",
+        "jobFamily",
+        "lastUsedAt",
+        "revokedAt",
+        "revokedReason",
+        "rotatedFromCredentialId",
+        "scheduleId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [],
+      "forbiddenLifecycleStates": [
+        "ALL_STATES"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": false,
+      "namedFunctionClass": "none",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "prohibited",
+      "hardDeleteSemantics": "prohibited",
+      "dependentDataBehavior": "No cascade is authorized by this rule.",
+      "retentionLegalConsequences": "Deletion requires a separate explicit workflow rule; absence of one is denial.",
+      "supportingWorkflowIds": [],
+      "supportingEvidence": [
+        "Default-deny hard-delete architecture rule in ARCHITECTURE.md."
+      ],
+      "allowScenarios": [
+        "None; this rule records the default prohibition."
+      ],
+      "denyScenarios": [
+        "Every direct or cascaded DELETE lacking a separate exact command rule is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-scheduled-job-credential-insert-1d6b2c647eac",
+      "tableId": "table-scheduled-job-credential",
+      "command": "INSERT",
+      "actorClasses": [
+        "operator"
+      ],
+      "runtimeIdentities": [
+        "identity-operator"
+      ],
+      "minimumAssurance": "operator-approved",
+      "minimumAssuranceByActorClass": {
+        "operator": "operator-approved"
+      },
+      "scopeRule": "approved-special-boundary boundary from tables.json; empty or forged context is denied.",
+      "allowedColumns": [
+        "capabilityHash",
+        "capabilityHashVersion",
+        "expiresAt",
+        "id",
+        "identityName",
+        "jobFamily",
+        "rotatedFromCredentialId",
+        "scheduleId",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "capabilityHash",
+        "capabilityHashVersion",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "revokedAt",
+        "rotatedFromCredentialId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL_OR_SERVER_INITIALIZED",
+        "lastUsedAt=NULL_OR_SERVER_INITIALIZED",
+        "revokedAt=NULL_OR_SERVER_INITIALIZED"
+      ],
+      "forbiddenLifecycleStates": [
+        "CLIENT_SELECTED_INITIAL_STATE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "New row preserves approved-special-boundary boundary from tables.json; empty or forged context is denied. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-operator-capability-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "scheduled-job-credential-operator"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql"
+      ],
+      "allowScenarios": [
+        "operator using identity-operator at operator-approved performs INSERT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-scheduled-job-credential-select-0b81b64aa57d",
+      "tableId": "table-scheduled-job-credential",
+      "command": "SELECT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative.",
+      "allowedColumns": [
+        "createdAt",
+        "expiresAt",
+        "id",
+        "identityName",
+        "jobFamily",
+        "lastUsedAt",
+        "revokedAt",
+        "revokedReason",
+        "scheduleId",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "capabilityHash",
+        "capabilityHashVersion",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "revokedAt",
+        "rotatedFromCredentialId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-scheduled-capability-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "scheduled-job-credential-scheduled"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql"
+      ],
+      "allowScenarios": [
+        "scheduled-job using identity-scheduled-job at system-verified performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
+    },
+    {
+      "id": "command-scheduled-job-credential-select-1d6b2c647eac",
+      "tableId": "table-scheduled-job-credential",
+      "command": "SELECT",
+      "actorClasses": [
+        "operator"
+      ],
+      "runtimeIdentities": [
+        "identity-operator"
+      ],
+      "minimumAssurance": "operator-approved",
+      "minimumAssuranceByActorClass": {
+        "operator": "operator-approved"
+      },
+      "scopeRule": "approved-special-boundary boundary from tables.json; empty or forged context is denied.",
+      "allowedColumns": [
+        "createdAt",
+        "expiresAt",
+        "id",
+        "identityName",
+        "jobFamily",
+        "lastUsedAt",
+        "revokedAt",
+        "revokedReason",
+        "scheduleId",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "capabilityHash",
+        "capabilityHashVersion",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "revokedAt",
+        "rotatedFromCredentialId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-operator-capability-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "scheduled-job-credential-operator"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql"
+      ],
+      "allowScenarios": [
+        "operator using identity-operator at operator-approved performs SELECT within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-scheduled-job-credential-select-56e28c0be62e",
+      "tableId": "table-scheduled-job-credential",
+      "command": "SELECT",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "createdAt",
+        "expiresAt",
+        "id",
+        "identityName",
+        "jobFamily",
+        "lastUsedAt",
+        "revokedAt",
+        "revokedReason",
+        "scheduleId",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "capabilityHash",
+        "capabilityHashVersion",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "revokedAt",
+        "rotatedFromCredentialId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "not-applicable",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "worker-fn-claim-compliance-pack-slice",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": false,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
+    },
+    {
+      "id": "command-scheduled-job-credential-update-0b81b64aa57d",
+      "tableId": "table-scheduled-job-credential",
+      "command": "UPDATE",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative.",
+      "allowedColumns": [
+        "lastUsedAt",
+        "revokedAt",
+        "revokedReason",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "capabilityHash",
+        "capabilityHashVersion",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "revokedAt",
+        "rotatedFromCredentialId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-scheduled-capability-function",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "scheduled-job-credential-scheduled"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql"
+      ],
+      "allowScenarios": [
+        "scheduled-job using identity-scheduled-job at system-verified performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
+    },
+    {
+      "id": "command-scheduled-job-credential-update-1d6b2c647eac",
+      "tableId": "table-scheduled-job-credential",
+      "command": "UPDATE",
+      "actorClasses": [
+        "operator"
+      ],
+      "runtimeIdentities": [
+        "identity-operator"
+      ],
+      "minimumAssurance": "operator-approved",
+      "minimumAssuranceByActorClass": {
+        "operator": "operator-approved"
+      },
+      "scopeRule": "approved-special-boundary boundary from tables.json; empty or forged context is denied.",
+      "allowedColumns": [
+        "lastUsedAt",
+        "revokedAt",
+        "revokedReason",
+        "updatedAt"
+      ],
+      "protectedColumns": [
+        "capabilityHash",
+        "capabilityHashVersion",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "revokedAt",
+        "rotatedFromCredentialId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "New row preserves approved-special-boundary boundary from tables.json; empty or forged context is denied. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "exact-operator-capability-function",
+      "requiresRestrictedWorkerBoundary": false,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "named-function",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "scheduled-job-credential-operator"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql"
+      ],
+      "allowScenarios": [
+        "operator using identity-operator at operator-approved performs UPDATE within the recorded scope, column set, lifecycle, and boundary."
+      ],
+      "denyScenarios": [
+        "Anonymous, empty-context, foreign-tenant, wrong-actor, lower-assurance, forbidden-state, protected-column, role-elevation, ownership-transfer, or unapproved execution is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved"
+    },
+    {
+      "id": "command-scheduled-job-credential-update-56e28c0be62e",
+      "tableId": "table-scheduled-job-credential",
+      "command": "UPDATE",
+      "actorClasses": [
+        "scheduled-job"
+      ],
+      "runtimeIdentities": [
+        "identity-scheduled-job"
+      ],
+      "minimumAssurance": "system-verified",
+      "minimumAssuranceByActorClass": {
+        "scheduled-job": "system-verified"
+      },
+      "scopeRule": "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
+      "allowedColumns": [
+        "identityName",
+        "jobFamily",
+        "revokedReason",
+        "scheduleId"
+      ],
+      "protectedColumns": [
+        "capabilityHash",
+        "capabilityHashVersion",
+        "createdAt",
+        "expiresAt",
+        "id",
+        "lastUsedAt",
+        "revokedAt",
+        "rotatedFromCredentialId",
+        "updatedAt"
+      ],
+      "allowedLifecycleStates": [
+        "expiresAt=NULL",
+        "expiresAt=SERVER_TIMESTAMP_SET",
+        "lastUsedAt=NULL",
+        "lastUsedAt=SERVER_TIMESTAMP_SET",
+        "revokedAt=NULL",
+        "revokedAt=SERVER_TIMESTAMP_SET"
+      ],
+      "forbiddenLifecycleStates": [
+        "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+      ],
+      "lifecycleColumns": [
+        "expiresAt",
+        "lastUsedAt",
+        "revokedAt"
+      ],
+      "withCheckRule": "New row preserves Durably verified job identity plus persisted job and tenant scope; queue payload scope is never authoritative. Ownership, actor, approval, audit-attribution, identity, token/hash, and lifecycle fields come only from trusted server context or the named boundary.",
+      "requiresNamedFunction": true,
+      "namedFunctionClass": "worker-fn-claim-compliance-pack-slice",
+      "requiresRestrictedWorkerBoundary": true,
+      "requiresAuditEvent": true,
+      "requiresApproval": false,
+      "approvalClass": "none",
+      "authorizationBoundary": "restricted-worker",
+      "hardDeleteSemantics": "not-applicable",
+      "dependentDataBehavior": "not-applicable",
+      "retentionLegalConsequences": "not-applicable",
+      "supportingWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+        "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
+        "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
+        "backend/src/services/compliancePackService.ts"
+      ],
+      "allowScenarios": [
+        "worker-boundary-scheduled-compliance-packs uses identity-scheduled-job at system-verified with a fresh verified durable job, exact context and command."
+      ],
+      "denyScenarios": [
+        "Unverified payload scope, unknown/stale job, conflicting replay, wrong identity, human impersonation, platform-admin context or out-of-bound command is denied."
+      ],
+      "confidence": "high",
+      "status": "architecture-resolved",
+      "workerBoundaryId": "worker-boundary-scheduled-compliance-packs"
     },
     {
       "id": "command-security-event-outbox-delete-prohibited",
@@ -77876,6 +78493,7 @@
         "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
       ],
       "supportingEvidence": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"

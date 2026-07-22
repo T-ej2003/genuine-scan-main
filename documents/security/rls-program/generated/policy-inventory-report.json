@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 86,
+  "count": 102,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -68,6 +68,78 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
+      "policyName": "scheduled_capability_actionidempotencykey_insert",
+      "command": "INSERT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-insert-56e28c0be62e",
+        "command-action-idempotency-key-insert-75f1f70d84fe"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
+      "policyName": "scheduled_capability_actionidempotencykey_select",
+      "command": "SELECT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-select-56e28c0be62e",
+        "command-action-idempotency-key-select-af982a9464b8"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
+      "policyName": "scheduled_capability_actionidempotencykey_update",
+      "command": "UPDATE",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-action-idempotency-key-update-56e28c0be62e",
+        "command-action-idempotency-key-update-774327f512ea"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -426,6 +498,48 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "scheduled_capability_auditlog_select",
+      "command": "SELECT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-select-07fec99a574c",
+        "command-audit-log-select-10bb09d50d24",
+        "command-audit-log-select-2708ba0e0ee8",
+        "command-audit-log-select-53ac4f1bd0ac",
+        "command-audit-log-select-56e28c0be62e",
+        "command-audit-log-select-5998dbf5eb0a",
+        "command-audit-log-select-7691bd31cd81",
+        "command-audit-log-select-7c30e2368afb",
+        "command-audit-log-select-7db9558237d9",
+        "command-audit-log-select-80b33bbd591a",
+        "command-audit-log-select-92ebfd6a1d0d",
+        "command-audit-log-select-97535583a8fe",
+        "command-audit-log-select-aa566e98f219",
+        "command-audit-log-select-af01288ca9ba",
+        "command-audit-log-select-afd12473687a",
+        "command-audit-log-select-ba667bcc5353",
+        "command-audit-log-select-bdf8789ff300",
+        "command-audit-log-select-c63bbcb4a31f",
+        "command-audit-log-select-e3ba477495b1",
+        "command-audit-log-select-f64d10600903"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-audit-log-outbox",
       "table": "AuditLogOutbox",
       "policyName": "b01_auditlogoutbox_insert",
@@ -505,6 +619,43 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "scheduled_capability_auditlogoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND payload->'details'->>'systemIdentity'='identity-scheduled-job' AND payload->>'licenseeId'=current_setting('app.scheduled_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-audit-log-outbox-insert-0b4b95c51d1e",
+        "command-audit-log-outbox-insert-0c52b3004f35",
+        "command-audit-log-outbox-insert-2d0779382f94",
+        "command-audit-log-outbox-insert-56e28c0be62e",
+        "command-audit-log-outbox-insert-62fc51366420",
+        "command-audit-log-outbox-insert-65b85bc0759d",
+        "command-audit-log-outbox-insert-88bea5f1af06",
+        "command-audit-log-outbox-insert-93fe5e2f9580",
+        "command-audit-log-outbox-insert-963323294162",
+        "command-audit-log-outbox-insert-986a6bc31b69",
+        "command-audit-log-outbox-insert-c4febf718039",
+        "command-audit-log-outbox-insert-ce5627f3ff70",
+        "command-audit-log-outbox-insert-e1561aa306f2",
+        "command-audit-log-outbox-insert-e45d5f48ae3c",
+        "command-audit-log-outbox-insert-f3dffb308a5e"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -723,6 +874,76 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-compliance-pack-job",
+      "table": "CompliancePackJob",
+      "policyName": "scheduled_capability_compliancepackjob_insert",
+      "command": "INSERT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND id=current_setting('app.scheduled_job_id',true) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND \"startedByUserId\" IS NULL",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-compliance-pack-job-insert-56e28c0be62e"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-compliance-pack-job",
+      "table": "CompliancePackJob",
+      "policyName": "scheduled_capability_compliancepackjob_select",
+      "command": "SELECT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND (current_setting('app.scheduled_job_id',true)='' OR id=current_setting('app.scheduled_job_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-compliance-pack-job-select-4ef0f20c1c1d",
+        "command-compliance-pack-job-select-56e28c0be62e"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-compliance-pack-job",
+      "table": "CompliancePackJob",
+      "policyName": "scheduled_capability_compliancepackjob_update",
+      "command": "UPDATE",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true) IN ('complete','fail') AND id=current_setting('app.scheduled_job_id',true) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND (current_setting('app.scheduled_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.scheduled_licensee_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-compliance-pack-job-update-56e28c0be62e"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-email-verification-token",
       "table": "EmailVerificationToken",
       "policyName": "b01_preauth_emailverificationtoken_select",
@@ -788,6 +1009,29 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-evidence-retention-policy",
+      "table": "EvidenceRetentionPolicy",
+      "policyName": "scheduled_capability_evidenceretentionpolicy_select",
+      "command": "SELECT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-evidence-retention-policy-select-56e28c0be62e"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -867,6 +1111,44 @@
       "internalHelperOnly": false
     },
     {
+      "tableId": "table-incident",
+      "table": "Incident",
+      "policyName": "scheduled_capability_incident_select",
+      "command": "SELECT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-incident-select-00b44dd2511d",
+        "command-incident-select-0c71149cc376",
+        "command-incident-select-217b37df4742",
+        "command-incident-select-2ffe31981acd",
+        "command-incident-select-33bbab7a0533",
+        "command-incident-select-509547f03abe",
+        "command-incident-select-56e28c0be62e",
+        "command-incident-select-5966ae6fe6ec",
+        "command-incident-select-7691bd31cd81",
+        "command-incident-select-76c4253bab2b",
+        "command-incident-select-7db7d24917f6",
+        "command-incident-select-85d2ed0982fd",
+        "command-incident-select-870a0f430208",
+        "command-incident-select-a82269aceabf",
+        "command-incident-select-b5a5aa6959be",
+        "command-incident-select-ff41ff8a7c43"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-incident-evidence",
       "table": "IncidentEvidence",
       "policyName": "c03_capability_incidentevidence_select",
@@ -909,6 +1191,29 @@
       ],
       "workflowId": null,
       "route": "C03 exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-incident-handoff",
+      "table": "IncidentHandoff",
+      "policyName": "scheduled_capability_incidenthandoff_select",
+      "command": "SELECT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" scheduled_incident WHERE scheduled_incident.id=\"incidentId\" AND scheduled_incident.\"licenseeId\"=current_setting('app.scheduled_licensee_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-incident-handoff-select-56e28c0be62e"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -1225,6 +1530,55 @@
       "route": "GET /api/analytics/risk-scores",
       "certificationStatus": "pending",
       "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
+      "policyName": "scheduled_capability_licensee_select",
+      "command": "SELECT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.scheduled_operation',true)='claim' OR id=current_setting('app.scheduled_licensee_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-licensee-select-00b44dd2511d",
+        "command-licensee-select-07fec99a574c",
+        "command-licensee-select-32463a66da3a",
+        "command-licensee-select-509547f03abe",
+        "command-licensee-select-54c31d8e3c1b",
+        "command-licensee-select-56e28c0be62e",
+        "command-licensee-select-58fa2fc9edab",
+        "command-licensee-select-606090826f02",
+        "command-licensee-select-65b85bc0759d",
+        "command-licensee-select-7c30e2368afb",
+        "command-licensee-select-808a0114622f",
+        "command-licensee-select-87ac040872c6",
+        "command-licensee-select-92ebfd6a1d0d",
+        "command-licensee-select-93fe5e2f9580",
+        "command-licensee-select-aa566e98f219",
+        "command-licensee-select-afd12473687a",
+        "command-licensee-select-ba667bcc5353",
+        "command-licensee-select-bdf8789ff300",
+        "command-licensee-select-bf4ed20e8b5b",
+        "command-licensee-select-bf81eba5b4e6",
+        "command-licensee-select-c63bbcb4a31f",
+        "command-licensee-select-d113603cb7d4",
+        "command-licensee-select-e3ba477495b1",
+        "command-licensee-select-f1b547f804cd",
+        "command-licensee-select-f64d10600903",
+        "command-licensee-select-fc757fc42aee",
+        "command-licensee-select-restricted-read"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-manufacturer-licensee-link",
@@ -1561,6 +1915,45 @@
       "route": "GET /api/analytics/risk-scores",
       "certificationStatus": "pending",
       "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
+      "policyName": "scheduled_capability_organization_select",
+      "command": "SELECT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND (current_setting('app.scheduled_operation',true)='claim' OR id=current_setting('app.organization_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-organization-select-00b44dd2511d",
+        "command-organization-select-07fec99a574c",
+        "command-organization-select-509547f03abe",
+        "command-organization-select-56e28c0be62e",
+        "command-organization-select-65b85bc0759d",
+        "command-organization-select-7c30e2368afb",
+        "command-organization-select-92ebfd6a1d0d",
+        "command-organization-select-93fe5e2f9580",
+        "command-organization-select-aa566e98f219",
+        "command-organization-select-afd12473687a",
+        "command-organization-select-ba667bcc5353",
+        "command-organization-select-bdf8789ff300",
+        "command-organization-select-c63bbcb4a31f",
+        "command-organization-select-d113603cb7d4",
+        "command-organization-select-e3ba477495b1",
+        "command-organization-select-f64d10600903",
+        "command-organization-select-restricted-read"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-password-reset",
@@ -2193,6 +2586,79 @@
       ],
       "workflowId": "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session",
       "route": "POST /auth/refresh",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-scheduled-job-credential",
+      "table": "ScheduledJobCredential",
+      "policyName": "scheduled_capability_scheduledjobcredential_insert",
+      "command": "INSERT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.scheduled_admin_operation',true)='provision' AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-scheduled-job-credential-insert-1d6b2c647eac"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-scheduled-job-credential",
+      "table": "ScheduledJobCredential",
+      "policyName": "scheduled_capability_scheduledjobcredential_select",
+      "command": "SELECT",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.scheduled_admin_operation',true) IN ('provision','revoke')))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-scheduled-job-credential-select-0b81b64aa57d",
+        "command-scheduled-job-credential-select-1d6b2c647eac",
+        "command-scheduled-job-credential-select-56e28c0be62e"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-scheduled-job-credential",
+      "table": "ScheduledJobCredential",
+      "policyName": "scheduled_capability_scheduledjobcredential_update",
+      "command": "UPDATE",
+      "actors": [
+        "scheduled-job"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "scheduled-compliance-pack"
+      ],
+      "scopeType": "security-definer-owner-and-durable-scheduled-capability",
+      "scopePredicate": "((current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_scheduled' AND ((current_setting('app.scheduled_verified',true)='' AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true)) OR (current_setting('app.scheduled_verified',true)='1' AND id=current_setting('app.scheduled_credential_id',true) AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_operator' AND current_setting('app.scheduled_admin_operation',true) IN ('provision','revoke')))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "command-scheduled-job-credential-update-0b81b64aa57d",
+        "command-scheduled-job-credential-update-1d6b2c647eac",
+        "command-scheduled-job-credential-update-56e28c0be62e"
+      ],
+      "workflowId": "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler",
+      "route": "scheduled compliance exact SQL boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },

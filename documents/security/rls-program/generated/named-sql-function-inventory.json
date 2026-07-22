@@ -198,6 +198,144 @@
       "line": 567
     },
     {
+      "functionName": "app_rls.enqueue_audit_log_outbox",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "enqueueAuditLogOutbox",
+      "line": 238
+    },
+    {
+      "functionName": "app_rls.enqueue_security_event_outbox",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "enqueueSecurityEventOutbox",
+      "line": 252
+    },
+    {
+      "functionName": "app_rls.claim_audit_log_outbox_slice",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "claimAuditLogOutboxSlice",
+      "line": 270
+    },
+    {
+      "functionName": "app_rls.consume_audit_log_outbox",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "consumeAuditLogOutbox",
+      "line": 283
+    },
+    {
+      "functionName": "app_rls.fail_audit_log_outbox",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "failAuditLogOutbox",
+      "line": 293
+    },
+    {
+      "functionName": "app_rls.claim_security_event_outbox_slice",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "claimSecurityEventOutboxSlice",
+      "line": 308
+    },
+    {
+      "functionName": "app_rls.complete_security_event_outbox",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "completeSecurityEventOutbox",
+      "line": 328
+    },
+    {
+      "functionName": "app_rls.fail_security_event_outbox",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "failSecurityEventOutbox",
+      "line": 339
+    },
+    {
+      "functionName": "app_rls.claim_compliance_pack_slice",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "claimCompliancePackSlice",
+      "line": 353
+    },
+    {
+      "functionName": "app_rls.scheduled_complete_compliance_pack_job",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "completeScheduledCompliancePackJob",
+      "line": 380
+    },
+    {
+      "functionName": "app_rls.scheduled_fail_compliance_pack_job",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "failScheduledCompliancePackJob",
+      "line": 390
+    },
+    {
+      "functionName": "app_rls.b03_primary_superadmin_email",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "getPrimarySuperadminEmail",
+      "line": 398
+    },
+    {
+      "functionName": "app_rls.b03_superadmin_alert_emails",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "getSuperadminAlertEmails",
+      "line": 406
+    },
+    {
+      "functionName": "app_rls.b03_resolve_incident_email_actor",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "resolveIncidentEmailActor",
+      "line": 415
+    },
+    {
+      "functionName": "app_rls.b03_create_role_notifications",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "createRoleNotifications",
+      "line": 436
+    },
+    {
+      "functionName": "app_rls.b03_create_user_notification",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "createUserNotification",
+      "line": 463
+    },
+    {
+      "functionName": "app_rls.b03_mark_notification_emailed",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "markNotificationEmailed",
+      "line": 490
+    },
+    {
+      "functionName": "app_rls.b03_list_notifications_for_user",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "listNotificationsForUser",
+      "line": 503
+    },
+    {
+      "functionName": "app_rls.b03_mark_notification_read",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "markNotificationRead",
+      "line": 526
+    },
+    {
+      "functionName": "app_rls.b03_mark_all_notifications_read",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "markAllNotificationsRead",
+      "line": 541
+    },
+    {
+      "functionName": "app_rls.b03_resolve_incident_notification_scope",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "resolveIncidentNotificationScope",
+      "line": 552
+    },
+    {
+      "functionName": "app_rls.b03_claim_incident_email_delivery",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "claimIncidentEmailDelivery",
+      "line": 566
+    },
+    {
+      "functionName": "app_rls.b03_complete_incident_email_delivery",
+      "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+      "sourceFunction": "completeIncidentEmailDelivery",
+      "line": 604
+    },
+    {
       "functionName": "app_rls.session_c_create_licensee",
       "sourceFile": "backend/src/rls-waves/session-c/c01/administrationRepository.ts",
       "sourceFunction": "createLicenseeInTransaction",
@@ -3287,6 +3425,378 @@
       ]
     },
     {
+      "functionName": "app_rls.b03_claim_incident_email_delivery",
+      "schema": "app_rls",
+      "name": "b03_claim_incident_email_delivery",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_claim_incident_email_delivery",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimIncidentEmailDelivery",
+          "line": 566
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_claim_incident_email_delivery",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimIncidentEmailDelivery",
+          "line": 566,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_complete_incident_email_delivery",
+      "schema": "app_rls",
+      "name": "b03_complete_incident_email_delivery",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_complete_incident_email_delivery",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "completeIncidentEmailDelivery",
+          "line": 604
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_complete_incident_email_delivery",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "completeIncidentEmailDelivery",
+          "line": 604,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_create_role_notifications",
+      "schema": "app_rls",
+      "name": "b03_create_role_notifications",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_create_role_notifications",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "createRoleNotifications",
+          "line": 436
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_create_role_notifications",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "createRoleNotifications",
+          "line": 436,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_create_user_notification",
+      "schema": "app_rls",
+      "name": "b03_create_user_notification",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_create_user_notification",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "createUserNotification",
+          "line": 463
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_create_user_notification",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "createUserNotification",
+          "line": 463,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_list_notifications_for_user",
+      "schema": "app_rls",
+      "name": "b03_list_notifications_for_user",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_list_notifications_for_user",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "listNotificationsForUser",
+          "line": 503
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_list_notifications_for_user",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "listNotificationsForUser",
+          "line": 503,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_mark_all_notifications_read",
+      "schema": "app_rls",
+      "name": "b03_mark_all_notifications_read",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_mark_all_notifications_read",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "markAllNotificationsRead",
+          "line": 541
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_mark_all_notifications_read",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "markAllNotificationsRead",
+          "line": 541,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_mark_notification_emailed",
+      "schema": "app_rls",
+      "name": "b03_mark_notification_emailed",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_mark_notification_emailed",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "markNotificationEmailed",
+          "line": 490
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_mark_notification_emailed",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "markNotificationEmailed",
+          "line": 490,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_mark_notification_read",
+      "schema": "app_rls",
+      "name": "b03_mark_notification_read",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_mark_notification_read",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "markNotificationRead",
+          "line": 526
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_mark_notification_read",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "markNotificationRead",
+          "line": 526,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_primary_superadmin_email",
+      "schema": "app_rls",
+      "name": "b03_primary_superadmin_email",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_primary_superadmin_email",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "getPrimarySuperadminEmail",
+          "line": 398
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_primary_superadmin_email",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "getPrimarySuperadminEmail",
+          "line": 398,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_resolve_incident_email_actor",
+      "schema": "app_rls",
+      "name": "b03_resolve_incident_email_actor",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_resolve_incident_email_actor",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "resolveIncidentEmailActor",
+          "line": 415
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_resolve_incident_email_actor",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "resolveIncidentEmailActor",
+          "line": 415,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_resolve_incident_notification_scope",
+      "schema": "app_rls",
+      "name": "b03_resolve_incident_notification_scope",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_resolve_incident_notification_scope",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "resolveIncidentNotificationScope",
+          "line": 552
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_resolve_incident_notification_scope",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "resolveIncidentNotificationScope",
+          "line": 552,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.b03_superadmin_alert_emails",
+      "schema": "app_rls",
+      "name": "b03_superadmin_alert_emails",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.b03_superadmin_alert_emails",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "getSuperadminAlertEmails",
+          "line": 406
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.b03_superadmin_alert_emails",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "getSuperadminAlertEmails",
+          "line": 406,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
       "functionName": "app_rls.batch_inventory_rollups",
       "schema": "app_rls",
       "name": "batch_inventory_rollups",
@@ -3812,6 +4322,7 @@
               "licenseeId",
               "status",
               "triggerType",
+              "scheduledScheduleId",
               "periodFrom",
               "periodTo",
               "fileName",
@@ -4155,6 +4666,7 @@
               "licenseeId",
               "status",
               "triggerType",
+              "scheduledScheduleId",
               "periodFrom",
               "periodTo",
               "fileName",
@@ -4686,6 +5198,7 @@
               "licenseeId",
               "status",
               "triggerType",
+              "scheduledScheduleId",
               "periodFrom",
               "periodTo",
               "fileName",
@@ -5060,6 +5573,7 @@
               "licenseeId",
               "status",
               "triggerType",
+              "scheduledScheduleId",
               "periodFrom",
               "periodTo",
               "fileName",
@@ -5442,6 +5956,7 @@
               "licenseeId",
               "status",
               "triggerType",
+              "scheduledScheduleId",
               "periodFrom",
               "periodTo",
               "fileName",
@@ -6188,6 +6703,7 @@
               "licenseeId",
               "status",
               "triggerType",
+              "scheduledScheduleId",
               "periodFrom",
               "periodTo",
               "fileName",
@@ -6601,6 +7117,7 @@
               "licenseeId",
               "status",
               "triggerType",
+              "scheduledScheduleId",
               "periodFrom",
               "periodTo",
               "fileName",
@@ -7022,6 +7539,515 @@
       ]
     },
     {
+      "functionName": "app_rls.claim_audit_log_outbox_slice",
+      "schema": "app_rls",
+      "name": "claim_audit_log_outbox_slice",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.claim_audit_log_outbox_slice",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimAuditLogOutboxSlice",
+          "line": 270
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.claim_audit_log_outbox_slice",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimAuditLogOutboxSlice",
+          "line": 270,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.claim_compliance_pack_slice",
+      "schema": "app_rls",
+      "name": "claim_compliance_pack_slice",
+      "signature": "text,text,timestamp without time zone,integer",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "scheduled"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityRollback.sql",
+        "deploymentPhase": "session-b-b03-scheduled",
+        "ownerPrivileges": [
+          [
+            "ScheduledJobCredential",
+            "SELECT",
+            [
+              "id",
+              "identityName",
+              "jobFamily",
+              "scheduleId",
+              "capabilityHash",
+              "capabilityHashVersion",
+              "expiresAt",
+              "revokedAt",
+              "revokedReason",
+              "rotatedFromCredentialId",
+              "lastUsedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ScheduledJobCredential",
+            "INSERT",
+            [
+              "id",
+              "identityName",
+              "jobFamily",
+              "scheduleId",
+              "capabilityHash",
+              "capabilityHashVersion",
+              "expiresAt",
+              "rotatedFromCredentialId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ScheduledJobCredential",
+            "UPDATE",
+            [
+              "lastUsedAt",
+              "revokedAt",
+              "revokedReason",
+              "updatedAt"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "scheduledScheduleId",
+              "periodFrom",
+              "periodTo",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "startedByUserId",
+              "startedAt",
+              "finishedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "scheduledScheduleId",
+              "periodFrom",
+              "periodTo",
+              "startedByUserId",
+              "startedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            [
+              "status",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "finishedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "statusCode",
+              "responsePayload",
+              "createdAt",
+              "completedAt",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            [
+              "statusCode",
+              "responsePayload",
+              "completedAt"
+            ]
+          ],
+          [
+            "Incident",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "slaDueAt",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            [
+              "incidentId",
+              "currentStage"
+            ]
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            [
+              "licenseeId",
+              "action",
+              "createdAt"
+            ]
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            [
+              "licenseeId",
+              "retentionDays"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "ScheduledJobCredential",
+            "SELECT",
+            "((current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true)) OR (current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true) IN ('provision','revoke')))"
+          ],
+          [
+            "ScheduledJobCredential",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true)='provision' AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true))"
+          ],
+          [
+            "ScheduledJobCredential",
+            "UPDATE",
+            "((current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND ((current_setting('app.scheduled_verified',true)='' AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true)) OR (current_setting('app.scheduled_verified',true)='1' AND id=current_setting('app.scheduled_credential_id',true) AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true)))) OR (current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true) IN ('provision','revoke')))"
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.scheduled_operation',true)='claim' OR id=current_setting('app.scheduled_licensee_id',true))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND (current_setting('app.scheduled_operation',true)='claim' OR id=current_setting('app.organization_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND (current_setting('app.scheduled_job_id',true)='' OR id=current_setting('app.scheduled_job_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND id=current_setting('app.scheduled_job_id',true) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND \"startedByUserId\" IS NULL"
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true) IN ('complete','fail') AND id=current_setting('app.scheduled_job_id',true) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND (current_setting('app.scheduled_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.scheduled_licensee_id',true))"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "Incident",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" scheduled_incident WHERE scheduled_incident.id=\"incidentId\" AND scheduled_incident.\"licenseeId\"=current_setting('app.scheduled_licensee_id',true))"
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND payload->'details'->>'systemIdentity'='identity-scheduled-job' AND payload->>'licenseeId'=current_setting('app.scheduled_licensee_id',true)"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "ScheduledJobCredential",
+          "SELECT"
+        ],
+        [
+          "ScheduledJobCredential",
+          "UPDATE"
+        ],
+        [
+          "Licensee",
+          "SELECT"
+        ],
+        [
+          "Organization",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "SELECT"
+        ],
+        [
+          "Incident",
+          "SELECT"
+        ],
+        [
+          "IncidentHandoff",
+          "SELECT"
+        ],
+        [
+          "AuditLog",
+          "SELECT"
+        ],
+        [
+          "EvidenceRetentionPolicy",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "INSERT"
+        ],
+        [
+          "ActionIdempotencyKey",
+          "SELECT"
+        ],
+        [
+          "ActionIdempotencyKey",
+          "INSERT"
+        ],
+        [
+          "ActionIdempotencyKey",
+          "UPDATE"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Hashes and verifies the exact scheduled capability before enumerating active database-derived licensee partitions and atomically claiming one daily job per partition.",
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.claim_compliance_pack_slice",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimCompliancePackSlice",
+          "line": 353
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.claim_compliance_pack_slice",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimCompliancePackSlice",
+          "line": 353,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.claim_security_event_outbox_slice",
+      "schema": "app_rls",
+      "name": "claim_security_event_outbox_slice",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.claim_security_event_outbox_slice",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimSecurityEventOutboxSlice",
+          "line": 308
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.claim_security_event_outbox_slice",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "claimSecurityEventOutboxSlice",
+          "line": 308,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.complete_security_event_outbox",
+      "schema": "app_rls",
+      "name": "complete_security_event_outbox",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.complete_security_event_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "completeSecurityEventOutbox",
+          "line": 328
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.complete_security_event_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "completeSecurityEventOutbox",
+          "line": 328,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.consume_audit_log_outbox",
+      "schema": "app_rls",
+      "name": "consume_audit_log_outbox",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.consume_audit_log_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "consumeAuditLogOutbox",
+          "line": 283
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.consume_audit_log_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "consumeAuditLogOutbox",
+          "line": 283,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
       "functionName": "app_rls.create_refresh_token",
       "schema": "app_rls",
       "name": "create_refresh_token",
@@ -7113,6 +8139,130 @@
           "sourceFile": "backend/src/services/dashboardSnapshotService.ts",
           "sourceFunction": "computeDashboardSnapshot",
           "line": 193,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.enqueue_audit_log_outbox",
+      "schema": "app_rls",
+      "name": "enqueue_audit_log_outbox",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.enqueue_audit_log_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "enqueueAuditLogOutbox",
+          "line": 238
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.enqueue_audit_log_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "enqueueAuditLogOutbox",
+          "line": 238,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.enqueue_security_event_outbox",
+      "schema": "app_rls",
+      "name": "enqueue_security_event_outbox",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.enqueue_security_event_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "enqueueSecurityEventOutbox",
+          "line": 252
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.enqueue_security_event_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "enqueueSecurityEventOutbox",
+          "line": 252,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.fail_audit_log_outbox",
+      "schema": "app_rls",
+      "name": "fail_audit_log_outbox",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.fail_audit_log_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "failAuditLogOutbox",
+          "line": 293
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.fail_audit_log_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "failAuditLogOutbox",
+          "line": 293,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.fail_security_event_outbox",
+      "schema": "app_rls",
+      "name": "fail_security_event_outbox",
+      "signature": null,
+      "definitionLocation": null,
+      "definitionKind": null,
+      "contractStatus": "missing",
+      "security": null,
+      "tableCommands": [],
+      "requiredContext": null,
+      "canonicalWorkflowIds": [],
+      "callers": [
+        {
+          "functionName": "app_rls.fail_security_event_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "failSecurityEventOutbox",
+          "line": 339
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.fail_security_event_outbox",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "failSecurityEventOutbox",
+          "line": 339,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }
@@ -7673,6 +8823,704 @@
           "sourceFile": "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
           "sourceFunction": "revokeRefreshTokenByIdentifier",
           "line": 510,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.scheduled_complete_compliance_pack_job",
+      "schema": "app_rls",
+      "name": "scheduled_complete_compliance_pack_job",
+      "signature": "text,text,text,text,jsonb",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "scheduled"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityRollback.sql",
+        "deploymentPhase": "session-b-b03-scheduled",
+        "ownerPrivileges": [
+          [
+            "ScheduledJobCredential",
+            "SELECT",
+            [
+              "id",
+              "identityName",
+              "jobFamily",
+              "scheduleId",
+              "capabilityHash",
+              "capabilityHashVersion",
+              "expiresAt",
+              "revokedAt",
+              "revokedReason",
+              "rotatedFromCredentialId",
+              "lastUsedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ScheduledJobCredential",
+            "INSERT",
+            [
+              "id",
+              "identityName",
+              "jobFamily",
+              "scheduleId",
+              "capabilityHash",
+              "capabilityHashVersion",
+              "expiresAt",
+              "rotatedFromCredentialId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ScheduledJobCredential",
+            "UPDATE",
+            [
+              "lastUsedAt",
+              "revokedAt",
+              "revokedReason",
+              "updatedAt"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "scheduledScheduleId",
+              "periodFrom",
+              "periodTo",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "startedByUserId",
+              "startedAt",
+              "finishedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "scheduledScheduleId",
+              "periodFrom",
+              "periodTo",
+              "startedByUserId",
+              "startedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            [
+              "status",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "finishedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "statusCode",
+              "responsePayload",
+              "createdAt",
+              "completedAt",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            [
+              "statusCode",
+              "responsePayload",
+              "completedAt"
+            ]
+          ],
+          [
+            "Incident",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "slaDueAt",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            [
+              "incidentId",
+              "currentStage"
+            ]
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            [
+              "licenseeId",
+              "action",
+              "createdAt"
+            ]
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            [
+              "licenseeId",
+              "retentionDays"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "ScheduledJobCredential",
+            "SELECT",
+            "((current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true)) OR (current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true) IN ('provision','revoke')))"
+          ],
+          [
+            "ScheduledJobCredential",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true)='provision' AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true))"
+          ],
+          [
+            "ScheduledJobCredential",
+            "UPDATE",
+            "((current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND ((current_setting('app.scheduled_verified',true)='' AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true)) OR (current_setting('app.scheduled_verified',true)='1' AND id=current_setting('app.scheduled_credential_id',true) AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true)))) OR (current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true) IN ('provision','revoke')))"
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.scheduled_operation',true)='claim' OR id=current_setting('app.scheduled_licensee_id',true))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND (current_setting('app.scheduled_operation',true)='claim' OR id=current_setting('app.organization_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND (current_setting('app.scheduled_job_id',true)='' OR id=current_setting('app.scheduled_job_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND id=current_setting('app.scheduled_job_id',true) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND \"startedByUserId\" IS NULL"
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true) IN ('complete','fail') AND id=current_setting('app.scheduled_job_id',true) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND (current_setting('app.scheduled_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.scheduled_licensee_id',true))"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "Incident",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" scheduled_incident WHERE scheduled_incident.id=\"incidentId\" AND scheduled_incident.\"licenseeId\"=current_setting('app.scheduled_licensee_id',true))"
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND payload->'details'->>'systemIdentity'='identity-scheduled-job' AND payload->>'licenseeId'=current_setting('app.scheduled_licensee_id',true)"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "ScheduledJobCredential",
+          "SELECT"
+        ],
+        [
+          "ScheduledJobCredential",
+          "UPDATE"
+        ],
+        [
+          "CompliancePackJob",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "UPDATE"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Verifies the scheduled capability, locks one SCHEDULED RUNNING job and atomically compare-and-sets its immutable artifact result and audit outbox.",
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.scheduled_complete_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "completeScheduledCompliancePackJob",
+          "line": 380
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.scheduled_complete_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "completeScheduledCompliancePackJob",
+          "line": 380,
+          "sourceFileActive": true,
+          "reachability": "active-source-file"
+        }
+      ]
+    },
+    {
+      "functionName": "app_rls.scheduled_fail_compliance_pack_job",
+      "schema": "app_rls",
+      "name": "scheduled_fail_compliance_pack_job",
+      "signature": "text,text,text,text,text",
+      "definitionLocation": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+      "definitionKind": "checked-in-production-package",
+      "contractStatus": "reviewed",
+      "security": {
+        "mode": "SECURITY DEFINER",
+        "ownerIdentity": "identity-auth-function-owner",
+        "ownerRole": "authOwner",
+        "searchPath": "pg_catalog,public",
+        "publicExecute": "revoked",
+        "runtimeExecuteGrantees": [
+          "scheduled"
+        ],
+        "functionSource": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql",
+        "rollbackDefinition": "backend/src/rls-waves/session-b/b03/scheduledJobIdentityRollback.sql",
+        "deploymentPhase": "session-b-b03-scheduled",
+        "ownerPrivileges": [
+          [
+            "ScheduledJobCredential",
+            "SELECT",
+            [
+              "id",
+              "identityName",
+              "jobFamily",
+              "scheduleId",
+              "capabilityHash",
+              "capabilityHashVersion",
+              "expiresAt",
+              "revokedAt",
+              "revokedReason",
+              "rotatedFromCredentialId",
+              "lastUsedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ScheduledJobCredential",
+            "INSERT",
+            [
+              "id",
+              "identityName",
+              "jobFamily",
+              "scheduleId",
+              "capabilityHash",
+              "capabilityHashVersion",
+              "expiresAt",
+              "rotatedFromCredentialId",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ScheduledJobCredential",
+            "UPDATE",
+            [
+              "lastUsedAt",
+              "revokedAt",
+              "revokedReason",
+              "updatedAt"
+            ]
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            [
+              "id",
+              "orgId",
+              "isActive",
+              "suspendedAt"
+            ]
+          ],
+          [
+            "Organization",
+            "SELECT",
+            [
+              "id",
+              "isActive"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "scheduledScheduleId",
+              "periodFrom",
+              "periodTo",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "startedByUserId",
+              "startedAt",
+              "finishedAt",
+              "createdAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "triggerType",
+              "scheduledScheduleId",
+              "periodFrom",
+              "periodTo",
+              "startedByUserId",
+              "startedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            [
+              "status",
+              "fileName",
+              "storageKey",
+              "integrityHash",
+              "signatureAlgorithm",
+              "summary",
+              "errorMessage",
+              "finishedAt",
+              "updatedAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "statusCode",
+              "responsePayload",
+              "createdAt",
+              "completedAt",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            [
+              "id",
+              "keyHash",
+              "action",
+              "scope",
+              "requestHash",
+              "expiresAt"
+            ]
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            [
+              "statusCode",
+              "responsePayload",
+              "completedAt"
+            ]
+          ],
+          [
+            "Incident",
+            "SELECT",
+            [
+              "id",
+              "licenseeId",
+              "status",
+              "slaDueAt",
+              "createdAt"
+            ]
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            [
+              "incidentId",
+              "currentStage"
+            ]
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            [
+              "licenseeId",
+              "action",
+              "createdAt"
+            ]
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            [
+              "licenseeId",
+              "retentionDays"
+            ]
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            [
+              "id",
+              "payload",
+              "updatedAt"
+            ]
+          ]
+        ],
+        "ownerPolicies": [
+          [
+            "ScheduledJobCredential",
+            "SELECT",
+            "((current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true)) OR (current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true) IN ('provision','revoke')))"
+          ],
+          [
+            "ScheduledJobCredential",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true)='provision' AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true))"
+          ],
+          [
+            "ScheduledJobCredential",
+            "UPDATE",
+            "((current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND ((current_setting('app.scheduled_verified',true)='' AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND \"scheduleId\"=current_setting('app.scheduled_schedule_id',true)) OR (current_setting('app.scheduled_verified',true)='1' AND id=current_setting('app.scheduled_credential_id',true) AND \"capabilityHash\"=current_setting('app.scheduled_capability_hash',true)))) OR (current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true) IN ('provision','revoke')))"
+          ],
+          [
+            "Licensee",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND \"suspendedAt\" IS NULL AND (current_setting('app.scheduled_operation',true)='claim' OR id=current_setting('app.scheduled_licensee_id',true))"
+          ],
+          [
+            "Organization",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"isActive\" AND (current_setting('app.scheduled_operation',true)='claim' OR id=current_setting('app.organization_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND (current_setting('app.scheduled_job_id',true)='' OR id=current_setting('app.scheduled_job_id',true))"
+          ],
+          [
+            "CompliancePackJob",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND id=current_setting('app.scheduled_job_id',true) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND \"startedByUserId\" IS NULL"
+          ],
+          [
+            "CompliancePackJob",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true) IN ('complete','fail') AND id=current_setting('app.scheduled_job_id',true) AND \"triggerType\"='SCHEDULED' AND \"scheduledScheduleId\"=current_setting('app.scheduled_schedule_id',true) AND (current_setting('app.scheduled_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.scheduled_licensee_id',true))"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "ActionIdempotencyKey",
+            "UPDATE",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND current_setting('app.scheduled_operation',true)='claim' AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "Incident",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "IncidentHandoff",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND EXISTS (SELECT 1 FROM public.\"Incident\" scheduled_incident WHERE scheduled_incident.id=\"incidentId\" AND scheduled_incident.\"licenseeId\"=current_setting('app.scheduled_licensee_id',true))"
+          ],
+          [
+            "AuditLog",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "EvidenceRetentionPolicy",
+            "SELECT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND \"licenseeId\"=current_setting('app.scheduled_licensee_id',true)"
+          ],
+          [
+            "AuditLogOutbox",
+            "INSERT",
+            "(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public.\"ScheduledJobCredential\" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential.\"capabilityHash\"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential.\"capabilityHashVersion\"='sha256-v1' AND scheduled_credential.\"identityName\"='identity-scheduled-job' AND scheduled_credential.\"jobFamily\"='compliance-pack' AND scheduled_credential.\"scheduleId\"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential.\"revokedAt\" IS NULL AND scheduled_credential.\"expiresAt\">clock_timestamp())) AND payload->'details'->>'systemIdentity'='identity-scheduled-job' AND payload->>'licenseeId'=current_setting('app.scheduled_licensee_id',true)"
+          ]
+        ]
+      },
+      "tableCommands": [
+        [
+          "ScheduledJobCredential",
+          "SELECT"
+        ],
+        [
+          "ScheduledJobCredential",
+          "UPDATE"
+        ],
+        [
+          "CompliancePackJob",
+          "SELECT"
+        ],
+        [
+          "CompliancePackJob",
+          "UPDATE"
+        ],
+        [
+          "AuditLogOutbox",
+          "INSERT"
+        ]
+      ],
+      "requiredContext": "Verifies the scheduled capability, locks one SCHEDULED RUNNING job and atomically records one bounded terminal failure and audit outbox.",
+      "canonicalWorkflowIds": [
+        "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler"
+      ],
+      "callers": [
+        {
+          "functionName": "app_rls.scheduled_fail_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "failScheduledCompliancePackJob",
+          "line": 390
+        }
+      ],
+      "activeCallers": [
+        {
+          "functionName": "app_rls.scheduled_fail_compliance_pack_job",
+          "sourceFile": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
+          "sourceFunction": "failScheduledCompliancePackJob",
+          "line": 390,
           "sourceFileActive": true,
           "reachability": "active-source-file"
         }

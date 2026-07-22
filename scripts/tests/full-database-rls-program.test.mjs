@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { TABLE_INVENTORY_BASELINE } from "../rls/lib/table-inventory-baseline.mjs";
 import { buildTableManifest, buildWorkflowManifest, commandSemanticsPath, commandSemanticsReviewPath, decisionManifestPath, identityManifestPath, manufacturerBootstrapBoundaryPath, manifests, objectOwnershipChainPath, objectOwnershipReviewPath, operatorAdministrationReviewPath, operatorBoundariesPath, parseSchema, platformReadScopeBoundaryPath, policyAlertActorCeilingPath, policyDependencyGraphPath, preAuthBoundaryReviewPath, preAuthFunctionsPath, publicReadContractPath, repoRoot, scanProductionAccess, sharedApplyIsBlocked, systemBoundariesPath, tableManifestPath, tableOwnershipReviewPath, validateManufacturerBootstrapBoundary, validateObjectOwnershipChain, validateOperatorBoundaries, validatePlatformReadScopeBoundary, validatePolicyAlertActorCeiling, validatePreAuthFunctions, validateProtectedTransactionClients, validatePublicReadContract, validateRuntimeIdentities, validateWorkerBoundaries, workerBoundariesPath, workerIdentityReviewPath, workflowManifestPath } from "../rls/lib/program-inventory.mjs";
 import { EXPECTED_CONTEXT_FAMILY_COUNT, EXPECTED_CONTRACT_ONLY_WORKFLOW_COUNT, EXPECTED_WORKFLOW_COUNT } from "../rls/lib/workflow-inventory-baseline.mjs";
 import { buildContextBoundaryPlan, contextBoundaryFamiliesPath, contextBoundaryReadBatchPath, contextBoundaryReportPath, validateContextBoundaryPlan, validateContextBoundaryReadBatch, validateSystemBoundaryContracts } from "../rls/context-boundary-plan.mjs";
@@ -643,8 +644,8 @@ test("security-sensitive tables and runtime identities fail closed", () => {
 test("all tables have resolved ownership, command, FORCE, and exception classifications", () => {
   const { tables, identities, decisions } = manifests();
   const identityById = new Map(identities.identities.map((identity) => [identity.id, identity]));
-  assert.equal(tables.tables.length, 77);
-  assert.equal(tables.tables.filter((table) => table.forceRlsTarget).length, 75);
+  assert.equal(tables.tables.length, TABLE_INVENTORY_BASELINE.tables);
+  assert.equal(tables.tables.filter((table) => table.forceRlsTarget).length, TABLE_INVENTORY_BASELINE.forceRlsTargets);
   assert.deepEqual(tables.tables.filter((table) => table.primaryCategory === "migration-only").map((table) => table.prismaModel).sort(), ["BatchPrintPackToken", "PrintRenderToken"]);
   assert.equal(tables.tables.filter((table) => table.primaryCategory === "intentionally-non-rls").length, 0);
   for (const table of tables.tables) {
@@ -729,8 +730,8 @@ test("clean-room full-RLS foundation remains exact and fail closed", () => {
   assert.equal(allowlist.certification.enabledWorkflowCount, 0);
   assert.equal(allowlist.certification.essentialWorkflowCount, allowlist.workflows.length);
   assert.deepEqual(allowlist.protectedRouteGate.enabledRoutes, shutdown.enabledProtectedRoutes);
-  assert.equal(generated.tables.length, 77);
-  assert.equal(generated.tables.filter((entry) => entry.rls === "ENABLE AND FORCE").length, 75);
+  assert.equal(generated.tables.length, TABLE_INVENTORY_BASELINE.tables);
+  assert.equal(generated.tables.filter((entry) => entry.rls === "ENABLE AND FORCE").length, TABLE_INVENTORY_BASELINE.forceRlsTargets);
   assert.equal(generated.tables.filter((entry) => entry.disposition === "migration-only-no-runtime-grant").length, 2);
   assert.deepEqual(validateGeneratedPackage({ manifest: generated, policies, privileges, commandSemantics }), {
     tables: generated.counts.tables,

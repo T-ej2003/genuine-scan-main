@@ -2,29 +2,41 @@
 
 Generated from tracked source and all local Git refs. Fixture SQL is evidence only and is never deployable production SQL.
 
-- fixture-only definition: 12
-- no definition found: 29
-- production definition recovered: 43
+- fixture-only definition: 13
+- no definition found: 48
+- production definition recovered: 46
 - repository contract only: 9
 
 | Function | Classification | Definition | Commit | Deployable |
 |---|---|---|---|---|
 | `app_auth.claim_refresh_token_rotation` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 4add7dec147d | yes |
 | `app_auth.complete_refresh_token_rotation` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 4add7dec147d | yes |
-| `app_auth.consume_email_verification_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | none | yes |
-| `app_auth.consume_invitation_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | 62b73a98b6e0 | yes |
-| `app_auth.consume_password_reset_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | none | yes |
+| `app_auth.consume_email_verification_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | a2a9efe68724 | yes |
+| `app_auth.consume_invitation_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | a2a9efe68724 | yes |
+| `app_auth.consume_password_reset_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | a2a9efe68724 | yes |
 | `app_auth.create_refresh_mfa_challenge` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 4add7dec147d | yes |
 | `app_auth.issue_authenticated_session_capability` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 4add7dec147d | yes |
 | `app_auth.load_refresh_session_state` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 4add7dec147d | yes |
-| `app_auth.lookup_invitation_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | 62b73a98b6e0 | yes |
-| `app_auth.lookup_password_user` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | 3fbcf1402d34 | yes |
-| `app_auth.record_password_failure` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | 3fbcf1402d34 | yes |
-| `app_auth.request_password_reset` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | none | yes |
+| `app_auth.lookup_invitation_token` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | a2a9efe68724 | yes |
+| `app_auth.lookup_password_user` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | a2a9efe68724 | yes |
+| `app_auth.record_password_failure` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | a2a9efe68724 | yes |
+| `app_auth.request_password_reset` | production definition recovered | backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFunctions.sql | a2a9efe68724 | yes |
 | `app_auth.require_authenticated_session` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 6a6ca469499b | yes |
 | `app_auth.revoke_all_authenticated_session_capabilities` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 6a6ca469499b | yes |
 | `app_auth.revoke_authenticated_session_capability` | production definition recovered | backend/src/rls-waves/session-b/b01/authenticatedSessionCapabilityFunctions.sql | 6a6ca469499b | yes |
 | `app_auth.revoke_refresh_token_scope` | production definition recovered | backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql | 4add7dec147d | yes |
+| `app_rls.b03_claim_incident_email_delivery` | no definition found | none | none | no |
+| `app_rls.b03_complete_incident_email_delivery` | no definition found | none | none | no |
+| `app_rls.b03_create_role_notifications` | no definition found | none | none | no |
+| `app_rls.b03_create_user_notification` | no definition found | none | none | no |
+| `app_rls.b03_list_notifications_for_user` | no definition found | none | none | no |
+| `app_rls.b03_mark_all_notifications_read` | no definition found | none | none | no |
+| `app_rls.b03_mark_notification_emailed` | no definition found | none | none | no |
+| `app_rls.b03_mark_notification_read` | no definition found | none | none | no |
+| `app_rls.b03_primary_superadmin_email` | no definition found | none | none | no |
+| `app_rls.b03_resolve_incident_email_actor` | no definition found | none | none | no |
+| `app_rls.b03_resolve_incident_notification_scope` | no definition found | none | none | no |
+| `app_rls.b03_superadmin_alert_emails` | no definition found | none | none | no |
 | `app_rls.batch_inventory_rollups` | repository contract only | none | 4add7dec147d | no |
 | `app_rls.batch_operational_rows` | repository contract only | none | 4add7dec147d | no |
 | `app_rls.batch_operational_scope` | repository contract only | none | 4add7dec147d | no |
@@ -72,9 +84,18 @@ Generated from tracked source and all local Git refs. Fixture SQL is evidence on
 | `app_rls.c03_update_retention_policy` | production definition recovered | backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql | fb555a0315ba | yes |
 | `app_rls.c03_upsert_tenant_feature_flag` | production definition recovered | backend/src/rls-waves/session-c/c03/c03GovernanceFunctions.sql | fb555a0315ba | yes |
 | `app_rls.change_authenticated_password` | no definition found | none | none | no |
+| `app_rls.claim_audit_log_outbox_slice` | no definition found | none | none | no |
+| `app_rls.claim_compliance_pack_slice` | production definition recovered | backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql | none | yes |
+| `app_rls.claim_security_event_outbox_slice` | no definition found | none | none | no |
+| `app_rls.complete_security_event_outbox` | no definition found | none | none | no |
+| `app_rls.consume_audit_log_outbox` | no definition found | none | none | no |
 | `app_rls.create_refresh_token` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 62b73a98b6e0 | no |
 | `app_rls.dashboard_snapshot_data` | repository contract only | none | 4add7dec147d | no |
 | `app_rls.dashboard_snapshot_scope` | repository contract only | none | 4add7dec147d | no |
+| `app_rls.enqueue_audit_log_outbox` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 62b73a98b6e0 | no |
+| `app_rls.enqueue_security_event_outbox` | no definition found | none | none | no |
+| `app_rls.fail_audit_log_outbox` | no definition found | none | none | no |
+| `app_rls.fail_security_event_outbox` | no definition found | none | none | no |
 | `app_rls.find_refresh_token_by_hashes` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
 | `app_rls.find_refresh_token_by_id` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
 | `app_rls.list_active_refresh_tokens` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
@@ -93,6 +114,8 @@ Generated from tracked source and all local Git refs. Fixture SQL is evidence on
 | `app_rls.revoke_password_only_refresh_tokens` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
 | `app_rls.revoke_refresh_token_by_hashes` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 45961044fde6 | no |
 | `app_rls.revoke_refresh_token_by_id` | fixture-only definition | backend/tests/rls-wave-b/b01/refreshSessionPostgres18.fixture.sql | 62b73a98b6e0 | no |
+| `app_rls.scheduled_complete_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql | none | yes |
+| `app_rls.scheduled_fail_compliance_pack_job` | production definition recovered | backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql | none | yes |
 | `app_rls.session_c_create_licensee` | production definition recovered | backend/src/rls-waves/session-c/c01/administration.sql | 3bcba7fb4749 | yes |
 | `app_rls.session_c_create_user` | production definition recovered | backend/src/rls-waves/session-c/c01/administration.sql | 3bcba7fb4749 | yes |
 | `app_rls.session_c_delete_licensee` | production definition recovered | backend/src/rls-waves/session-c/c01/administration.sql | 3bcba7fb4749 | yes |

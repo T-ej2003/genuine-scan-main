@@ -27,7 +27,7 @@ const callsInSource = ({ ts, file }) => {
     const rawTag = ts.isTaggedTemplateExpression(node) && ts.isPropertyAccessExpression(node.tag)
       && /\$(?:query|execute)Raw(?:Unsafe)?$/.test(node.tag.name.text);
     const rawCall = ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
-      && /\$(?:query|execute)RawUnsafe$/.test(node.expression.name.text);
+      && /\$(?:query|execute)Raw(?:Unsafe)?$/.test(node.expression.name.text);
     const text = rawTag ? node.template.getText(ast)
       : rawCall ? node.arguments.map((argument) => argument.getText(ast)).join(" ") : "";
     for (const match of text.matchAll(/\b(app_(?:auth|rls)\.[a-z_][a-z0-9_]*)\s*\(/gi)) {

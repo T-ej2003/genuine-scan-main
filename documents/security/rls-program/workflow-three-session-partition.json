@@ -46,6 +46,7 @@
         "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
         "backend/src/rls-waves/session-b/b02/actorRevalidationRepository.ts",
         "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts",
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/routes/modules/authRoutes.ts",
         "backend/src/routes/publicRoutes.ts",
         "backend/src/services/analyticsRollupService.ts",
@@ -181,7 +182,7 @@
       "originalBranchPoint": "061b3134ba89db84e0564b893e920a2601c14452",
       "workflowCount": 181,
       "workflowFamilyCount": 3,
-      "productionFileCount": 76,
+      "productionFileCount": 77,
       "existingTestFileCount": 47
     },
     {
@@ -5531,6 +5532,7 @@
       "executionSurface": "scheduled",
       "contract": "Workers, scheduled jobs, durable outbox and delivery with database-derived partitions, leases, bounded batches, idempotency and immutable attribution.",
       "canonicalSourceFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/services/compliancePackService.ts"

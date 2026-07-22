@@ -55,7 +55,7 @@ const CATEGORY_MODELS = Object.freeze({
   "tenant-owned": ["Licensee", "ManufacturerLicenseeLink", "QRRange", "Batch", "InventoryStatusRollup", "QRCode", "QrAllocationRequest", "PolicyAlert", "TenantFeatureFlag", "EvidenceRetentionPolicy"],
   "actor-owned": ["PrinterRegistration", "Notification"],
   "parent-inherited": ["PrintJob", "PrintSession", "PrinterAgentSession", "PrintJobChunk", "PrintItem", "PrinterProfile", "PrinterProfileSnapshot", "PrintReissueRequest", "PrinterAttestation", "Ownership", "OwnershipTransfer", "ReplacementChain", "IncidentHandoff", "SupportTicket", "SupportTicketMessage"],
-  "security-sensitive": ["User", "Printer", "VerificationDecision", "VerificationEvidenceSnapshot", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerTrustIntake", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval", "SecurityPolicy", "PolicyRule", "Incident", "RequestAccess", "SupportIssueReport"],
+  "security-sensitive": ["User", "Printer", "VerificationDecision", "VerificationEvidenceSnapshot", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerTrustIntake", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "ScheduledJobCredential", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval", "SecurityPolicy", "PolicyRule", "Incident", "RequestAccess", "SupportIssueReport"],
   "append-only-audit": ["PrintItemEvent", "PrintAuditEvent", "QrScanLog", "AuditLog", "AllocationEvent", "TraceEvent", "IncidentEvent", "IncidentCommunication", "IncidentEvidence", "ForensicEventChain", "RouteTransitionMetric"],
   "platform-reference": [],
   "operational-system": ["ScanMetricsHourlyRollup", "AuditLogOutbox", "SystemCheckpoint", "SecurityEventOutbox", "CompliancePackJob", "EvidenceRetentionJob", "IncidentEvidenceFingerprint", "ActionIdempotencyKey", "DegradationEvent"],
@@ -65,7 +65,7 @@ const CATEGORY_MODELS = Object.freeze({
 const CATEGORY_BY_MODEL = new Map(Object.entries(CATEGORY_MODELS).flatMap(([category, models]) => models.map((model) => [model, category])));
 
 const REVIEW_GROUP_MODELS = Object.freeze({
-  A: ["User", "PrintRenderToken", "BatchPrintPackToken", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerTrustIntake", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval"],
+  A: ["User", "PrintRenderToken", "BatchPrintPackToken", "CustomerTrustCredential", "CustomerWebAuthnCredential", "CustomerWebAuthnChallenge", "CustomerVerificationSession", "CustomerTrustIntake", "Invite", "PasswordReset", "EmailVerificationToken", "RefreshToken", "ScheduledJobCredential", "AdminMfaCredential", "AdminWebAuthnCredential", "UserMfaFactor", "UserBackupCode", "MfaLoginChallenge", "AuthMfaChallenge", "AuthWebAuthnChallenge", "AuthSessionRiskSignal", "SensitiveActionApproval"],
   B: ["Organization", "Licensee", "ManufacturerLicenseeLink"],
   C: ["QRRange", "Batch", "InventoryStatusRollup", "QRCode", "Ownership", "OwnershipTransfer", "QrScanLog", "VerificationDecision", "VerificationEvidenceSnapshot", "ReplacementChain", "DegradationEvent", "QrAllocationRequest", "AllocationEvent", "TraceEvent", "ScanMetricsHourlyRollup"],
   D: ["PrintJob", "PrintSession", "PrinterAgentSession", "PrintJobChunk", "PrintItem", "PrintItemEvent", "PrintAuditEvent", "PrinterRegistration", "Printer", "PrinterProfile", "PrinterProfileSnapshot", "PrintReissueRequest", "PrinterAttestation"],
@@ -811,7 +811,7 @@ export const writeTableOwnershipReview = (tableManifest, graph) => {
   const lines = [
     "# MSCQR full-database table ownership review",
     "",
-    "This is the compact human review of the machine-readable classification in `tables.json`. It changes no policy, database owner, role, runtime behavior, or RLS state. All 77 Prisma tables remain policy-generation candidates owned logically by `identity-table-owner`; implementation and disposable PostgreSQL proof are separate work.",
+    "This is the compact human review of the machine-readable classification in `tables.json`. It changes no policy, database owner, role, runtime behavior, or RLS state. All 78 Prisma tables remain policy-generation candidates owned logically by `identity-table-owner`; implementation and disposable PostgreSQL proof are separate work.",
     "",
     `Dependency graph: ${graph.nodes.length} nodes, ${graph.edges.length} directed edges, acyclic=${graph.acyclic}, recursion risks=${graph.edges.filter((edge) => edge.recursionRisk !== "none").length}.`,
     "",
@@ -1245,6 +1245,36 @@ export const buildCommandSemantics = (tableManifest, workflowManifest) => {
     }
     workflow.unresolvedDecisions = workflow.unresolvedDecisions.filter((id) => id !== "decision-policy-command-semantics");
   }
+  const scheduledCredentialTable = tablesById.get("table-scheduled-job-credential");
+  if (scheduledCredentialTable) {
+    const scheduledContracts = validateNamedSqlFunctionContracts().filter((contract) => contract.security.deploymentPhase === "session-b-b03-scheduled");
+    const commandColumns = (command) => [...new Set(scheduledContracts.flatMap((contract) =>
+      contract.security.ownerPrivileges?.filter(([table, candidate]) => table === "ScheduledJobCredential" && candidate === command)
+        .flatMap(([, , columns]) => columns) || []
+    ))].sort();
+    for (const definition of [
+      { suffix: "scheduled", actor: "scheduled-job", identity: "identity-scheduled-job", commands: ["SELECT", "UPDATE"] },
+      { suffix: "operator", actor: "operator", identity: "identity-operator", commands: ["SELECT", "INSERT", "UPDATE"] },
+    ]) for (const command of definition.commands) {
+      const syntheticWorkflow = {
+        id: `scheduled-job-credential-${definition.suffix}`,
+        canonicalSourceFiles: ["backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql"],
+        supportingEvidence: ["Exact named-function contract and hash-only ScheduledJobCredential migration."],
+        executionSurface: definition.suffix === "scheduled" ? "scheduled" : "internal",
+        authorizationBoundaryType: definition.suffix === "scheduled" ? "restricted-worker" : "operator-break-glass",
+        contextBoundaryStatus: "implemented",
+      };
+      const rule = buildCommandRule({ table: scheduledCredentialTable, workflow: syntheticWorkflow, command,
+        actors: [definition.actor], identityId: definition.identity,
+        assurance: definition.suffix === "scheduled" ? "system-verified" : "operator-approved", routeEvidence: null });
+      rule.allowedColumns = commandColumns(command).filter((column) => command !== "SELECT" || !scheduledCredentialTable.sensitiveColumns.includes(column));
+      rule.requiresNamedFunction = true;
+      rule.namedFunctionClass = definition.suffix === "scheduled" ? "exact-scheduled-capability-function" : "exact-operator-capability-function";
+      rule.authorizationBoundary = definition.suffix === "scheduled" ? "restricted-worker" : "named-function";
+      if (definition.suffix === "scheduled") rule.workerBoundaryId = "worker-boundary-scheduled-compliance-packs";
+      rules.push(rule);
+    }
+  }
   for (const table of tableManifest.tables.filter((item) => item.forceRlsTarget)) {
     if (table.allowedCommandsByIdentity.some((entry) => entry.identityId === "identity-restricted-read" && entry.commands.includes("SELECT"))) {
       const restrictedWorkflow = { id: `runtime-restricted-read-${table.id}`, canonicalSourceFiles: ["documents/security/mscqr_staging_rls_candidate_templates_2026-07-09.sql"], supportingEvidence: [], authorizationBoundaryType: "authenticated-context", executionSurface: "internal" };
@@ -1653,10 +1683,10 @@ const WORKER_BOUNDARY_DEFINITIONS = Object.freeze({
     tenantScopeFields: ["licensee_id", "organization_id resolved from licensee_id", "schedule_scope_version"],
     actorFields: ["executing_system_identity; no human actor or platform-admin impersonation"],
     scopeVerificationMethod: "An exact schedule-claim function enumerates only active allowlisted tenant partitions, creates/claims one durable CompliancePackJob, and the scheduled transaction revalidates licensee-to-organization scope.",
-    authorizationRevalidationRules: ["Licensee remains active", "Licensee-to-organization binding matches", "Schedule ID and UTC partition are allowlisted", "Current platform-user lookup and human impersonation are removed before activation"],
-    tablesRead: ["table-licensee", "table-compliance-pack-job", "table-action-idempotency-key", "table-incident", "table-incident-handoff", "table-audit-log", "table-evidence-retention-policy"],
+    authorizationRevalidationRules: ["Licensee remains active", "Licensee-to-organization binding matches", "Schedule ID matches the verified durable credential and claimed job", "No platform-user lookup or human impersonation is permitted"],
+    tablesRead: ["table-scheduled-job-credential", "table-licensee", "table-organization", "table-compliance-pack-job", "table-action-idempotency-key", "table-incident", "table-incident-handoff", "table-audit-log", "table-evidence-retention-policy"],
     tablesWritten: ["table-compliance-pack-job", "table-action-idempotency-key", "table-audit-log-outbox"],
-    tableCommands: [{ tableId: "table-user", commands: ["SELECT"], disposition: "remove-before-activation; no human impersonation" }, { tableId: "table-licensee", commands: ["SELECT"], authority: "worker-fn-claim-compliance-pack-slice" }, { tableId: "table-compliance-pack-job", commands: ["INSERT", "UPDATE"] }, { tableId: "table-action-idempotency-key", commands: ["SELECT", "INSERT", "UPDATE"] }, { tableId: "table-incident", commands: ["SELECT"] }, { tableId: "table-incident-handoff", commands: ["SELECT"] }, { tableId: "table-audit-log", commands: ["SELECT"] }, { tableId: "table-evidence-retention-policy", commands: ["SELECT"] }, { tableId: "table-audit-log-outbox", commands: ["INSERT"] }],
+    tableCommands: [{ tableId: "table-scheduled-job-credential", commands: ["SELECT", "UPDATE"], authority: "worker-fn-claim-compliance-pack-slice" }, { tableId: "table-licensee", commands: ["SELECT"], authority: "worker-fn-claim-compliance-pack-slice" }, { tableId: "table-organization", commands: ["SELECT"], authority: "worker-fn-claim-compliance-pack-slice" }, { tableId: "table-compliance-pack-job", commands: ["SELECT", "INSERT", "UPDATE"] }, { tableId: "table-action-idempotency-key", commands: ["SELECT", "INSERT", "UPDATE"] }, { tableId: "table-incident", commands: ["SELECT"] }, { tableId: "table-incident-handoff", commands: ["SELECT"] }, { tableId: "table-audit-log", commands: ["SELECT"] }, { tableId: "table-evidence-retention-policy", commands: ["SELECT"] }, { tableId: "table-audit-log-outbox", commands: ["INSERT"] }],
     idempotencyStrategy: { keySource: "compliance-pack + licensee_id + UTC schedule stamp + report period", uniquenessBoundary: "job_type + licensee_id + schedule stamp", conflictBehavior: "reject a different tenant/period/digest for the same key", replayResult: "return the existing job/result; RELEASED/COMPLETED work is not regenerated", conflictingPayloadDenied: true },
     replayProtection: "Unique schedule-partition key, durable job state, maximum age and RUNNING-to-COMPLETED/FAILED compare-and-set.",
     retryPolicy: { maxAttempts: 3, backoffSeconds: "bounded exponential 60..900 within maximum job age", duplicateSideEffectsAllowed: false, retryableStates: ["FAILED"] },
@@ -1666,7 +1696,7 @@ const WORKER_BOUNDARY_DEFINITIONS = Object.freeze({
     maximumJobAgeSeconds: 7200,
     cancellationSemantics: "Stop after the current tenant transaction, leave unclaimed partitions retryable, and never publish a partial artifact as COMPLETED.",
     acceptedJobTypes: ["SCHEDULED_COMPLIANCE_PACK"],
-    namedFunctionRequirement: { required: true, functionId: "worker-fn-claim-compliance-pack-slice", sqlSchema: "app_rls", sqlFunctionName: "claim_compliance_pack_slice", arguments: [{ name: "schedule_id", type: "text" }, { name: "due_at", type: "timestamp without time zone" }, { name: "batch_size", type: "integer" }], genericQueryInputsAllowed: false, reason: "Platform-wide tenant enumeration must be an exact bounded claim, after which all report work is tenant-scoped." },
+    namedFunctionRequirement: { required: true, functionId: "worker-fn-claim-compliance-pack-slice", sqlSchema: "app_rls", sqlFunctionName: "claim_compliance_pack_slice", arguments: [{ name: "capability", type: "text" }, { name: "schedule_id", type: "text" }, { name: "due_at", type: "timestamp without time zone" }, { name: "batch_size", type: "integer" }], genericQueryInputsAllowed: false, reason: "A hash-only scheduled capability authorizes one bounded platform-wide tenant claim; every returned report remains tenant-scoped." },
   },
 });
 
@@ -1743,12 +1773,14 @@ const buildWorkerBoundaryManifest = (workflowManifest, commandManifest, currentT
       workflowIds: [workflow.id],
       requiredTransactionContext: { keys: WORKER_CONTEXT_KEYS, transactionLocal: true, sameTransactionAsProtectedQueries: true, derivedFromVerifiedServerEvidence: true, clearsAtTransactionEnd: true, fixedAssurance: "system-verified", humanRoleContextAllowed: false, platformAdminContextAllowed: false },
       exactCommandRuleIds: rules.map((rule) => rule.id).sort(),
-      namedFunctionRequirement: { ...definition.namedFunctionRequirement, ownerIdentity: definition.namedFunctionRequirement.required ? "identity-table-owner" : null, securityMode: "INVOKER", fixedSearchPath: "pg_catalog", publicExecutionDenied: true, executableRuntimeIdentity: definition.runtimeIdentity },
+      namedFunctionRequirement: { ...definition.namedFunctionRequirement, ownerIdentity: definition.namedFunctionRequirement.required ? (definition.runtimeIdentity === "identity-scheduled-job" ? "identity-auth-function-owner" : "identity-table-owner") : null, securityMode: definition.runtimeIdentity === "identity-scheduled-job" ? "DEFINER" : "INVOKER", fixedSearchPath: definition.runtimeIdentity === "identity-scheduled-job" ? "pg_catalog,public" : "pg_catalog", publicExecutionDenied: true, executableRuntimeIdentity: definition.runtimeIdentity },
       auditEventRequirement: { required: true, fields: ["system_identity", "job_id", "job_type", "initiating_user_id_when_present", "tenant_scope", "request_id", "outcome", "retry_attempt"], executorAttribution: definition.runtimeIdentity, humanActorIsInitiatorOnly: true, immutable: true },
       correlationIdRequirement: "A validated UUID request/correlation ID is mandatory in the durable record and every audit/retry event.",
       allowedScenarios: ["An accepted job type with a fresh durable record, verified scope, matching digest/idempotency key and exact runtime identity executes once."],
       deniedScenarios: ["Unknown type, missing or payload-only scope, actor/tenant mismatch, expired job, replay conflict, malformed correlation ID, unexpected command, platform-admin flag or wrong identity is denied."],
-      implementationStatus: "contract-resolved; runtime/schema implementation required before activation",
+      implementationStatus: definition.runtimeIdentity === "identity-scheduled-job"
+        ? "implemented; PostgreSQL 18 disposable certification required for each generated package"
+        : "contract-resolved; runtime/schema implementation required before activation",
       p2TestRequirements: ["verified durable scope and empty/payload-only denial", "idempotent replay and conflicting digest denial", "concurrent single winner", "maximum-age and unknown-type denial", "audit executor/job attribution", "retry/dead-letter/cancellation state machine"],
       assurance: "system-verified",
       platformAdminContextAllowed: false,
@@ -1784,7 +1816,7 @@ export const writeWorkerIdentityReview = (manifest) => {
   const lines = ["# MSCQR worker and scheduled-job identity review", "", "This review defines authorization contracts only. It changes no worker runtime, SQL function, database role, policy, RLS state, queue, schedule or database.", "", `Selected execution workflows: ${manifest.boundaries.length} (workers: ${manifest.boundaries.filter((item) => item.runtimeIdentity === "identity-worker").length}; scheduled: ${manifest.boundaries.filter((item) => item.runtimeIdentity === "identity-scheduled-job").length}).`, "", "## Approved boundaries", "", "| Boundary | Class | Runtime | Durable authority | Tables read | Tables written | Named function |", "|---|---|---|---|---|---|---|"];
   for (const boundary of manifest.boundaries) lines.push(`| ${boundary.id} | ${boundary.workerClass} | ${boundary.runtimeIdentity} | ${boundary.durableJobTableOrPayloadSource} | ${boundary.tablesRead.join(", ")} | ${boundary.tablesWritten.join(", ")} | ${boundary.namedFunctionRequirement.required ? boundary.namedFunctionRequirement.functionId : "none"} |`);
   const contextKeys = manifest.contextKeys.map((key) => "`" + key + "`").join(", ");
-  lines.push("", "## Context, idempotency and audit", "", "Every protected transaction installs only these transaction-local keys from verified durable evidence: " + contextKeys + ". Human role and platform-admin context are forbidden; `app.auth_assurance` is fixed to `system-verified`.", "", "Audit-outbox delivery preserves the initiating actor as origin evidence while recording `identity-worker` as executor. SIEM delivery uses the durable outbox ID as the stable external event ID. Scheduled compliance uses a unique licensee/schedule partition and `identity-scheduled-job`; its current platform-user lookup must be removed rather than converted into impersonation.", "", "All retries retain the same job ID, digest and idempotency key. Conflicting payloads are denied, terminal results are returned rather than repeated, database row/CAS or unique constraints enforce concurrency, and retry exhaustion retains immutable dead-letter evidence.", "", "## Remaining implementation work", "", "Before activation, add the durable scope/digest/idempotency/expiry fields described by the contracts, implement the two exact `app_rls` SECURITY INVOKER functions, replace scheduled platform-user lookup, add database claims/uniqueness, migrate callers, and certify allow/deny/replay/concurrency/cancellation behavior in disposable PostgreSQL. No generic query function or broad worker grant is permitted.", "");
+  lines.push("", "## Context, idempotency and audit", "", "Every protected transaction installs only these transaction-local keys from verified durable evidence: " + contextKeys + ". Human role and platform-admin context are forbidden; `app.auth_assurance` is fixed to `system-verified`.", "", "Audit-outbox delivery preserves the initiating actor as origin evidence while recording `identity-worker` as executor. SIEM delivery uses the durable outbox ID as the stable external event ID. Scheduled compliance uses a hash-only credential, a unique licensee/schedule partition and `identity-scheduled-job`; it performs no platform-user lookup or human impersonation.", "", "All retries retain the same job ID, digest and idempotency key. Conflicting payloads are denied, terminal results are returned rather than repeated, database row/CAS or unique constraints enforce concurrency, and retry exhaustion retains immutable dead-letter evidence.", "", "## Remaining implementation work", "", "The scheduled compliance boundary is implemented by the checked-in B03 credential migration, exact SECURITY DEFINER functions, owner policies and scheduled/operator grants. Every generated package must still pass the PostgreSQL 18 disposable capability, denial, replay, concurrency, rollback and cleanup probes before use. Other worker boundaries remain contract-resolved until their own durable claims and exact runtime functions are implemented. No generic query function or broad worker grant is permitted.", "");
   fs.writeFileSync(workerIdentityReviewPath, `${lines.join("\n")}\n`);
 };
 
@@ -1868,8 +1900,8 @@ export const buildObjectOwnershipManifest = (tableManifest, identityManifest, pr
     postgresVersion: "18",
     environments: ENVIRONMENT_ROLES,
     logicalOwnerIdentities: [
-      { identityId: tableOwner, environmentRoleNames: Object.fromEntries(Object.entries(ENVIRONMENT_ROLES).map(([environment, roles]) => [environment, roles.tableOwner])), attributes: OWNER_ATTRIBUTES, owns: ["all 77 Prisma tables", "application sequences", "public and app_rls schemas", "table-bound objects", "approved app_rls SECURITY INVOKER helpers"], forbiddenMemberships: "No runtime role and no standing migration membership." },
-      { identityId: authOwner, environmentRoleNames: Object.fromEntries(Object.entries(ENVIRONMENT_ROLES).map(([environment, roles]) => [environment, roles.authOwner])), attributes: OWNER_ATTRIBUTES, owns: ["app_auth schema", "the seven exact pre-auth function signatures"], forbiddenOwnership: ["application tables", "application sequences", "app_rls", "non-approved functions"], forbiddenMemberships: "No runtime role and no standing migration membership." },
+      { identityId: tableOwner, environmentRoleNames: Object.fromEntries(Object.entries(ENVIRONMENT_ROLES).map(([environment, roles]) => [environment, roles.tableOwner])), attributes: OWNER_ATTRIBUTES, owns: ["all 78 Prisma tables", "application sequences", "public and app_rls schemas", "table-bound objects", "approved app_rls SECURITY INVOKER helpers"], forbiddenMemberships: "No runtime role and no standing migration membership." },
+      { identityId: authOwner, environmentRoleNames: Object.fromEntries(Object.entries(ENVIRONMENT_ROLES).map(([environment, roles]) => [environment, roles.authOwner])), attributes: OWNER_ATTRIBUTES, owns: ["app_auth schema", "approved app_auth and app_rls SECURITY DEFINER boundaries"], forbiddenOwnership: ["application tables", "application sequences", "app_rls schema", "non-approved functions"], forbiddenMemberships: "No runtime role and no standing migration membership." },
       { identityId: "identity-migration", environmentRoleNames: Object.fromEntries(Object.entries(ENVIRONMENT_ROLES).map(([environment, roles]) => [environment, roles.migration])), attributes: { login: true, superuser: false, bypassRls: false, inherit: false }, ownsAtSuccess: [], credentialPurpose: "deployment-only", createAuthority: "Reviewed DDL during the migration window only", ownerMembershipAtSuccess: [] },
     ],
     postgres18CapabilityPrerequisites: [
@@ -1890,7 +1922,7 @@ export const buildObjectOwnershipManifest = (tableManifest, identityManifest, pr
     ],
     approvedFunctionOwnerBoundaries: {
       preAuth: preAuthManifest.functions.map((fn) => ({ functionId: fn.id, schema: fn.sqlSchema, name: fn.sqlFunctionName, argumentTypes: fn.arguments.map((argument) => argument.type), owner: authOwner, securityMode: "DEFINER" })),
-      worker: workerManifest.boundaries.filter((boundary) => boundary.namedFunctionRequirement.required).map((boundary) => ({ functionId: boundary.namedFunctionRequirement.functionId, schema: boundary.namedFunctionRequirement.sqlSchema, name: boundary.namedFunctionRequirement.sqlFunctionName, argumentTypes: boundary.namedFunctionRequirement.arguments.map((argument) => argument.type), owner: tableOwner, securityMode: "INVOKER" })),
+      worker: workerManifest.boundaries.filter((boundary) => boundary.namedFunctionRequirement.required).map((boundary) => ({ functionId: boundary.namedFunctionRequirement.functionId, schema: boundary.namedFunctionRequirement.sqlSchema, name: boundary.namedFunctionRequirement.sqlFunctionName, argumentTypes: boundary.namedFunctionRequirement.arguments.map((argument) => argument.type), owner: boundary.runtimeIdentity === "identity-scheduled-job" ? authOwner : tableOwner, securityMode: boundary.runtimeIdentity === "identity-scheduled-job" ? "DEFINER" : "INVOKER" })),
     },
     sequenceOwnershipRules: { tableOwned: "Owner must equal the owning table owner; dependency must identify exactly one owning column/table.", standalone: "Non-extension application sequences use identity-table-owner and exact command grants; migration ownership is residue.", extensionOwned: "Remain with the allowlisted extension owner and are excluded only through catalog dependency evidence." },
     enumAndTypeOwnershipRules: { applicationEnums: tableOwner, applicationCompositeTypes: tableOwner, tableRowTypes: "follow owning table", extensionTypes: "managed-service-extension-owner by catalog dependency" },
@@ -3594,17 +3626,20 @@ export const validateWorkerBoundaries = (manifest, workflowManifest, commandMani
     for (const tableId of [...boundary.tablesRead, ...boundary.tablesWritten]) assert(tables.has(tableId), `${boundary.id} references unknown table ${tableId}`);
     if (boundary.runtimeIdentity === "identity-scheduled-job") assert.equal(workflow.executionSurface, "scheduled", `${boundary.id} scheduled boundary has wrong surface`);
     if (workflow.executionSurface === "scheduled") assert.equal(boundary.runtimeIdentity, "identity-scheduled-job", `${boundary.id} scheduled job uses worker identity`);
-    if (boundary.id === "worker-boundary-scheduled-compliance-packs") assert(boundary.tableCommands.find((item) => item.tableId === "table-user")?.disposition?.includes("remove-before-activation"), `${boundary.id} retains human impersonation`);
+    if (boundary.id === "worker-boundary-scheduled-compliance-packs") {
+      assert(!boundary.tableCommands.some((item) => item.tableId === "table-user"), `${boundary.id} retains human impersonation`);
+      assert(boundary.tableCommands.some((item) => item.tableId === "table-scheduled-job-credential" && item.authority === "worker-fn-claim-compliance-pack-slice"), `${boundary.id} lacks durable scheduled identity`);
+    }
     if (boundary.workerClass === "actor-derived-job") assert(boundary.actorFields.some((field) => /initiating_user_id/.test(field)) && boundary.actorFields.some((field) => /executing_system_identity/.test(field)), `${boundary.id} lacks initiating actor and executor identity`);
     const fn = boundary.namedFunctionRequirement;
     assert.equal(fn.genericQueryInputsAllowed, false, `${boundary.id} permits a generic worker function`);
     if (fn.required) {
       assert(/^worker-fn-[a-z0-9-]+$/.test(fn.functionId) && fn.sqlSchema === "app_rls" && /^[a-z][a-z0-9_]*$/.test(fn.sqlFunctionName), `${boundary.id} has invalid named worker function`);
       assert(fn.arguments.length && fn.arguments.every((item) => item.name && item.type && !genericInput.test(item.name) && !/^(?:json|jsonb|regclass|name)$/i.test(item.type)), `${boundary.id} permits a generic worker function`);
-      assert.equal(fn.securityMode, "INVOKER", `${boundary.id} worker function may bypass caller RLS`);
+      assert.equal(fn.securityMode, boundary.runtimeIdentity === "identity-scheduled-job" ? "DEFINER" : "INVOKER", `${boundary.id} worker function may bypass caller RLS`);
       assert.equal(identities.get(fn.ownerIdentity)?.loginExpectation, "NOLOGIN", `${boundary.id} worker function owner may LOGIN`);
       assert.equal(fn.publicExecutionDenied, true, `${boundary.id} worker function allows PUBLIC execute`);
-      assert.equal(fn.fixedSearchPath, "pg_catalog", `${boundary.id} worker function search_path is not fixed`);
+      assert.equal(fn.fixedSearchPath, boundary.runtimeIdentity === "identity-scheduled-job" ? "pg_catalog,public" : "pg_catalog", `${boundary.id} worker function search_path is not fixed`);
       assert.equal(fn.executableRuntimeIdentity, boundary.runtimeIdentity, `${boundary.id} worker function executor drifted`);
     }
     assert(boundary.allowedScenarios.length && boundary.deniedScenarios.length && boundary.p2TestRequirements.length, `${boundary.id} lacks scenarios or P2 tests`);
@@ -3681,8 +3716,10 @@ export const validateObjectOwnershipChain = (manifest, tableManifest, identityMa
   const workers = new Map(manifest.approvedFunctionOwnerBoundaries.worker.map((fn) => [fn.functionId, fn]));
   for (const boundary of workerManifest.boundaries.filter((item) => item.namedFunctionRequirement.required)) {
     const fn = workers.get(boundary.namedFunctionRequirement.functionId);
-    assert.equal(fn?.owner, "identity-table-owner", `${boundary.id} worker function has the wrong owner`);
-    assert.equal(fn?.securityMode, "INVOKER", `${boundary.id} SECURITY INVOKER helper becomes SECURITY DEFINER`);
+    const scheduled = boundary.runtimeIdentity === "identity-scheduled-job";
+    assert.equal(fn?.owner, scheduled ? "identity-auth-function-owner" : "identity-table-owner", `${boundary.id} worker function has the wrong owner`);
+    if (scheduled) assert.equal(fn?.securityMode, "DEFINER", `${boundary.id} scheduled function must remain SECURITY DEFINER`);
+    else assert.equal(fn?.securityMode, "INVOKER", `${boundary.id} SECURITY INVOKER helper becomes SECURITY DEFINER`);
   }
   assert.deepEqual(manifest.defaultPrivilegeRules.publicGrants, [], "default privileges grant PUBLIC access broadly");
   assert.deepEqual(manifest.defaultPrivilegeRules.runtimeGrants, [], "default privileges grant table access broadly");

@@ -255,6 +255,10 @@
       "expectedOwner": "mscqr_rls_cert_owner"
     },
     {
+      "table": "ScheduledJobCredential",
+      "expectedOwner": "mscqr_rls_cert_owner"
+    },
+    {
       "table": "SecurityEventOutbox",
       "expectedOwner": "mscqr_rls_cert_owner"
     },

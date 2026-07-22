@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { verifyFullRlsPackage } from "./verify-full-rls-package.mjs";
 import { applicationPathCertificationFamilies } from "./lib/application-path-certifications.mjs";
+import { EXPECTED_FORCE_RLS_TABLE_COUNT, EXPECTED_TABLE_COUNT } from "./lib/table-inventory-baseline.mjs";
 
 export const CONFIRM_ENV = "MSCQR_FULL_RLS_CERTIFICATION_CONFIRM";
 export const CONFIRM_VALUE = "MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION";
@@ -186,6 +187,26 @@ const runB01PreAuthCertification = (connections, env) => {
   if (!/B01 pre-auth security application-path proof passed/.test(result.stdout || "")) throw new Error("B01 pre-auth certification did not emit its success marker");
   return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-b/b01/preAuthSecurityPostgres18.test.js" };
 };
+const runScheduledJobIdentityCertification = (connections, env) => {
+  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/rls-wave-b/b03/scheduledJobIdentityPostgres18.test.js")], {
+    cwd: root,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      MSCQR_SCHEDULED_IDENTITY_BOOTSTRAP_URL: connections.bootstrap,
+      MSCQR_SCHEDULED_IDENTITY_OPERATOR_URL: connections.operator,
+      MSCQR_SCHEDULED_IDENTITY_RUNTIME_URL: connections.scheduled,
+      MSCQR_SCHEDULED_IDENTITY_APP_URL: connections.app,
+      MSCQR_SCHEDULED_IDENTITY_POSTGRES18_TEST: "true",
+      MSCQR_SCHEDULED_IDENTITY_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_SCHEDULED_IDENTITY_POSTGRES18_TEST",
+    },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`Scheduled-job identity certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/scheduled-job identity application-path proof passed/.test(result.stdout || "")) throw new Error("Scheduled-job identity certification did not emit its success marker");
+  return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-b/b03/scheduledJobIdentityPostgres18.test.js" };
+};
 const injectBeforeCommit = (file, label) => {
   const source = fs.readFileSync(path.join(sqlRoot, file), "utf8");
   const index = source.lastIndexOf("\nCOMMIT;");
@@ -287,9 +308,9 @@ const tenantFixtureExpectations = {
 
 const certifyTablesAndColumns = (dbUrl, appUrl, manifest, policies, privileges) => {
   const forceCount = Number(scalar(dbUrl, "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relrowsecurity AND c.relforcerowsecurity", "count FORCE RLS tables"));
-  if (forceCount !== 75) throw new Error(`Expected 75 FORCE RLS tables, found ${forceCount}`);
+  if (forceCount !== EXPECTED_FORCE_RLS_TABLE_COUNT) throw new Error(`Expected ${EXPECTED_FORCE_RLS_TABLE_COUNT} FORCE RLS tables, found ${forceCount}`);
   const ownerCount = Number(scalar(dbUrl, `SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_roles r ON r.oid=c.relowner WHERE n.nspname='public' AND c.relkind='r' AND r.rolname=${lit(manifest.roles.owner)}`, "count table owners"));
-  if (ownerCount !== 77) throw new Error(`Expected 77 NOLOGIN-owned tables, found ${ownerCount}`);
+  if (ownerCount !== EXPECTED_TABLE_COUNT) throw new Error(`Expected ${EXPECTED_TABLE_COUNT} NOLOGIN-owned tables, found ${ownerCount}`);
   if (Number(scalar(dbUrl, `SELECT count(*) FROM pg_roles WHERE rolname IN (${roleListSql(manifest.roles)}) AND (rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)`, "verify exact role attributes")) !== 0) throw new Error("A managed role has an unsafe attribute");
   if (Number(scalar(dbUrl, `SELECT count(*) FROM pg_auth_members m JOIN pg_roles p ON p.oid=m.roleid JOIN pg_roles u ON u.oid=m.member WHERE u.rolname IN (${roleListSql(manifest.roles)}) OR (p.rolname IN (${roleListSql(manifest.roles)}) AND (u.rolname<>${lit(certificationAdministrator)} OR m.inherit_option))`, "verify bounded role memberships")) !== 0) throw new Error("A managed role has unsafe membership authority");
   if (Number(scalar(dbUrl, `SELECT count(*) FROM pg_roles r WHERE r.rolname IN (${roleListSql(manifest.roles)}) AND NOT pg_has_role(${lit(certificationAdministrator)},r.rolname,'SET')`, "verify administrative SET capability")) !== 0) throw new Error("Certification administrator lacks SET authority for a managed role");
@@ -541,6 +562,8 @@ const createUrls = (adminUrl, maintenanceDatabase, database, manifest) => ({
   maintenance: databaseUrlFor(adminUrl, maintenanceDatabase, certificationAdministrator),
   app: databaseUrlFor(adminUrl, database, manifest.roles.app),
   preauth: databaseUrlFor(adminUrl, database, manifest.roles.preauth),
+  scheduled: databaseUrlFor(adminUrl, database, manifest.roles.scheduled),
+  operator: databaseUrlFor(adminUrl, database, manifest.roles.operator),
 });
 const assertZeroBeforePrisma = (administratorUrl) => {
   if (scalar(administratorUrl, "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p','S','v','m','f')", "prove zero public objects before Prisma") !== "0") throw new Error("Fresh green database contains public application objects before Prisma");
@@ -773,13 +796,14 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     certifySemantics(urls.bootstrap, urls.app);
     const fixtureRows = Number(scalar(urls.bootstrap, "SELECT sum(row_count) FROM (SELECT (xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM public.%I',c.relname),false,true,'')))[1]::text::bigint AS row_count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_prisma_migrations') counts", "count disposable certification fixture rows"));
     if (!fixtureRows) throw new Error("Final semantic certification did not load its declared disposable fixtures");
-    const connections = { app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth };
+    const connections = { app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth, scheduled: urls.scheduled, operator: urls.operator };
+    const scheduledJobIdentityCertification = runScheduledJobIdentityCertification(connections, env);
     const c03Certification = runC03AuthenticatedCertification(connections, env);
     const applicationPathResults = env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "c03-authenticated-boundaries"
       ? []
       : runApplicationPathCertifications(connections, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, c03Certification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, c03Certification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -818,8 +842,8 @@ export const runCertification = (adminUrl, env = process.env) => {
     deploymentModel: "clean-room-blue-green",
     postgresqlMajor: 18,
     sourceContractSha256: execution.sourceContractSha256,
-    tablesExpected: 77,
-    forceRlsTargetsExpected: 75,
+    tablesExpected: EXPECTED_TABLE_COUNT,
+    forceRlsTargetsExpected: EXPECTED_FORCE_RLS_TABLE_COUNT,
     tablesCertified: 0,
     generatedPoliciesCertified: 0,
     columnPrivilegeCellsCertified: 0,
@@ -828,6 +852,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     applicationPathCertifiedWorkflowIds: [],
     applicationPathResults: [],
     b01PreAuthCertification: null,
+    scheduledJobIdentityCertification: null,
     workflowsProductProhibited: workflowEvidence.summary.frozenProductProhibited,
     cleanRoomPreflightCertified: false,
     migrationsFromZeroCertified: false,
@@ -887,6 +912,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     result.catalogTamperResults = finalRun.catalogTamperResults;
     result.b01Certification = finalRun.b01Certification;
     result.b01PreAuthCertification = finalRun.b01PreAuthCertification;
+    result.scheduledJobIdentityCertification = finalRun.scheduledJobIdentityCertification;
     result.c03Certification = finalRun.c03Certification;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
     result.generatedPoliciesCertified = policies.count;

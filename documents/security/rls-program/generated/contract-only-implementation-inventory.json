@@ -367,6 +367,8 @@
           "command-licensee-select-56e28c0be62e",
           "command-organization-select-56e28c0be62e",
           "command-refresh-token-select-56e28c0be62e",
+          "command-scheduled-job-credential-select-56e28c0be62e",
+          "command-scheduled-job-credential-update-56e28c0be62e",
           "command-user-select-56e28c0be62e"
         ]
       },
@@ -685,6 +687,8 @@
         "command-licensee-select-56e28c0be62e",
         "command-organization-select-56e28c0be62e",
         "command-refresh-token-select-56e28c0be62e",
+        "command-scheduled-job-credential-select-56e28c0be62e",
+        "command-scheduled-job-credential-update-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ]
     },

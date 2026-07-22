@@ -1,12 +1,12 @@
 # MSCQR full-database table ownership review
 
-This is the compact human review of the machine-readable classification in `tables.json`. It changes no policy, database owner, role, runtime behavior, or RLS state. All 77 Prisma tables remain policy-generation candidates owned logically by `identity-table-owner`; implementation and disposable PostgreSQL proof are separate work.
+This is the compact human review of the machine-readable classification in `tables.json`. It changes no policy, database owner, role, runtime behavior, or RLS state. All 78 Prisma tables remain policy-generation candidates owned logically by `identity-table-owner`; implementation and disposable PostgreSQL proof are separate work.
 
-Dependency graph: 77 nodes, 38 directed edges, acyclic=true, recursion risks=0.
+Dependency graph: 78 nodes, 38 directed edges, acyclic=true, recursion risks=0.
 
 ## Group A — Security-sensitive and identity
 
-Tables: 21; resolved: 21; unresolved: 0; dependency edges: 15; confidence high/medium/low: 18/3/0; blockers: none.
+Tables: 22; resolved: 22; unresolved: 0; dependency edges: 15; confidence high/medium/low: 18/4/0; blockers: none.
 
 | Table | Category | Row scope | Parent | FORCE RLS | Readers | Writers | Confidence | Blocker |
 |---|---|---|---|---:|---|---|---|---|
@@ -27,6 +27,7 @@ Tables: 21; resolved: 21; unresolved: 0; dependency edges: 15; confidence high/m
 | PasswordReset | security-sensitive | Special repository/function boundary with row scope inherited from User through userId=id. | table-user | yes | identity-pre-auth-app | identity-pre-auth-app | high | none |
 | PrintRenderToken | migration-only | No production runtime row access; migration identity only. | — | no | none | none | high | none |
 | RefreshToken | security-sensitive | Special repository/function boundary with row scope inherited from User through userId=id. | table-user | yes | identity-authenticated-app, identity-pre-auth-app, identity-scheduled-job | identity-authenticated-app, identity-pre-auth-app | high | none |
+| ScheduledJobCredential | security-sensitive | Special named function, restricted repository, or operator boundary; ordinary authenticated broad-table access is forbidden. | — | yes | identity-scheduled-job | identity-scheduled-job | medium | none |
 | SensitiveActionApproval | security-sensitive | Special actor-owned repository/function boundary using requestedByUserId; administrator access is command-specific and audited. | — | yes | identity-authenticated-app | none | medium | none |
 | User | security-sensitive | Special actor-owned repository/function boundary using id; administrator access is command-specific and audited. | — | yes | identity-authenticated-app, identity-pre-auth-app, identity-restricted-read, identity-scheduled-job | identity-authenticated-app, identity-pre-auth-app | medium | none |
 | UserBackupCode | security-sensitive | Special repository/function boundary with row scope inherited from User through userId=id. | table-user | yes | identity-authenticated-app | identity-authenticated-app | high | none |

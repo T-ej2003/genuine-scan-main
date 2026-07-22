@@ -57,7 +57,7 @@ test("session ownership is exhaustive and editable production and test files nev
   assert.equal(sessionB.workflowIds.length, 181);
   assert.equal(sessionC.workflowIds.length, 44);
   assert.equal(sessionA.productionFileCount, 61);
-  assert.equal(sessionB.productionFileCount, 76);
+  assert.equal(sessionB.productionFileCount, 77);
   assert.equal(sessionC.productionFileCount, 28);
   assert.equal(sessionB.existingTestFileCount, 47);
   assert.equal(sessionC.existingTestFileCount, 21);

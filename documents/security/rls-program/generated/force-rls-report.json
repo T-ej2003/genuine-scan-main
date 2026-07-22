@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 75,
+  "count": 76,
   "tables": [
     "ActionIdempotencyKey",
     "AdminMfaCredential",
@@ -63,6 +63,7 @@
     "RequestAccess",
     "RouteTransitionMetric",
     "ScanMetricsHourlyRollup",
+    "ScheduledJobCredential",
     "SecurityEventOutbox",
     "SecurityPolicy",
     "SensitiveActionApproval",

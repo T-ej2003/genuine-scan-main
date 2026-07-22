@@ -634,6 +634,16 @@
       "dependencyLayer": 0
     },
     {
+      "id": "table-scheduled-job-credential",
+      "prismaModel": "ScheduledJobCredential",
+      "primaryCategory": "security-sensitive",
+      "reviewGroup": "A",
+      "physicalOwnerRole": "identity-table-owner",
+      "forceRlsTarget": true,
+      "terminalBoundary": "approved-special-boundary",
+      "dependencyLayer": 0
+    },
+    {
       "id": "table-security-event-outbox",
       "prismaModel": "SecurityEventOutbox",
       "primaryCategory": "operational-system",
@@ -1504,14 +1514,14 @@
   "unrestrictedRuntimeOwnedDependencies": 0,
   "reviewGroups": {
     "A": {
-      "tableCount": 21,
-      "resolvedCount": 21,
+      "tableCount": 22,
+      "resolvedCount": 22,
       "unresolvedCount": 0,
       "dependencyEdges": 15,
       "blockingDecisions": [],
       "ownershipConfidence": {
         "high": 18,
-        "medium": 3,
+        "medium": 4,
         "low": 0
       }
     },

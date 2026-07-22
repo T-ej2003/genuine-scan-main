@@ -492,6 +492,7 @@
     "backend/src/rls-waves/session-b/b01/sessionCredentialRepository.ts",
     "backend/src/rls-waves/session-b/b02/actorRevalidationRepository.ts",
     "backend/src/rls-waves/session-b/b02/authenticatedRepositories.ts",
+    "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
     "backend/src/routes/modules/authRoutes.ts",
     "backend/src/routes/publicRoutes.ts",
     "backend/src/services/analyticsRollupService.ts",

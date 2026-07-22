@@ -684,6 +684,7 @@
         "licenseeId",
         "status",
         "triggerType",
+        "scheduledScheduleId",
         "periodFrom",
         "periodTo",
         "fileName",
@@ -802,6 +803,237 @@
         "fileType",
         "uploadedByUserId",
         "uploadedBy",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "IncidentHandoff",
+      "command": "SELECT",
+      "columns": [
+        "incidentId",
+        "currentStage"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "AuditLog",
+      "command": "SELECT",
+      "columns": [
+        "licenseeId",
+        "action",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "EvidenceRetentionPolicy",
+      "command": "SELECT",
+      "columns": [
+        "licenseeId",
+        "retentionDays"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "AuditLogOutbox",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "payload",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "ScheduledJobCredential",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "identityName",
+        "jobFamily",
+        "scheduleId",
+        "capabilityHash",
+        "capabilityHashVersion",
+        "expiresAt",
+        "revokedAt",
+        "revokedReason",
+        "rotatedFromCredentialId",
+        "lastUsedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "ScheduledJobCredential",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "identityName",
+        "jobFamily",
+        "scheduleId",
+        "capabilityHash",
+        "capabilityHashVersion",
+        "expiresAt",
+        "rotatedFromCredentialId",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "ScheduledJobCredential",
+      "command": "UPDATE",
+      "columns": [
+        "lastUsedAt",
+        "revokedAt",
+        "revokedReason",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "orgId",
+        "isActive",
+        "suspendedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "Organization",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "isActive"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "CompliancePackJob",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "status",
+        "triggerType",
+        "scheduledScheduleId",
+        "periodFrom",
+        "periodTo",
+        "fileName",
+        "storageKey",
+        "integrityHash",
+        "signatureAlgorithm",
+        "summary",
+        "errorMessage",
+        "startedByUserId",
+        "startedAt",
+        "finishedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "CompliancePackJob",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "status",
+        "triggerType",
+        "scheduledScheduleId",
+        "periodFrom",
+        "periodTo",
+        "startedByUserId",
+        "startedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "CompliancePackJob",
+      "command": "UPDATE",
+      "columns": [
+        "status",
+        "fileName",
+        "storageKey",
+        "integrityHash",
+        "signatureAlgorithm",
+        "summary",
+        "errorMessage",
+        "finishedAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "ActionIdempotencyKey",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "keyHash",
+        "action",
+        "scope",
+        "requestHash",
+        "statusCode",
+        "responsePayload",
+        "createdAt",
+        "completedAt",
+        "expiresAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "ActionIdempotencyKey",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "keyHash",
+        "action",
+        "scope",
+        "requestHash",
+        "expiresAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "ActionIdempotencyKey",
+      "command": "UPDATE",
+      "columns": [
+        "statusCode",
+        "responsePayload",
+        "completedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "Incident",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "status",
+        "slaDueAt",
         "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",

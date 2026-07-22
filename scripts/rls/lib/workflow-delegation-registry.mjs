@@ -117,6 +117,19 @@ export const WORKFLOW_DELEGATIONS = Object.freeze([
     reason: "The scheduled service owns the compliance-pack lifecycle; the repository helper contributes read or rebuild implementation evidence to that canonical workflow.",
   })),
   {
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts", function: "claimCompliancePackSlice" },
+    canonical: { executionSurface: "scheduled", sourceFile: "backend/src/services/compliancePackService.ts", function: "startCompliancePackScheduler" },
+    reason: "The scheduled compliance service owns the registered workflow; B03 contributes its database-verifiable partition claim boundary.",
+  },
+  ...[
+    "completeScheduledCompliancePackJob",
+    "failScheduledCompliancePackJob",
+  ].map((functionName) => ({
+    delegated: { executionSurface: "scheduled", sourceFile: "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts", function: functionName },
+    canonical: { executionSurface: "scheduled", sourceFile: "backend/src/services/compliancePackService.ts", function: "startCompliancePackScheduler" },
+    reason: "The scheduled compliance service owns the registered workflow; B03 contributes its database-verifiable claim and terminal transition boundaries.",
+  })),
+  {
     delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c03/c03GovernanceRepository.ts", function: "listTenantFeatureFlagsInTransaction" },
     canonical: { executionSurface: "internal", sourceFile: "backend/src/services/governanceService.ts", function: "listTenantFeatureFlags" },
     reason: "The service owns the internal feature-flag workflow; the C03 repository implements its scoped read.",

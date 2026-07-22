@@ -67,12 +67,14 @@ const main = async () => {
 
   const complianceCalls = [];
   await claimCompliancePackSlice(client([], complianceCalls), {
+    capability: "A".repeat(43),
     scheduleId: "daily-utc",
     dueAt: new Date("2026-07-20T11:00:00.000Z"),
     batchSize: 100,
   });
   assert.match(complianceCalls[0].sql, /app_rls\.claim_compliance_pack_slice\(/);
-  assert.deepEqual(complianceCalls[0].values.slice(0, 3), [
+  assert.deepEqual(complianceCalls[0].values.slice(0, 4), [
+    "A".repeat(43),
     "daily-utc",
     new Date("2026-07-20T11:00:00.000Z"),
     100,

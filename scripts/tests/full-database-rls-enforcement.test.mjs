@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { TABLE_INVENTORY_BASELINE } from "../rls/lib/table-inventory-baseline.mjs";
 import { fileURLToPath } from "node:url";
 
 import { assertSafeAdminUrl, FullRlsCertificationSafetyError } from "../rls/certify-full-database.mjs";
@@ -21,10 +22,10 @@ const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex"
 
 test("full RLS generator covers all tables with fail-closed dispositions", () => {
   const generated = readJson("generated/full-rls-implementation-manifest.json");
-  assert.equal(generated.tables.length, 77);
-  assert.equal(generated.tables.filter((table) => table.rls === "ENABLE AND FORCE").length, 75);
+  assert.equal(generated.tables.length, TABLE_INVENTORY_BASELINE.tables);
+  assert.equal(generated.tables.filter((table) => table.rls === "ENABLE AND FORCE").length, TABLE_INVENTORY_BASELINE.forceRlsTargets);
   assert.equal(generated.tables.filter((table) => table.rls.startsWith("not-applicable")).length, 2);
-  assert.equal(new Set(generated.tables.map((table) => table.table)).size, 77);
+  assert.equal(new Set(generated.tables.map((table) => table.table)).size, TABLE_INVENTORY_BASELINE.tables);
   assert.ok(generated.tables.every((table) => table.policyFamily && table.disposition && table.postgresqlCertification === "pending"));
   assert.ok(generated.tables.filter((table) => table.disposition === "fail-closed-no-runtime-grant").length > 0);
 });

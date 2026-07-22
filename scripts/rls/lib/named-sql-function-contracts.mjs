@@ -52,6 +52,8 @@ const preAuthSource = "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityFun
 const preAuthRollback = "backend/src/rls-waves/session-b/b01/b01PreAuthSecurityRollback.sql";
 const c03Source = "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundaries.sql";
 const c03Rollback = "backend/src/rls-waves/session-c/c03/c03AuthenticatedBoundariesRollback.sql";
+const scheduledSource = "backend/src/rls-waves/session-b/b03/scheduledJobIdentityFunctions.sql";
+const scheduledRollback = "backend/src/rls-waves/session-b/b03/scheduledJobIdentityRollback.sql";
 const b01Workflow = "workflow-internal-backend-src-services-auth-auth-service-ts-refresh-session";
 const b01Context = "SECURITY DEFINER sets transaction-local B01 bearer-hash scope before the first RefreshToken read, then derives every user, tenant, manufacturer and MFA scope from the locked predecessor row. Caller app.* settings are never read as authority.";
 const b01Security = Object.freeze({
@@ -143,7 +145,7 @@ const c03Security = Object.freeze({
     ["User", "SELECT", ["id","role","orgId","licenseeId","status","isActive","disabledAt","deletedAt"]],
     ["Licensee", "SELECT", ["id","orgId","isActive","suspendedAt"]],
     ["Organization", "SELECT", ["id","isActive"]],
-    ["CompliancePackJob", "SELECT", ["id","licenseeId","status","triggerType","periodFrom","periodTo","fileName","storageKey","integrityHash","signatureAlgorithm","summary","errorMessage","startedByUserId","startedAt","finishedAt","createdAt","updatedAt"]],
+    ["CompliancePackJob", "SELECT", ["id","licenseeId","status","triggerType","scheduledScheduleId","periodFrom","periodTo","fileName","storageKey","integrityHash","signatureAlgorithm","summary","errorMessage","startedByUserId","startedAt","finishedAt","createdAt","updatedAt"]],
     ["CompliancePackJob", "INSERT", ["id","licenseeId","status","triggerType","periodFrom","periodTo","startedByUserId","startedAt","updatedAt"]],
     ["CompliancePackJob", "UPDATE", ["status","fileName","storageKey","integrityHash","signatureAlgorithm","summary","errorMessage","finishedAt","updatedAt"]],
     ["ActionIdempotencyKey", "SELECT", ["id","keyHash","action","scope","requestHash","statusCode","responsePayload","createdAt","completedAt","expiresAt"]],
@@ -176,6 +178,7 @@ const c03Security = Object.freeze({
 
 const c03ComplianceWorkflow = "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler";
 const c03EvidenceWorkflow = "workflow-http-backend-src-controllers-incident-controller-ts-serve-incident-evidence-file";
+const scheduledComplianceWorkflow = "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler";
 const c03Commands = Object.freeze({
   start: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["CompliancePackJob","INSERT"],["CompliancePackJob","SELECT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"],["Incident","SELECT"],["IncidentHandoff","SELECT"],["AuditLog","SELECT"],["EvidenceRetentionPolicy","SELECT"],["AuditLogOutbox","INSERT"]],
   transition: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["CompliancePackJob","SELECT"],["CompliancePackJob","UPDATE"],["AuditLogOutbox","INSERT"]],
@@ -183,9 +186,90 @@ const c03Commands = Object.freeze({
   evidence: [["RefreshToken","SELECT"],["User","SELECT"],["Licensee","SELECT"],["Organization","SELECT"],["Incident","SELECT"],["IncidentEvidence","SELECT"]],
 });
 
+const scheduledBinding = `(current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND current_setting('app.scheduled_verified',true)='1' AND current_setting('app.scheduled_family',true)='compliance-pack' AND EXISTS (SELECT 1 FROM public."ScheduledJobCredential" scheduled_credential WHERE scheduled_credential.id=current_setting('app.scheduled_credential_id',true) AND scheduled_credential."capabilityHash"=current_setting('app.scheduled_capability_hash',true) AND scheduled_credential."capabilityHashVersion"='sha256-v1' AND scheduled_credential."identityName"='identity-scheduled-job' AND scheduled_credential."jobFamily"='compliance-pack' AND scheduled_credential."scheduleId"=current_setting('app.scheduled_schedule_id',true) AND scheduled_credential."revokedAt" IS NULL AND scheduled_credential."expiresAt">clock_timestamp()))`;
+const scheduledSecurity = Object.freeze({
+  mode: "SECURITY DEFINER",
+  ownerIdentity: "identity-auth-function-owner",
+  ownerRole: "authOwner",
+  searchPath: "pg_catalog,public",
+  publicExecute: "revoked",
+  runtimeExecuteGrantees: ["scheduled"],
+  functionSource: scheduledSource,
+  rollbackDefinition: scheduledRollback,
+  deploymentPhase: "session-b-b03-scheduled",
+  ownerPrivileges: [
+    ["ScheduledJobCredential", "SELECT", ["id","identityName","jobFamily","scheduleId","capabilityHash","capabilityHashVersion","expiresAt","revokedAt","revokedReason","rotatedFromCredentialId","lastUsedAt","createdAt","updatedAt"]],
+    ["ScheduledJobCredential", "INSERT", ["id","identityName","jobFamily","scheduleId","capabilityHash","capabilityHashVersion","expiresAt","rotatedFromCredentialId","updatedAt"]],
+    ["ScheduledJobCredential", "UPDATE", ["lastUsedAt","revokedAt","revokedReason","updatedAt"]],
+    ["Licensee", "SELECT", ["id","orgId","isActive","suspendedAt"]],
+    ["Organization", "SELECT", ["id","isActive"]],
+    ["CompliancePackJob", "SELECT", ["id","licenseeId","status","triggerType","scheduledScheduleId","periodFrom","periodTo","fileName","storageKey","integrityHash","signatureAlgorithm","summary","errorMessage","startedByUserId","startedAt","finishedAt","createdAt","updatedAt"]],
+    ["CompliancePackJob", "INSERT", ["id","licenseeId","status","triggerType","scheduledScheduleId","periodFrom","periodTo","startedByUserId","startedAt","updatedAt"]],
+    ["CompliancePackJob", "UPDATE", ["status","fileName","storageKey","integrityHash","signatureAlgorithm","summary","errorMessage","finishedAt","updatedAt"]],
+    ["ActionIdempotencyKey", "SELECT", ["id","keyHash","action","scope","requestHash","statusCode","responsePayload","createdAt","completedAt","expiresAt"]],
+    ["ActionIdempotencyKey", "INSERT", ["id","keyHash","action","scope","requestHash","expiresAt"]],
+    ["ActionIdempotencyKey", "UPDATE", ["statusCode","responsePayload","completedAt"]],
+    ["Incident", "SELECT", ["id","licenseeId","status","slaDueAt","createdAt"]],
+    ["IncidentHandoff", "SELECT", ["incidentId","currentStage"]],
+    ["AuditLog", "SELECT", ["licenseeId","action","createdAt"]],
+    ["EvidenceRetentionPolicy", "SELECT", ["licenseeId","retentionDays"]],
+    ["AuditLogOutbox", "INSERT", ["id","payload","updatedAt"]],
+  ],
+  ownerPolicies: [
+    ["ScheduledJobCredential", "SELECT", `((current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND "capabilityHash"=current_setting('app.scheduled_capability_hash',true) AND "scheduleId"=current_setting('app.scheduled_schedule_id',true)) OR (current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true) IN ('provision','revoke')))`],
+    ["ScheduledJobCredential", "INSERT", `(current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true)='provision' AND "capabilityHash"=current_setting('app.scheduled_capability_hash',true) AND "scheduleId"=current_setting('app.scheduled_schedule_id',true))`],
+    ["ScheduledJobCredential", "UPDATE", `((current_user={{AUTH_OWNER}} AND session_user={{SCHEDULED_ROLE}} AND ((current_setting('app.scheduled_verified',true)='' AND "capabilityHash"=current_setting('app.scheduled_capability_hash',true) AND "scheduleId"=current_setting('app.scheduled_schedule_id',true)) OR (current_setting('app.scheduled_verified',true)='1' AND id=current_setting('app.scheduled_credential_id',true) AND "capabilityHash"=current_setting('app.scheduled_capability_hash',true)))) OR (current_user={{AUTH_OWNER}} AND session_user={{OPERATOR_ROLE}} AND current_setting('app.scheduled_admin_operation',true) IN ('provision','revoke')))`],
+    ["Licensee", "SELECT", `${scheduledBinding} AND "isActive" AND "suspendedAt" IS NULL AND (current_setting('app.scheduled_operation',true)='claim' OR id=current_setting('app.scheduled_licensee_id',true))`],
+    ["Organization", "SELECT", `${scheduledBinding} AND "isActive" AND (current_setting('app.scheduled_operation',true)='claim' OR id=current_setting('app.organization_id',true))`],
+    ["CompliancePackJob", "SELECT", `${scheduledBinding} AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=current_setting('app.scheduled_schedule_id',true) AND (current_setting('app.scheduled_job_id',true)='' OR id=current_setting('app.scheduled_job_id',true))`],
+    ["CompliancePackJob", "INSERT", `${scheduledBinding} AND current_setting('app.scheduled_operation',true)='claim' AND id=current_setting('app.scheduled_job_id',true) AND "licenseeId"=current_setting('app.scheduled_licensee_id',true) AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=current_setting('app.scheduled_schedule_id',true) AND "startedByUserId" IS NULL`],
+    ["CompliancePackJob", "UPDATE", `${scheduledBinding} AND current_setting('app.scheduled_operation',true) IN ('complete','fail') AND id=current_setting('app.scheduled_job_id',true) AND "triggerType"='SCHEDULED' AND "scheduledScheduleId"=current_setting('app.scheduled_schedule_id',true) AND (current_setting('app.scheduled_licensee_id',true)='' OR "licenseeId"=current_setting('app.scheduled_licensee_id',true))`],
+    ["ActionIdempotencyKey", "SELECT", `${scheduledBinding} AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)`],
+    ["ActionIdempotencyKey", "INSERT", `${scheduledBinding} AND current_setting('app.scheduled_operation',true)='claim' AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)`],
+    ["ActionIdempotencyKey", "UPDATE", `${scheduledBinding} AND current_setting('app.scheduled_operation',true)='claim' AND action='scheduled-compliance-pack' AND scope=current_setting('app.scheduled_licensee_id',true)`],
+    ["Incident", "SELECT", `${scheduledBinding} AND "licenseeId"=current_setting('app.scheduled_licensee_id',true)`],
+    ["IncidentHandoff", "SELECT", `${scheduledBinding} AND EXISTS (SELECT 1 FROM public."Incident" scheduled_incident WHERE scheduled_incident.id="incidentId" AND scheduled_incident."licenseeId"=current_setting('app.scheduled_licensee_id',true))`],
+    ["AuditLog", "SELECT", `${scheduledBinding} AND "licenseeId"=current_setting('app.scheduled_licensee_id',true)`],
+    ["EvidenceRetentionPolicy", "SELECT", `${scheduledBinding} AND "licenseeId"=current_setting('app.scheduled_licensee_id',true)`],
+    ["AuditLogOutbox", "INSERT", `${scheduledBinding} AND payload->'details'->>'systemIdentity'='identity-scheduled-job' AND payload->>'licenseeId'=current_setting('app.scheduled_licensee_id',true)`],
+  ],
+});
+const scheduledReadCommands = [["ScheduledJobCredential","SELECT"],["ScheduledJobCredential","UPDATE"],["Licensee","SELECT"],["Organization","SELECT"],["CompliancePackJob","SELECT"],["Incident","SELECT"],["IncidentHandoff","SELECT"],["AuditLog","SELECT"],["EvidenceRetentionPolicy","SELECT"]];
+const scheduledTransitionCommands = [["ScheduledJobCredential","SELECT"],["ScheduledJobCredential","UPDATE"],["CompliancePackJob","SELECT"],["CompliancePackJob","UPDATE"],["AuditLogOutbox","INSERT"]];
+
 // A function is production-reviewed only when its deployable definition,
 // contract, rollback and exact table-command evidence live together here.
 export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
+  {
+    id: "b03-provision-scheduled-job-credential", schema: "app_rls", name: "provision_scheduled_job_credential", signature: "text,text,text,timestamp with time zone,text,text", returnType: "text",
+    identityArguments: "p_credential_id text, p_schedule_id text, p_capability_hash text, p_expires_at timestamp with time zone, p_rotated_from_credential_id text, p_request_id text", definitionLocation: scheduledSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: { ...scheduledSecurity, runtimeExecuteGrantees: ["operator"] }, tableCommands: [["ScheduledJobCredential","SELECT"],["ScheduledJobCredential","INSERT"],["ScheduledJobCredential","UPDATE"]], context: "The exact operator role provisions only a sha256-v1 hash and atomically revokes the predecessor during rotation; PostgreSQL never receives the raw capability.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-b/b03/scheduledJobCredentialService.ts:provisionScheduledJobCredential"], inputAuthority: "operator role plus server-generated credential ID and SHA-256 hash", outputColumns: ["credentialId"], disposableProbes: ["scheduled-job-identity-postgres18"],
+  },
+  {
+    id: "b03-revoke-scheduled-job-credential", schema: "app_rls", name: "revoke_scheduled_job_credential", signature: "text,text,text", returnType: "boolean",
+    identityArguments: "p_credential_id text, p_reason text, p_request_id text", definitionLocation: scheduledSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: { ...scheduledSecurity, runtimeExecuteGrantees: ["operator"] }, tableCommands: [["ScheduledJobCredential","SELECT"],["ScheduledJobCredential","UPDATE"]], context: "The exact operator role revokes one credential ID without exposing its hash; repeat revocation is idempotent.", canonicalWorkflowIds: [], repositoryCallers: ["backend/src/rls-waves/session-b/b03/scheduledJobCredentialService.ts:revokeScheduledJobCredential"], inputAuthority: "operator role and exact credential selector", outputColumns: ["revoked"], disposableProbes: ["scheduled-job-identity-postgres18"],
+  },
+  {
+    id: "b03-claim-compliance-pack-slice", schema: "app_rls", name: "claim_compliance_pack_slice", signature: "text,text,timestamp without time zone,integer", returnType: "TABLE(jobId text, requestId text, organizationId text, licenseeId text, scheduleScopeVersion text, expiresAt timestamp without time zone, attempt integer, report jsonb)",
+    identityArguments: "p_capability text, p_schedule_id text, p_due_at timestamp without time zone, p_batch_size integer", definitionLocation: scheduledSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: scheduledSecurity, tableCommands: [...scheduledReadCommands,["CompliancePackJob","INSERT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"],["AuditLogOutbox","INSERT"]], context: "Hashes and verifies the exact scheduled capability before enumerating active database-derived licensee partitions and atomically claiming one daily job per partition.", canonicalWorkflowIds: [scheduledComplianceWorkflow], repositoryCallers: ["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:claimCompliancePackSlice"], inputAuthority: "opaque scheduled capability; schedule ID is bound to its durable credential", outputColumns: ["jobId","requestId","organizationId","licenseeId","scheduleScopeVersion","expiresAt","attempt","report"], disposableProbes: ["scheduled-job-identity-postgres18"],
+  },
+  {
+    id: "b03-get-scheduled-compliance-pack", schema: "app_rls", name: "scheduled_get_compliance_pack_job", signature: "text,text,text,text", returnType: "jsonb",
+    identityArguments: "p_capability text, p_schedule_id text, p_request_id text, p_job_id text", definitionLocation: scheduledSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: scheduledSecurity, tableCommands: scheduledReadCommands, context: "Verifies the scheduled capability and returns one scheduled job plus a tenant-scoped report; job ID is selection-only.", canonicalWorkflowIds: [scheduledComplianceWorkflow], repositoryCallers: ["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:getScheduledCompliancePackJob"], inputAuthority: "opaque scheduled capability plus credential-bound schedule", outputColumns: ["job","report"], disposableProbes: ["scheduled-job-identity-postgres18"],
+  },
+  {
+    id: "b03-complete-scheduled-compliance-pack", schema: "app_rls", name: "scheduled_complete_compliance_pack_job", signature: "text,text,text,text,jsonb", returnType: "jsonb",
+    identityArguments: "p_capability text, p_schedule_id text, p_request_id text, p_job_id text, p_result jsonb", definitionLocation: scheduledSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: scheduledSecurity, tableCommands: scheduledTransitionCommands, context: "Verifies the scheduled capability, locks one SCHEDULED RUNNING job and atomically compare-and-sets its immutable artifact result and audit outbox.", canonicalWorkflowIds: [scheduledComplianceWorkflow], repositoryCallers: ["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:completeScheduledCompliancePackJob"], inputAuthority: "opaque scheduled capability; job ID and artifact are bounded mutation inputs", outputColumns: ["job"], disposableProbes: ["scheduled-job-identity-postgres18"],
+  },
+  {
+    id: "b03-fail-scheduled-compliance-pack", schema: "app_rls", name: "scheduled_fail_compliance_pack_job", signature: "text,text,text,text,text", returnType: "jsonb",
+    identityArguments: "p_capability text, p_schedule_id text, p_request_id text, p_job_id text, p_error_code text", definitionLocation: scheduledSource, definitionKind: "checked-in-production-package", definitionStatus: "production-reviewed",
+    security: scheduledSecurity, tableCommands: scheduledTransitionCommands, context: "Verifies the scheduled capability, locks one SCHEDULED RUNNING job and atomically records one bounded terminal failure and audit outbox.", canonicalWorkflowIds: [scheduledComplianceWorkflow], repositoryCallers: ["backend/src/rls-waves/session-b/b03/repositoryFunctions.ts:failScheduledCompliancePackJob"], inputAuthority: "opaque scheduled capability; job ID and bounded error code are mutation inputs", outputColumns: ["job"], disposableProbes: ["scheduled-job-identity-postgres18"],
+  },
   {
     id: "b01-lookup-password-user", schema: "app_auth", name: "lookup_password_user", signature: "text",
     returnType: "TABLE(id text, email text, passwordHash text, name text, role text, licenseeId text, orgId text, status text, isActive boolean, disabledAt timestamp without time zone, deletedAt timestamp without time zone, failedLoginAttempts integer, lockedUntil timestamp without time zone, lastLoginAt timestamp without time zone, emailVerifiedAt timestamp without time zone)",

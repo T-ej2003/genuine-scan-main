@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { createHash, createHmac, createPrivateKey, sign as cryptoSign } from "crypto";
+import { createHash, createHmac, createPrivateKey, randomUUID, sign as cryptoSign } from "crypto";
 
 import JSZip from "jszip";
 import { UserRole } from "@prisma/client";
@@ -22,6 +22,12 @@ import {
   loadCompliancePackJobInTransaction,
   startCompliancePackJobInTransaction,
 } from "../rls-waves/session-c/c03/c03CompliancePackRepository";
+import { withB03ScheduledContext } from "../rls-waves/session-b/b03/systemContext";
+import {
+  claimCompliancePackSlice,
+  completeScheduledCompliancePackJob,
+  failScheduledCompliancePackJob,
+} from "../rls-waves/session-b/b03/repositoryFunctions";
 
 const ensureDir = (dir: string) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -127,7 +133,6 @@ const persistCompliancePackBuffer = async (storageKey: string, buffer: Buffer) =
 };
 
 export const buildSignedComplianceEvidencePack = async (params: {
-  actor: { userId: string; role: UserRole; licenseeId?: string | null };
   licenseeId?: string | null;
   from?: Date | null;
   to?: Date | null;
@@ -243,7 +248,6 @@ export const runCompliancePackJob = async (params: {
 
   try {
     const pack = await buildSignedComplianceEvidencePack({
-      actor: params.actor,
       licenseeId: security.licenseeId,
       from: params.from,
       to: params.to,
@@ -350,7 +354,6 @@ export const rebuildCompliancePackArtifactForJob = async (params: {
   const job = snapshot.job;
 
   const pack = await buildSignedComplianceEvidencePack({
-    actor: params.actor,
     licenseeId: job.licenseeId || null,
     from: job.periodFrom ? new Date(job.periodFrom) : null,
     to: job.periodTo ? new Date(job.periodTo) : null,
@@ -406,6 +409,12 @@ export const startCompliancePackScheduler = () => {
 
   const hourUtc = parseIntEnv("COMPLIANCE_PACK_SCHEDULER_HOUR_UTC", 2, 0, 23);
   const minuteUtc = parseIntEnv("COMPLIANCE_PACK_SCHEDULER_MINUTE_UTC", 0, 0, 59);
+  const scheduleId = String(process.env.COMPLIANCE_PACK_SCHEDULE_ID || "daily-compliance-pack-v1").trim();
+  const capability = String(process.env.MSCQR_SCHEDULED_JOB_CAPABILITY || "").trim();
+  if (!/^[A-Za-z0-9_-]{43}$/.test(capability)) {
+    logger.error("Compliance pack scheduler requires a database-verifiable scheduled capability");
+    return;
+  }
 
   schedulerStarted = true;
   schedulerTimer = setInterval(() => {
@@ -415,36 +424,37 @@ export const startCompliancePackScheduler = () => {
       if (stamp === lastRunStamp) return;
       if (now.getUTCHours() !== hourUtc || now.getUTCMinutes() !== minuteUtc) return;
 
-      const systemUser = await prisma.user.findFirst({
-        where: {
-          role: { in: ["SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"] as any },
-          isActive: true,
-        },
-        select: { id: true, role: true, licenseeId: true },
-      });
-      if (!systemUser) return;
+      const claims = await withB03ScheduledContext({
+        capability,
+        jobId: `schedule:${scheduleId}:${stamp}`,
+        requestId: randomUUID(),
+      }, (tx) => claimCompliancePackSlice(tx, { capability, scheduleId, dueAt: now, batchSize: 100 }));
 
-      const licensees = await prisma.licensee.findMany({
-        where: { isActive: true },
-        select: { id: true },
-      });
-
-      for (const licensee of licensees) {
+      for (const claim of claims) {
         try {
-          await runCompliancePackJob({
-            triggerType: "SCHEDULED",
-            actor: {
-              userId: systemUser.id,
-              role: systemUser.role as UserRole,
-              licenseeId: systemUser.licenseeId,
-            },
-            licenseeId: licensee.id,
-            from: new Date(Date.now() - 24 * 60 * 60 * 1000),
-            to: new Date(),
+          const pack = await buildSignedComplianceEvidencePack({
+            licenseeId: claim.licenseeId,
+            from: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+            to: now,
+            report: claim.report,
           });
+          const storageKey = `${claim.jobId}-${pack.fileName}`;
+          const persisted = await persistCompliancePackBuffer(storageKey, pack.buffer);
+          await withB03ScheduledContext({ capability, jobId: claim.jobId, requestId: claim.requestId,
+            organizationId: claim.organizationId, licenseeId: claim.licenseeId }, (tx) =>
+            completeScheduledCompliancePackJob(tx, { capability, scheduleId, requestId: claim.requestId,
+              jobId: claim.jobId, result: { fileName: pack.fileName, storageKey: persisted.storageKey,
+                integrityHash: pack.metadata.integrityHash, signatureAlgorithm: pack.metadata.signatureAlgorithm,
+                controls: pack.metadata.controls, generatedAt: pack.metadata.generatedAt, storageMode: persisted.storageMode } })
+          );
         } catch (error) {
+          await withB03ScheduledContext({ capability, jobId: claim.jobId, requestId: randomUUID(),
+            organizationId: claim.organizationId, licenseeId: claim.licenseeId }, (tx) =>
+            failScheduledCompliancePackJob(tx, { capability, scheduleId, requestId: randomUUID(),
+              jobId: claim.jobId, errorCode: "COMPLIANCE_PACK_BUILD_FAILED" })
+          ).catch(() => undefined);
           logger.warn("Scheduled compliance pack run failed", {
-            licenseeId: licensee.id,
+            licenseeId: claim.licenseeId,
             error: error instanceof Error ? error.message : String(error),
           });
         }

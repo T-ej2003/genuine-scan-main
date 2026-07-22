@@ -2126,6 +2126,7 @@ model CompliancePackJob {
 
   status CompliancePackJobStatus @default(RUNNING)
   triggerType String
+  scheduledScheduleId String?
   periodFrom DateTime?
   periodTo DateTime?
 
@@ -2147,7 +2148,32 @@ model CompliancePackJob {
   @@index([licenseeId, startedAt])
   @@index([status, startedAt])
   @@index([triggerType, startedAt])
+  @@index([scheduledScheduleId, status, startedAt])
   @@index([startedByUserId])
+}
+
+model ScheduledJobCredential {
+  id String @id @default(uuid())
+
+  identityName String
+  jobFamily String
+  scheduleId String
+
+  capabilityHash String @unique
+  capabilityHashVersion String @default("sha256-v1")
+
+  expiresAt DateTime
+  revokedAt DateTime?
+  revokedReason String?
+  rotatedFromCredentialId String?
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([identityName, jobFamily, scheduleId])
+  @@index([jobFamily, scheduleId, expiresAt])
+  @@index([expiresAt, revokedAt])
 }
 
 model QrAllocationRequest {

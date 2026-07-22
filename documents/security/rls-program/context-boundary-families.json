@@ -38910,6 +38910,7 @@
         "backend/src/services/compliancePackService.ts"
       ],
       "repositoryFiles": [
+        "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts"
       ],
       "protectedTables": [
@@ -38923,6 +38924,7 @@
         "table-licensee",
         "table-organization",
         "table-refresh-token",
+        "table-scheduled-job-credential",
         "table-user"
       ],
       "actorClasses": [
@@ -38950,6 +38952,8 @@
         "command-licensee-select-56e28c0be62e",
         "command-organization-select-56e28c0be62e",
         "command-refresh-token-select-56e28c0be62e",
+        "command-scheduled-job-credential-select-56e28c0be62e",
+        "command-scheduled-job-credential-update-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ],
       "tenantScopeModel": [
@@ -39116,6 +39120,42 @@
             "sessionCapabilityRevokedAt=SERVER_TIMESTAMP_SET"
           ],
           "forbidden": []
+        },
+        {
+          "commandRuleId": "command-scheduled-job-credential-select-56e28c0be62e",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": []
+        },
+        {
+          "commandRuleId": "command-scheduled-job-credential-update-56e28c0be62e",
+          "columns": [
+            "expiresAt",
+            "lastUsedAt",
+            "revokedAt"
+          ],
+          "allowed": [
+            "expiresAt=NULL",
+            "expiresAt=SERVER_TIMESTAMP_SET",
+            "lastUsedAt=NULL",
+            "lastUsedAt=SERVER_TIMESTAMP_SET",
+            "revokedAt=NULL",
+            "revokedAt=SERVER_TIMESTAMP_SET"
+          ],
+          "forbidden": [
+            "ANY_STATE_CHANGE_NOT_ACCEPTED_ATOMICALLY_BY_THE_CANONICAL_SERVICE"
+          ]
         },
         {
           "commandRuleId": "command-user-select-56e28c0be62e",

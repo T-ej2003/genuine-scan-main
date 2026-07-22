@@ -15,19 +15,19 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "0b4be52a6b9a37940964d4263da7f39eb7dbb66ad5cdd259153146d1608d471b",
+  "sourceContractSha256": "fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
-      "sha256": "d5d6d4963e14d55ce3308502658729eb1a07c23badaa393dc575b76b1ddeb0d6"
+      "sha256": "6a2d22fe867d5d2806fb4f767b0ff5ca40f342cd64645194f9482aa27f301980"
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "7a4735e94d58c38f860dd95d9370f4b14d2542828de9b5b4ae3b559f575d26c9"
+      "sha256": "da40ea55e7312165d9c886c8a45dfdc8dfa10484628cab41753e42cb5ed79fe7"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "657929b242b68e8744f7c95d29554805b4509f7c3bb94db7624ea6f1fb58842e"
+      "sha256": "a3ec9ea2e28e6aff4ef51c475d81a63e4f10e9c13570e3deb2ad22d17ff0ffec"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -35,7 +35,7 @@
     },
     {
       "path": "documents/security/rls-program/object-ownership-chain.json",
-      "sha256": "f746ce4a86468e720c2669927959cfe2466629dbd3b4505e36ce37966ce160a9"
+      "sha256": "12e662a9f640b2b5d8224bf9e7c42566baae32c9b02918bfbd7e1698779c2d1d"
     },
     {
       "path": "documents/security/rls-program/essential-workflow-allowlist.json",
@@ -43,15 +43,15 @@
     },
     {
       "path": "documents/security/rls-program/context-boundary-families.json",
-      "sha256": "0782890997f9142ee6b973177c8e168c715912c868f2bff2804d5901a90e9a44"
+      "sha256": "d27405c229b884641f903b804ed5f74fdffd7808b4f24ba278db2cc3ec2fd280"
     },
     {
       "path": "documents/security/rls-program/workflow-three-session-partition.json",
-      "sha256": "bdd016179a24f5b9cfceec4ade9cb731e92ebb92db282cbb6fcf683ee86eea1f"
+      "sha256": "92e54a3354a3878c703901f10927f30eed032494d464f60ea0a0f9e33153936b"
     },
     {
       "path": "backend/prisma/schema.prisma",
-      "sha256": "d8a88ee364ac42d5f8aa1c4d9b5be7fabfd6b9137e917cfbb9b4fa95cabcc98d"
+      "sha256": "7d99f10edd8d8100c5b0c415754139d6687141810d59c84b41349a69771c4212"
     },
     {
       "path": "scripts/rls/generate-full-rls-sql.mjs",
@@ -59,15 +59,15 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "0419a1cad457f144e8d1e0a0329bbc565cfcc5f33ad7ea1c6c187e5318abaab3"
+      "sha256": "ec8dbc98bf7f7aa2adc33a8464deb1163db1e0d8e8d6977a5856534ede004cee"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
-      "sha256": "c4ecea36bc20b046fa4140a7cdcab73b71bb735f8bb3ff539ff855bdc3300f19"
+      "sha256": "14d78f5da2dd03a75963faa54f555855fdc9320d1c5ce0d7dd8d8ad980d28e27"
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
-      "sha256": "e081bef9f22e7bf463d5ee7d29a7fe2e007efde44857dbc09b336cdb15f8c1d3"
+      "sha256": "6bc04e6673f3e2c1b8dddfbc9a2ccb404c553dc42b472d7bf92260ca01132e2e"
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
@@ -79,7 +79,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "8d05b3bbbe5a555055bce7ebd9f8d57f519d2499d1876e85eca4cef0433cb5e8"
+      "sha256": "b7293eb001d29c89b228709f16315f94ddc32267710ff8ed102fafecb605ec6d"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -112,14 +112,14 @@
   ],
   "greenDatabasePattern": "^mscqr_full_rls_cert_[a-z0-9_]+$",
   "counts": {
-    "tables": 77,
-    "forceRlsTargets": 75,
+    "tables": 78,
+    "forceRlsTargets": 76,
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 31,
-    "generatedPolicies": 86,
+    "generatedPolicies": 102,
     "columnPrivilegeCells": 78,
-    "prismaMigrations": 50,
+    "prismaMigrations": 51,
     "prismaEnums": 58,
     "registeredWorkflowCallPaths": 401,
     "applicationPathCertifiedWorkflows": 10
@@ -135,7 +135,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:0b4be52a6b9a37940964d4263da7f39eb7dbb66ad5cdd259153146d1608d471b",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:fe7eea45c9e370bcf378e10c360767df3069c691041f607066985a34d213fa95",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
@@ -360,6 +360,10 @@
     {
       "name": "20260722120000_add_authenticated_session_capability",
       "sha256": "908d9b05ed63c11361704d4500e37129a7e52f953552fe63dca8d64ac5c06c59"
+    },
+    {
+      "name": "20260722150000_add_scheduled_job_credential",
+      "sha256": "435c1c6f9df39d4b57798f19ed2d0b395b8203d913ad0c240c2329eaf5b63bb2"
     }
   ],
   "prohibitions": [
@@ -386,7 +390,7 @@
         "inherit": false
       },
       "owns": [
-        "all 77 Prisma tables",
+        "all 78 Prisma tables",
         "application sequences",
         "public and app_rls schemas",
         "table-bound objects",
@@ -412,12 +416,12 @@
       },
       "owns": [
         "app_auth schema",
-        "the seven exact pre-auth function signatures"
+        "approved app_auth and app_rls SECURITY DEFINER boundaries"
       ],
       "forbiddenOwnership": [
         "application tables",
         "application sequences",
-        "app_rls",
+        "app_rls schema",
         "non-approved functions"
       ],
       "forbiddenMemberships": "No runtime role and no standing migration membership."
@@ -1422,6 +1426,18 @@
       "tableId": "table-scan-metrics-hourly-rollup",
       "table": "ScanMetricsHourlyRollup",
       "category": "operational-system",
+      "rls": "ENABLE AND FORCE",
+      "owner": "identity-table-owner",
+      "policyFamily": "deny-by-default-no-policy",
+      "policySlices": [],
+      "columnGrants": [],
+      "disposition": "fail-closed-no-runtime-grant",
+      "postgresqlCertification": "pending"
+    },
+    {
+      "tableId": "table-scheduled-job-credential",
+      "table": "ScheduledJobCredential",
+      "category": "security-sensitive",
       "rls": "ENABLE AND FORCE",
       "owner": "identity-table-owner",
       "policyFamily": "deny-by-default-no-policy",

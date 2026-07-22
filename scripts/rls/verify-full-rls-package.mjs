@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { TABLE_INVENTORY_BASELINE } from "./lib/table-inventory-baseline.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { calculateCleanRoomSourceContract } from "./lib/clean-room-source-contract.mjs";
 import { buildRegisteredCallPathEvidence } from "./lib/application-path-certifications.mjs";
@@ -63,12 +64,12 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
   ensure(dashboardProfiles.every((profile) => equal(profile.routes, ["GET /api/dashboard/stats", "GET /api/events/dashboard"]) && equal(profile.purposeCodes, ["dashboard-snapshot-read"])), "Dashboard snapshot route or purpose profiles drifted");
   ensure(blockedProfiles.some((profile) => profile.status === "direct-policy-blocked" && profile.blockers?.length), "Blocked direct-policy contracts were lost");
   ensure(manifest.deploymentModel === "clean-room-blue-green", "Generated package is not clean-room blue/green");
-  ensure(manifest.counts.tables === 77 && manifest.counts.forceRlsTargets === 75 && manifest.counts.migrationOnly === 2, "Generated full-RLS table counts drifted");
+  ensure(manifest.counts.tables === TABLE_INVENTORY_BASELINE.tables && manifest.counts.forceRlsTargets === TABLE_INVENTORY_BASELINE.forceRlsTargets && manifest.counts.migrationOnly === TABLE_INVENTORY_BASELINE.migrationOnly, "Generated full-RLS table counts drifted");
   ensure(manifest.counts.directPolicySlices === directProfiles.reduce((count, profile) => count + profile.commandRuleIds.length, 0), "Direct policy slice count drifted");
   ensure(manifest.counts.generatedPolicies === policies.rows.length && policies.count === policies.rows.length, "Generated policy count drifted");
   ensure(manifest.counts.columnPrivilegeCells === privileges.cells, "Generated column privilege count drifted");
-  ensure(new Set(manifest.tables.map((table) => table.table)).size === 77, "Generated table dispositions are not unique");
-  ensure(manifest.tables.filter((table) => table.rls === "ENABLE AND FORCE").length === 75, "Every intended table must be FORCE RLS");
+  ensure(new Set(manifest.tables.map((table) => table.table)).size === TABLE_INVENTORY_BASELINE.tables, "Generated table dispositions are not unique");
+  ensure(manifest.tables.filter((table) => table.rls === "ENABLE AND FORCE").length === TABLE_INVENTORY_BASELINE.forceRlsTargets, "Every intended table must be FORCE RLS");
   ensure(manifest.tables.every((table) => table.policyFamily && table.disposition && Array.isArray(table.policySlices) && Array.isArray(table.columnGrants)), "A table lacks an exact policy disposition");
 
   const policyNames = new Set();
@@ -119,7 +120,7 @@ export const validateGeneratedPackage = ({ manifest, policies, privileges, comma
     ensure(equal(grant.sourceCommandRuleIds, expected.sourceCommandRuleIds), `${grant.table} ${grant.command} source rule IDs drifted`);
   }
   ensure(privileges.cells === privileges.rows.reduce((count, row) => count + row.columns.length, 0), "Column privilege cell total drifted");
-  return { tables: 77, forceRlsTargets: 75, policies: policies.rows.length, directPolicySlices: directPolicies.length, columnPrivilegeCells: privileges.cells };
+  return { tables: TABLE_INVENTORY_BASELINE.tables, forceRlsTargets: TABLE_INVENTORY_BASELINE.forceRlsTargets, policies: policies.rows.length, directPolicySlices: directPolicies.length, columnPrivilegeCells: privileges.cells };
 };
 
 export const verifyFullRlsPackage = () => {
@@ -192,7 +193,7 @@ export const verifyFullRlsPackage = () => {
   ensure(!/DROP DATABASE/i.test(cleanup), "Role cleanup attempts to drop its own or an unbound database");
   const verification = readGenerated("40-post-apply-verification.sql").toString();
   ensure(!/^\s*(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|GRANT|REVOKE)\b/im.test(verification), "Verification SQL is not read-only");
-  ensure((readGenerated("30-policies.sql").toString().match(/FORCE ROW LEVEL SECURITY/g) || []).length === 75, "Generated SQL does not FORCE exactly 75 tables");
+  ensure((readGenerated("30-policies.sql").toString().match(/FORCE ROW LEVEL SECURITY/g) || []).length === TABLE_INVENTORY_BASELINE.forceRlsTargets, `Generated SQL does not FORCE exactly ${TABLE_INVENTORY_BASELINE.forceRlsTargets} tables`);
   ensure((readGenerated("30-policies.sql").toString().match(/CREATE POLICY/g) || []).length === policies.rows.length, "Generated SQL policy count differs from inventory");
   ensure((readGenerated("21-runtime-grants.sql").toString().match(/GRANT\s+(?:SELECT|INSERT|UPDATE)\s*\(/g) || []).length === privileges.rows.length + (privileges.functionOwnerRows || []).length, "Generated SQL column grants differ from inventory");
 

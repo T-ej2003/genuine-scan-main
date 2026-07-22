@@ -347,17 +347,17 @@ export const failSecurityEventOutbox = async (
 
 export const claimCompliancePackSlice = async (
   db: B03FunctionClient,
-  input: { scheduleId: string; dueAt: Date; batchSize: number }
+  input: { capability: string; scheduleId: string; dueAt: Date; batchSize: number }
 ) => {
   const batchSize = integer(input.batchSize, "batchSize", 1, 100);
   const rows = await db.$queryRaw<Array<{
   jobId: string; requestId: string; organizationId: string; licenseeId: string;
-  scheduleScopeVersion: string; expiresAt: Date; attempt: number;
+  scheduleScopeVersion: string; expiresAt: Date; attempt: number; report: Record<string, unknown>;
 }>>(Prisma.sql`
   SELECT claim."jobId", claim."requestId", claim."organizationId", claim."licenseeId",
-    claim."scheduleScopeVersion", claim."expiresAt", claim."attempt"
+    claim."scheduleScopeVersion", claim."expiresAt", claim."attempt", claim."report"
   FROM app_rls.claim_compliance_pack_slice(
-    ${text(input.scheduleId, "scheduleId", 128)}, ${timestamp(input.dueAt, "dueAt")},
+    ${text(input.capability, "scheduled capability", 43)}, ${text(input.scheduleId, "scheduleId", 128)}, ${timestamp(input.dueAt, "dueAt")},
     ${batchSize}
   ) AS claim
   `);
@@ -369,9 +369,30 @@ export const claimCompliancePackSlice = async (
     text(row.scheduleScopeVersion, "scheduleScopeVersion", 128);
     timestamp(row.expiresAt, "expiresAt");
     integer(row.attempt, "attempt", 1, 3);
+    json(row.report);
     return row;
   });
 };
+
+export const completeScheduledCompliancePackJob = async (
+  db: B03FunctionClient,
+  input: { capability: string; scheduleId: string; requestId: string; jobId: string; result: unknown }
+) => exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
+  SELECT app_rls.scheduled_complete_compliance_pack_job(
+    ${text(input.capability, "scheduled capability", 43)}, ${text(input.scheduleId, "scheduleId", 128)},
+    ${uuid(input.requestId)}, ${id(input.jobId, "jobId")}, CAST(${json(input.result)} AS jsonb)
+  ) AS result
+`), "app_rls.scheduled_complete_compliance_pack_job").result;
+
+export const failScheduledCompliancePackJob = async (
+  db: B03FunctionClient,
+  input: { capability: string; scheduleId: string; requestId: string; jobId: string; errorCode: string }
+) => exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
+  SELECT app_rls.scheduled_fail_compliance_pack_job(
+    ${text(input.capability, "scheduled capability", 43)}, ${text(input.scheduleId, "scheduleId", 128)},
+    ${uuid(input.requestId)}, ${id(input.jobId, "jobId")}, ${text(input.errorCode, "errorCode", 128)}
+  ) AS result
+`), "app_rls.scheduled_fail_compliance_pack_job").result;
 
 export const getPrimarySuperadminEmail = async (db: B03FunctionClient) => {
   const row = exactlyOne(await db.$queryRaw<Array<{ email: string | null }>>(Prisma.sql`

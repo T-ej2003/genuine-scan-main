@@ -221,11 +221,13 @@
       "authorizationRevalidationRules": [
         "Licensee remains active",
         "Licensee-to-organization binding matches",
-        "Schedule ID and UTC partition are allowlisted",
-        "Current platform-user lookup and human impersonation are removed before activation"
+        "Schedule ID matches the verified durable credential and claimed job",
+        "No platform-user lookup or human impersonation is permitted"
       ],
       "tablesRead": [
+        "table-scheduled-job-credential",
         "table-licensee",
+        "table-organization",
         "table-compliance-pack-job",
         "table-action-idempotency-key",
         "table-incident",
@@ -240,11 +242,12 @@
       ],
       "tableCommands": [
         {
-          "tableId": "table-user",
+          "tableId": "table-scheduled-job-credential",
           "commands": [
-            "SELECT"
+            "SELECT",
+            "UPDATE"
           ],
-          "disposition": "remove-before-activation; no human impersonation"
+          "authority": "worker-fn-claim-compliance-pack-slice"
         },
         {
           "tableId": "table-licensee",
@@ -254,8 +257,16 @@
           "authority": "worker-fn-claim-compliance-pack-slice"
         },
         {
+          "tableId": "table-organization",
+          "commands": [
+            "SELECT"
+          ],
+          "authority": "worker-fn-claim-compliance-pack-slice"
+        },
+        {
           "tableId": "table-compliance-pack-job",
           "commands": [
+            "SELECT",
             "INSERT",
             "UPDATE"
           ]
@@ -334,6 +345,10 @@
         "sqlFunctionName": "claim_compliance_pack_slice",
         "arguments": [
           {
+            "name": "capability",
+            "type": "text"
+          },
+          {
             "name": "schedule_id",
             "type": "text"
           },
@@ -347,10 +362,10 @@
           }
         ],
         "genericQueryInputsAllowed": false,
-        "reason": "Platform-wide tenant enumeration must be an exact bounded claim, after which all report work is tenant-scoped.",
-        "ownerIdentity": "identity-table-owner",
-        "securityMode": "INVOKER",
-        "fixedSearchPath": "pg_catalog",
+        "reason": "A hash-only scheduled capability authorizes one bounded platform-wide tenant claim; every returned report remains tenant-scoped.",
+        "ownerIdentity": "identity-auth-function-owner",
+        "securityMode": "DEFINER",
+        "fixedSearchPath": "pg_catalog,public",
         "publicExecutionDenied": true,
         "executableRuntimeIdentity": "identity-scheduled-job"
       },
@@ -392,6 +407,8 @@
         "command-licensee-select-56e28c0be62e",
         "command-organization-select-56e28c0be62e",
         "command-refresh-token-select-56e28c0be62e",
+        "command-scheduled-job-credential-select-56e28c0be62e",
+        "command-scheduled-job-credential-update-56e28c0be62e",
         "command-user-select-56e28c0be62e"
       ],
       "auditEventRequirement": {
@@ -417,7 +434,7 @@
       "deniedScenarios": [
         "Unknown type, missing or payload-only scope, actor/tenant mismatch, expired job, replay conflict, malformed correlation ID, unexpected command, platform-admin flag or wrong identity is denied."
       ],
-      "implementationStatus": "contract-resolved; runtime/schema implementation required before activation",
+      "implementationStatus": "implemented; PostgreSQL 18 disposable certification required for each generated package",
       "p2TestRequirements": [
         "verified durable scope and empty/payload-only denial",
         "idempotent replay and conflicting digest denial",

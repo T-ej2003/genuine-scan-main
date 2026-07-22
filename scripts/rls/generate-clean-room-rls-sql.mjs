@@ -9,6 +9,7 @@ import {
   buildRegisteredCallPathEvidence,
 } from "./lib/application-path-certifications.mjs";
 import { NAMED_SQL_FUNCTION_CONTRACTS, validateNamedSqlFunctionContracts } from "./lib/named-sql-function-contracts.mjs";
+import { TABLE_INVENTORY_BASELINE } from "./lib/table-inventory-baseline.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const programRoot = path.join(repoRoot, "documents/security/rls-program");
@@ -56,11 +57,12 @@ const workflowById = new Map(workflowsManifest.workflows.map((workflow) => [work
 const ruleById = new Map(commandSemantics.rules.map((rule) => [rule.id, rule]));
 const forceTargets = tables.filter((table) => table.rlsApplicability === "force-rls-target");
 const migrationOnly = tables.filter((table) => table.rlsApplicability !== "force-rls-target");
-if (tables.length !== 77 || forceTargets.length !== 75 || migrationOnly.length !== 2) throw new Error(`Expected 77/75/2 tables; found ${tables.length}/${forceTargets.length}/${migrationOnly.length}`);
+if (tables.length !== TABLE_INVENTORY_BASELINE.tables || forceTargets.length !== TABLE_INVENTORY_BASELINE.forceRlsTargets || migrationOnly.length !== TABLE_INVENTORY_BASELINE.migrationOnly) throw new Error(`Expected ${TABLE_INVENTORY_BASELINE.tables}/${TABLE_INVENTORY_BASELINE.forceRlsTargets}/${TABLE_INVENTORY_BASELINE.migrationOnly} tables; found ${tables.length}/${forceTargets.length}/${migrationOnly.length}`);
 
 const candidateWorkflowIds = new Set(allowlist.workflows
   .filter((entry) => entry.currentRuntimeStatus === "runtime-implemented-postgresql-pending")
   .map((entry) => entry.workflowId));
+const scheduledComplianceWorkflow = "workflow-scheduled-backend-src-services-compliance-pack-service-ts-start-compliance-pack-scheduler";
 const directProfiles = (commandSemantics.sqlCertificationProfiles || []).filter((profile) => profile.status === "direct-policy-candidate");
 const blockedProfiles = (commandSemantics.sqlCertificationProfiles || []).filter((profile) => profile.status === "direct-policy-blocked");
 if (!directProfiles.length || !blockedProfiles.length) throw new Error("Exact SQL certification profiles are required");
@@ -171,6 +173,9 @@ const preAuthContracts = validateNamedSqlFunctionContracts().filter((contract) =
 const c03Contracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-c-c03"
 );
+const scheduledContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "session-b-b03-scheduled"
+);
 const b01FunctionSource = b01Contracts.length
   ? fs.readFileSync(path.join(repoRoot, b01Contracts[0].definitionLocation), "utf8").replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
   : "";
@@ -193,6 +198,16 @@ const c03FunctionSource = c03Contracts.length
 const c03AppSignatures = c03Contracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const c03OwnerPrivileges = [...new Map(c03Contracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const c03OwnerPolicies = [...new Map(c03Contracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const scheduledFunctionSource = scheduledContracts.length
+  ? fs.readFileSync(path.join(repoRoot, scheduledContracts[0].definitionLocation), "utf8")
+      .replaceAll("{{AUTH_OWNER}}", q(roleNames.authOwner))
+      .replaceAll("{{SCHEDULED_ROLE}}", lit(roleNames.scheduled))
+      .replaceAll("{{OPERATOR_ROLE}}", lit(roleNames.operator))
+  : "";
+const scheduledSignatures = scheduledContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("scheduled")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const scheduledOperatorSignatures = scheduledContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("operator")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const scheduledOwnerPrivileges = [...new Map(scheduledContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const scheduledOwnerPolicies = [...new Map(scheduledContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 // This is deliberately an exact runtime execution allowlist.  The functions
 // are the only app_rls public boundaries emitted by this clean-room package;
 // context setters and authorization helpers stay internal to their owner.
@@ -239,10 +254,12 @@ const b01FunctionOwnerGrants = [
 const b01OwnerGrantSql = b01FunctionOwnerGrants.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const preAuthOwnerGrantSql = preAuthOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const c03OwnerGrantSql = c03OwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const scheduledOwnerGrantSql = scheduledOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const functionOwnerRows = [
   ...b01FunctionOwnerGrants.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: b01Contracts.map((contract) => contract.id) })),
   ...preAuthOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: preAuthContracts.map((contract) => contract.id) })),
   ...c03OwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: c03Contracts.map((contract) => contract.id) })),
+  ...scheduledOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: scheduledContracts.map((contract) => contract.id) })),
 ];
 const b01PolicyOwner = `current_user=${lit(roleNames.authOwner)}`;
 const b01User = `current_setting('app.b01_user_id',true)`;
@@ -617,12 +634,13 @@ ${setRole(roleNames.owner)}
 GRANT USAGE ON SCHEMA public,app_rls TO ${q(roleNames.app)};
 GRANT USAGE ON SCHEMA public,app_rls TO ${q(roleNames.read)};
 GRANT USAGE ON SCHEMA public,app_rls TO ${q(roleNames.worker)},${q(roleNames.scheduled)};
-GRANT USAGE ON SCHEMA public TO ${q(roleNames.operator)};
+GRANT USAGE ON SCHEMA public,app_rls TO ${q(roleNames.operator)};
 ${columnGrantSql}
 ${appTypeGrantSql}
 ${b01OwnerGrantSql}
 ${preAuthOwnerGrantSql}
 ${c03OwnerGrantSql}
+${scheduledOwnerGrantSql}
 GRANT USAGE ON SCHEMA public TO ${q(roleNames.authOwner)};
 ${resetRole}
 ${setRole(roleNames.authOwner)}
@@ -1290,6 +1308,17 @@ ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
 ${resetRole}` : ""}
+${scheduledFunctionSource ? `${setRole(roleNames.owner)}
+GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
+${resetRole}
+${setRole(roleNames.authOwner)}
+${scheduledFunctionSource}
+${scheduledSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.scheduled)};`).join("\n")}
+${scheduledOperatorSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.operator)};`).join("\n")}
+${resetRole}
+${setRole(roleNames.owner)}
+REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
+${resetRole}` : ""}
 INSERT INTO mscqr_rls_install.expected_routine(
   schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
   security_definer,leakproof,strict,parallel_mode,configuration,source_body,acl_rows
@@ -1628,6 +1657,16 @@ for (const [table, command, rawPredicate] of c03OwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "c03-authenticated-capability", ownerIdentity: "identity-auth-function-owner", scope: "verified session plus operation-specific selector" }))};`);
 }
+for (const [table, command, rawPredicate] of scheduledOwnerPolicies) {
+  const predicate = rawPredicate
+    .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
+    .replaceAll("{{SCHEDULED_ROLE}}", lit(roleNames.scheduled))
+    .replaceAll("{{OPERATOR_ROLE}}", lit(roleNames.operator));
+  const policyName = shortName("scheduled_capability", table, command);
+  const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "scheduled-job-capability", ownerIdentity: "identity-auth-function-owner", scope: "verified scheduled credential plus operation-specific selector" }))};`);
+}
 const policiesSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
 ${requirePackagePhaseSql("runtime-grants-installed", "policy package")}
@@ -1670,6 +1709,7 @@ const expectedColumnAclSelect = expectedRowsSelect([
   ...b01FunctionOwnerGrants.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...preAuthOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...c03OwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...scheduledOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
 ], columnAclColumns);
 const expectedTypeAclSelect = expectedRowsSelect(appTypeGrantNames.map((type) => ["public", type, roleNames.app, roleNames.owner, "USAGE", false]), aclColumns);
 const expectedDatabaseAclSelect = expectedRowsSelect([
@@ -1717,8 +1757,10 @@ const expectedRoutineIdentities = [
   ["app_rls", "c03_validate_compliance_result", "p_result jsonb"],
   ["app_rls", "c03_queue_audit", "p_action text, p_entity_type text, p_entity_id text, p_details jsonb"],
   ["app_rls", "c03_build_compliance_report", "p_licensee_id text, p_from timestamp with time zone, p_to timestamp with time zone"],
+  ["app_rls", "scheduled_job_prepare", "p_capability text, p_schedule_id text, p_operation text, p_request_id text"],
+  ["app_rls", "scheduled_job_queue_audit", "p_action text, p_job_id text, p_licensee_id text, p_details jsonb"],
   ["app_auth", "b01_preauth_audit", "p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb"],
-  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...c03Contracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
+  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...c03Contracts, ...scheduledContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
@@ -1814,12 +1856,35 @@ const policyInventory = [
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),
+  ...scheduledOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("scheduled_capability", table, command),
+    command,
+    actors: ["scheduled-job"],
+    assurance: "source-rule-specific",
+    purpose: ["scheduled-compliance-pack"],
+    scopeType: "security-definer-owner-and-durable-scheduled-capability",
+    scopePredicate: rawPredicate
+      .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
+      .replaceAll("{{SCHEDULED_ROLE}}", lit(roleNames.scheduled))
+      .replaceAll("{{OPERATOR_ROLE}}", lit(roleNames.operator)),
+    columns: [],
+    sourceCommandRuleIds: commandSemantics.rules.filter((rule) =>
+      rule.tableId === tables.find((entry) => entry.physicalTable === table)?.id &&
+      rule.command === command && rule.authorizationBoundary !== "prohibited"
+    ).map((rule) => rule.id).sort(),
+    workflowId: scheduledComplianceWorkflow,
+    route: "scheduled compliance exact SQL boundary",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
 ].sort((left, right) => `${left.table}:${left.policyName}`.localeCompare(`${right.table}:${right.policyName}`));
 const expectedPolicyValues = policyInventory.map((policy) => `(${lit(policy.table)},${lit(policy.policyName)},${lit(policy.command)})`).join(",");
 const expectedSchemaAclRows = [
   ...[roleNames.app, roleNames.read, roleNames.worker, roleNames.scheduled, roleNames.operator, roleNames.migration].map((grantee) => ["public", grantee, roleNames.owner, "USAGE", false]),
   ["public", roleNames.authOwner, roleNames.owner, "USAGE", false],
-  ...[roleNames.app, roleNames.read, roleNames.worker, roleNames.scheduled].map((grantee) => ["app_rls", grantee, roleNames.owner, "USAGE", false]),
+  ...[roleNames.app, roleNames.read, roleNames.worker, roleNames.scheduled, roleNames.operator].map((grantee) => ["app_rls", grantee, roleNames.owner, "USAGE", false]),
   ["app_rls", roleNames.authOwner, roleNames.owner, "USAGE", false],
   ["app_auth", roleNames.preauth, roleNames.authOwner, "USAGE", false],
   ["app_auth", roleNames.app, roleNames.authOwner, "USAGE", false],

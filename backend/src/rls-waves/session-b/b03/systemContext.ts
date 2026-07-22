@@ -145,12 +145,25 @@ export const withB03AnalyticsWorkerContext = <T>(
 );
 
 export const withB03ScheduledContext = <T>(
-  input: BoundaryInput,
+  input: BoundaryInput & { capability: string },
   callback: (tx: Prisma.TransactionClient) => Promise<T>,
   runner: TransactionRunner = prisma
-) => withB03SystemContext(
-  { ...input, systemIdentity: "identity-scheduled-job", jobType: "SCHEDULED_COMPLIANCE_PACK" },
-  new Set(["SCHEDULED_COMPLIANCE_PACK"]),
-  callback,
-  runner
-);
+) => {
+  const capability = String(input.capability || "").trim();
+  if (!/^[A-Za-z0-9_-]{43}$/.test(capability)) {
+    throw new Error("B03 scheduled boundary requires a database-verifiable capability");
+  }
+  const context = validated(
+    { ...input, systemIdentity: "identity-scheduled-job", jobType: "SCHEDULED_COMPLIANCE_PACK" },
+    new Set(["SCHEDULED_COMPLIANCE_PACK"])
+  );
+  return runner.$transaction(async (tx) => {
+    const [identity] = await tx.$queryRaw<Array<{ databaseRole: string }>>(Prisma.sql`
+      SELECT current_user::text AS "databaseRole"
+    `);
+    if (identity?.databaseRole !== context.expectedDatabaseRole) {
+      throw new Error("B03 scheduled boundary database role mismatch");
+    }
+    return callback(tx);
+  }, { maxWait: 5_000, timeout: transactionTimeoutMs() });
+};
