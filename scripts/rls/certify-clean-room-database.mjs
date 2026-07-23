@@ -168,6 +168,27 @@ const runC03AuthenticatedCertification = (connections, env) => {
   if (!/C03 authenticated boundaries application-path proof passed/.test(result.stdout || "")) throw new Error("C03 authenticated certification did not emit its success marker");
   return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-c/c03/c03AuthenticatedBoundariesPostgres18.test.js" };
 };
+const runPrintingLifecycleCertification = (connections, env) => {
+  if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY !== "printing-lifecycle") return null;
+  const result = spawnSync(process.execPath, [path.join(root, "backend/tests/rls-wave-c/c02/printingLifecyclePostgres18.test.js")], {
+    cwd: root,
+    env: {
+      ...env,
+      NODE_ENV: "test",
+      MSCQR_PRINTING_ADMIN_URL: connections.bootstrap,
+      MSCQR_PRINTING_PREAUTH_URL: connections.preauth,
+      MSCQR_PRINTING_APP_URL: connections.app,
+      MSCQR_PRINTING_WORKER_URL: connections.worker,
+      MSCQR_PRINTING_POSTGRES18_TEST: "true",
+      MSCQR_PRINTING_POSTGRES18_CONFIRM: "MSCQR_RUN_LOCAL_PRINTING_POSTGRES18_TEST",
+    },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new Error(`Printing lifecycle certification failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+  if (!/Release Fix 5 PostgreSQL 18 printing lifecycle proof passed/.test(result.stdout || "")) throw new Error("Printing lifecycle certification did not emit its success marker");
+  return { status: "application-path-certified", postgresqlMajor: 18, testFile: "backend/tests/rls-wave-c/c02/printingLifecyclePostgres18.test.js" };
+};
 const runB01PreAuthCertification = (connections, env) => {
   const result = spawnSync(process.execPath, [path.join(root, "backend/tests/rls-wave-b/b01/preAuthSecurityPostgres18.test.js")], {
     cwd: root,
@@ -810,6 +831,27 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
     runSqlFile(urls.administrator, "admin-ownership.sql", "run exact administrative ownership entrypoint");
     runSqlFile(urls.administrator, "runtime-policy.sql", "run exact runtime policy entrypoint");
     runSqlFile(urls.administrator, "verification.sql", "run exact verification entrypoint");
+    if (env.MSCQR_FULL_RLS_CERTIFICATION_FAMILY === "printing-lifecycle") {
+      const fixtureRows = Number(scalar(urls.bootstrap, "SELECT sum(row_count) FROM (SELECT (xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM public.%I',c.relname),false,true,'')))[1]::text::bigint AS row_count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname<>'_prisma_migrations') counts", "count disposable certification fixture rows"));
+      const connections = { app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth, worker: urls.worker, scheduled: urls.scheduled, operator: urls.operator };
+      const printingLifecycleCertification = runPrintingLifecycleCertification(connections, env);
+      destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
+      return {
+        tablesCertified: 0,
+        fixtureRows,
+        applicationPathResults: [],
+        catalogTamperResults: [],
+        b01Certification: null,
+        b01PreAuthCertification: null,
+        scheduledJobIdentityCertification: null,
+        b03OutboxCertification: null,
+        c03Certification: null,
+        printingLifecycleCertification,
+        databaseResidueCount: 0,
+        managedRoleResidueCount: 0,
+        blueFingerprintUnchanged: true,
+      };
+    }
     const catalogTamperResults = certifyCatalogTamperDetection(urls.administrator, manifest, policies);
     const b01Certification = certifyB01RefreshRotation(urls, manifest);
     const b01PreAuthCertification = runB01PreAuthCertification({ app: urls.app, bootstrap: urls.bootstrap, preauth: urls.preauth }, env);
@@ -826,7 +868,7 @@ const runSuccessfulCertification = ({ adminUrl, maintenanceDatabase, manifest, e
       ? []
       : runApplicationPathCertifications(connections, env);
     destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true });
-    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
+    return { tablesCertified, fixtureRows, applicationPathResults, catalogTamperResults, b01Certification, b01PreAuthCertification, scheduledJobIdentityCertification, b03OutboxCertification, c03Certification, printingLifecycleCertification: null, databaseResidueCount: 0, managedRoleResidueCount: 0, blueFingerprintUnchanged: true };
   } catch (error) {
     try { destroyAndProve({ urls, database, manifest, blueUrl, expectedBlueFingerprint, allowCertificationFixtures: true }); } catch (cleanupError) { throw new Error(`${error.message}; cleanup failed: ${cleanupError.message}`); }
     throw error;
@@ -939,6 +981,7 @@ export const runCertification = (adminUrl, env = process.env) => {
     result.scheduledJobIdentityCertification = finalRun.scheduledJobIdentityCertification;
     result.b03OutboxCertification = finalRun.b03OutboxCertification;
     result.c03Certification = finalRun.c03Certification;
+    result.printingLifecycleCertification = finalRun.printingLifecycleCertification;
     result.exactCatalogTamperCertification = finalRun.catalogTamperResults.length === 9;
     result.generatedPoliciesCertified = policies.count;
     result.columnPrivilegeCellsCertified = privileges.cells;

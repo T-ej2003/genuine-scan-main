@@ -15,7 +15,7 @@ import {
   sessionClientMessageSchema,
   sessionHelloSchema,
   type TrustedPrinterAgentSession,
-} from "./printerAgentSessionService";
+} from "./printerAgentSessionBoundaryService";
 
 type SessionSocketState = {
   trusted: TrustedPrinterAgentSession | null;

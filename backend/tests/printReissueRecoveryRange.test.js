@@ -93,17 +93,20 @@ assert.equal(projectedLargeRun.requestedCount, 10, "Projected replacement count 
 const serviceSource = read("backend/src/services/printReissueService.ts");
 const workflowSource = read("backend/src/services/printReissueRequestWorkflowService.ts");
 const controllerSource = read("backend/src/controllers/print-job/queryHandlers.ts");
+const printingSql = read("backend/src/rls-waves/session-c/c02/printingLifecycle.sql");
 
 assert(serviceSource.includes("findUnresolvedRecoveryRangeForBatch"), "Replacement printing must check unresolved recovery before allocating labels");
 assert(serviceSource.includes("replacementRangeStart") && serviceSource.includes("replacementRangeEnd"), "Replacement print jobs must carry backend-calculated recovery ranges");
 assert(serviceSource.includes("rangeStart: replacementRangeStart") && serviceSource.includes("rangeEnd: replacementRangeEnd"), "Replacement reservation must use the calculated range");
 assert(serviceSource.includes("projectPrintJobReissueSummaries"), "Large print jobs need an aggregate projection for reissue summaries");
-assert(workflowSource.includes("projectPrintJobReissueSummaries"), "Reissue list/create responses must use projected recovery summaries");
+assert(workflowSource.includes('operation: "REISSUE_LIST"'), "Reissue list responses must use the capability-bound projection");
 assert(!workflowSource.includes("items:"), "Reissue request list/review queries must not hydrate print session items");
 assert(serviceSource.includes("PRINT_REISSUE_ORIGINAL_NOT_RECOVERABLE"), "Invalid original lifecycle must be a typed business conflict");
 assert(serviceSource.includes("NOT_ENOUGH_RECOVERABLE_LABELS"), "Invalid recovery range must return a typed 422-style conflict");
 assert(controllerSource.includes("error.statusCode") && controllerSource.includes("error?.details"), "Reissue print endpoint must return structured safe business errors");
 assert(!/displayCode\s*\|\|\s*[^,\n]*code/i.test(serviceSource), "Print reissue service must not fall back from displayCode to public QR identity");
 assert(serviceSource.includes("REPLACEMENT_QR_PUBLIC_CODE_MISSING"), "Replacement printing must fail closed when QRCode.code is missing");
+assert(printingSql.includes('q."displayCode">=request_row."affectedRangeStart"'), "replacement execution must enforce the approved lower range");
+assert(printingSql.includes('q."displayCode"<=request_row."affectedRangeEnd"'), "replacement execution must enforce the approved upper range");
 
 console.log("print reissue recovery range tests passed");

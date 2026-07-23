@@ -1,30 +1,31 @@
+import { randomBytes } from "crypto";
 import { PrinterCommandLanguage, PrinterConnectionType, PrinterDeliveryMode, UserRole } from "@prisma/client";
 import { Response } from "express";
 import { z } from "zod";
 
 import { AuthRequest } from "../middleware/auth";
 import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
-import { discoverPrinterCapabilities } from "../printing/registry/printerProfileService";
 import {
-  deleteNetworkDirectPrinter as deleteNetworkDirectPrinterRecord,
-  getRegisteredPrinterForManufacturer,
-  testRegisteredPrinterConnection,
-  upsertManagedNetworkPrinter,
+  hashGatewaySecret,
 } from "../services/printerRegistryService";
-import { listScopedManufacturerPrintersReadPayload } from "../services/stagingRlsManufacturerPrintersReadService";
-import { createAuditLog } from "../services/auditService";
-import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import { resolvePrinterConfirmationMode } from "../services/printConfirmationService";
-import { markPrinterTestLabelConfirmed } from "../services/printerTestLabelGateService";
+import { buildPrinterTestLabelFingerprint } from "../services/printerTestLabelGateService";
 import { printTestLabelForRegisteredPrinter } from "../services/printerTestLabelService";
 import { sanitizePrinterActionError } from "../utils/printerUserFacingErrors";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 import {
-  beginIdempotentAction,
-  completeIdempotentAction,
   extractIdempotencyKey,
 } from "../services/idempotencyService";
 import { mapPrinterIdempotencyError } from "./printerIdempotencyResponse";
+import {
+  administerPrintingPrinter,
+  beginPrintingIdempotency,
+  completePrintingIdempotency,
+  readPrintingProjection,
+} from "../rls-waves/session-c/c02/printingLifecycleRepository";
+import { testNetworkPrinterConnectivity } from "../services/networkPrinterSocketService";
+import { inspectIppPrinter } from "../printing/ippClient";
+import { supportsNetworkDirectPayload } from "../services/printPayloadService";
 
 const NETWORK_DIRECT_LANGUAGE_OPTIONS = [
   PrinterCommandLanguage.ZPL,
@@ -86,15 +87,12 @@ const printerIdParamSchema = z.object({
 const isOpsRole = (role?: UserRole | null) =>
   Boolean(
     role &&
-      [
+      ([
         UserRole.SUPER_ADMIN,
         UserRole.PLATFORM_SUPER_ADMIN,
         UserRole.LICENSEE_ADMIN,
-        UserRole.ORG_ADMIN,
-        UserRole.MANUFACTURER,
         UserRole.MANUFACTURER_ADMIN,
-        UserRole.MANUFACTURER_USER,
-      ].includes(role)
+      ] as UserRole[]).includes(role)
   );
 
 export const canConfigurePrinterNetworkEndpoint = (role?: UserRole | null) =>
@@ -104,18 +102,89 @@ export const canConfigurePrinterNetworkEndpoint = (role?: UserRole | null) =>
         UserRole.SUPER_ADMIN,
         UserRole.PLATFORM_SUPER_ADMIN,
         UserRole.LICENSEE_ADMIN,
-        UserRole.ORG_ADMIN,
       ] as UserRole[]).includes(role)
   );
 
 const canManagePrinterProfiles = canConfigurePrinterNetworkEndpoint;
 
-const resolveScope = async (req: AuthRequest) => ({
+const printingRequestId = (req: AuthRequest) =>
+  String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+
+const printingCapability = (req: AuthRequest) =>
+  String(req.databaseSessionCapability || "").trim();
+
+const recordPrinterEvidence = (
+  req: AuthRequest,
+  printerId: string,
+  operation: "AUDIT_TEST" | "AUDIT_TEST_LABEL_ATTENTION" | "AUDIT_TEST_LABEL_CONFIRMED" | "AUDIT_TEST_LABEL_QUEUED" | "AUDIT_DISCOVERY",
+  evidence: Record<string, unknown>
+) => administerPrintingPrinter({
+  capability: printingCapability(req),
+  requestId: printingRequestId(req),
+  operation,
+  printerId,
+  payload: { evidence },
+});
+
+const resolveScope = (req: AuthRequest) => ({
   userId: req.user!.userId,
   orgId: req.user?.orgId || null,
   licenseeId: getEffectiveLicenseeId(req),
-  licenseeIds: isManufacturerRole(req.user?.role) ? await resolveAccessibleLicenseeIdsForUser(req.user!) : null,
 });
+
+const validatePrinterTransport = async (req: AuthRequest, printer: any) => {
+  let ok = false;
+  let detail = "Printer is not ready.";
+  let latencyMs: number | null = null;
+  if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
+    const status = await readPrintingProjection({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "PRINTER_STATUS",
+      subjectId: req.user!.userId,
+    });
+    ok = Boolean(status?.trusted && status?.connected && status?.eligibleForPrinting);
+    detail = ok ? "Trusted connector and selected printer are ready." : String(status?.error || "Trusted connector is not ready.");
+  } else if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
+    const lastSeen = printer.gatewayLastSeenAt ? new Date(printer.gatewayLastSeenAt).getTime() : NaN;
+    ok = printer.gatewayStatus === "ONLINE" && Number.isFinite(lastSeen) && Date.now() - lastSeen < 120_000;
+    detail = ok ? "Site gateway is online." : String(printer.gatewayLastError || "Site gateway is offline.");
+  } else if (printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
+    const result = await testNetworkPrinterConnectivity({
+      ipAddress: String(printer.ipAddress || ""),
+      port: Number(printer.port || 9100),
+    });
+    latencyMs = result.latencyMs;
+    ok = supportsNetworkDirectPayload(printer);
+    detail = ok
+      ? `TCP connectivity validated in ${result.latencyMs}ms.`
+      : "Printer language/profile is not certified for direct dispatch.";
+  } else {
+    const result = await inspectIppPrinter({
+      host: printer.host,
+      port: printer.port,
+      resourcePath: printer.resourcePath,
+      tlsEnabled: printer.tlsEnabled,
+      printerUri: printer.printerUri,
+    });
+    ok = result.pdfSupported;
+    detail = ok
+      ? `IPP attributes validated at ${result.printerUri}.`
+      : "IPP endpoint does not advertise application/pdf.";
+  }
+  await administerPrintingPrinter({
+    capability: printingCapability(req),
+    requestId: printingRequestId(req),
+    operation: "UPDATE",
+    printerId: printer.id,
+    payload: { lastValidationStatus: ok ? "READY" : "BLOCKED", lastValidationMessage: detail },
+  });
+  return {
+    ok,
+    ...(latencyMs === null ? {} : { latencyMs }),
+    registryStatus: { state: ok ? "READY" : "BLOCKED", summary: detail, detail },
+  };
+};
 
 export const listPrinters = async (req: AuthRequest, res: Response) => {
   try {
@@ -124,10 +193,12 @@ export const listPrinters = async (req: AuthRequest, res: Response) => {
     }
 
     const includeInactive = String(req.query.includeInactive || "").trim().toLowerCase() === "true";
-    const rows = await listScopedManufacturerPrintersReadPayload({
-      user: req.user,
-      licenseeId: getEffectiveLicenseeId(req),
-      includeInactive,
+    const rows = await readPrintingProjection({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "PRINTER_LIST",
+      subjectId: req.user.userId,
+      options: { includeInactive },
     });
 
     return res.json({ success: true, data: rows });
@@ -148,39 +219,31 @@ export const createNetworkPrinter = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid printer payload" });
     }
 
-    const scope = await resolveScope(req);
-    if (!scope.licenseeId) {
+    const licenseeId = getEffectiveLicenseeId(req);
+    if (!licenseeId) {
       return res.status(400).json({ success: false, error: "licenseeId is required to register a network printer" });
     }
-    const result = await upsertManagedNetworkPrinter({
-      userId: scope.userId,
-      orgId: scope.orgId,
-      licenseeId: scope.licenseeId,
-      ...parsed.data,
-    });
-    const printer = result.printer;
-
-    await createAuditLog({
-      userId: scope.userId,
-      licenseeId: scope.licenseeId || undefined,
-      action: "PRINTER_REGISTERED",
-      entityType: "Printer",
-      entityId: printer.id,
-      details: {
-        connectionType: printer.connectionType,
-        commandLanguage: printer.commandLanguage,
-        ipAddress: printer.ipAddress,
-        port: printer.port,
+    const gatewayProvisioningSecret =
+      parsed.data.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY
+        ? randomBytes(24).toString("base64url")
+        : null;
+    const printer = await administerPrintingPrinter({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "CREATE",
+      payload: {
+        ...parsed.data,
+        licenseeId,
+        gatewayId: gatewayProvisioningSecret ? `gw-${randomBytes(9).toString("hex")}` : null,
+        gatewaySecretHash: gatewayProvisioningSecret ? hashGatewaySecret(gatewayProvisioningSecret) : null,
       },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
     });
 
     return res.status(201).json({
       success: true,
       data: {
         ...printer,
-        gatewayProvisioningSecret: result.gatewayProvisioningSecret || null,
+        gatewayProvisioningSecret,
       },
     });
   } catch (error: any) {
@@ -209,14 +272,11 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid printer payload" });
     }
 
-    const scope = await resolveScope(req);
-    const current = await getRegisteredPrinterForManufacturer({
-      printerId,
-      userId: scope.userId,
-      orgId: scope.orgId,
-      licenseeId: scope.licenseeId,
-      licenseeIds: scope.licenseeIds,
-      includeInactive: true,
+    const current = await readPrintingProjection({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "PRINTER",
+      subjectId: printerId,
     });
     if (!current) return res.status(404).json({ success: false, error: "Printer not found" });
     if (current.connectionType === PrinterConnectionType.LOCAL_AGENT) {
@@ -224,50 +284,7 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
     }
 
     const connectionType = parsed.data.connectionType || current.connectionType;
-    const upsertPayload = {
-      printerId,
-      userId: scope.userId,
-      orgId: scope.orgId,
-      licenseeId: scope.licenseeId || current.licenseeId || null,
-      name: parsed.data.name || current.name,
-      vendor: parsed.data.vendor ?? current.vendor,
-      model: parsed.data.model ?? current.model,
-      connectionType,
-      ipAddress:
-        connectionType === PrinterConnectionType.NETWORK_DIRECT
-          ? ("ipAddress" in parsed.data ? parsed.data.ipAddress : current.ipAddress) || ""
-          : null,
-      host:
-        connectionType === PrinterConnectionType.NETWORK_IPP
-          ? ("host" in parsed.data ? parsed.data.host : current.host) || ""
-          : null,
-      port: parsed.data.port ?? current.port ?? (connectionType === PrinterConnectionType.NETWORK_IPP ? 631 : 9100),
-      resourcePath:
-        connectionType === PrinterConnectionType.NETWORK_IPP
-          ? ("resourcePath" in parsed.data ? parsed.data.resourcePath : current.resourcePath) || "/ipp/print"
-          : null,
-      tlsEnabled:
-        connectionType === PrinterConnectionType.NETWORK_IPP
-          ? ("tlsEnabled" in parsed.data ? parsed.data.tlsEnabled : current.tlsEnabled) ?? true
-          : false,
-      printerUri:
-        connectionType === PrinterConnectionType.NETWORK_IPP
-          ? ("printerUri" in parsed.data ? parsed.data.printerUri : current.printerUri) || undefined
-          : undefined,
-      deliveryMode:
-        connectionType === PrinterConnectionType.NETWORK_IPP || connectionType === PrinterConnectionType.NETWORK_DIRECT
-          ? ("deliveryMode" in parsed.data ? parsed.data.deliveryMode : current.deliveryMode) ?? PrinterDeliveryMode.DIRECT
-          : PrinterDeliveryMode.DIRECT,
-      rotateGatewaySecret: "rotateGatewaySecret" in parsed.data ? parsed.data.rotateGatewaySecret : false,
-      commandLanguage:
-        connectionType === PrinterConnectionType.NETWORK_DIRECT
-          ? (("commandLanguage" in parsed.data ? parsed.data.commandLanguage : current.commandLanguage) as PrinterCommandLanguage)
-          : PrinterCommandLanguage.AUTO,
-      capabilitySummary: parsed.data.capabilitySummary ?? ((current.capabilitySummary as any) || null),
-      calibrationProfile: parsed.data.calibrationProfile ?? ((current.calibrationProfile as any) || null),
-      isActive: parsed.data.isActive ?? current.isActive,
-      isDefault: parsed.data.isDefault ?? current.isDefault,
-    };
+    const upsertPayload = { ...parsed.data, connectionType };
 
     if ("rotateGatewaySecret" in parsed.data && parsed.data.rotateGatewaySecret) {
       const approval = await createSensitiveActionApproval({
@@ -278,8 +295,8 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
           orgId: req.user.orgId || null,
           licenseeId: req.user.licenseeId || null,
         },
-        orgId: scope.orgId || null,
-        licenseeId: scope.licenseeId || current.licenseeId || null,
+        orgId: req.user.orgId || null,
+        licenseeId: getEffectiveLicenseeId(req) || current.licenseeId || null,
         entityType: "Printer",
         entityId: printerId,
         summary: {
@@ -291,6 +308,10 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
         payload: upsertPayload,
         ipAddress: req.ip,
         userAgent: req.get("user-agent") || null,
+        securityContext: {
+          databaseSessionCapability: printingCapability(req),
+          requestId: printingRequestId(req),
+        },
       });
 
       return res.status(202).json({
@@ -304,31 +325,19 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const result = await upsertManagedNetworkPrinter(upsertPayload);
-    const printer = result.printer;
-
-    await createAuditLog({
-      userId: scope.userId,
-      licenseeId: scope.licenseeId || undefined,
-      action: "PRINTER_UPDATED",
-      entityType: "Printer",
-      entityId: printer.id,
-      details: {
-        connectionType: printer.connectionType,
-        commandLanguage: printer.commandLanguage,
-        ipAddress: printer.ipAddress,
-        port: printer.port,
-        isActive: printer.isActive,
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
+    const printer = await administerPrintingPrinter({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "UPDATE",
+      printerId,
+      payload: upsertPayload,
     });
 
     return res.json({
       success: true,
       data: {
         ...printer,
-        gatewayProvisioningSecret: result.gatewayProvisioningSecret || null,
+        gatewayProvisioningSecret: null,
       },
     });
   } catch (error: any) {
@@ -352,31 +361,19 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
     }
     const printerId = paramsParsed.data.id;
 
-    const scope = await resolveScope(req);
-    const printer = await getRegisteredPrinterForManufacturer({
-      printerId,
-      userId: scope.userId,
-      orgId: scope.orgId,
-      licenseeId: scope.licenseeId,
-      licenseeIds: scope.licenseeIds,
-      includeInactive: true,
+    const printer = await readPrintingProjection({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "PRINTER",
+      subjectId: printerId,
     });
     if (!printer) return res.status(404).json({ success: false, error: "Printer not found" });
 
-    const result = await testRegisteredPrinterConnection({ printer, userId: scope.userId });
+    const result = await validatePrinterTransport(req, printer);
 
-    await createAuditLog({
-      userId: scope.userId,
-      licenseeId: scope.licenseeId || undefined,
-      action: "PRINTER_TESTED",
-      entityType: "Printer",
-      entityId: printer.id,
-      details: {
+    await recordPrinterEvidence(req, printer.id, "AUDIT_TEST", {
         connectionType: printer.connectionType,
         result,
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
     });
 
     return res.json({ success: true, data: result });
@@ -401,17 +398,20 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
     }
     const printerId = paramsParsed.data.id;
 
-    const scope = await resolveScope(req);
+    const scope = resolveScope(req);
     let idempotency;
     try {
-      idempotency = await beginIdempotentAction({
-        action: "printer_test_label",
-        scope: `tenant:${scope.licenseeId || scope.orgId || "none"}:user:${scope.userId}:printer:${printerId}`,
-        idempotencyKey: extractIdempotencyKey(req.headers as any, req.body as any),
-        requestPayload: { printerId },
-        required: true,
-        ttlSeconds: 300,
-      });
+      const key = String(extractIdempotencyKey(req.headers as any, req.body as any) || "").trim();
+      if (!key) throw new Error("IDEMPOTENCY_KEY_REQUIRED");
+      const context = {
+        capability: printingCapability(req),
+        requestId: printingRequestId(req),
+        action: "PRINTER_TEST_LABEL" as const,
+        actorScope: `tenant:${scope.licenseeId || scope.orgId || "none"}:user:${scope.userId}:printer:${printerId}`,
+        key,
+        payload: { printerId },
+      };
+      idempotency = { ...(await beginPrintingIdempotency(context)), context };
     } catch (error) {
       const mapped = mapPrinterIdempotencyError(error);
       if (mapped) return res.status(mapped.status).json(mapped.payload);
@@ -422,18 +422,16 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       return res.status(idempotency.statusCode || 200).json(idempotency.responsePayload || { success: true });
     }
 
-    const printer = await getRegisteredPrinterForManufacturer({
-      printerId,
-      userId: scope.userId,
-      orgId: scope.orgId,
-      licenseeId: scope.licenseeId,
-      licenseeIds: scope.licenseeIds,
-      includeInactive: true,
+    const printer = await readPrintingProjection({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "PRINTER",
+      subjectId: printerId,
     });
     if (!printer) return res.status(404).json({ success: false, error: "Printer not found" });
 
     const confirmationMode = resolvePrinterConfirmationMode(printer as any);
-    const validation = await testRegisteredPrinterConnection({ printer, userId: scope.userId });
+    const validation = await validatePrinterTransport(req, printer);
 
     if (!validation.ok) {
       const data = {
@@ -451,54 +449,65 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
         confirmedAt: null,
       };
 
-      await createAuditLog({
-        userId: scope.userId,
-        licenseeId: scope.licenseeId || undefined,
-        action: "PRINTER_TEST_LABEL_ATTENTION",
-        entityType: "Printer",
-        entityId: printer.id,
-        details: {
+      await recordPrinterEvidence(req, printer.id, "AUDIT_TEST_LABEL_ATTENTION", {
           connectionType: printer.connectionType,
           deliveryMode: printer.deliveryMode,
           confirmationMode,
           validation,
           result: data,
-        },
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent") || undefined,
       });
 
       const responsePayload = { success: true, data };
-      await completeIdempotentAction({ keyHash: idempotency.keyHash, statusCode: 200, responsePayload });
+      await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
       return res.json(responsePayload);
     }
 
     try {
-      const result = await printTestLabelForRegisteredPrinter({ printer: printer as any, actorUserId: scope.userId });
+      const result = await printTestLabelForRegisteredPrinter({
+        printer: printer as any,
+        actorUserId: scope.userId,
+        boundary: {
+          capability: printingCapability(req),
+          requestId: printingRequestId(req),
+        },
+      });
       if (result.outcome === "confirmed") {
-        await markPrinterTestLabelConfirmed({
-          printer, confirmedAt: result.confirmedAt, connectionType: result.connectionType, deviceJobRef: result.deviceJobRef,
+        const metadata = printer.metadata && typeof printer.metadata === "object" && !Array.isArray(printer.metadata)
+          ? printer.metadata
+          : {};
+        await administerPrintingPrinter({
+          capability: printingCapability(req),
+          requestId: printingRequestId(req),
+          operation: "UPDATE",
+          printerId: printer.id,
+          payload: {
+            metadata: {
+              ...metadata,
+              lastTestLabelConfirmedAt: result.confirmedAt,
+              lastTestLabelConnectionType: result.connectionType,
+              lastTestLabelDeviceJobRef: result.deviceJobRef || null,
+              lastTestLabelFingerprint: buildPrinterTestLabelFingerprint(printer),
+            },
+          },
         });
       }
 
-      await createAuditLog({
-        userId: scope.userId,
-        licenseeId: scope.licenseeId || undefined,
-        action: result.outcome === "confirmed" ? "PRINTER_TEST_LABEL_CONFIRMED" : "PRINTER_TEST_LABEL_QUEUED",
-        entityType: "Printer",
-        entityId: printer.id,
-        details: {
+      if (!(printer.connectionType === PrinterConnectionType.LOCAL_AGENT && result.outcome === "queued")) {
+        await recordPrinterEvidence(
+          req,
+          printer.id,
+          result.outcome === "confirmed" ? "AUDIT_TEST_LABEL_CONFIRMED" : "AUDIT_TEST_LABEL_QUEUED",
+          {
           connectionType: printer.connectionType,
           deliveryMode: printer.deliveryMode,
           validation,
           result,
-        },
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent") || undefined,
-      });
+          }
+        );
+      }
 
       const responsePayload = { success: true, data: result };
-      await completeIdempotentAction({ keyHash: idempotency.keyHash, statusCode: 200, responsePayload });
+      await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
       return res.json(responsePayload);
     } catch (error: any) {
       const data = {
@@ -513,26 +522,17 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
         confirmedAt: null,
       };
 
-      await createAuditLog({
-        userId: scope.userId,
-        licenseeId: scope.licenseeId || undefined,
-        action: "PRINTER_TEST_LABEL_ATTENTION",
-        entityType: "Printer",
-        entityId: printer.id,
-        details: {
+      await recordPrinterEvidence(req, printer.id, "AUDIT_TEST_LABEL_ATTENTION", {
           connectionType: printer.connectionType,
           deliveryMode: printer.deliveryMode,
           confirmationMode,
           validation,
           error: error?.message || null,
           result: data,
-        },
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent") || undefined,
       });
 
       const responsePayload = { success: true, data };
-      await completeIdempotentAction({ keyHash: idempotency.keyHash, statusCode: 200, responsePayload });
+      await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
       return res.json(responsePayload);
     }
   } catch (error: any) {
@@ -556,14 +556,11 @@ export const discoverPrinter = async (req: AuthRequest, res: Response) => {
     }
     const printerId = paramsParsed.data.id;
 
-    const scope = await resolveScope(req);
-    const printer = await getRegisteredPrinterForManufacturer({
-      printerId,
-      userId: scope.userId,
-      orgId: scope.orgId,
-      licenseeId: scope.licenseeId,
-      licenseeIds: scope.licenseeIds,
-      includeInactive: true,
+    const printer = await readPrintingProjection({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "PRINTER",
+      subjectId: printerId,
     });
     if (!printer) return res.status(404).json({ success: false, error: "Printer not found" });
 
@@ -574,26 +571,24 @@ export const discoverPrinter = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const validation = await testRegisteredPrinterConnection({
-      printer,
-      userId: scope.userId,
-    });
-    const certification = await discoverPrinterCapabilities(printer);
+    const validation = await validatePrinterTransport(req, printer);
+    const certification = {
+      printerId: printer.id,
+      printerProfileId: null,
+      status: validation.ok ? "CERTIFIED" : "NEEDS_REVIEW",
+      summary: validation.ok
+        ? "Printer transport discovered and certified."
+        : "Printer transport needs review before production print.",
+      warnings: validation.ok ? [] : [validation.registryStatus.detail],
+      mismatches: validation.ok ? [] : [validation.registryStatus.detail],
+      lastVerifiedAt: new Date().toISOString(),
+    };
 
-    await createAuditLog({
-      userId: scope.userId,
-      licenseeId: scope.licenseeId || undefined,
-      action: "PRINTER_DISCOVERED",
-      entityType: "Printer",
-      entityId: printer.id,
-      details: {
+    await recordPrinterEvidence(req, printer.id, "AUDIT_DISCOVERY", {
         connectionType: printer.connectionType,
         commandLanguage: printer.commandLanguage,
         validation,
         certification,
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
     });
 
     return res.json({
@@ -624,38 +619,22 @@ export const deleteNetworkPrinter = async (req: AuthRequest, res: Response) => {
     }
     const printerId = paramsParsed.data.id;
 
-    const scope = await resolveScope(req);
-    const printer = await getRegisteredPrinterForManufacturer({
-      printerId,
-      userId: scope.userId,
-      orgId: scope.orgId,
-      licenseeId: scope.licenseeId,
-      licenseeIds: scope.licenseeIds,
-      includeInactive: true,
+    const printer = await readPrintingProjection({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "PRINTER",
+      subjectId: printerId,
     });
     if (!printer) return res.status(404).json({ success: false, error: "Printer not found" });
     if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
       return res.status(400).json({ success: false, error: "Local-agent printers are managed automatically from the workstation agent." });
     }
 
-    const deletedPrinter = await deleteNetworkDirectPrinterRecord({
+    const deletedPrinter = await administerPrintingPrinter({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "DELETE",
       printerId: printer.id,
-    });
-
-    await createAuditLog({
-      userId: scope.userId,
-      licenseeId: scope.licenseeId || deletedPrinter.licenseeId || undefined,
-      action: "PRINTER_REMOVED",
-      entityType: "Printer",
-      entityId: deletedPrinter.id,
-      details: {
-        connectionType: deletedPrinter.connectionType,
-        commandLanguage: deletedPrinter.commandLanguage,
-        ipAddress: deletedPrinter.ipAddress,
-        port: deletedPrinter.port,
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
     });
 
     return res.json({

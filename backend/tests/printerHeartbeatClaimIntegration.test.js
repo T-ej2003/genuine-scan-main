@@ -179,6 +179,24 @@ mockModule("config/database.js", {
     },
   },
 });
+mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
+  resolvePrintingConnectorIdentity: async ({ agentId, deviceFingerprint, printerSelector }) => {
+    const registration = registrations.find(
+      (entry) =>
+        entry.agentId === agentId &&
+        entry.deviceFingerprint === deviceFingerprint &&
+        entry.revokedAt === null &&
+        entry.trustStatus === PrinterTrustStatus.TRUSTED
+    );
+    if (!registration) throw new Error("CONNECTOR_BOUNDARY_DENIED");
+    return {
+      registration,
+      printer: { id: "printer-db-1", nativePrinterId: printerSelector, isActive: true },
+      eligibleForPrinting: false,
+    };
+  },
+  recordConnectorEvent: async () => ({ available: false }),
+});
 
 const {
   buildPrinterAgentActionPayload,

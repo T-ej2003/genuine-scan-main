@@ -4,51 +4,33 @@ import {
   NotificationAudience,
   NotificationChannel,
   PrintDispatchMode,
-  PrintPayloadType,
   Prisma,
-  PrinterConnectionType,
-  PrinterDeliveryMode,
   UserRole,
 } from "@prisma/client";
 import { z } from "zod";
 
-import prisma from "../../config/database";
 import { AuthRequest } from "../../middleware/auth";
 import { createRoleNotifications } from "../../services/notificationService";
-import { getPrinterConnectionStatusForUser } from "../../services/printerConnectionService";
 import {
-  resolvePayloadType,
-  supportsNetworkDirectPayload,
-} from "../../services/printPayloadService";
-import { getRegisteredPrinterForManufacturer } from "../../services/printerRegistryService";
-import { testNetworkPrinterConnectivity } from "../../services/networkPrinterSocketService";
-import { inspectIppPrinter } from "../../printing/ippClient";
-import { resolvePrinterConfirmationMode } from "../../services/printConfirmationService";
-import { assertPrinterTestLabelConfirmed } from "../../services/printerTestLabelGateService";
-import {
-  beginIdempotentAction,
   extractIdempotencyKey,
-  type IdempotencyBeginResult,
 } from "../../services/idempotencyService";
-import { resolveLocalAgentPrinterMapping } from "../../services/localAgentPrinterMappingService";
+import {
+  abortPrintingIdempotency,
+  beginPrintingIdempotency,
+  completePrintingIdempotency,
+} from "../../rls-waves/session-c/c02/printingLifecycleRepository";
 
-const MANUFACTURER_ROLES: UserRole[] = [
-  UserRole.MANUFACTURER,
-  UserRole.MANUFACTURER_ADMIN,
-  UserRole.MANUFACTURER_USER,
-];
+const MANUFACTURER_ROLES: UserRole[] = [UserRole.MANUFACTURER_ADMIN];
 export const PRINT_OPERATIONS_ROLES: UserRole[] = [
   UserRole.SUPER_ADMIN,
   UserRole.PLATFORM_SUPER_ADMIN,
   UserRole.LICENSEE_ADMIN,
-  UserRole.ORG_ADMIN,
   ...MANUFACTURER_ROLES,
 ];
 export const PRINT_REISSUE_ROLES: UserRole[] = [
   UserRole.SUPER_ADMIN,
   UserRole.PLATFORM_SUPER_ADMIN,
   UserRole.LICENSEE_ADMIN,
-  UserRole.ORG_ADMIN,
 ];
 
 const isManufacturerRole = (role?: UserRole | null) =>
@@ -161,260 +143,8 @@ export const ensurePrintReissueApprover = (req: AuthRequest, res: Response) => {
   return req.user;
 };
 
-export const getManufacturerPrintJob = async (jobId: string, userId: string) =>
-  prisma.printJob.findFirst({
-    where: { id: jobId, manufacturerId: userId },
-    include: {
-      batch: { select: { id: true, name: true, licenseeId: true } },
-      printer: true,
-      printSession: true,
-    },
-  });
-
 export const generatePrintJobNumber = () =>
   `PJ-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${randomBytes(4).toString("hex").toUpperCase()}`;
-
-const ensureTrustedPrinterConnected = async (userId: string) => {
-  const printerStatus = await getPrinterConnectionStatusForUser(userId);
-  if (!printerStatus.connected || !printerStatus.eligibleForPrinting) {
-    throw Object.assign(new Error("PRINTER_NOT_TRUSTED"), { printerStatus });
-  }
-  return printerStatus;
-};
-
-export const ensureSelectedPrinterReady = async (params: {
-  printerId: string;
-  userId: string;
-  orgId?: string | null;
-  licenseeId?: string | null;
-}) => {
-  const printer = await getRegisteredPrinterForManufacturer({
-    printerId: params.printerId,
-    userId: params.userId,
-    orgId: params.orgId,
-    licenseeId: params.licenseeId,
-    includeInactive: true,
-  });
-
-  if (!printer) {
-    throw new Error("PRINTER_NOT_FOUND");
-  }
-  if (!printer.isActive) {
-    throw new Error("PRINTER_INACTIVE");
-  }
-
-  if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
-    const printerStatus = await ensureTrustedPrinterConnected(params.userId);
-    const resolvedPrinter = await resolveLocalAgentPrinterMapping({ printer, printerStatus });
-    const activePrinterId = String(printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
-    if (resolvedPrinter.nativePrinterId && activePrinterId && resolvedPrinter.nativePrinterId !== activePrinterId) {
-      throw Object.assign(new Error("PRINTER_SELECTION_MISMATCH"), { printerStatus, printer });
-    }
-    assertPrinterTestLabelConfirmed(resolvedPrinter);
-    return {
-      printer: resolvedPrinter,
-      printerStatus,
-      printMode: PrintDispatchMode.LOCAL_AGENT,
-      payloadType: resolvePayloadType(resolvedPrinter as any),
-    };
-  }
-
-  if (printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
-    const confirmationMode = resolvePrinterConfirmationMode(printer as any);
-    if (confirmationMode === "DIRECT_NOT_ALLOWED") {
-      const detail =
-        "This raw industrial printer does not yet expose a strict completion signal for safe direct printing. Use the workstation connector path or a certified Zebra profile.";
-      await prisma.printer.update({
-        where: { id: printer.id },
-        data: {
-          lastValidatedAt: new Date(),
-          lastValidationStatus: "BLOCKED",
-          lastValidationMessage: detail,
-        },
-      });
-      throw Object.assign(new Error("PRINTER_NETWORK_CONFIRMATION_UNSUPPORTED"), { reason: detail, printer });
-    }
-
-    if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
-      if (!printer.gatewayId || !printer.gatewaySecretHash) {
-        throw Object.assign(new Error("PRINTER_GATEWAY_CONFIG_INVALID"), { printer });
-      }
-      const lastSeenAt = printer.gatewayLastSeenAt ? new Date(printer.gatewayLastSeenAt) : null;
-      const stale =
-        !lastSeenAt ||
-        Number.isNaN(lastSeenAt.getTime()) ||
-        Date.now() - lastSeenAt.getTime() >
-          (Math.max(10_000, Number(process.env.PRINT_GATEWAY_HEARTBEAT_TTL_MS || 45_000) || 45_000));
-      if (stale) {
-        throw Object.assign(new Error("PRINTER_GATEWAY_OFFLINE"), {
-          reason: printer.gatewayLastError || "Site gateway is offline.",
-          printer,
-        });
-      }
-      assertPrinterTestLabelConfirmed(printer);
-      return {
-        printer,
-        printerStatus: null,
-        printMode: PrintDispatchMode.NETWORK_DIRECT,
-        payloadType: resolvePayloadType(printer as any),
-      };
-    }
-
-    if (!printer.ipAddress || !printer.port) {
-      throw new Error("PRINTER_NETWORK_CONFIG_INVALID");
-    }
-
-    if (!supportsNetworkDirectPayload(printer as any)) {
-      const detail =
-        "Network-direct printing currently supports certified ZPL, TSPL, EPL, DPL, Honeywell, IPL, SBPL, ZSim, and CPCL profiles only. Use the managed connector path for anything else.";
-      await prisma.printer.update({
-        where: { id: printer.id },
-        data: {
-          lastValidatedAt: new Date(),
-          lastValidationStatus: "BLOCKED",
-          lastValidationMessage: detail,
-        },
-      });
-      throw Object.assign(new Error("PRINTER_NETWORK_LANGUAGE_UNSUPPORTED"), { reason: detail, printer });
-    }
-
-    try {
-      const result = await testNetworkPrinterConnectivity({
-        ipAddress: printer.ipAddress,
-        port: printer.port,
-      });
-      await prisma.printer.update({
-        where: { id: printer.id },
-        data: {
-          lastValidatedAt: new Date(),
-          lastValidationStatus: "READY",
-          lastValidationMessage: `TCP connectivity validated in ${result.latencyMs}ms`,
-        },
-      });
-    } catch (error: any) {
-      const detail = error?.message || `Could not reach ${printer.ipAddress}:${printer.port}`;
-      await prisma.printer.update({
-        where: { id: printer.id },
-        data: {
-          lastValidatedAt: new Date(),
-          lastValidationStatus: "OFFLINE",
-          lastValidationMessage: detail,
-        },
-      });
-      throw Object.assign(new Error("PRINTER_NETWORK_UNREACHABLE"), {
-        reason: detail,
-        printer,
-      });
-    }
-
-    assertPrinterTestLabelConfirmed(printer);
-    return {
-      printer,
-      printerStatus: null,
-      printMode: PrintDispatchMode.NETWORK_DIRECT,
-      payloadType: resolvePayloadType(printer as any),
-    };
-  }
-
-  if (printer.connectionType === PrinterConnectionType.NETWORK_IPP) {
-    if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
-      if (!printer.gatewayId || !printer.gatewaySecretHash) {
-        throw Object.assign(new Error("PRINTER_GATEWAY_CONFIG_INVALID"), { printer });
-      }
-      const lastSeenAt = printer.gatewayLastSeenAt ? new Date(printer.gatewayLastSeenAt) : null;
-      const stale =
-        !lastSeenAt ||
-        Number.isNaN(lastSeenAt.getTime()) ||
-        Date.now() - lastSeenAt.getTime() >
-          (Math.max(10_000, Number(process.env.PRINT_GATEWAY_HEARTBEAT_TTL_MS || 45_000) || 45_000));
-      if (stale) {
-        throw Object.assign(new Error("PRINTER_GATEWAY_OFFLINE"), {
-          reason: printer.gatewayLastError || "Site gateway is offline.",
-          printer,
-        });
-      }
-      assertPrinterTestLabelConfirmed(printer);
-      return {
-        printer,
-        printerStatus: null,
-        printMode: PrintDispatchMode.NETWORK_IPP,
-        payloadType: PrintPayloadType.PDF,
-      };
-    }
-
-    try {
-      const inspection = await inspectIppPrinter({
-        host: printer.host,
-        port: printer.port,
-        resourcePath: printer.resourcePath,
-        tlsEnabled: printer.tlsEnabled,
-        printerUri: printer.printerUri,
-      });
-      if (!inspection.pdfSupported) {
-        const detail = `IPP endpoint ${inspection.printerUri} is reachable, but application/pdf is not advertised by the printer.`;
-        await prisma.printer.update({
-          where: { id: printer.id },
-          data: {
-            lastValidatedAt: new Date(),
-            lastValidationStatus: "BLOCKED",
-            lastValidationMessage: detail,
-            printerUri: inspection.printerUri,
-            capabilitySummary: {
-              ...(printer.capabilitySummary as Record<string, unknown> | null),
-              documentFormats: inspection.documentFormats,
-              uriSecurity: inspection.uriSecurity,
-              ippVersions: inspection.ippVersions,
-              printerState: inspection.printerState,
-            } as any,
-          },
-        });
-        throw Object.assign(new Error("PRINTER_IPP_FORMAT_UNSUPPORTED"), { reason: detail, printer });
-      }
-      await prisma.printer.update({
-        where: { id: printer.id },
-        data: {
-          lastValidatedAt: new Date(),
-          lastValidationStatus: "READY",
-          lastValidationMessage: `IPP printer validated at ${inspection.printerUri}`,
-          printerUri: inspection.printerUri,
-          capabilitySummary: {
-            ...(printer.capabilitySummary as Record<string, unknown> | null),
-            documentFormats: inspection.documentFormats,
-            uriSecurity: inspection.uriSecurity,
-            ippVersions: inspection.ippVersions,
-            printerState: inspection.printerState,
-          } as any,
-        },
-      });
-      assertPrinterTestLabelConfirmed({ ...printer, printerUri: inspection.printerUri });
-      return {
-        printer: {
-          ...printer,
-          printerUri: inspection.printerUri,
-        },
-        printerStatus: null,
-        printMode: PrintDispatchMode.NETWORK_IPP,
-        payloadType: PrintPayloadType.PDF,
-      };
-    } catch (error: any) {
-      if (String(error?.message || "").includes("PRINTER_IPP_FORMAT_UNSUPPORTED")) {
-        throw error;
-      }
-      const detail = error?.message || "IPP printer validation failed.";
-      await prisma.printer.update({
-        where: { id: printer.id },
-        data: {
-          lastValidatedAt: new Date(),
-          lastValidationStatus: "OFFLINE",
-          lastValidationMessage: detail,
-        },
-      });
-      throw Object.assign(new Error("PRINTER_IPP_UNREACHABLE"), { reason: detail, printer });
-    }
-  }
-
-  throw new Error("PRINTER_MODE_UNSUPPORTED");
-};
 
 export const notifySystemPrintEvent = async (params: {
   licenseeId?: string | null;
@@ -477,16 +207,34 @@ export const beginPrintActionIdempotency = async (params: {
   scope: string;
   payload?: any;
 }) => {
-  return beginIdempotentAction({
-    action: params.action,
-    scope: params.scope,
-    idempotencyKey: extractIdempotencyKey(params.req.headers as any, params.req.body as any),
-    requestPayload: params.payload ?? null,
-    required: true,
-  });
+  if (params.action !== "print_job_create") throw new Error("IDEMPOTENCY_ACTION_REQUIRED");
+  const key = String(extractIdempotencyKey(params.req.headers as any, params.req.body as any) || "").trim();
+  if (!key) throw new Error("IDEMPOTENCY_KEY_REQUIRED");
+  const context = {
+    capability: String(params.req.databaseSessionCapability || ""),
+    requestId: String((params.req as AuthRequest & { requestId?: string }).requestId || ""),
+    action: "PRINT_JOB_CREATE" as const,
+    actorScope: params.scope,
+    key,
+    payload: params.payload ?? null,
+  };
+  return { ...(await beginPrintingIdempotency(context)), context };
 };
 
-export const replayIdempotentResponseIfAny = (idempotency: IdempotencyBeginResult<any>, res: Response) => {
+export const completePrintActionIdempotency = (
+  idempotency: Awaited<ReturnType<typeof beginPrintActionIdempotency>>,
+  statusCode: number,
+  responsePayload: Record<string, unknown>
+) => completePrintingIdempotency({ ...idempotency.context, statusCode, responsePayload });
+
+export const abortPrintActionIdempotency = (
+  idempotency: Awaited<ReturnType<typeof beginPrintActionIdempotency>>
+) => abortPrintingIdempotency(idempotency.context);
+
+export const replayIdempotentResponseIfAny = (
+  idempotency: Awaited<ReturnType<typeof beginPrintActionIdempotency>>,
+  res: Response
+) => {
   if (!idempotency.replayed) return false;
   return res.status(idempotency.statusCode || 200).json(idempotency.responsePayload || { success: true });
 };

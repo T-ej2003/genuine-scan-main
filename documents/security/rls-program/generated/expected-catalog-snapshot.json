@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168",
+  "sourceContractSha256": "745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -45,7 +45,7 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "1c91053ca3d9cc83d493b3979b8177073b6d9af04378ed02b88041b99f18f17f"
+      "sha256": "3afc44f050b13e5aa3cf9cb6693c58974ff308ee23dd230bc6dc61dc17c41c76"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
@@ -53,7 +53,7 @@
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
-      "sha256": "e4f60b4d9ac79c03bd2f9349490dcd747d6176de946d75f9b916c50789d9c571"
+      "sha256": "b58bcb4fde768190c532a98fcb349fecc4f6486f0272cfa5c19be380f0117fc4"
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
@@ -65,7 +65,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "e46957d58946ebcc33f8a8b7d076dd3705bcc433f9c244dfd4a44c415377761f"
+      "sha256": "1f6f3c7e285d0972b8deab1c3381c1f412d4110e18299b40e62bcfd1448117b0"
     },
     {
       "path": "backend/src/rls-waves/session-b/b01/b01RefreshRotationFunctions.sql",
@@ -1312,6 +1312,87 @@
     {
       "tableId": "table-action-idempotency-key",
       "table": "ActionIdempotencyKey",
+      "policyName": "printing_lifecycle_actionidempotencykey_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-idempotency-begin' AND \"keyHash\"=current_setting('app.printing_idempotency_key_hash',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-idempotency:ActionIdempotencyKey:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
+      "policyName": "printing_lifecycle_actionidempotencykey_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) LIKE 'printing-idempotency-%' AND \"keyHash\"=current_setting('app.printing_idempotency_key_hash',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-idempotency:ActionIdempotencyKey:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
+      "policyName": "printing_lifecycle_actionidempotencykey_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) IN ('printing-idempotency-begin','printing-idempotency-complete','printing-idempotency-abort') AND \"keyHash\"=current_setting('app.printing_idempotency_key_hash',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-idempotency:ActionIdempotencyKey:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-action-idempotency-key",
+      "table": "ActionIdempotencyKey",
       "policyName": "scheduled_capability_actionidempotencykey_insert",
       "command": "INSERT",
       "actors": [
@@ -1912,6 +1993,39 @@
     {
       "tableId": "table-audit-log",
       "table": "AuditLog",
+      "policyName": "printing_lifecycle_auditlog_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true) IN ('printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail'))) AND id=current_setting('app.printing_audit_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-control-job:AuditLog:INSERT",
+        "contract:release-fix-5-create-job:AuditLog:INSERT",
+        "contract:release-fix-5-printer-administration:AuditLog:INSERT",
+        "contract:release-fix-5-record-sample:AuditLog:INSERT",
+        "contract:release-fix-5-reissue-request:AuditLog:INSERT",
+        "contract:release-fix-5-release-batch:AuditLog:INSERT",
+        "contract:release-fix-5-test-label-job:AuditLog:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
       "policyName": "qr_system_auditlog_insert",
       "command": "INSERT",
       "actors": [
@@ -2415,6 +2529,73 @@
       "certificationStatus": "pending",
       "internalHelperOnly": true,
       "roleKey": "authOwner"
+    },
+    {
+      "tableId": "table-batch",
+      "table": "Batch",
+      "policyName": "printing_lifecycle_batch_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (id=current_setting('app.printing_batch_id',true) OR current_setting('app.printing_operation',true)='printing-readiness')) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND id=current_setting('app.printing_batch_id',true)) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-control-job:Batch:SELECT",
+        "contract:release-fix-5-create-job:Batch:SELECT",
+        "contract:release-fix-5-readiness:Batch:SELECT",
+        "contract:release-fix-5-record-sample:Batch:SELECT",
+        "contract:release-fix-5-reissue-request:Batch:SELECT",
+        "contract:release-fix-5-release-batch:Batch:SELECT",
+        "contract:release-fix-5-worker-network:Batch:SELECT",
+        "contract:release-fix-5-worker-reconcile:Batch:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-batch",
+      "table": "Batch",
+      "policyName": "printing_lifecycle_batch_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND id=current_setting('app.printing_batch_id',true) AND current_setting('app.printing_operation',true) IN ('printing-create-job','printing-sample-scan','printing-release')) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:Batch:UPDATE",
+        "contract:release-fix-5-create-job:Batch:UPDATE",
+        "contract:release-fix-5-gateway-job:Batch:UPDATE",
+        "contract:release-fix-5-record-sample:Batch:UPDATE",
+        "contract:release-fix-5-release-batch:Batch:UPDATE",
+        "contract:release-fix-5-worker-network:Batch:UPDATE",
+        "contract:release-fix-5-worker-reconcile:Batch:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-batch",
@@ -3599,6 +3780,41 @@
     {
       "tableId": "table-licensee",
       "table": "Licensee",
+      "policyName": "printing_lifecycle_licensee_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND id=current_setting('app.printing_licensee_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-registration:Licensee:SELECT",
+        "contract:release-fix-5-control-job:Licensee:SELECT",
+        "contract:release-fix-5-create-job:Licensee:SELECT",
+        "contract:release-fix-5-printer-administration:Licensee:SELECT",
+        "contract:release-fix-5-readiness:Licensee:SELECT",
+        "contract:release-fix-5-record-sample:Licensee:SELECT",
+        "contract:release-fix-5-reissue-request:Licensee:SELECT",
+        "contract:release-fix-5-release-batch:Licensee:SELECT",
+        "contract:release-fix-5-test-label-job:Licensee:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-licensee",
+      "table": "Licensee",
       "policyName": "qr_system_licensee_select",
       "command": "SELECT",
       "actors": [
@@ -4019,6 +4235,41 @@
     {
       "tableId": "table-manufacturer-licensee-link",
       "table": "ManufacturerLicenseeLink",
+      "policyName": "printing_lifecycle_manufacturerlicenseelink_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>''",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-registration:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-5-control-job:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-5-create-job:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-5-printer-administration:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-5-readiness:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-5-record-sample:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-5-reissue-request:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-5-release-batch:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-5-test-label-job:ManufacturerLicenseeLink:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-manufacturer-licensee-link",
+      "table": "ManufacturerLicenseeLink",
       "policyName": "qr_system_manufacturerlicenseelink_select",
       "command": "SELECT",
       "actors": [
@@ -4408,6 +4659,41 @@
     {
       "tableId": "table-organization",
       "table": "Organization",
+      "policyName": "printing_lifecycle_organization_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>''",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-registration:Organization:SELECT",
+        "contract:release-fix-5-control-job:Organization:SELECT",
+        "contract:release-fix-5-create-job:Organization:SELECT",
+        "contract:release-fix-5-printer-administration:Organization:SELECT",
+        "contract:release-fix-5-readiness:Organization:SELECT",
+        "contract:release-fix-5-record-sample:Organization:SELECT",
+        "contract:release-fix-5-reissue-request:Organization:SELECT",
+        "contract:release-fix-5-release-batch:Organization:SELECT",
+        "contract:release-fix-5-test-label-job:Organization:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-organization",
+      "table": "Organization",
       "policyName": "qr_system_organization_select",
       "command": "SELECT",
       "actors": [
@@ -4731,6 +5017,330 @@
       "internalHelperOnly": false
     },
     {
+      "tableId": "table-print-audit-event",
+      "table": "PrintAuditEvent",
+      "policyName": "printing_lifecycle_printauditevent_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"printJobId\"=current_setting('app.printing_job_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%' AND \"printJobId\"=current_setting('app.printing_job_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrintAuditEvent:INSERT",
+        "contract:release-fix-5-gateway-job:PrintAuditEvent:INSERT",
+        "contract:release-fix-5-record-sample:PrintAuditEvent:INSERT",
+        "contract:release-fix-5-worker-network:PrintAuditEvent:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-audit-event",
+      "table": "PrintAuditEvent",
+      "policyName": "printing_lifecycle_printauditevent_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND \"batchId\"=current_setting('app.printing_batch_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-readiness:PrintAuditEvent:SELECT",
+        "contract:release-fix-5-record-sample:PrintAuditEvent:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer",
+      "table": "Printer",
+      "policyName": "printing_lifecycle_printer_delete",
+      "command": "DELETE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-printer-admin-delete' AND id=current_setting('app.printing_printer_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-printer-administration:Printer:DELETE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer",
+      "table": "Printer",
+      "policyName": "printing_lifecycle_printer_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND ((current_setting('app.printing_operation',true)='printing-printer-admin-create' AND id=current_setting('app.printing_printer_id',true) AND \"licenseeId\"=current_setting('app.printing_licensee_id',true)) OR (current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND \"assignedUserId\"=current_setting('app.printing_user_id',true) AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-registration:Printer:INSERT",
+        "contract:release-fix-5-printer-administration:Printer:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer",
+      "table": "Printer",
+      "policyName": "printing_lifecycle_printer_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND ((\"printerRegistrationId\"=current_setting('app.printing_registration_id',true)) OR (current_setting('app.printing_operation',true) IN ('printing-connector-identity','printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail') AND \"gatewayId\"=current_setting('app.printing_gateway_id',true) AND \"gatewaySecretHash\"=current_setting('app.printing_gateway_secret_hash',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%' AND current_setting('app.printing_operation',true)='printing-worker-network' AND id=current_setting('app.printing_printer_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:Printer:SELECT",
+        "contract:release-fix-5-connector-identity:Printer:SELECT",
+        "contract:release-fix-5-connector-registration:Printer:SELECT",
+        "contract:release-fix-5-create-job:Printer:SELECT",
+        "contract:release-fix-5-gateway-job:Printer:SELECT",
+        "contract:release-fix-5-printer-administration:Printer:SELECT",
+        "contract:release-fix-5-reissue-request:Printer:SELECT",
+        "contract:release-fix-5-test-label-job:Printer:SELECT",
+        "contract:release-fix-5-worker-network:Printer:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer",
+      "table": "Printer",
+      "policyName": "printing_lifecycle_printer_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND ((current_setting('app.printing_operation',true) IN ('printing-printer-admin-update','printing-test-label-queue') AND id=current_setting('app.printing_printer_id',true)) OR (current_setting('app.printing_operation',true)='printing-printer-admin-relink' AND (id=current_setting('app.printing_printer_id',true) OR \"assignedUserId\"=current_setting('app.printing_user_id',true))) OR (current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND \"assignedUserId\"=current_setting('app.printing_user_id',true) AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true) IN ('printing-connector-identity','printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail','printing-connector-test-label-claim','printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail') AND (id=current_setting('app.printing_printer_id',true) OR (\"gatewayId\"=current_setting('app.printing_gateway_id',true) AND \"gatewaySecretHash\"=current_setting('app.printing_gateway_secret_hash',true))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-identity:Printer:UPDATE",
+        "contract:release-fix-5-connector-registration:Printer:UPDATE",
+        "contract:release-fix-5-gateway-job:Printer:UPDATE",
+        "contract:release-fix-5-printer-administration:Printer:UPDATE",
+        "contract:release-fix-5-test-label-job:Printer:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer-attestation",
+      "table": "PrinterAttestation",
+      "policyName": "printing_lifecycle_printerattestation_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrinterAttestation:INSERT",
+        "contract:release-fix-5-connector-registration:PrinterAttestation:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer-attestation",
+      "table": "PrinterAttestation",
+      "policyName": "printing_lifecycle_printerattestation_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%') AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-registration:PrinterAttestation:SELECT",
+        "contract:release-fix-5-create-job:PrinterAttestation:SELECT",
+        "contract:release-fix-5-reissue-request:PrinterAttestation:SELECT",
+        "contract:release-fix-5-test-label-job:PrinterAttestation:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer-registration",
+      "table": "PrinterRegistration",
+      "policyName": "printing_lifecycle_printerregistration_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND id=current_setting('app.printing_registration_id',true) AND \"userId\"=current_setting('app.printing_user_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-registration:PrinterRegistration:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer-registration",
+      "table": "PrinterRegistration",
+      "policyName": "printing_lifecycle_printerregistration_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND (id=current_setting('app.printing_registration_id',true) OR (current_setting('app.printing_operation',true)='printing-connector-identity' AND \"agentId\"=current_setting('app.printing_agent_id',true) AND \"deviceFingerprint\"=current_setting('app.printing_device_fingerprint',true))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrinterRegistration:SELECT",
+        "contract:release-fix-5-connector-identity:PrinterRegistration:SELECT",
+        "contract:release-fix-5-connector-registration:PrinterRegistration:SELECT",
+        "contract:release-fix-5-create-job:PrinterRegistration:SELECT",
+        "contract:release-fix-5-printer-administration:PrinterRegistration:SELECT",
+        "contract:release-fix-5-test-label-job:PrinterRegistration:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer-registration",
+      "table": "PrinterRegistration",
+      "policyName": "printing_lifecycle_printerregistration_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND \"userId\"=current_setting('app.printing_user_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true)='printing-connector-identity' AND id=current_setting('app.printing_registration_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-identity:PrinterRegistration:UPDATE",
+        "contract:release-fix-5-connector-registration:PrinterRegistration:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-print-item",
       "table": "PrintItem",
       "policyName": "full_rls_internal_authowner_printitem_select",
@@ -4779,6 +5389,128 @@
       "roleKey": "authOwner"
     },
     {
+      "tableId": "table-print-item",
+      "table": "PrintItem",
+      "policyName": "printing_lifecycle_printitem_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-create-job' AND \"printSessionId\"=current_setting('app.printing_session_row_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-create-job:PrintItem:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-item",
+      "table": "PrintItem",
+      "policyName": "printing_lifecycle_printitem_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (current_setting('app.printing_operation',true)='printing-readiness' OR \"printSessionId\"=current_setting('app.printing_session_row_id',true) OR (current_setting('app.printing_operation',true)='printing-reissue' AND \"printSessionId\"=current_setting('app.printing_original_session_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"printSessionId\"=current_setting('app.printing_session_row_id',true)) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrintItem:SELECT",
+        "contract:release-fix-5-control-job:PrintItem:SELECT",
+        "contract:release-fix-5-create-job:PrintItem:SELECT",
+        "contract:release-fix-5-gateway-job:PrintItem:SELECT",
+        "contract:release-fix-5-readiness:PrintItem:SELECT",
+        "contract:release-fix-5-reissue-request:PrintItem:SELECT",
+        "contract:release-fix-5-release-batch:PrintItem:SELECT",
+        "contract:release-fix-5-worker-network:PrintItem:SELECT",
+        "contract:release-fix-5-worker-reconcile:PrintItem:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-item",
+      "table": "PrintItem",
+      "policyName": "printing_lifecycle_printitem_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-job-control' AND \"printSessionId\"=current_setting('app.printing_session_row_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND \"printSessionId\" IN (current_setting('app.printing_original_session_id',true),current_setting('app.printing_session_row_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"printSessionId\"=current_setting('app.printing_session_row_id',true)) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrintItem:UPDATE",
+        "contract:release-fix-5-control-job:PrintItem:UPDATE",
+        "contract:release-fix-5-gateway-job:PrintItem:UPDATE",
+        "contract:release-fix-5-reissue-request:PrintItem:UPDATE",
+        "contract:release-fix-5-worker-network:PrintItem:UPDATE",
+        "contract:release-fix-5-worker-reconcile:PrintItem:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-item-event",
+      "table": "PrintItemEvent",
+      "policyName": "printing_lifecycle_printitemevent_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"printItemId\"=current_setting('app.printing_item_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrintItemEvent:INSERT",
+        "contract:release-fix-5-gateway-job:PrintItemEvent:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-print-job",
       "table": "PrintJob",
       "policyName": "full_rls_internal_authowner_printjob_select",
@@ -4817,6 +5549,182 @@
       "certificationStatus": "pending",
       "internalHelperOnly": true,
       "roleKey": "authOwner"
+    },
+    {
+      "tableId": "table-print-job",
+      "table": "PrintJob",
+      "policyName": "printing_lifecycle_printjob_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) IN ('printing-create-job','printing-reissue') AND id=current_setting('app.printing_job_id',true) AND \"batchId\"=current_setting('app.printing_batch_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-create-job:PrintJob:INSERT",
+        "contract:release-fix-5-reissue-request:PrintJob:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-job",
+      "table": "PrintJob",
+      "policyName": "printing_lifecycle_printjob_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (current_setting('app.printing_operation',true)='printing-readiness' OR id=current_setting('app.printing_job_id',true) OR \"batchId\"=current_setting('app.printing_batch_id',true) OR (current_setting('app.printing_operation',true)='printing-printer-admin-delete' AND \"printerId\"=current_setting('app.printing_printer_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND (id=current_setting('app.printing_job_id',true) OR (current_setting('app.printing_operation',true)='printing-connector-claim' AND \"printerId\"=current_setting('app.printing_printer_id',true)))) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrintJob:SELECT",
+        "contract:release-fix-5-control-job:PrintJob:SELECT",
+        "contract:release-fix-5-create-job:PrintJob:SELECT",
+        "contract:release-fix-5-gateway-job:PrintJob:SELECT",
+        "contract:release-fix-5-printer-administration:PrintJob:SELECT",
+        "contract:release-fix-5-readiness:PrintJob:SELECT",
+        "contract:release-fix-5-record-sample:PrintJob:SELECT",
+        "contract:release-fix-5-reissue-request:PrintJob:SELECT",
+        "contract:release-fix-5-release-batch:PrintJob:SELECT",
+        "contract:release-fix-5-worker-network:PrintJob:SELECT",
+        "contract:release-fix-5-worker-reconcile:PrintJob:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-job",
+      "table": "PrintJob",
+      "policyName": "printing_lifecycle_printjob_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND id=current_setting('app.printing_job_id',true) AND current_setting('app.printing_operation',true) IN ('printing-job-control','printing-sample-scan','printing-reissue')) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND (id=current_setting('app.printing_job_id',true) OR (current_setting('app.printing_operation',true)='printing-connector-claim' AND \"printerId\"=current_setting('app.printing_printer_id',true)))) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrintJob:UPDATE",
+        "contract:release-fix-5-control-job:PrintJob:UPDATE",
+        "contract:release-fix-5-gateway-job:PrintJob:UPDATE",
+        "contract:release-fix-5-worker-network:PrintJob:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-reissue-request",
+      "table": "PrintReissueRequest",
+      "policyName": "printing_lifecycle_printreissuerequest_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND id=current_setting('app.printing_reissue_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-reissue-request:PrintReissueRequest:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-reissue-request",
+      "table": "PrintReissueRequest",
+      "policyName": "printing_lifecycle_printreissuerequest_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (current_setting('app.printing_operation',true)='printing-readiness' OR id=current_setting('app.printing_reissue_id',true) OR \"batchId\"=current_setting('app.printing_batch_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-reissue-request:PrintReissueRequest:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-reissue-request",
+      "table": "PrintReissueRequest",
+      "policyName": "printing_lifecycle_printreissuerequest_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND id=current_setting('app.printing_reissue_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-reissue-request:PrintReissueRequest:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-print-session",
@@ -4858,6 +5766,98 @@
       "certificationStatus": "pending",
       "internalHelperOnly": true,
       "roleKey": "authOwner"
+    },
+    {
+      "tableId": "table-print-session",
+      "table": "PrintSession",
+      "policyName": "printing_lifecycle_printsession_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) IN ('printing-create-job','printing-reissue') AND id=current_setting('app.printing_session_row_id',true) AND \"batchId\"=current_setting('app.printing_batch_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-create-job:PrintSession:INSERT",
+        "contract:release-fix-5-reissue-request:PrintSession:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-session",
+      "table": "PrintSession",
+      "policyName": "printing_lifecycle_printsession_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (\"batchId\"=current_setting('app.printing_batch_id',true) OR id=current_setting('app.printing_session_row_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND (id=current_setting('app.printing_session_row_id',true) OR (\"printJobId\"=current_setting('app.printing_job_id',true) AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)))) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrintSession:SELECT",
+        "contract:release-fix-5-control-job:PrintSession:SELECT",
+        "contract:release-fix-5-create-job:PrintSession:SELECT",
+        "contract:release-fix-5-gateway-job:PrintSession:SELECT",
+        "contract:release-fix-5-readiness:PrintSession:SELECT",
+        "contract:release-fix-5-reissue-request:PrintSession:SELECT",
+        "contract:release-fix-5-release-batch:PrintSession:SELECT",
+        "contract:release-fix-5-worker-network:PrintSession:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-session",
+      "table": "PrintSession",
+      "policyName": "printing_lifecycle_printsession_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND id=current_setting('app.printing_session_row_id',true) AND current_setting('app.printing_operation',true)='printing-job-control') OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND (id=current_setting('app.printing_session_row_id',true) OR (\"printJobId\"=current_setting('app.printing_job_id',true) AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)))) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrintSession:UPDATE",
+        "contract:release-fix-5-control-job:PrintSession:UPDATE",
+        "contract:release-fix-5-gateway-job:PrintSession:UPDATE",
+        "contract:release-fix-5-worker-network:PrintSession:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-qr-allocation-request",
@@ -5039,6 +6039,72 @@
       "route": "GET /api/analytics/risk-scores",
       "certificationStatus": "pending",
       "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-qrcode",
+      "table": "QRCode",
+      "policyName": "printing_lifecycle_qrcode_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND \"batchId\"=current_setting('app.printing_batch_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"printJobId\"=current_setting('app.printing_job_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%' AND current_setting('app.printing_operation',true)='printing-worker-network' AND \"printJobId\"=current_setting('app.printing_job_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-create-job:QRCode:SELECT",
+        "contract:release-fix-5-gateway-job:QRCode:SELECT",
+        "contract:release-fix-5-readiness:QRCode:SELECT",
+        "contract:release-fix-5-record-sample:QRCode:SELECT",
+        "contract:release-fix-5-reissue-request:QRCode:SELECT",
+        "contract:release-fix-5-release-batch:QRCode:SELECT",
+        "contract:release-fix-5-worker-network:QRCode:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-qrcode",
+      "table": "QRCode",
+      "policyName": "printing_lifecycle_qrcode_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND \"batchId\"=current_setting('app.printing_batch_id',true) AND current_setting('app.printing_operation',true) IN ('printing-create-job','printing-release','printing-sample-scan','printing-reissue')) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"printJobId\"=current_setting('app.printing_job_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%' AND current_setting('app.printing_operation',true)='printing-worker-network' AND \"printJobId\"=current_setting('app.printing_job_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:QRCode:UPDATE",
+        "contract:release-fix-5-create-job:QRCode:UPDATE",
+        "contract:release-fix-5-gateway-job:QRCode:UPDATE",
+        "contract:release-fix-5-record-sample:QRCode:UPDATE",
+        "contract:release-fix-5-reissue-request:QRCode:UPDATE",
+        "contract:release-fix-5-release-batch:QRCode:UPDATE",
+        "contract:release-fix-5-worker-network:QRCode:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-qrcode",
@@ -5880,6 +6946,39 @@
     {
       "tableId": "table-security-event-outbox",
       "table": "SecurityEventOutbox",
+      "policyName": "printing_lifecycle_securityeventoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true) IN ('printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail'))) AND id=current_setting('app.printing_outbox_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-control-job:SecurityEventOutbox:INSERT",
+        "contract:release-fix-5-create-job:SecurityEventOutbox:INSERT",
+        "contract:release-fix-5-printer-administration:SecurityEventOutbox:INSERT",
+        "contract:release-fix-5-record-sample:SecurityEventOutbox:INSERT",
+        "contract:release-fix-5-reissue-request:SecurityEventOutbox:INSERT",
+        "contract:release-fix-5-release-batch:SecurityEventOutbox:INSERT",
+        "contract:release-fix-5-test-label-job:SecurityEventOutbox:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-security-event-outbox",
+      "table": "SecurityEventOutbox",
       "policyName": "qr_system_securityeventoutbox_insert",
       "command": "INSERT",
       "actors": [
@@ -5960,6 +7059,87 @@
       "route": "GET /api/analytics/risk-scores",
       "certificationStatus": "pending",
       "internalHelperOnly": false
+    },
+    {
+      "tableId": "table-sensitive-action-approval",
+      "table": "SensitiveActionApproval",
+      "policyName": "printing_lifecycle_sensitiveactionapproval_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-release' AND \"actionKey\"='BATCH_RELEASE' AND \"entityType\"='Batch' AND \"entityId\"=current_setting('app.printing_batch_id',true) AND \"licenseeId\"=current_setting('app.printing_licensee_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-release-batch:SensitiveActionApproval:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-sensitive-action-approval",
+      "table": "SensitiveActionApproval",
+      "policyName": "printing_lifecycle_sensitiveactionapproval_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-release' AND \"actionKey\"='BATCH_RELEASE' AND \"entityType\"='Batch' AND \"entityId\"=current_setting('app.printing_batch_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-release-batch:SensitiveActionApproval:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-sensitive-action-approval",
+      "table": "SensitiveActionApproval",
+      "policyName": "printing_lifecycle_sensitiveactionapproval_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-release' AND \"actionKey\"='BATCH_RELEASE' AND \"entityType\"='Batch' AND \"entityId\"=current_setting('app.printing_batch_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-release-batch:SensitiveActionApproval:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
     },
     {
       "tableId": "table-system-checkpoint",
@@ -6613,6 +7793,42 @@
     {
       "tableId": "table-user",
       "table": "User",
+      "policyName": "printing_lifecycle_user_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND id IN (\n    current_setting('app.printing_user_id',true),\n    current_setting('app.printing_released_user_id',true),\n    current_setting('app.printing_approved_user_id',true)\n  )) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND id=current_setting('app.printing_user_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-registration:User:SELECT",
+        "contract:release-fix-5-control-job:User:SELECT",
+        "contract:release-fix-5-create-job:User:SELECT",
+        "contract:release-fix-5-idempotency:User:SELECT",
+        "contract:release-fix-5-printer-administration:User:SELECT",
+        "contract:release-fix-5-readiness:User:SELECT",
+        "contract:release-fix-5-record-sample:User:SELECT",
+        "contract:release-fix-5-reissue-request:User:SELECT",
+        "contract:release-fix-5-release-batch:User:SELECT",
+        "contract:release-fix-5-test-label-job:User:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-user",
+      "table": "User",
       "policyName": "qr_system_user_select",
       "command": "SELECT",
       "actors": [
@@ -6780,55 +7996,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168"
+      "marker": "mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168"
+      "marker": "mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168"
+      "marker": "mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168"
+      "marker": "mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168"
+      "marker": "mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168"
+      "marker": "mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168"
+      "marker": "mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168"
+      "marker": "mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:aa29cb02f424c6fe58d9acad32dd3dfc7b218f5953c1f90134f342b886726168"
+      "marker": "mscqr-full-rls-clean-room:certification:745d713cf284dde78b13e04a815d333cbf9eeed589e6662f98a0d97642dcd5b0"
     }
   ]
 }

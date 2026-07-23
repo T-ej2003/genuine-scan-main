@@ -1,7 +1,5 @@
-import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
-import { getPrinterConnectionStatusForUser } from "./printerConnectionService";
-import { countBlockedQrCodesForPrint, countReservableQrCodesForPrint } from "./printReservationService";
+import { readPrintingProjection } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 
 export const buildPrintJobCreateDiagnostics = async (
   req: AuthRequest,
@@ -22,47 +20,39 @@ export const buildPrintJobCreateDiagnostics = async (
   }
 ) => {
   const userId = req.user?.userId || null;
-  const [batch, printableCount, blockedPrintItemCount, printer, printerStatus] = await Promise.all([
+  const boundary = {
+    capability: String(req.databaseSessionCapability || ""),
+    requestId: String(requestId || ""),
+  };
+  const [batchProjection, printer, printerStatus] = await Promise.all([
     params.batchId && userId
-      ? prisma.batch.findFirst({
-          where: { id: params.batchId, manufacturerId: userId },
-          select: {
-            id: true,
-            name: true,
-            manufacturerId: true,
-            licenseeId: true,
-            totalCodes: true,
-            printedAt: true,
-            suspendedAt: true,
-          },
+      ? readPrintingProjection({
+          ...boundary,
+          operation: "PRINTABLE_ITEMS",
+          subjectId: params.batchId,
+          options: { limit: Math.max(1, Math.min(Number(params.quantity || 1), 200000)) },
         })
-      : Promise.resolve(null),
-    params.batchId
-      ? countReservableQrCodesForPrint(prisma, { batchId: params.batchId }).catch(() => null)
-      : Promise.resolve(null),
-    params.batchId
-      ? countBlockedQrCodesForPrint(prisma, { batchId: params.batchId }).catch(() => null)
       : Promise.resolve(null),
     params.printerId
-      ? prisma.printer.findUnique({
-          where: { id: params.printerId },
-          select: {
-            id: true,
-            name: true,
-            connectionType: true,
-            deliveryMode: true,
-            nativePrinterId: true,
-            printerRegistrationId: true,
-            assignedUserId: true,
-            createdByUserId: true,
-            isActive: true,
-            agentId: true,
-            deviceFingerprint: true,
-          },
+      ? readPrintingProjection({
+          ...boundary,
+          operation: "PRINTER",
+          subjectId: params.printerId,
+          options: params.batchId ? { batchId: params.batchId } : {},
         })
       : Promise.resolve(null),
-    userId ? getPrinterConnectionStatusForUser(userId).catch(() => null) : Promise.resolve(null),
+    userId
+      ? readPrintingProjection({
+          ...boundary,
+          operation: "PRINTER_STATUS",
+          subjectId: userId,
+        }).catch(() => null)
+      : Promise.resolve(null),
   ]);
+  const batch = batchProjection?.batch || null;
+  const printableCount = Array.isArray(batchProjection?.printableItems)
+    ? batchProjection.printableItems.length
+    : null;
 
   return {
     requestId,
@@ -88,7 +78,7 @@ export const buildPrintJobCreateDiagnostics = async (
       suspendedAt: batch?.suspendedAt?.toISOString?.() || null,
       printableCount: printableCount ?? null,
       remainingCodes: printableCount ?? null,
-      blockedByPrintItemEvidenceCount: blockedPrintItemCount ?? null,
+      blockedByPrintItemEvidenceCount: null,
     },
     printerProfile: {
       present: Boolean(params.printerId),
@@ -124,14 +114,14 @@ export const buildPrintJobCreateDiagnostics = async (
           selectedPrinterName: printerStatus.selectedPrinterName || null,
           inventory: Array.isArray(printerStatus.printers)
             ? printerStatus.printers
-                .map((row) => ({
+                .map((row: unknown) => ({
                   printerId: String((row as any)?.printerId || "").trim() || null,
                   printerName: String((row as any)?.printerName || "").trim() || null,
                   connection: String((row as any)?.connection || "").trim() || null,
                   online: typeof (row as any)?.online === "boolean" ? (row as any).online : null,
                   languages: Array.isArray((row as any)?.languages) ? (row as any).languages.slice(0, 8) : [],
                 }))
-                .filter((row) => row.printerId || row.printerName)
+                .filter((row: { printerId: string | null; printerName: string | null }) => row.printerId || row.printerName)
                 .slice(0, 20)
             : [],
         }

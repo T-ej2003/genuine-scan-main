@@ -19,8 +19,7 @@ import { summarizeQrStatusCounts } from "../services/qrStatusMetrics";
 import { createSensitiveActionApproval, SENSITIVE_ACTION_KEYS } from "../services/sensitiveActionApprovalService";
 import { listLatestDecisionByQrCodeIds } from "../services/verificationDecisionReadService";
 import { recordBreakGlassIssuanceMetric } from "../observability/verificationTrustMetrics";
-import { getBatchReleaseApprovalContext, releaseBatchForSupplyChain } from "../services/batchReleaseService";
-import { assertBatchTransitionAllowedFromDb } from "../services/batchStateMachineService";
+import { getBatchReleaseApprovalContext, releaseBatchForSupplyChain, requestOrApproveBatchRelease } from "../services/batchReleaseService";
 import {
   formatPrintValidationEvidenceMarkdown,
   generatePrintValidationEvidenceReport,
@@ -904,12 +903,8 @@ export const getPrintValidationEvidence = async (req: AuthRequest, res: Response
 
     const report = await generatePrintValidationEvidenceReport({
       batchId: paramsParsed.data.id,
-      actor: {
-        userId: req.user.userId,
-        role: req.user.role,
-        licenseeId: req.user.licenseeId || null,
-        linkedLicenseeIds: req.user.linkedLicenseeIds || null,
-      },
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: qrRequestId(req),
       printJobId: String(req.query.printJobId || "").trim() || null,
       includePublicCode: String(req.query.includePublicCode || "").trim().toLowerCase() === "true",
     });
@@ -939,15 +934,13 @@ export const releaseBatch = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
     }
 
-    const batch = await findScopedBatch(req.user, paramsParsed.data.id, {
-      select: { id: true, manufacturerId: true },
-    });
-    if (!batch) return res.status(404).json({ success: false, error: "Batch not found" });
-
+    const boundary = {
+      capability: String(req.databaseSessionCapability || ""),
+      requestId: String((req as AuthRequest & { requestId?: string }).requestId || ""),
+    };
     const releaseContext = await getBatchReleaseApprovalContext({
-      batchId: batch.id,
-      actorUserId: auth.userId,
-      actorManufacturerId: isManufacturerRole(auth.role) ? auth.userId : null,
+      batchId: paramsParsed.data.id,
+      boundary,
     });
 
     if (releaseContext.approvalPolicy.required) {
@@ -960,86 +953,25 @@ export const releaseBatch = async (req: AuthRequest, res: Response) => {
           }
         );
       }
-      await assertBatchTransitionAllowedFromDb({
-        batchId: batch.id,
-        printJobId: releaseContext.readiness.printJobId,
-        toStatus: "APPROVAL_PENDING",
-        actor: { userId: auth.userId, role: auth.role },
-        approvalRequired: true,
+      const result = await requestOrApproveBatchRelease({
+        batchId: paramsParsed.data.id,
+        boundary,
+        reason: releaseContext.approvalPolicy.reason,
       });
-
-      const existingApproval = await prisma.sensitiveActionApproval.findFirst({
-        where: {
-          actionKey: SENSITIVE_ACTION_KEYS.BATCH_RELEASE,
-          entityType: "Batch",
-          entityId: batch.id,
-          status: "PENDING",
-          expiresAt: { gt: new Date() },
-        },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      });
-      if (existingApproval) {
-        return res.status(202).json({
-          success: true,
-          data: {
-            approvalRequired: true,
-            approvalId: existingApproval.id,
-            status: existingApproval.status,
-            expiresAt: existingApproval.expiresAt,
-            readiness: releaseContext.readiness,
-            approvalPolicy: releaseContext.approvalPolicy,
-            idempotent: true,
-          },
-        });
-      }
-
-      const approval = await createSensitiveActionApproval({
-        actionKey: SENSITIVE_ACTION_KEYS.BATCH_RELEASE,
-        actor: {
-          userId: auth.userId,
-          role: auth.role,
-          orgId: req.user.orgId || null,
-          licenseeId: req.user.licenseeId || null,
-        },
-        orgId: req.user.orgId || null,
-        licenseeId: releaseContext.batch.licenseeId,
-        entityType: "Batch",
-        entityId: batch.id,
-        payload: {
-          batchId: batch.id,
-          printJobId: releaseContext.readiness.printJobId,
-          requestedByUserId: auth.userId,
-          releaseBoundary: "supply_chain",
-        },
-        summary: {
-          reason: releaseContext.approvalPolicy.reason,
-          threshold: releaseContext.approvalPolicy.threshold,
-          totalCodes: releaseContext.batch.totalCodes,
-          readiness: releaseContext.readiness,
-        },
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent") || null,
-      });
-
-      return res.status(202).json({
+      const completed = result.batch?.lifecycleState === "RELEASED";
+      return res.status(completed ? 200 : 202).json({
         success: true,
         data: {
-          approvalRequired: true,
-          approvalId: approval.id,
-          status: approval.status,
-          expiresAt: approval.expiresAt,
-          readiness: releaseContext.readiness,
-          approvalPolicy: releaseContext.approvalPolicy,
+          ...result.batch,
+          readiness: result.readiness,
+          approvalPolicy: result.approvalPolicy,
         },
       });
     }
 
     const result = await releaseBatchForSupplyChain({
-      batchId: batch.id,
-      actorUserId: auth.userId,
-      actorManufacturerId: isManufacturerRole(auth.role) ? auth.userId : null,
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || null,
+      batchId: paramsParsed.data.id,
+      boundary,
     });
 
     return res.json({ success: true, data: result });

@@ -1,45 +1,11 @@
 const assert = require("assert");
-const { UserRole } = require("@prisma/client");
-
 const {
-  canViewPrintValidationEvidence,
   formatPrintValidationEvidenceMarkdown,
   maskPublicCode,
 } = require("../dist/services/printValidationEvidenceService");
 
-const batch = {
-  licenseeId: "licensee-a",
-  manufacturerId: "manufacturer-a",
-};
-
 assert.strictEqual(maskPublicCode("c_abcdefghijklmnopqrstuvwxyz"), "c_abcd...uvwxyz");
 assert.strictEqual(maskPublicCode("short"), "sho...rt");
-
-assert.strictEqual(
-  canViewPrintValidationEvidence({ userId: "platform", role: UserRole.SUPER_ADMIN }, batch),
-  true,
-  "platform admin can view validation evidence"
-);
-assert.strictEqual(
-  canViewPrintValidationEvidence({ userId: "brand-a", role: UserRole.LICENSEE_ADMIN, licenseeId: "licensee-a" }, batch),
-  true,
-  "owning licensee admin can view validation evidence"
-);
-assert.strictEqual(
-  canViewPrintValidationEvidence({ userId: "brand-b", role: UserRole.LICENSEE_ADMIN, licenseeId: "licensee-b" }, batch),
-  false,
-  "foreign licensee admin cannot view validation evidence"
-);
-assert.strictEqual(
-  canViewPrintValidationEvidence({ userId: "manufacturer-a", role: UserRole.MANUFACTURER_ADMIN, licenseeId: "licensee-a" }, batch),
-  true,
-  "owning manufacturer admin can view validation evidence"
-);
-assert.strictEqual(
-  canViewPrintValidationEvidence({ userId: "operator-a", role: UserRole.MANUFACTURER_USER, licenseeId: "licensee-a" }, batch),
-  false,
-  "normal manufacturer operator cannot view admin validation evidence"
-);
 
 const markdown = formatPrintValidationEvidenceMarkdown({
   generatedAt: "2026-06-09T00:00:00.000Z",

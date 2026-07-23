@@ -182,6 +182,9 @@ const administrationContracts = validateNamedSqlFunctionContracts().filter((cont
 const qrSystemContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "release-fix-4-qr-system"
 );
+const printingLifecycleContracts = validateNamedSqlFunctionContracts().filter((contract) =>
+  contract.security.deploymentPhase === "release-fix-5-printing-lifecycle"
+);
 const scheduledContracts = validateNamedSqlFunctionContracts().filter((contract) =>
   contract.security.deploymentPhase === "session-b-b03-scheduled"
 );
@@ -235,6 +238,15 @@ const qrSystemAppSignatures = qrSystemContracts.filter((contract) => contract.se
 const qrSystemWorkerSignatures = qrSystemContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const qrSystemOwnerPrivileges = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const qrSystemOwnerPolicies = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const printingLifecycleFunctionSource = printingLifecycleContracts.length
+  ? fs.readFileSync(path.join(repoRoot, printingLifecycleContracts[0].definitionLocation), "utf8")
+      .replaceAll("{{APP_ROLE}}", lit(roleNames.app))
+      .replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker))
+  : "";
+const printingLifecycleAppSignatures = printingLifecycleContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const printingLifecycleWorkerSignatures = printingLifecycleContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const printingLifecycleOwnerPrivileges = [...new Map(printingLifecycleContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const printingLifecycleOwnerPolicies = [...new Map(printingLifecycleContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const contractEvidenceFor = (contracts, table, command) => contracts
   .filter((contract) => contract.tableCommands.some(([candidateTable, candidateCommand]) => candidateTable === table && candidateCommand === command))
   .map((contract) => `contract:${contract.id}:${table}:${command}`)
@@ -336,6 +348,11 @@ const administrationOwnerGrantSql = administrationOwnerPrivileges.map(([table, c
 const qrSystemOwnerGrantSql = qrSystemOwnerPrivileges.map(([table, command, columns]) => command === "DELETE"
   ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
   : `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
+const printingLifecycleOwnerGrantSql = printingLifecycleOwnerPrivileges.map(([table, command, columns]) =>
+  command === "DELETE"
+    ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
+    : `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
+).join("\n");
 const scheduledOwnerGrantSql = scheduledOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const outboxOwnerGrantSql = outboxOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const operationalReadOwnerGrantSql = operationalReadOwnerPrivileges.map(([table, command, columns]) => `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
@@ -346,6 +363,7 @@ const functionOwnerRows = [
   ...c03OwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: c03Contracts.map((contract) => contract.id) })),
   ...administrationOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: administrationContracts.map((contract) => contract.id) })),
   ...qrSystemOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: qrSystemContracts.map((contract) => contract.id) })),
+  ...printingLifecycleOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: printingLifecycleContracts.map((contract) => contract.id) })),
   ...scheduledOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: scheduledContracts.map((contract) => contract.id) })),
   ...outboxOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: outboxContracts.map((contract) => contract.id) })),
   ...operationalReadOwnerPrivileges.map(([table, command, columns]) => ({ table, command, columns, grantee: roleNames.authOwner, ownerIdentity: "identity-auth-function-owner", contracts: operationalReadContracts.map((contract) => contract.id) })),
@@ -733,6 +751,7 @@ ${authenticationClosureOwnerGrantSql}
 ${c03OwnerGrantSql}
 ${administrationOwnerGrantSql}
 ${qrSystemOwnerGrantSql}
+${printingLifecycleOwnerGrantSql}
 ${scheduledOwnerGrantSql}
 ${outboxOwnerGrantSql}
 ${operationalReadOwnerGrantSql}
@@ -1455,6 +1474,17 @@ ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
 ${resetRole}` : ""}
+${printingLifecycleFunctionSource ? `${setRole(roleNames.owner)}
+GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
+${resetRole}
+${setRole(roleNames.authOwner)}
+${printingLifecycleFunctionSource}
+${printingLifecycleAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${printingLifecycleWorkerSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.worker)};`).join("\n")}
+${resetRole}
+${setRole(roleNames.owner)}
+REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
+${resetRole}` : ""}
 ${scheduledFunctionSource ? `${setRole(roleNames.owner)}
 GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
 ${resetRole}
@@ -1845,6 +1875,16 @@ for (const [table, command, rawPredicate] of qrSystemOwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "qr-system-authenticated-capability", ownerIdentity: "identity-auth-function-owner", scope: "verified session plus operation and row-local QR scope" }))};`);
 }
+for (const [table, command, rawPredicate] of printingLifecycleOwnerPolicies) {
+  const predicate = rawPredicate
+    .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
+    .replaceAll("{{APP_ROLE}}", lit(roleNames.app))
+    .replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker));
+  const policyName = shortName("printing_lifecycle", table, command);
+  const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "release-fix-5-printing-lifecycle", ownerIdentity: "identity-auth-function-owner", scope: "verified session or exact connector/worker operation plus row-local printing selector" }))};`);
+}
 for (const [table, command, rawPredicate] of scheduledOwnerPolicies) {
   const predicate = rawPredicate
     .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
@@ -1905,6 +1945,7 @@ const expectedTableAclSelect = expectedRowsSelect([
   ...grants.filter((grant) => grant.command === "DELETE").map((grant) => ["public", grant.table, roleNames.app, roleNames.owner, "DELETE", false]),
   ...administrationOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
   ...qrSystemOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
+  ...printingLifecycleOwnerPrivileges.filter(([, command]) => command === "DELETE").map(([table]) => ["public", table, roleNames.authOwner, roleNames.owner, "DELETE", false]),
 ], aclColumns);
 const expectedColumnAclSelect = expectedRowsSelect([
   ...grants.flatMap((grant) => grant.command === "DELETE" ? [] : grant.columns.map((column) => ["public", grant.table, column, roleNames.app, roleNames.owner, grant.command, false])),
@@ -1914,6 +1955,7 @@ const expectedColumnAclSelect = expectedRowsSelect([
   ...c03OwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...administrationOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...qrSystemOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
+  ...printingLifecycleOwnerPrivileges.flatMap(([table, command, columns]) => command === "DELETE" ? [] : columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...scheduledOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...outboxOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
   ...operationalReadOwnerPrivileges.flatMap(([table, command, columns]) => columns.map((column) => ["public", table, column, roleNames.authOwner, roleNames.owner, command, false])),
@@ -1971,13 +2013,15 @@ const expectedRoutineIdentities = [
   ["app_rls", "session_c_admin_command", "p_capability text, p_purpose text, p_request_id text, p_command text, payload jsonb"],
   ["app_rls", "qr_bind_actor", "p_capability text, p_purpose text, p_request_id text, p_target_licensee_id text"],
   ["app_rls", "qr_write_audit", "p_actor_id text, p_org_id text, p_licensee_id text, p_action text, p_entity_type text, p_entity_id text, p_details jsonb"],
+  ["app_rls", "printing_bind_actor", "p_capability text, p_purpose text, p_request_id text, p_batch_id text"],
+  ["app_rls", "printing_write_audit", "p_actor_id text, p_actor_role text, p_org_id text, p_licensee_id text, p_action text, p_entity_type text, p_entity_id text, p_details jsonb"],
   ["app_rls", "scheduled_job_prepare", "p_capability text, p_schedule_id text, p_operation text, p_request_id text"],
   ["app_rls", "scheduled_job_queue_audit", "p_action text, p_job_id text, p_licensee_id text, p_details jsonb"],
   ["app_rls", "b03_bind_outbox_operation", "p_operation text, p_row_id text, p_payload_digest text"],
   ["app_rls", "operational_read_bind_actor", "p_capability text, p_purpose text, p_request_id text, p_requested_licensee_id text"],
   ["app_auth", "b01_preauth_audit", "p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb"],
   ["app_rls", "b01_authenticated_actor", "p_expected_user_id text, p_expected_session_id text, p_request_id text"],
-  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...authenticationClosureContracts, ...c03Contracts, ...administrationContracts, ...qrSystemContracts, ...scheduledContracts, ...outboxContracts, ...operationalReadContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
+  ...[...b01Contracts, ...preAuthContracts, ...authenticatedSessionContracts, ...authenticationClosureContracts, ...c03Contracts, ...administrationContracts, ...qrSystemContracts, ...printingLifecycleContracts, ...scheduledContracts, ...outboxContracts, ...operationalReadContracts].map((contract) => [contract.schema, contract.name, contract.identityArguments]),
 ];
 const routineIdentityColumns = [{ name: "schema_name", type: "text" }, { name: "routine_name", type: "text" }, { name: "identity_arguments", type: "text" }];
 const expectedRoutineIdentitySelect = expectedRowsSelect(expectedRoutineIdentities, routineIdentityColumns);
@@ -2135,6 +2179,26 @@ const policyInventory = [
     sourceCommandRuleIds: contractEvidenceFor(qrSystemContracts, table, command),
     workflowId: null,
     route: "Release Fix 4 exact QR boundary",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
+  ...printingLifecycleOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("printing_lifecycle", table, command),
+    command,
+    actors: ["platform-admin","licensee-admin","manufacturer","connector","background-worker"],
+    assurance: "source-rule-specific",
+    purpose: ["release-fix-5-printing-lifecycle"],
+    scopeType: "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+    scopePredicate: rawPredicate
+      .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
+      .replaceAll("{{APP_ROLE}}", lit(roleNames.app))
+      .replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker)),
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(printingLifecycleContracts, table, command),
+    workflowId: null,
+    route: "Release Fix 5 exact printing boundary",
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),

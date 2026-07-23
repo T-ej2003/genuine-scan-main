@@ -68,6 +68,15 @@ mockModule("services/printerRegistryService.js", {
   syncLocalAgentPrintersFromHeartbeat: async () => [],
 });
 
+mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
+  registerPrintingConnector: async () => {
+    throw storageError;
+  },
+  readPrintingProjection: async () => {
+    throw storageError;
+  },
+});
+
 mockModule("services/auditService.js", {
   createAuditLog: async () => ({}),
 });
@@ -85,7 +94,7 @@ const { reportPrinterHeartbeat } = require("../dist/controllers/printerAgentCont
 const req = {
   user: {
     userId: "user-1",
-    role: "MANUFACTURER",
+    role: "MANUFACTURER_ADMIN",
     licenseeId: "licensee-1",
     orgId: "org-1",
   },
@@ -97,6 +106,10 @@ const req = {
     selectedPrinterName: "Zebra ZD421",
     agentId: "agent-1",
     deviceFingerprint: "device-1",
+    publicKeyPem: "-----BEGIN PUBLIC KEY----- fixture",
+    heartbeatNonce: "heartbeat-nonce",
+    heartbeatIssuedAt: new Date().toISOString(),
+    heartbeatSignature: "signed-fixture",
   },
   ip: "198.51.100.44",
   get() {
@@ -120,15 +133,12 @@ const res = {
 (async () => {
   await reportPrinterHeartbeat(req, res);
 
-  assert.strictEqual(res.statusCode, 200, "heartbeat should degrade gracefully when printer storage tables are unavailable");
-  assert.strictEqual(res.body?.success, true, "heartbeat fallback should still return success");
-  assert.strictEqual(res.body?.degraded, true, "heartbeat fallback should flag degraded mode");
-  assert.strictEqual(res.body?.data?.connected, true, "heartbeat fallback should preserve the current connected signal");
-  assert.strictEqual(res.body?.data?.compatibilityMode, true, "heartbeat fallback should identify the visible helper as compatibility-only");
-  assert.strictEqual(res.body?.data?.eligibleForPrinting, false, "heartbeat fallback must not allow printing while trust storage is degraded");
-  assert.strictEqual(res.body?.data?.connectionClass, "BLOCKED", "heartbeat fallback should block physical printing until secure storage recovers");
+  assert.strictEqual(res.statusCode, 500, "heartbeat must fail closed when the reviewed trust boundary is unavailable");
+  assert.strictEqual(res.body?.success, false, "storage failure must not be reported as a successful heartbeat");
+  assert.match(String(res.body?.error || ""), /PrinterAttestation/, "the storage denial must remain observable to operators");
+  assert.strictEqual(res.body?.data, undefined, "failed trust storage must not project a printable state");
 
-  console.log("printer heartbeat storage fallback tests passed");
+  console.log("printer heartbeat storage fail-closed tests passed");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

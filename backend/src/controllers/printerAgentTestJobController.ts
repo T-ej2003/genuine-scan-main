@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { Request, Response } from "express";
 
 import {
@@ -15,6 +16,15 @@ import {
 import { verifyLocalAgentRequest } from "../services/localAgentRequestAuthService";
 import { localAgentErrorResponse } from "./printerAgentJobController";
 
+const connectorBoundary = (req: Request, parsed: any, registration: any) => ({
+  registrationId: String(registration.id),
+  agentId: parsed.agentId,
+  deviceFingerprint: parsed.deviceFingerprint,
+  nonce: parsed.nonce,
+  issuedAt: parsed.issuedAt,
+  requestId: String((req as Request & { requestId?: string }).requestId || randomUUID()),
+});
+
 export const ackLocalAgentPrinterTestJob = async (req: Request, res: Response) => {
   try {
     const parsed = localAgentTestAckSchema.safeParse(req.body || {});
@@ -22,7 +32,7 @@ export const ackLocalAgentPrinterTestJob = async (req: Request, res: Response) =
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent test ACK payload" });
     }
 
-    await verifyLocalAgentRequest(parsed.data, "ack");
+    const registration = await verifyLocalAgentRequest(parsed.data, "ack");
     const acknowledged =
       (await acknowledgeLocalAgentPrinterTestJob({
         printerId: parsed.data.printerId,
@@ -34,6 +44,7 @@ export const ackLocalAgentPrinterTestJob = async (req: Request, res: Response) =
           payloadType: String(parsed.data.payloadType || "").trim() || null,
           agentMetadata: parsed.data.agentMetadata || null,
         },
+        connectorBoundary: connectorBoundary(req, parsed.data, registration),
       })) ||
       acknowledgeGatewayPrinterTestJob({
         printerId: parsed.data.printerId,
@@ -61,7 +72,7 @@ export const confirmLocalAgentPrinterTestJob = async (req: Request, res: Respons
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent test confirm payload" });
     }
 
-    await verifyLocalAgentRequest(parsed.data, "confirm");
+    const registration = await verifyLocalAgentRequest(parsed.data, "confirm");
     const confirmed =
       (await confirmLocalAgentPrinterTestJobState({
         printerId: parsed.data.printerId,
@@ -74,6 +85,7 @@ export const confirmLocalAgentPrinterTestJob = async (req: Request, res: Respons
           bytesWritten: parsed.data.bytesWritten || null,
           agentMetadata: parsed.data.agentMetadata || null,
         },
+        connectorBoundary: connectorBoundary(req, parsed.data, registration),
       })) ||
       confirmGatewayPrinterTestJob({
         printerId: parsed.data.printerId,
@@ -102,12 +114,13 @@ export const failLocalAgentPrinterTestJob = async (req: Request, res: Response) 
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent test failure payload" });
     }
 
-    await verifyLocalAgentRequest(parsed.data, "fail");
+    const registration = await verifyLocalAgentRequest(parsed.data, "fail");
     const failed =
       (await failLocalAgentPrinterTestJobState({
         printerId: parsed.data.printerId,
         testJobId: parsed.data.testJobId,
         reason: parsed.data.reason,
+        connectorBoundary: connectorBoundary(req, parsed.data, registration),
       })) ||
       failGatewayPrinterTestJob({
         printerId: parsed.data.printerId,

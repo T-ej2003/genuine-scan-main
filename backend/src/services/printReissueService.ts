@@ -3,6 +3,7 @@ import {
   PrintItemEventType,
   PrintItemState,
   PrintJobStatus,
+  PrintPayloadType,
   PrintPipelineState,
   PrintSessionStatus,
   Prisma,
@@ -16,7 +17,7 @@ import { createUserNotification } from "./notificationService";
 import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "./qrTokenService";
 import { startNetworkDirectDispatch } from "./networkDirectPrintService";
 import { startNetworkIppDispatch } from "./networkIppPrintService";
-import { ensureSelectedPrinterReady, generatePrintJobNumber } from "../controllers/print-job/shared";
+import { generatePrintJobNumber } from "../controllers/print-job/shared";
 import { buildScopedPrintJobWhere, type PrintJobScope } from "./printJobScopeService";
 import { materializeReplacementChainsForReissue } from "./replacementChainService";
 import {
@@ -34,6 +35,15 @@ const RECOVERABLE_ORIGINAL_JOB_STATUSES = new Set<PrintJobStatus>([
   PrintJobStatus.FAILED,
   PrintJobStatus.CANCELLED,
 ]);
+
+const rejectRetiredDirectReissuePath = async (): Promise<{
+  printMode: PrintDispatchMode;
+  payloadType: PrintPayloadType;
+  printer: any;
+  printerStatus: any;
+}> => {
+  throw Object.assign(new Error("PRINT_REISSUE_DIRECT_PATH_RETIRED"), { statusCode: 410 });
+};
 const RECOVERABLE_ORIGINAL_SESSION_STATUSES = new Set<PrintSessionStatus>([
   PrintSessionStatus.COMPLETED,
   PrintSessionStatus.STOPPED,
@@ -368,12 +378,7 @@ export const createAuthorizedPrintReissue = async (params: {
 
   const now = new Date();
   const expAt = getQrTokenExpiryDate(now);
-  const printerSelection = await ensureSelectedPrinterReady({
-    printerId: originalJob.printerId,
-    userId: originalJob.manufacturerId,
-    orgId: originalJob.printer.orgId || null,
-    licenseeId: originalJob.batch.licenseeId || null,
-  });
+  const printerSelection = await rejectRetiredDirectReissuePath();
 
   const created = await prisma.$transaction(
     async (tx) => {

@@ -1,27 +1,10 @@
-import {
-  PrintDispatchMode,
-  PrintItemEventType,
-  PrintItemState,
-  PrintJobStatus,
-  PrintPipelineState,
-} from "@prisma/client";
+import { createHash, randomUUID } from "crypto";
 import { Request, Response } from "express";
 
-import prisma from "../config/database";
-import { createAuditLog } from "../services/auditService";
-import { markBatchPrintAcknowledged } from "../services/batchStateMachineService";
-import { failStopPrintSession } from "../services/printLifecycleService";
-import { acknowledgePrintItemDispatch, confirmPrintItemDispatch, resolvePrinterConfirmationMode } from "../services/printConfirmationService";
-import {
-  buildClaimApprovedPayloadOrFail,
-  countLocalAgentClaimItems,
-  LOCAL_AGENT_BUSY_RETRY_MS,
-  LOCAL_AGENT_NO_WORK_RETRY_MS,
-  reserveLocalAgentItem,
-} from "../services/localAgentClaimService";
+import { buildApprovedPrintPayload, buildPrintPayloadDiagnostics } from "../services/printPayloadService";
+import { LOCAL_AGENT_BUSY_RETRY_MS, LOCAL_AGENT_NO_WORK_RETRY_MS } from "../services/localAgentClaimService";
 import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
 import { buildLocalAgentClaimRuntimeBlock } from "../services/localAgentProductionRuntimeGate";
-import { ensurePrinterProfileForPrinter, resolvePrinterPreflight } from "../printing/registry/printerProfileService";
 import {
   buildLocalAgentValidationErrorPayload,
   claimSchema,
@@ -31,54 +14,67 @@ import {
   localAgentAckSchema,
   validateLocalAgentAckDispatchPhase,
 } from "../services/localAgentAckProtocolService";
-import { buildPrintPayloadDiagnostics } from "../services/printPayloadService";
-import { claimLocalAgentPrinterTestJob } from "../services/printerTestLabelService";
 import { verifyLocalAgentRequest } from "../services/localAgentRequestAuthService";
 import { publishPrintJobViewEvent } from "../services/printJobRealtimeService";
-
-const noClaimWork = (res: Response, retryAfterMs = LOCAL_AGENT_NO_WORK_RETRY_MS) => res.json({ success: true, data: null, retryAfterMs });
-const publishLocalAgentJobEvent = (job: any, type: string, reason: string) =>
-  void publishPrintJobViewEvent({
-    printJobId: job.id, manufacturerId: job.manufacturerId,
-    licenseeId: job.batch.licenseeId || null,
-    batchId: job.batchId, type, reason,
-  });
+import { recordConnectorEvent } from "../rls-waves/session-c/c02/printingLifecycleRepository";
+import { claimLocalAgentPrinterTestJob } from "../services/printerTestLabelService";
 
 export const localAgentErrorResponse = (res: Response, error: any) =>
   res.status(error?.statusCode || 500).json({
-    success: false, error: error?.message || "Internal server error",
+    success: false,
+    error: error?.message || "Internal server error",
     ...(error?.errorCode ? { code: error.errorCode, errorCode: error.errorCode } : {}),
     ...(error?.serverTime ? { serverTime: error.serverTime } : {}),
     ...(error?.timestampSkewSeconds != null ? { timestampSkewSeconds: error.timestampSkewSeconds } : {}),
   });
 
-const toRecord = (value: unknown) => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {} as Record<string, unknown>;
-  return value as Record<string, unknown>;
+const requestId = (req: Request) => {
+  const value = String(getLocalAgentRequestId(req) || "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : randomUUID();
 };
 
-const sampledClaimLogAt = new Map<string, number>();
-const logLocalAgentClaim = (event: string, payload: Record<string, unknown>) => {
-  const noWorkEvent = event === "no_active_job" || event === "no_registered_printer_match" || event === "no_reserved_item";
-  if (noWorkEvent) {
-    const key = `${event}:${String(payload.registrationId || "")}:${String(payload.selectedPrinterId || "")}`;
-    const now = Date.now();
-    if (now - (sampledClaimLogAt.get(key) || 0) < 60_000) return;
-    sampledClaimLogAt.set(key, now);
-  }
-  const log = noWorkEvent ? console.debug : console.info;
-  log("local_agent_claim", { event, ...payload });
-};
+const evidenceHash = (signature: string) => createHash("sha256").update(signature).digest("hex");
 
-const hasQueueConfirmationUnavailable = (value: unknown) => {
-  const root = toRecord(value);
-  const dispatchMetadata = toRecord(root.dispatchMetadata);
-  const agentMetadata = toRecord(root.agentMetadata);
-  return Boolean(
-    root.queueConfirmationUnavailable ||
-      dispatchMetadata.queueConfirmationUnavailable ||
-      agentMetadata.queueConfirmationUnavailable
-  );
+const connectorEvent = async (
+  req: Request,
+  data: any,
+  registration: any,
+  operation: "CLAIM" | "ACK" | "CONFIRM" | "FAIL"
+) =>
+  recordConnectorEvent({
+    registrationId: registration.id,
+    agentId: data.agentId,
+    deviceFingerprint: data.deviceFingerprint,
+    nonce: data.nonce,
+    issuedAt: data.issuedAt,
+    requestId: requestId(req),
+    operation,
+    jobId: data.printJobId || "",
+    itemId: data.printItemId || null,
+    printerId: String(data.selectedPrinterId || data.printerId || "").trim(),
+    payloadHash: String(data.payloadHash || evidenceHash(data.signature)).trim(),
+    deviceJobRef: String(data.deviceJobRef || "").trim() || null,
+    details: {
+      bytesWritten: data.bytesWritten || null,
+      markDispatched: data.markDispatched !== false,
+      dispatchMetadata: data.dispatchMetadata || null,
+      agentMetadata: data.agentMetadata || null,
+      reason: data.reason || null,
+    },
+  });
+
+const publish = (result: any, type: string, reason: string) => {
+  if (!result?.printJobId) return;
+  void publishPrintJobViewEvent({
+    printJobId: result.printJobId,
+    manufacturerId: result.manufacturerId || null,
+    licenseeId: result.licenseeId || null,
+    batchId: result.batchId || null,
+    type,
+    reason,
+  });
 };
 
 export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
@@ -87,215 +83,88 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent claim payload" });
     }
-
     const registration = await verifyLocalAgentRequest(parsed.data, "claim", undefined, { skipReadiness: true });
     const runtimeBlock = buildLocalAgentClaimRuntimeBlock(parsed.data, registration);
-    if (runtimeBlock) {
-      console.info("local_agent_claim", runtimeBlock.log);
-      return res.status(runtimeBlock.status).json(runtimeBlock.payload);
-    }
+    if (runtimeBlock) return res.status(runtimeBlock.status).json(runtimeBlock.payload);
 
-    const selectedPrinterId = String(parsed.data.selectedPrinterId || parsed.data.printerId || "").trim();
-    const candidatePrinters = await prisma.printer.findMany({
-      where: {
-        connectionType: "LOCAL_AGENT",
-        isActive: true,
-        printerRegistrationId: registration.id,
-        ...(selectedPrinterId ? { nativePrinterId: selectedPrinterId } : {}),
-      },
-      orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }],
-    });
-
-    const printerIds = candidatePrinters.map((printer) => printer.id);
-    if (printerIds.length === 0) {
-      logLocalAgentClaim("no_registered_printer_match", { registrationId: registration.id, agentId: registration.agentId, selectedPrinterId, candidatePrinterCount: candidatePrinters.length, retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS });
-      return noClaimWork(res);
-    }
-
-    const testClaim = await claimLocalAgentPrinterTestJob({ printerIds });
-    if (testClaim) {
-      console.info("local_agent_claim", {
-        event: "test_work_returned",
-        registrationId: registration.id,
-        agentId: registration.agentId,
-        selectedPrinterId,
-        printerIds,
-        testJobId: testClaim.testJobId,
-        payloadDiagnostics: buildPrintPayloadDiagnostics({
-          payloadType: testClaim.payloadType,
-          labelLanguage: testClaim.commandLanguage,
-          payloadContent: testClaim.payloadContent,
-        }),
+    const resolvedPrinterId = String(registration.resolvedPrinterId || "").trim();
+    if (resolvedPrinterId) {
+      const testClaim = await claimLocalAgentPrinterTestJob({
+        printerIds: [resolvedPrinterId],
+        connectorBoundary: {
+          registrationId: registration.id,
+          agentId: parsed.data.agentId,
+          deviceFingerprint: parsed.data.deviceFingerprint,
+          nonce: parsed.data.nonce,
+          issuedAt: parsed.data.issuedAt,
+          requestId: requestId(req),
+        },
       });
-      return res.json({
-        success: true,
-        retryAfterMs: LOCAL_AGENT_BUSY_RETRY_MS,
-        protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-        data: {
-          ...testClaim,
+      if (testClaim) {
+        return res.json({
+          success: true,
+          retryAfterMs: LOCAL_AGENT_BUSY_RETRY_MS,
           protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-        },
-      });
+          data: { ...testClaim, protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION },
+        });
+      }
     }
 
-    const { availableItemCount, inFlightItemCount } = await countLocalAgentClaimItems({
-      printerIds,
-      manufacturerId: registration.userId,
-    });
-
-    const job = await prisma.printJob.findFirst({
-      where: {
-        manufacturerId: registration.userId,
-        printerId: { in: printerIds },
-        printMode: PrintDispatchMode.LOCAL_AGENT,
-        status: { in: [PrintJobStatus.PENDING, PrintJobStatus.SENT] },
-        printSession: {
-          is: { status: "ACTIVE" },
-        },
+    const claimed = await connectorEvent(req, parsed.data, registration, "CLAIM");
+    if (!claimed?.available) {
+      return res.json({ success: true, data: null, retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS });
+    }
+    const payload = buildApprovedPrintPayload({
+      printer: claimed.printer,
+      qr: claimed.qrCode,
+      manufacturerId: claimed.manufacturerId,
+      printJobId: claimed.printJobId,
+      printItemId: claimed.printItemId,
+      jobNumber: claimed.jobNumber,
+      reprintOfJobId: claimed.reprintOfJobId,
+      serialContext: {
+        sequence: claimed.issueSequence,
+        issuedAt: claimed.issuedAt,
+        batch: claimed.batch,
+        licensee: claimed.batch?.licensee,
+        manufacturer: claimed.manufacturer,
+        printer: claimed.printer,
       },
-      include: {
-        batch: {
-          select: {
-            id: true,
-            name: true,
-            licenseeId: true,
-            metadata: true,
-            licensee: { select: { id: true, name: true, prefix: true, location: true, metadata: true } },
-          },
-        },
-        manufacturer: { select: { id: true, name: true, location: true, metadata: true } },
-        printer: true,
-        printSession: true,
-      },
-      orderBy: [{ createdAt: "asc" }],
     });
-
-    if (!job || !job.printSession || !job.printer) {
-      logLocalAgentClaim("no_active_job", { registrationId: registration.id, agentId: registration.agentId, selectedPrinterId, printerIds, availableItemCount, inFlightItemCount, retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS });
-      return noClaimWork(res, inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS);
-    }
-
-    await ensurePrinterProfileForPrinter(job.printer);
-    const preflight = await resolvePrinterPreflight(job.printer, {
-      quantity: 1,
-      labelWidthMm:
-        typeof (job.printer.calibrationProfile as Record<string, unknown> | null)?.labelWidthMm === "number"
-          ? Number((job.printer.calibrationProfile as Record<string, unknown>).labelWidthMm)
-          : 50,
-      labelHeightMm:
-        typeof (job.printer.calibrationProfile as Record<string, unknown> | null)?.labelHeightMm === "number"
-          ? Number((job.printer.calibrationProfile as Record<string, unknown>).labelHeightMm)
-          : 50,
-    });
-
-    if (!preflight.ok) {
-      await prisma.printJob.update({
-        where: { id: job.id },
-        data: {
-          status: PrintJobStatus.FAILED,
-          pipelineState: PrintPipelineState.NEEDS_OPERATOR_ACTION,
-          failureReason: preflight.issues.join(" "),
-        },
-      });
-
-      console.info("local_agent_claim", {
-        event: "preflight_failed",
-        registrationId: registration.id,
-        agentId: registration.agentId,
-        printJobId: job.id,
-        printSessionId: job.printSession.id,
-        retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS,
-      });
-      return noClaimWork(res);
-    }
-
-    if (job.status === PrintJobStatus.PENDING) {
-      await prisma.printJob.update({
-        where: { id: job.id },
-        data: {
-          status: PrintJobStatus.SENT,
-          pipelineState: PrintPipelineState.SENT_TO_PRINTER,
-          sentAt: new Date(),
-        },
-      });
-      await markBatchPrintAcknowledged({
-        batchId: job.batchId,
-        printJobId: job.id,
-        actorUserId: job.manufacturerId,
-      });
-    }
-
-    const item = await reserveLocalAgentItem({
-      printSessionId: job.printSession.id,
-      actorUserId: job.manufacturerId,
-    });
-
-    if (!item) {
-      logLocalAgentClaim("no_reserved_item", { registrationId: registration.id, agentId: registration.agentId, selectedPrinterId, printJobId: job.id, printSessionId: job.printSession.id, availableItemCount, inFlightItemCount, retryAfterMs: inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS });
-      return noClaimWork(res, inFlightItemCount > 0 ? LOCAL_AGENT_BUSY_RETRY_MS : LOCAL_AGENT_NO_WORK_RETRY_MS);
-    }
-
-    const approved = await buildClaimApprovedPayloadOrFail({ job, item, registration });
-    if (!approved.ok) {
-      return res.status(approved.status).json({
-        success: false,
-        error: approved.error,
-        code: approved.code,
-        errorCode: approved.code,
-        retryAfterMs: LOCAL_AGENT_NO_WORK_RETRY_MS,
-      });
-    }
-    const approvedPayload = approved.payload;
-
     console.info("local_agent_claim", {
       event: "work_returned",
       registrationId: registration.id,
-      agentId: registration.agentId,
-      printJobId: job.id,
-      printSessionId: job.printSession.id,
-      printItemId: item.id,
-      selectedPrinterId,
-      returnedItemCount: 1,
-      availableItemCount,
-      inFlightItemCount,
-      retryAfterMs: LOCAL_AGENT_BUSY_RETRY_MS,
-      payloadDiagnostics: buildPrintPayloadDiagnostics({ payloadType: approvedPayload.payloadType, labelLanguage: approvedPayload.commandLanguage, payloadContent: approvedPayload.payloadContent }),
+      printJobId: claimed.printJobId,
+      printItemId: claimed.printItemId,
+      payloadDiagnostics: buildPrintPayloadDiagnostics({
+        payloadType: payload.payloadType,
+        labelLanguage: payload.commandLanguage,
+        payloadContent: payload.payloadContent,
+      }),
     });
-
     return res.json({
       success: true,
       retryAfterMs: LOCAL_AGENT_BUSY_RETRY_MS,
       protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
       data: {
         protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,
-        printJobId: job.id,
-        printSessionId: job.printSession.id,
-        printItemId: item.id,
-        code: item.code,
-        payloadType: approvedPayload.payloadType,
-        payloadContent: approvedPayload.payloadContent,
-        payloadHash: approvedPayload.payloadHash,
-        previewLabel: approvedPayload.previewLabel,
-        commandLanguage: approvedPayload.commandLanguage,
-        scanUrl: approvedPayload.scanUrl,
+        printJobId: claimed.printJobId,
+        printSessionId: claimed.printSessionId,
+        printItemId: claimed.printItemId,
+        code: claimed.code,
+        ...payload,
         printer: {
-          id: job.printer.id,
-          name: job.printer.name,
-          nativePrinterId: job.printer.nativePrinterId,
-          selectedPrinterId,
-          dpi:
-            Number((job.printer.capabilitySummary as Record<string, unknown> | null)?.dpi || 0) ||
-            Number((job.printer.calibrationProfile as Record<string, unknown> | null)?.dpi || 0) ||
-            null,
-          languages:
-            Array.isArray((job.printer.capabilitySummary as Record<string, unknown> | null)?.languages)
-              ? (((job.printer.capabilitySummary as Record<string, unknown>).languages as unknown[]) || []).map((value) =>
-                  String(value || "").trim()
-                )
-              : [],
+          id: claimed.printer.id,
+          name: claimed.printer.name,
+          nativePrinterId: claimed.printer.nativePrinterId,
+          selectedPrinterId: String(parsed.data.selectedPrinterId || parsed.data.printerId || "").trim(),
+          dpi: Number(claimed.printer.capabilitySummary?.dpi || claimed.printer.calibrationProfile?.dpi || 0) || null,
+          languages: Array.isArray(claimed.printer.capabilitySummary?.languages)
+            ? claimed.printer.capabilitySummary.languages.map((value: unknown) => String(value || "").trim())
+            : [],
         },
-        calibrationProfile: (job.printer.calibrationProfile as Record<string, unknown> | null) || null,
-        jobNumber: job.jobNumber,
+        calibrationProfile: claimed.printer.calibrationProfile || null,
+        jobNumber: claimed.jobNumber,
       },
     });
   } catch (error: any) {
@@ -315,174 +184,25 @@ export const ackLocalAgentPrintJob = async (req: Request, res: Response) => {
         message: "Invalid local agent ACK payload.",
         issues: parsed.error.issues,
       });
-      console.info("local_agent_ack", {
-        event: "validation_failed",
-        requestId: getLocalAgentRequestId(req),
-        validationIssuePaths: payload.details.validationIssuePaths,
-        missingFields: payload.details.missingFields,
-        protocolVersion: payload.details.protocolVersion,
-        buildVersion: payload.details.buildVersion,
-      });
       return res.status(400).json(payload);
     }
-
     const dispatchPhase = validateLocalAgentAckDispatchPhase(parsed.data);
     if (!dispatchPhase.ok) {
-      const payload = buildLocalAgentValidationErrorPayload({
+      return res.status(400).json(buildLocalAgentValidationErrorPayload({
         req,
         body: req.body || {},
         errorCode: "invalid_local_agent_ack_payload",
         message: "Invalid local agent ACK payload.",
         issues: dispatchPhase.issues,
-      });
-      console.info("local_agent_ack", {
-        event: "dispatch_validation_failed",
-        requestId: getLocalAgentRequestId(req),
-        printItemId: parsed.data.printItemId,
-        markDispatched: parsed.data.markDispatched !== false,
-        validationIssuePaths: payload.details.validationIssuePaths,
-        missingFields: payload.details.missingFields,
-        protocolVersion: payload.details.protocolVersion,
-        buildVersion: payload.details.buildVersion,
-      });
-      return res.status(400).json(payload);
+      }));
     }
-
     const registration = await verifyLocalAgentRequest(parsed.data, "ack", {
       printJobId: parsed.data.printJobId,
       printItemId: parsed.data.printItemId,
     });
-
-    const job = await prisma.printJob.findFirst({
-      where: {
-        id: parsed.data.printJobId,
-        manufacturerId: registration.userId,
-        printMode: PrintDispatchMode.LOCAL_AGENT,
-      },
-      include: {
-        batch: { select: { id: true, licenseeId: true } },
-        printSession: true,
-        printer: true,
-      },
-    });
-    if (!job || !job.printSession || !job.printer || job.printer.printerRegistrationId !== registration.id) {
-      return res.status(404).json({ success: false, error: "Print job not found for this printer agent." });
-    }
-
-    const item = await prisma.printItem.findFirst({
-      where: {
-        id: parsed.data.printItemId,
-        printSessionId: job.printSession.id,
-      },
-      include: {
-        qrCode: {
-          select: {
-            id: true,
-            code: true,
-            status: true,
-          },
-        },
-      },
-    });
-    if (!item) {
-      return res.status(404).json({ success: false, error: "Print item not found." });
-    }
-
-    const payloadHash = String(parsed.data.payloadHash || "").trim();
-    const confirmationMode = resolvePrinterConfirmationMode(job.printer);
-    if (confirmationMode !== "LOCAL_QUEUE") {
-      return res.status(409).json({ success: false, error: "This local printer is not configured for queue-backed confirmation." });
-    }
-
-    await acknowledgePrintItemDispatch({
-      printItemId: item.id,
-      actorUserId: job.manufacturerId,
-      dispatchMode: PrintDispatchMode.LOCAL_AGENT,
-      payloadType: job.payloadType || null,
-      payloadHash: payloadHash || null,
-      bytesWritten: parsed.data.bytesWritten || null,
-      deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
-      dispatchMetadata: {
-        printerRegistrationId: registration.id,
-        agentMetadata: parsed.data.agentMetadata || null,
-        dispatchMetadata: parsed.data.dispatchMetadata || null,
-      },
-      confirmationMode,
-      markDispatched: parsed.data.markDispatched !== false,
-    });
-
-    if (hasQueueConfirmationUnavailable(parsed.data)) {
-      const message =
-        "Sent to printer queue, but local queue confirmation is unavailable. Operator confirmation is required before labels are treated as printed.";
-      await prisma.printJob.update({
-        where: { id: job.id },
-        data: {
-          pipelineState: PrintPipelineState.NEEDS_OPERATOR_ACTION,
-          failureReason: message,
-        },
-      });
-      await prisma.printItemEvent.create({
-        data: {
-          printItemId: item.id,
-          eventType: PrintItemEventType.AGENT_ACKED,
-          previousState: PrintItemState.AGENT_ACKED,
-          nextState: PrintItemState.AGENT_ACKED,
-          actorUserId: job.manufacturerId,
-          details: {
-            dispatchMode: PrintDispatchMode.LOCAL_AGENT,
-            queueConfirmationUnavailable: true,
-            deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
-            message,
-          },
-        },
-      });
-    }
-
-    console.info("local_agent_ack", {
-      registrationId: registration.id,
-      agentId: registration.agentId,
-      printJobId: job.id,
-      printSessionId: job.printSession?.id || null,
-      printItemId: item.id,
-      deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
-      markDispatched: parsed.data.markDispatched !== false,
-      payloadHashPresent: Boolean(payloadHash),
-      protocolVersion: parsed.data.protocolVersion || parsed.data.agentMetadata?.protocolVersion || null,
-      buildVersion: parsed.data.buildVersion || parsed.data.agentMetadata?.buildVersion || null,
-    });
-
-    await createAuditLog({
-      userId: job.manufacturerId,
-      licenseeId: job.batch.licenseeId || undefined,
-      action: "LOCAL_AGENT_PRINT_ITEM_ACKED",
-      entityType: "PrintItem",
-      entityId: item.id,
-      details: {
-        printJobId: job.id,
-        printSessionId: job.printSession?.id || null,
-        code: item.code,
-        payloadHash,
-        deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
-        agentMetadata: parsed.data.agentMetadata || null,
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
-    });
-
-    publishLocalAgentJobEvent(job, "local_agent.ack", "local_agent_rest_ack");
-
-    return res.json({
-      success: true,
-      data: {
-        printJobId: job.id,
-        printSessionId: job.printSession?.id || null,
-        printItemId: item.id,
-        qrId: item.qrCode.id,
-        code: item.code,
-        acknowledged: true,
-        deviceJobRef: String(parsed.data.deviceJobRef || "").trim() || null,
-      },
-    });
+    const result = await connectorEvent(req, parsed.data, registration, "ACK");
+    publish(result, "local_agent.ack", "local_agent_rest_ack");
+    return res.json({ success: true, data: { ...result, acknowledged: true, deviceJobRef: parsed.data.deviceJobRef || null } });
   } catch (error: any) {
     console.error("ackLocalAgentPrintJob error:", error);
     return localAgentErrorResponse(res, error);
@@ -495,123 +215,13 @@ export const confirmLocalAgentPrintJob = async (req: Request, res: Response) => 
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent confirm payload" });
     }
-
     const registration = await verifyLocalAgentRequest(parsed.data, "confirm", {
       printJobId: parsed.data.printJobId,
       printItemId: parsed.data.printItemId,
     });
-
-    const job = await prisma.printJob.findFirst({
-      where: {
-        id: parsed.data.printJobId,
-        manufacturerId: registration.userId,
-        printMode: PrintDispatchMode.LOCAL_AGENT,
-      },
-      include: {
-        batch: { select: { id: true, licenseeId: true } },
-        printSession: true,
-        printer: true,
-      },
-    });
-    if (!job || !job.printSession || !job.printer || job.printer.printerRegistrationId !== registration.id) {
-      return res.status(404).json({ success: false, error: "Print job not found for this printer agent." });
-    }
-
-    const item = await prisma.printItem.findFirst({
-      where: {
-        id: parsed.data.printItemId,
-        printSessionId: job.printSession.id,
-      },
-      include: {
-        qrCode: {
-          select: {
-            id: true,
-            code: true,
-            status: true,
-          },
-        },
-      },
-    });
-    if (!item) {
-      return res.status(404).json({ success: false, error: "Print item not found." });
-    }
-
-    const payloadHash = String(parsed.data.payloadHash || "").trim();
-    const deviceJobRef = String(parsed.data.deviceJobRef || "").trim();
-    const confirmationMode = resolvePrinterConfirmationMode(job.printer);
-    if (confirmationMode !== "LOCAL_QUEUE") {
-      return res.status(409).json({ success: false, error: "This local printer is not configured for queue-backed confirmation." });
-    }
-
-    const finalize = await confirmPrintItemDispatch({
-      printSessionId: job.printSession.id,
-      printJobId: job.id,
-      batchId: job.batchId,
-      printItemId: item.id,
-      actorUserId: job.manufacturerId,
-      dispatchMode: PrintDispatchMode.LOCAL_AGENT,
-      payloadType: job.payloadType || null,
-      payloadHash: payloadHash || null,
-      bytesWritten: parsed.data.bytesWritten || null,
-      deviceJobRef: deviceJobRef || null,
-      dispatchMetadata: {
-        printerRegistrationId: registration.id,
-        agentMetadata: parsed.data.agentMetadata || null,
-      },
-      confirmationMode,
-      confirmationEvidence: {
-        printerRegistrationId: registration.id,
-        agentMetadata: parsed.data.agentMetadata || null,
-        queueConfirmed: true,
-      },
-    });
-
-    console.info("local_agent_confirm", {
-      registrationId: registration.id,
-      agentId: registration.agentId,
-      printJobId: job.id,
-      printSessionId: job.printSession?.id || null,
-      printItemId: item.id,
-      deviceJobRef: deviceJobRef || null,
-      remainingToPrint: finalize.remainingToPrint,
-      jobConfirmed: finalize.jobConfirmed,
-      payloadHashPresent: Boolean(payloadHash),
-    });
-
-    await createAuditLog({
-      userId: job.manufacturerId,
-      licenseeId: job.batch.licenseeId || undefined,
-      action: "LOCAL_AGENT_PRINT_ITEM_CONFIRMED",
-      entityType: "PrintItem",
-      entityId: item.id,
-      details: {
-        printJobId: job.id,
-        printSessionId: job.printSession?.id || null,
-        code: item.code,
-        payloadHash,
-        remainingToPrint: finalize.remainingToPrint,
-        deviceJobRef: deviceJobRef || null,
-        agentMetadata: parsed.data.agentMetadata || null,
-      },
-      ipAddress: req.ip,
-      userAgent: req.get("user-agent") || undefined,
-    });
-
-    publishLocalAgentJobEvent(job, "local_agent.confirm", "local_agent_rest_confirm");
-
-    return res.json({
-      success: true,
-      data: {
-        printJobId: job.id,
-        printSessionId: job.printSession?.id || null,
-        printItemId: item.id,
-        qrId: item.qrCode.id,
-        code: item.code,
-        remainingToPrint: finalize.remainingToPrint,
-        jobConfirmed: finalize.jobConfirmed,
-        confirmedAt: finalize.confirmedAt?.toISOString() || null,
-      },
-    });
+    const result = await connectorEvent(req, parsed.data, registration, "CONFIRM");
+    publish(result, "local_agent.confirm", "local_agent_rest_confirm");
+    return res.json({ success: true, data: { ...result, jobConfirmed: Number(result.remainingToPrint || 0) === 0 } });
   } catch (error: any) {
     console.error("confirmLocalAgentPrintJob error:", error);
     return localAgentErrorResponse(res, error);
@@ -624,70 +234,13 @@ export const failLocalAgentPrintJob = async (req: Request, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent failure payload" });
     }
-
     const registration = await verifyLocalAgentRequest(parsed.data, "fail", {
       printJobId: parsed.data.printJobId,
       printItemId: parsed.data.printItemId,
     });
-
-    const job = await prisma.printJob.findFirst({
-      where: {
-        id: parsed.data.printJobId,
-        manufacturerId: registration.userId,
-        printMode: PrintDispatchMode.LOCAL_AGENT,
-      },
-      include: {
-        batch: { select: { id: true, licenseeId: true } },
-        printSession: true,
-        printer: true,
-      },
-    });
-    if (!job || !job.printSession || !job.printer || job.printer.printerRegistrationId !== registration.id) {
-      return res.status(404).json({ success: false, error: "Print job not found for this printer agent." });
-    }
-
-    const result = await failStopPrintSession({
-      printSessionId: job.printSession.id,
-      printJobId: job.id,
-      batchId: job.batchId,
-      licenseeId: job.batch.licenseeId || null,
-      actorUserId: job.manufacturerId,
-      reason: parsed.data.reason,
-      printItemId: parsed.data.printItemId,
-      metadata: parsed.data.agentMetadata || null,
-    });
-
-    await prisma.printJob.update({
-      where: { id: job.id },
-      data: {
-        status: PrintJobStatus.FAILED,
-        pipelineState: PrintPipelineState.FAILED,
-        failureReason: parsed.data.reason,
-      },
-    });
-
-    console.info("local_agent_fail", {
-      registrationId: registration.id,
-      agentId: registration.agentId,
-      printJobId: job.id,
-      printSessionId: job.printSession.id,
-      printItemId: parsed.data.printItemId,
-      reasonLength: parsed.data.reason.length,
-      frozenCount: result.frozenCount,
-    });
-
-    publishLocalAgentJobEvent(job, "local_agent.fail", "local_agent_rest_fail");
-
-    return res.json({
-      success: true,
-      data: {
-        printJobId: job.id,
-        printSessionId: job.printSession.id,
-        reason: parsed.data.reason,
-        incidentId: result.incident.id,
-        frozenCount: result.frozenCount,
-      },
-    });
+    const result = await connectorEvent(req, parsed.data, registration, "FAIL");
+    publish(result, "local_agent.fail", "local_agent_rest_fail");
+    return res.json({ success: true, data: { ...result, reason: parsed.data.reason } });
   } catch (error: any) {
     console.error("failLocalAgentPrintJob error:", error);
     return localAgentErrorResponse(res, error);

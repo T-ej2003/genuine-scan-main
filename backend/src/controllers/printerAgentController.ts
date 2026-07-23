@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { NotificationAudience, NotificationChannel, Prisma, UserRole } from "@prisma/client";
 import { Response } from "express";
 import { z } from "zod";
@@ -7,7 +8,6 @@ import { resolveScopedLicenseeAccess } from "../services/manufacturerScopeServic
 import { createAuditLog } from "../services/auditService";
 import { createRoleNotifications } from "../services/notificationService";
 import {
-  getPrinterConnectionStatusForUser,
   onPrinterConnectionEvent,
   upsertPrinterConnectionHeartbeat,
 } from "../services/printerConnectionService";
@@ -19,14 +19,31 @@ import { isPrismaMissingTableError } from "../utils/prismaStorageGuard";
 import { writeSseRealtimeEnvelope } from "../utils/realtime";
 import { getOrComputeVersionedCache } from "../services/versionedCacheService";
 import { getTrustedMtlsFingerprintHeader } from "../utils/mtlsFingerprintHeader";
+import {
+  readPrintingProjection,
+  registerPrintingConnector,
+} from "../rls-waves/session-c/c02/printingLifecycleRepository";
+import {
+  buildPrinterAgentHeartbeatPayload,
+  getPrinterAgentIssuedAtSkewSeconds,
+  verifyPrinterAgentPayloadSignature,
+} from "../services/printerAgentSigningService";
 const MANUFACTURER_ROLES: UserRole[] = [
-  UserRole.MANUFACTURER,
   UserRole.MANUFACTURER_ADMIN,
-  UserRole.MANUFACTURER_USER,
 ];
 
 const isManufacturerRole = (role?: UserRole | null) =>
   Boolean(role && MANUFACTURER_ROLES.includes(role));
+
+const requestId = (req: AuthRequest) =>
+  String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+const readPrinterStatus = (req: AuthRequest) =>
+  readPrintingProjection({
+    capability: String(req.databaseSessionCapability || ""),
+    requestId: requestId(req),
+    operation: "PRINTER_STATUS",
+    subjectId: req.user!.userId,
+  });
 
 const heartbeatSchema = z.object({
   licenseeId: z.string().trim().uuid().optional(),
@@ -149,7 +166,10 @@ const buildDegradedHeartbeatStatus = (input: z.infer<typeof heartbeatSchema>, cu
   };
 };
 
-export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) => {
+// Quarantined compatibility implementation. The exported route below is the
+// capability-bound path; retaining this body temporarily avoids widening RF5
+// into notification behavior that is not printing authority.
+const quarantinedLegacyPrinterHeartbeat = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || !isManufacturerRole(req.user.role)) {
       return res.status(403).json({ success: false, error: "Access denied" });
@@ -204,7 +224,7 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
 
       let currentStatus: Record<string, any> | null = null;
       try {
-        currentStatus = await getPrinterConnectionStatusForUser(req.user.userId);
+        currentStatus = await readPrinterStatus(req);
       } catch (statusError) {
         console.error("reportPrinterHeartbeat fallback status lookup failed:", statusError);
       }
@@ -339,6 +359,109 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
   }
 };
 
+export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || !isManufacturerRole(req.user.role)) {
+      return res.status(403).json({ success: false, error: "Access denied" });
+    }
+    const parsed = heartbeatSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid heartbeat payload" });
+    }
+    const agentId = String(parsed.data.agentId || "").trim();
+    const deviceFingerprint = String(parsed.data.deviceFingerprint || "").trim();
+    const heartbeatNonce = String(parsed.data.heartbeatNonce || "").trim();
+    const heartbeatIssuedAt = String(parsed.data.heartbeatIssuedAt || "").trim();
+    const heartbeatSignature = String(parsed.data.heartbeatSignature || "").trim();
+    if (!agentId || !deviceFingerprint || !heartbeatNonce || !heartbeatIssuedAt || !heartbeatSignature) {
+      return res.status(401).json({ success: false, error: "Signed connector identity is required." });
+    }
+
+    const capability = String(req.databaseSessionCapability || "");
+    const lookup = await registerPrintingConnector({
+      capability,
+      requestId: requestId(req),
+      operation: "LOOKUP",
+      payload: { deviceFingerprint },
+    });
+    const publicKeyPem = String(parsed.data.publicKeyPem || lookup?.publicKeyPem || "")
+      .replace(/\\n/g, "\n")
+      .trim();
+    if (!publicKeyPem.includes("BEGIN") || (lookup?.publicKeyPem && lookup.publicKeyPem !== publicKeyPem)) {
+      return res.status(401).json({ success: false, error: "Connector public key does not match its registration." });
+    }
+
+    const printerId = String(parsed.data.printerId || parsed.data.selectedPrinterId || "unknown-printer").trim();
+    const payloads = [req.user.userId, "manufacturer-browser-heartbeat"].map((userId) =>
+      buildPrinterAgentHeartbeatPayload({
+        userId,
+        agentId,
+        deviceFingerprint,
+        printerId,
+        connected: parsed.data.connected,
+        heartbeatNonce,
+        heartbeatIssuedAt,
+      })
+    );
+    const skew = getPrinterAgentIssuedAtSkewSeconds(heartbeatIssuedAt);
+    const signedPayload = skew !== null && skew <= 180
+      ? payloads.find((payload) => verifyPrinterAgentPayloadSignature({
+          publicKeyPem,
+          payload,
+          signature: heartbeatSignature,
+        })) || null
+      : null;
+    const signatureValid = Boolean(signedPayload);
+    await registerPrintingConnector({
+      capability,
+      requestId: requestId(req),
+      operation: "HEARTBEAT",
+      payload: {
+        connected: parsed.data.connected,
+        agentId,
+        deviceFingerprint,
+        publicKeyPem,
+        signatureValid,
+        signedPayloadHash: createHash("sha256").update(signedPayload || payloads[0]).digest("hex"),
+        heartbeatNonce,
+        expiresAt: new Date(Date.now() + 35_000).toISOString(),
+        rejectionReason: signatureValid ? null : "Heartbeat signature verification failed",
+        certFingerprint: getTrustedMtlsFingerprintHeader(req) || parsed.data.clientCertFingerprint || null,
+        sourceIpHash: req.ip ? createHash("sha256").update(req.ip).digest("hex") : null,
+        userAgentHash: req.get("user-agent")
+          ? createHash("sha256").update(String(req.get("user-agent"))).digest("hex")
+          : null,
+        metadata: {
+          connected: parsed.data.connected,
+          printerName: parsed.data.printerName || parsed.data.selectedPrinterName || null,
+          printerId: parsed.data.printerId || parsed.data.selectedPrinterId || null,
+          selectedPrinterId: parsed.data.selectedPrinterId || parsed.data.printerId || null,
+          selectedPrinterName: parsed.data.selectedPrinterName || parsed.data.printerName || null,
+          deviceName: parsed.data.deviceName || null,
+          agentVersion: parsed.data.agentVersion || null,
+          protocolVersion: parsed.data.protocolVersion || null,
+          buildVersion: parsed.data.buildVersion || null,
+          transportDiagnosticsVersion: parsed.data.transportDiagnosticsVersion || null,
+          capabilities: parsed.data.capabilities || null,
+          capabilitySummary: parsed.data.capabilitySummary || null,
+          calibrationProfile: parsed.data.calibrationProfile || null,
+          printers: parsed.data.printers || [],
+          error: parsed.data.error || null,
+          heartbeatIssuedAt,
+        },
+        printers: parsed.data.printers || [],
+      },
+    });
+    if (!signatureValid) {
+      return res.status(401).json({ success: false, error: "Printer heartbeat signature verification failed." });
+    }
+    return res.json({ success: true, data: await readPrinterStatus(req) });
+  } catch (error: any) {
+    console.error("reportPrinterHeartbeat error:", error);
+    return res.status(500).json({ success: false, error: error?.message || "Internal server error" });
+  }
+};
+
 export const getPrinterConnectionStatus = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || !isManufacturerRole(req.user.role)) {
@@ -349,7 +472,7 @@ export const getPrinterConnectionStatus = async (req: AuthRequest, res: Response
     return res.json({
       success: true,
       data: await getOrComputeVersionedCache("printer-status", scopeKey, 5, () =>
-        getPrinterConnectionStatusForUser(req.user!.userId)
+        readPrinterStatus(req)
       ),
     });
   } catch (error: any) {
@@ -370,7 +493,7 @@ export const printerConnectionEvents = async (req: AuthRequest, res: Response) =
     res.flushHeaders?.();
 
     const sendSnapshot = async (reason: string) => {
-      const status = await getPrinterConnectionStatusForUser(req.user!.userId);
+      const status = await readPrinterStatus(req);
       writeSseRealtimeEnvelope(res, {
         channel: "printer",
         type: "snapshot",

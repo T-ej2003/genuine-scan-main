@@ -13,6 +13,7 @@ import { getEffectiveLicenseeId } from "../middleware/tenantIsolation";
 import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "./manufacturerScopeService";
 import { listNotificationsForUser } from "./notificationService";
 import { getOrComputeVersionedCache } from "./versionedCacheService";
+import { readPrintingProjection } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 
 export type AttentionQueueItemTone = "neutral" | "verified" | "review" | "blocked" | "audit" | "support" | "print";
 
@@ -245,27 +246,32 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
 
   const incidentWhere = buildIncidentWhere(req);
   const policyAlertWhere = buildPolicyAlertWhere(req);
-  const printJobWhere = buildPrintJobWhere(req);
   const supportTicketWhere = buildSupportTicketWhere(req);
   const auditWhere = buildAuditWhere(req, since);
+  const printingAttentionPromise = readPrintingProjection({
+    capability: String(req.databaseSessionCapability || ""),
+    requestId: String((req as AuthRequest & { requestId?: string }).requestId || ""),
+    operation: "ATTENTION_QUEUE",
+    subjectId: "00000000-0000-4000-8000-000000000000",
+    options: { licenseeId: getEffectiveLicenseeId(req) || null },
+  });
 
   const [
     notifications,
     incidentCount,
     policyAlertCount,
-    printJobCount,
+    printingAttention,
     supportTicketCount,
     auditEvents24h,
     latestIncident,
     latestPolicyAlert,
-    latestPrintJob,
     latestSupportTicket,
     latestAuditEvent,
   ] = await Promise.all([
     notificationPromise,
     prisma.incident.count({ where: incidentWhere }),
     prisma.policyAlert.count({ where: policyAlertWhere }),
-    prisma.printJob.count({ where: printJobWhere }),
+    printingAttentionPromise,
     prisma.supportTicket.count({ where: supportTicketWhere }),
     prisma.auditLog.count({ where: auditWhere }),
     prisma.incident.findFirst({
@@ -277,11 +283,6 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
       where: policyAlertWhere,
       orderBy: { createdAt: "desc" },
       select: { id: true, alertType: true, severity: true, message: true, createdAt: true },
-    }),
-    prisma.printJob.findFirst({
-      where: printJobWhere,
-      orderBy: { updatedAt: "desc" },
-      select: { id: true, jobNumber: true, status: true, pipelineState: true, updatedAt: true },
     }),
     prisma.supportTicket.findFirst({
       where: supportTicketWhere,
@@ -295,6 +296,8 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
     }),
   ]);
 
+  const printJobCount = Number(printingAttention?.count || 0);
+  const latestPrintJob = printingAttention?.latest || null;
   const items: AttentionQueueItem[] = [];
   const firstNotification = notifications.notifications[0];
   if (firstNotification) {
@@ -341,7 +344,7 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
       body: `${latestPrintJob.jobNumber || "A print job"} is ${humanizeEnum(latestPrintJob.pipelineState || latestPrintJob.status)}.`,
       tone: latestPrintJob.pipelineState === "NEEDS_OPERATOR_ACTION" ? "review" : "print",
       route: "/batches",
-      createdAt: latestPrintJob.updatedAt.toISOString(),
+      createdAt: firstIso(latestPrintJob.updatedAt),
       count: printJobCount,
     });
   }
